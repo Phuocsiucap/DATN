@@ -1,0 +1,7 @@
+praw
+feedparser
+playwright
+python -m playwright install
+
+pymongo
+redis
