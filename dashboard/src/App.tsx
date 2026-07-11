@@ -5,28 +5,50 @@ import { useWebSocket } from './hooks/useWebSocket'
 import Navbar from './components/Navbar'
 import DashboardPage from './pages/DashboardPage'
 import ArticlesPage from './pages/ArticlesPage'
+import { LayoutDashboard, Newspaper } from 'lucide-react'
 import './index.css'
 
 type Tab = 'dashboard' | 'articles'
+
+const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
+  { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={16} /> },
+  { key: 'articles', label: 'Bài viết', icon: <Newspaper size={16} /> },
+]
 
 function AppContent() {
   const [tab, setTab] = useState<Tab>('dashboard')
   useWebSocket()
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--bg-base)' }}>
       <Navbar />
-      <div className="flex gap-4 px-6 pt-4 border-b border-gray-700">
-        {(['dashboard', 'articles'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`pb-3 text-sm font-medium capitalize border-b-2 transition-colors ${
-              tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'
-            }`}>
-            {t === 'dashboard' ? 'Tổng quan' : 'Bài viết'}
+      {/* Tab bar */}
+      <div style={{ backgroundColor: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}
+        className="px-6 flex items-center gap-1">
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className="flex items-center gap-2 px-4 py-3 text-sm font-medium transition-all relative"
+            style={{
+              color: tab === t.key ? 'var(--accent)' : 'var(--text-secondary)',
+            }}
+          >
+            {t.icon}
+            {t.label}
+            {tab === t.key && (
+              <span
+                className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t"
+                style={{ backgroundColor: 'var(--accent)' }}
+              />
+            )}
           </button>
         ))}
       </div>
-      {tab === 'dashboard' ? <DashboardPage /> : <ArticlesPage />}
+
+      <main className="flex-1 overflow-auto">
+        {tab === 'dashboard' ? <DashboardPage /> : <ArticlesPage />}
+      </main>
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '../hooks/useAppDispatch'
 import { fetchArticles, setStatusFilter } from '../store/slices/articlesSlice'
 import ArticleRow from '../components/ArticleRow'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Search, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react'
 import ArticleDetailModal from '../components/ArticleDetailModal'
 import type { Article } from '../store/slices/articlesSlice'
 
@@ -13,128 +13,224 @@ const FILTERS = [
   { label: 'Thất bại', value: 'failed' },
 ]
 
+const PAGE_SIZE = 20
+
 export default function ArticlesPage() {
   const dispatch = useAppDispatch()
   const { items, total, page, loading, statusFilter } = useAppSelector(s => s.articles)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
-  
-  // Local state for search and date filters
+
   const [searchInput, setSearchInput] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [hasVideoInput, setHasVideoInput] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+
+  const buildParams = (p = page) => ({
+    page: p,
+    status: statusFilter || undefined,
+    search: searchInput || undefined,
+    startDate: startDate ? new Date(startDate).toISOString() : undefined,
+    endDate: endDate ? new Date(endDate).toISOString() : undefined,
+    hasVideo: hasVideoInput || undefined,
+  })
 
   useEffect(() => {
-    dispatch(fetchArticles({ 
-      page, 
-      status: statusFilter || undefined,
-      search: searchInput || undefined,
-      startDate: startDate ? new Date(startDate).toISOString() : undefined,
-      endDate: endDate ? new Date(endDate).toISOString() : undefined
-    }))
+    dispatch(fetchArticles(buildParams()))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, page, statusFilter])
 
   const handleApplyFilters = () => {
-    dispatch(fetchArticles({ 
-      page: 1, 
-      status: statusFilter || undefined,
-      search: searchInput || undefined,
-      startDate: startDate ? new Date(startDate).toISOString() : undefined,
-      endDate: endDate ? new Date(endDate).toISOString() : undefined
-    }))
+    dispatch(fetchArticles(buildParams(1)))
   }
 
+  const totalPages = Math.ceil(total / PAGE_SIZE)
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <h1 className="text-white text-xl font-bold">Bài viết ({total})</h1>
-        <div className="flex flex-wrap gap-2">
+    <div className="p-6 max-w-7xl mx-auto space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Bài viết
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            {total.toLocaleString('vi-VN')} kết quả
+          </p>
+        </div>
+
+        {/* Status filters */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           {FILTERS.map(f => (
-            <button key={f.value}
+            <button
+              key={f.value}
               onClick={() => dispatch(setStatusFilter(f.value))}
-              className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={
                 statusFilter === f.value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}>
+                  ? { backgroundColor: 'var(--accent)', color: '#fff' }
+                  : { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+              }
+            >
               {f.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Advanced Filters Bar */}
-      <div className="flex flex-col md:flex-row gap-3 bg-gray-800 p-4 rounded-xl border border-gray-700">
-        <div className="flex-1">
-          <input 
-            type="text" 
-            placeholder="Tìm kiếm tiêu đề, nội dung..." 
-            value={searchInput}
-            onChange={e => setSearchInput(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          />
+      {/* Search + filter bar */}
+      <div
+        className="rounded-xl p-4 space-y-3"
+        style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+      >
+        <div className="flex gap-3">
+          <div className="flex-1 relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2"
+              style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              placeholder="Tìm kiếm tiêu đề, nội dung..."
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleApplyFilters()}
+              className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none transition-all"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-primary)',
+              }}
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all"
+            style={
+              showFilters
+                ? { backgroundColor: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)' }
+                : { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+            }
+          >
+            <SlidersHorizontal size={13} /> Bộ lọc
+          </button>
+          <button
+            onClick={handleApplyFilters}
+            className="px-4 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+          >
+            Tìm
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          <input 
-            type="date" 
-            value={startDate}
-            onChange={e => setStartDate(e.target.value)}
-            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500"
-            title="Từ ngày"
-          />
-          <span className="text-gray-500">-</span>
-          <input 
-            type="date" 
-            value={endDate}
-            onChange={e => setEndDate(e.target.value)}
-            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-blue-500"
-            title="Đến ngày"
-          />
-        </div>
-        <button 
-          onClick={handleApplyFilters}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          Lọc kết quả
-        </button>
+
+        {showFilters && (
+          <div className="flex flex-wrap gap-3 pt-1">
+            <select
+              value={hasVideoInput}
+              onChange={e => setHasVideoInput(e.target.value)}
+              className="px-3 py-2 rounded-lg text-xs outline-none"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <option value="">Tất cả media</option>
+              <option value="true">Có video</option>
+              <option value="false">Không video</option>
+            </select>
+            <input
+              type="date"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              className="px-3 py-2 rounded-lg text-xs outline-none"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+              }}
+              title="Từ ngày"
+            />
+            <span className="self-center text-xs" style={{ color: 'var(--text-muted)' }}>đến</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              className="px-3 py-2 rounded-lg text-xs outline-none"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+              }}
+              title="Đến ngày"
+            />
+          </div>
+        )}
       </div>
 
+      {/* List */}
       {loading ? (
         <div className="flex justify-center py-20">
-          <Loader2 className="animate-spin text-blue-400" size={32} />
+          <Loader2 className="animate-spin text-blue-400" size={28} />
         </div>
       ) : items.length === 0 ? (
-        <p className="text-gray-500 text-center py-20">Không có bài viết nào</p>
+        <div className="flex flex-col items-center justify-center py-20 gap-2"
+          style={{ color: 'var(--text-muted)' }}>
+          <Search size={28} className="opacity-30" />
+          <p className="text-sm">Không tìm thấy bài viết nào</p>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {items.map(article => (
-            <ArticleRow 
-              key={article.link} 
-              article={article} 
-              onView={() => setSelectedArticle(article)} 
+            <ArticleRow
+              key={article.link}
+              article={article}
+              onView={() => setSelectedArticle(article)}
             />
           ))}
         </div>
       )}
 
       {/* Pagination */}
-      {total > 20 && (
-        <div className="flex justify-center gap-2 pt-4">
-          {Array.from({ length: Math.ceil(total / 20) }, (_, i) => i + 1).slice(0, 10).map(p => (
-            <button key={p}
-              onClick={() => dispatch(fetchArticles({ page: p, status: statusFilter || undefined }))}
-              className={`w-8 h-8 rounded text-sm ${page === p ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            disabled={page <= 1}
+            onClick={() => dispatch(fetchArticles(buildParams(page - 1)))}
+            className="p-2 rounded-lg transition-all disabled:opacity-30"
+            style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <ChevronLeft size={14} />
+          </button>
+
+          {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1).map(p => (
+            <button
+              key={p}
+              onClick={() => dispatch(fetchArticles(buildParams(p)))}
+              className="w-8 h-8 rounded-lg text-xs font-medium transition-all"
+              style={
+                page === p
+                  ? { backgroundColor: 'var(--accent)', color: '#fff' }
+                  : { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+              }
+            >
               {p}
             </button>
           ))}
+
+          <button
+            disabled={page >= totalPages}
+            onClick={() => dispatch(fetchArticles(buildParams(page + 1)))}
+            className="p-2 rounded-lg transition-all disabled:opacity-30"
+            style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <ChevronRight size={14} />
+          </button>
         </div>
       )}
 
-      {/* Modal */}
       {selectedArticle && (
-        <ArticleDetailModal 
-          article={selectedArticle} 
-          onClose={() => setSelectedArticle(null)} 
+        <ArticleDetailModal
+          article={selectedArticle}
+          onClose={() => setSelectedArticle(null)}
         />
       )}
     </div>

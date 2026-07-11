@@ -4,6 +4,15 @@ from backend.core.config import settings
 from backend.core.database import articles_col, publish_log_col
 from backend.services.ai_rewriter import rewrite_for_platform
 from backend.api.websockets.events import broadcast
+import os
+import asyncio
+from playwright.sync_api import sync_playwright
+
+
+from pathlib import Path
+
+# Tìm đường dẫn gốc của project (D:\DATN)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 async def publish_to_facebook(content: str, media_path: str = None) -> dict:
     """Post to Facebook Page via Graph API."""
@@ -25,10 +34,6 @@ async def publish_to_facebook(content: str, media_path: str = None) -> dict:
             return {"success": False, "error": data.get("error", {}).get("message", "Unknown")}
         except Exception as e:
             return {"success": False, "error": str(e)}
-
-import os
-import asyncio
-from playwright.sync_api import sync_playwright
 
 def _publish_to_tiktok_sync(content: str, video_path: str, user_data_dir: str):
     with sync_playwright() as p:
@@ -129,10 +134,6 @@ def _publish_to_tiktok_sync(content: str, video_path: str, user_data_dir: str):
                 page.wait_for_timeout(1000)
             raise e
 
-from pathlib import Path
-
-# Tìm đường dẫn gốc của project (D:\DATN)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 async def publish_to_tiktok(content: str, media_path: str = None) -> dict:
     """Post caption to TikTok (mở trình duyệt để người dùng đăng thủ công)."""
@@ -174,10 +175,11 @@ async def publish_article(article: dict, platform: str) -> dict:
     content_raw = article.get("content", "")
     
     # Do database lưu content dưới dạng mảng các đoạn văn (list), ta cần nối chúng lại
-    if isinstance(content_raw, list):
-        content_text = "\n\n".join(content_raw)
-    else:
-        content_text = str(content_raw)
+    # if isinstance(content_raw, list):
+    #     content_text = "\n\n".join(content_raw)
+    # else:
+    #     content_text = str(content_raw)
+    content_text = await rewrite_for_platform({"title": title, "content": content_raw}, platform)
 
     # Lấy một phần nội dung và đính kèm link gốc
     if platform == "tiktok":

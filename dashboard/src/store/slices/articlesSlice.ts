@@ -21,6 +21,7 @@ interface ArticlesState {
   loading: boolean
   publishing: Record<string, boolean>
   statusFilter: string
+  hasVideoFilter: string
 }
 
 const initialState: ArticlesState = {
@@ -30,12 +31,13 @@ const initialState: ArticlesState = {
   loading: false,
   publishing: {},
   statusFilter: '',
+  hasVideoFilter: '',
 }
 
 export const fetchArticles = createAsyncThunk(
   'articles/fetch',
-  async ({ page, status, search, startDate, endDate }: { page: number; status?: string; search?: string; startDate?: string; endDate?: string }) => {
-    return await fetchArticlesApi(page, status, search, startDate, endDate)
+  async ({ page, status, search, startDate, endDate, hasVideo }: { page: number; status?: string; search?: string; startDate?: string; endDate?: string; hasVideo?: string | boolean }) => {
+    return await fetchArticlesApi(page, status, search, startDate, endDate, hasVideo)
   }
 )
 
@@ -52,6 +54,10 @@ const articlesSlice = createSlice({
   reducers: {
     setStatusFilter(state, action: PayloadAction<string>) {
       state.statusFilter = action.payload
+      state.page = 1
+    },
+    setHasVideoFilter(state, action: PayloadAction<string>) {
+      state.hasVideoFilter = action.payload
       state.page = 1
     },
     prependArticle(state, action: PayloadAction<Article>) {
@@ -85,5 +91,5 @@ const articlesSlice = createSlice({
   },
 })
 
-export const { setStatusFilter, prependArticle, updateArticleStatus } = articlesSlice.actions
+export const { setStatusFilter, setHasVideoFilter, prependArticle, updateArticleStatus } = articlesSlice.actions
 export default articlesSlice.reducer

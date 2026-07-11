@@ -18,18 +18,16 @@ scheduler = AsyncIOScheduler()
 _thread_executor = ThreadPoolExecutor(max_workers=2)
 
 
-
-
-
 async def run_crawl_cycle():
     loop = asyncio.get_event_loop()
     await broadcast({"type": "crawl_start", "timestamp": datetime.utcnow().isoformat()})
 
     # Collect links (run sync Playwright + RSS in threads)
     vnexpress_links = await loop.run_in_executor(_thread_executor, crawl_vnexpress_sync)
-    rss_links = await loop.run_in_executor(_thread_executor, crawl_rss_sync)
+    # rss_links = await loop.run_in_executor(_thread_executor, crawl_rss_sync)
 
-    links = list(set(vnexpress_links + rss_links))
+    # links = list(set(vnexpress_links + rss_links))
+    links = list(set(vnexpress_links))
     new_count = 0
 
     for link in links:
@@ -39,6 +37,8 @@ async def run_crawl_cycle():
 
             data = await loop.run_in_executor(_thread_executor, crawl_article_sync, link)
             if data:
+                if articles_col.find_one({"title": data["title"]}):
+                    continue
                 data["crawled_at"] = datetime.utcnow()
                 data["status"] = "crawled"
                 articles_col.insert_one(data)
@@ -60,13 +60,29 @@ async def run_crawl_cycle():
     print(f"✅ Crawl done: {new_count} new articles")
 
 
-async def start_scheduler():
-    scheduler.add_job(run_crawl_cycle, "interval", minutes=30, id="crawl_cycle")
-    scheduler.start()
-    print("🕐 Scheduler started — crawling every 15 minutes")
-    asyncio.create_task(run_crawl_cycle())
+async def start_scheduler(interval_minutes: int = 30):
+    if not scheduler.running:
+        scheduler.add_job(run_crawl_cycle, "interval", minutes=interval_minutes, id="crawl_cycle", replace_existing=True)
+        scheduler.start()
+        print(f"🕐 Scheduler started — crawling every {interval_minutes} minutes")
+        asyncio.create_task(run_crawl_cycle())
+    else:
+        # Check if job exists, reschedule it with new interval
+        job = scheduler.get_job("crawl_cycle")
+        if job:
+            scheduler.reschedule_job("crawl_cycle", trigger="interval", minutes=interval_minutes)
+        else:
+            scheduler.add_job(run_crawl_cycle, "interval", minutes=interval_minutes, id="crawl_cycle", replace_existing=True)
+        scheduler.resume()
+        print(f"🕐 Scheduler resumed/updated — crawling every {interval_minutes} minutes")
 
+def get_current_interval() -> int:
+    job = scheduler.get_job("crawl_cycle")
+    if job and hasattr(job.trigger, 'interval'):
+        return int(job.trigger.interval.total_seconds() / 60)
+    return 30
 
 async def stop_scheduler():
-    scheduler.shutdown(wait=False)
-    _thread_executor.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.pause()
+        print("⏸ Scheduler paused")
