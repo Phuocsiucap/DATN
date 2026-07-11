@@ -1,7 +1,13 @@
+playwright
 praw
 feedparser
-playwright
-python -m playwright install
-
 pymongo
 redis
+python-dotenv
+kafka-python
+fastapi
+uvicorn[standard]
+apscheduler
+openai
+httpx
+pydantic

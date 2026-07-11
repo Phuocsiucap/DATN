@@ -1,2 +1,7 @@
 .env
 .venv
+__pycache__/
+*.pyc
+dashboard/node_modules/
+dashboard/dist/
+tiktok_profile/

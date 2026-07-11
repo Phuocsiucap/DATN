@@ -1,0 +1,79 @@
+Edited publisher.py
+Viewed publisher.py:175-196
+
+Chúc mừng bạn đã vượt qua được ải Playwright khó nhằn! Bây giờ con Bot đã biết tự dán text và tự ấn nút hoàn hảo.
+
+Để thay thế cái video demo thành **video thật của bài báo**, chúng ta cần một quy trình xử lý Video tự động (Video Processing Pipeline) ở Backend. Dựa vào data JSON bạn cung cấp, các video thường nằm dưới dạng link nhúng (embed) chứa file `.m3u8` (HLS Stream). 
+
+Dưới đây là **3 Ý Tưởng Xử Lý Video** từ cơ bản đến "chuẩn TikToker", kèm theo cách làm chi tiết:
+
+### 💡 Ý Tưởng 1: Cơ bản nhất - Tải m3u8 và chuyển thành MP4
+TikTok chỉ nhận file `MP4/WebM`. Bài báo của bạn lại cung cấp link luồng `m3u8` (bị giấu trong tham số `file=...`).
+*   **Bước 1:** Dùng code Python bóc tách (Regex/URL Parse) để lấy cái link `https://.../master.m3u8` ra khỏi mớ bòng bong `https://player.sohatv.vn/embed/...`.
+*   **Bước 2:** Gọi thư viện `yt-dlp` hoặc lệnh `ffmpeg` ngầm để tự động gộp các mảnh m3u8 tải về thành 1 file MP4 duy nhất lưu ở thư mục `temp/`.
+*   **Bước 3:** Ném file MP4 vừa tải xong vào biến `video_path` cho Playwright đăng lên.
+
+### 💡 Ý Tưởng 2: Chuẩn TikTok - Xử lý khung hình dọc (9:16)
+Video thể thao/thời sự thường là khung ngang (16:9). Đăng thẳng lên TikTok sẽ bị hai viền đen to đùng trên dưới, nhìn rất "kém sang" và ít được lên xu hướng.
+*   **Cách làm:** Dùng `ffmpeg-python` hoặc `moviepy` để tự động render lại video sang khung 9:16:
+    *   Phóng to video gốc, làm mờ đi (blur) để làm hình nền (Background).
+    *   Đặt video rõ nét kích thước 16:9 ở ngay chính giữa màn hình.
+    *   *(Đây là format chuẩn mà các kênh News trên TikTok đang làm).*
+
+### 💡 Ý Tưởng 3: Cao cấp - Gắn Tiêu đề và Đọc tự động (AI Voice)
+Nếu muốn làm một trang tin tức tự động "hái ra tiền":
+*   **Gắn Text:** Lấy chính `article["title"]` in đậm, viền đen, dán cố định lên nửa trên của Video (dùng lệnh `drawtext` của FFmpeg).
+*   **Đọc AI (Tương lai):** Bạn có thể gộp các đoạn `content` lại, đưa qua API Text-to-Speech (như Viettel AI, FPT, Google) để tạo ra file `.mp3` giọng đọc, sau đó chèn đè lên âm thanh gốc của video.
+
+---
+
+### 💻 Gợi ý Code triển khai Bước 1 (Tải Video Tự Động):
+Nếu bạn muốn làm luôn bây giờ, mình có thể tích hợp **Ý Tưởng 1** vào ngay `publisher.py` của bạn. Quy trình sẽ là:
+
+**1. Hàm bóc tách Link Video:**
+```python
+import urllib.parse
+
+def extract_video_url(embed_url: str) -> str:
+    # Lấy giá trị của biến file=...
+    parsed = urllib.parse.urlparse(embed_url)
+    queries = urllib.parse.parse_qs(parsed.query)
+    if 'file' in queries:
+        # Giải mã chuỗi URL
+        return urllib.parse.unquote(queries['file'][0])
+    return embed_url
+```
+
+**2. Hàm tải bằng YT-DLP (Cần cài yt-dlp và FFmpeg):**
+```python
+import yt_dlp
+import os
+
+def download_video(video_url: str, output_path: str):
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        print(f"[*] Đang tải video từ {video_url}...")
+        ydl.download([video_url])
+        return output_path
+```
+
+**3. Ghép vào logic hiện tại:**
+Khi người dùng bấm Đăng, thay vì xài video demo, Backend sẽ làm thế này:
+1. Check xem `article['videos']` có phần tử nào không.
+2. Tách link -> Gọi `download_video("link_m3u8", "D:/DATN/temp/video_bai_bao.mp4")`.
+3. Chạy Playwright với file MP4 vừa tải.
+4. Đăng xong thì xoá file MP4 đi cho nhẹ máy.
+
+Bạn có muốn mình **Viết luôn tính năng Tải Video tự động (Ý tưởng 1)** để thay thế hoàn toàn file Demo đi không? (Bạn sẽ cần phải chắc chắn máy bạn đã cài công cụ `ffmpeg` nhé).
+
+
+
+
+
+
+1. Tại sao video tải 2 lần? Đó là do lúc bạn ấn Đăng, thuật toán gửi 1 lúc 2 yêu cầu độc lập cho Backend (1 yêu cầu cho Facebook, 1 yêu cầu cho TikTok). Hậu quả là video_handler bị "chăm chỉ quá mức" và hì hục ngồi tải cùng 1 cái video 2 lần khác nhau. 👉 Cách khắc phục: Mình vừa thêm thuật toán Băm (Hash MD5) vào downloader.py. Từ giờ, mỗi link m3u8 sẽ được mã hoá thành một ID duy nhất. Con Bot sẽ kiểm tra xem thư mục temp/ đã có file video_{ID} này chưa, nếu có rồi thì nó dùng luôn và in ra [*] Video đã được tải trước đó, sử dụng lại chứ không tải lại nữa!

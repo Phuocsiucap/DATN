@@ -1,0 +1,93 @@
+Tốt, đã hiểu toàn bộ stack hiện tại. Đây là đề xuất kiến trúc đầy đủ:
+
+Đề xuất kiến trúc hệ thống Auto-Crawl & Auto-Post
+Tổng quan stack hiện tại
+Bạn đã có: Playwright crawler, Kafka queue, MongoDB, Redis, RSS + Reddit crawler. Nền tảng khá tốt, cần mở rộng thêm 3 lớp: AI rewrite, Social publisher, Realtime dashboard.
+
+Kiến trúc đề xuất
+┌─────────────────────────────────────────────────────────┐
+│                    SCHEDULER (APScheduler)               │
+│          Cron mỗi 15 phút → trigger crawl jobs          │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+          ┌────────────▼────────────┐
+          │   Kafka Topic: raw-jobs  │
+          └────────────┬────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   [RSS Crawler]  [Reddit Crawler] [VNExpress]
+   feedparser     praw             Playwright
+        │              │              │
+        └──────────────▼──────────────┘
+          Kafka Topic: raw-articles
+                       │
+          ┌────────────▼────────────┐
+          │   AI Processor (LLM)    │  ← THÊM MỚI
+          │  - Scoring trending     │
+          │  - Rewrite for FB/TT    │
+          │  - Generate hashtags    │
+          └────────────┬────────────┘
+                       │
+          ┌────────────▼────────────┐
+          │  MongoDB + Redis Cache  │
+          └────────────┬────────────┘
+                       │
+          ┌────────────▼────────────┐
+          │  Kafka: publish-queue   │
+          └──────┬──────────┬───────┘
+                 │          │
+        ┌────────▼──┐  ┌────▼──────┐
+        │ FB Worker │  │ TikTok W. │  ← THÊM MỚI
+        │ Graph API │  │ TT API    │
+        └───────────┘  └───────────┘
+                       │
+          ┌────────────▼────────────┐
+          │  FastAPI Backend        │  ← THÊM MỚI
+          │  WebSocket realtime     │
+          └────────────┬────────────┘
+                       │
+          ┌────────────▼────────────┐
+          │  React Dashboard UI     │  ← THÊM MỚI
+          │  Live feed, stats, logs │
+          └─────────────────────────┘
+3 phần cần xây dựng
+1. MCP Tools (cho Kiro/AI agent điều khiển hệ thống)
+mcp-tools/
+  crawl_tool.py       # trigger crawl on demand
+  publish_tool.py     # force publish 1 article
+  status_tool.py      # get system health
+  trending_tool.py    # query top trending now
+MCP tools cho phép AI agent (hoặc bạn qua chat) điều khiển hệ thống bằng ngôn ngữ tự nhiên — ví dụ: "crawl trending TikTok và post lên FB ngay bây giờ".
+
+2. Backend (FastAPI + WebSocket)
+backend/
+  main.py             # FastAPI app
+  routers/
+    articles.py       # REST: list, filter articles
+    publish.py        # REST: manual trigger publish
+    stats.py          # REST: system metrics
+  ws/
+    events.py         # WebSocket: realtime events stream
+  services/
+    ai_rewriter.py    # LLM rewrite content for each platform
+    scorer.py         # trend scoring logic
+    fb_publisher.py   # Facebook Graph API
+    tiktok_publisher.py
+3. UI Dashboard (React)
+Realtime panels:
+  - Live crawl feed (WebSocket)
+  - Articles queue với status: crawled → rewritten → published
+  - Stats: bài/giờ, success rate, platform breakdown
+  - Manual controls: trigger crawl, approve/reject bài trước khi post
+  - Logs viewer
+Bước triển khai gợi ý
+Thêm APScheduler vào crawler.py để tự động chạy định kỳ
+Xây AI Processor dùng OpenAI/Gemini để rewrite content theo format FB/TT
+Xây FastAPI backend + WebSocket emit events khi có bài mới
+Xây React dashboard subscribe WebSocket
+Xây MCP tools wrap các API của backend
+Thêm FB Graph API publisher + TikTok publisher
+Bạn muốn bắt đầu từ phần nào trước? Gợi ý nên đi theo thứ tự:
+
+Backend FastAPI → AI Rewriter → Dashboard UI → MCP Tools → Social Publishers
