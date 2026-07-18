@@ -11,3 +11,17 @@ apscheduler
 openai
 httpx
 pydantic
+pydantic-settings
+PyJWT
+bcrypt
+sqlalchemy
+psycopg2-binary
+yt-dlp
+imageio-ffmpeg
+pillow
+pytesseract
+numpy
+rapidocr-onnxruntime
+faster-whisper
+pyperclip
+

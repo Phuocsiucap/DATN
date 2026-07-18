@@ -1,0 +1,50 @@
+import { api } from './client'
+
+export const searchBilibiliVideosApi = async (q: string, limit = 10) => {
+  const { data } = await api.get('/video-localization/bilibili/search', { params: { q, limit } })
+  return data
+}
+
+export const fetchBilibiliVideoDetailApi = async (params: { bvid?: string | number; aid?: string | number }) => {
+  const { data } = await api.get('/video-localization/bilibili/detail', { params })
+  return data
+}
+
+export const searchBilibiliSeriesApi = async (q: string, limit = 10) => {
+  const { data } = await api.get('/video-localization/bilibili/series/search', { params: { q, limit } })
+  return data
+}
+
+export const fetchBilibiliSeriesDetailApi = async (seasonId: string | number) => {
+  const { data } = await api.get(`/video-localization/bilibili/series/${seasonId}`)
+  return data
+}
+
+export const fetchVideoLocalizationJobsApi = async () => {
+  const { data } = await api.get('/video-localization/jobs')
+  return data
+}
+
+export const createVideoLocalizationJobApi = async (payload: any) => {
+  const { data } = await api.post('/video-localization/jobs', payload)
+  return data
+}
+
+export const fetchVideoLocalizationJobApi = async (jobId: string) => {
+  const { data } = await api.get(`/video-localization/jobs/${jobId}`)
+  return data
+}
+
+export const getVideoLocalizationDownloadUrl = (jobId: string) => {
+  return `${api.defaults.baseURL}/video-localization/jobs/${jobId}/download`
+}
+
+export const resolveApiAssetUrl = (path?: string | null) => {
+  if (!path) return ''
+  if (path.startsWith('http')) return path
+  const base = String(api.defaults.baseURL || '').replace(/\/$/, '')
+  if (path.startsWith('/api/')) {
+    return `${base}${path.slice(4)}`
+  }
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`
+}
