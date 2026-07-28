@@ -285,10 +285,14 @@ def build_link_plan(url: str) -> KeywordPlanResponse:
 
 
 def candidate_from_metadata(metadata: dict, fallback_url: str) -> SearchCandidateResponse:
+    bvid = extract_bvid_from_metadata(metadata, fallback_url)
+    aid = extract_aid_from_metadata(metadata, fallback_url)
     return SearchCandidateResponse(
         title=str(metadata["title"]),
         title_vi=None,
         url=str(metadata["url"] or fallback_url),
+        aid=aid,
+        bvid=bvid,
         platform="bilibili",
         duration_seconds=metadata["duration_seconds"] if isinstance(metadata["duration_seconds"], int) else None,
         query="Bilibili link",
@@ -302,17 +306,18 @@ def candidate_from_metadata(metadata: dict, fallback_url: str) -> SearchCandidat
 
 def resolve_link_candidate(url: str) -> SearchCandidateResponse:
     metadata: dict | None = None
+    series_input = build_series_info_input_from_link(url)
     try:
-        data = crawler.fetch_bilibili_series_info(url=url)
+        data = crawler.fetch_bilibili_series_info(**series_input)
         if data.get("current"):
             current = dict(data["current"])
             return SearchCandidateResponse(**{**current, "title_vi": None})
     except Exception:
         metadata = downloader.extract_video_metadata(url)
-        bvid = extract_bvid_from_metadata(metadata, url)
-        if bvid:
+        series_input = build_series_info_input_from_metadata(metadata, url)
+        if series_input:
             try:
-                data = crawler.fetch_bilibili_series_info(url=str(metadata.get("url") or url), bvid=bvid)
+                data = crawler.fetch_bilibili_series_info(**series_input)
                 if data.get("current"):
                     current = dict(data["current"])
                     return SearchCandidateResponse(**{**current, "title_vi": None})
@@ -323,14 +328,62 @@ def resolve_link_candidate(url: str) -> SearchCandidateResponse:
     return candidate_from_metadata(metadata, url)
 
 
+def build_series_info_input_from_link(url: str) -> dict[str, object]:
+    aid = extract_aid_from_url(url)
+    if aid:
+        return {"aid": aid}
+    bvid = extract_bvid_from_url(url)
+    if bvid:
+        return {"bvid": bvid}
+    return {"url": url}
+
+
+def build_series_info_input_from_metadata(metadata: dict, fallback_url: str) -> dict[str, object] | None:
+    aid = extract_aid_from_metadata(metadata, fallback_url)
+    if aid:
+        return {"aid": aid}
+    bvid = extract_bvid_from_metadata(metadata, fallback_url)
+    if bvid:
+        return {"bvid": bvid}
+    url = metadata.get("url") or fallback_url
+    return {"url": str(url)} if url else None
+
+
 def extract_bvid_from_metadata(metadata: dict, fallback_url: str) -> str | None:
     for value in (metadata.get("url"), metadata.get("embed_url"), fallback_url):
         if not isinstance(value, str):
             continue
-        match = re.search(r"(BV[0-9A-Za-z]+)", value)
-        if match:
-            return match.group(1)
+        bvid = extract_bvid_from_url(value)
+        if bvid:
+            return bvid
     return None
 
 
+def extract_aid_from_metadata(metadata: dict, fallback_url: str) -> int | None:
+    for value in (metadata.get("aid"), metadata.get("id"), metadata.get("url"), metadata.get("embed_url"), fallback_url):
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if not isinstance(value, str):
+            continue
+        aid = extract_aid_from_url(value)
+        if aid:
+            return aid
+    return None
+
+
+def extract_bvid_from_url(value: str) -> str | None:
+    parsed = urlparse(value)
+    path_match = re.search(r"(BV[0-9A-Za-z]+)", parsed.path)
+    if path_match:
+        return path_match.group(1)
+    query_match = re.search(r"[?&]bvid=(BV[0-9A-Za-z]+)", value)
+    if query_match:
+        return query_match.group(1)
+    any_match = re.search(r"(BV[0-9A-Za-z]+)", value)
+    return any_match.group(1) if any_match else None
+
+
+def extract_aid_from_url(value: str) -> int | None:
+    match = re.search(r"/video/av(\d+)", value, re.I) or re.search(r"[?&]aid=(\d+)", value, re.I)
+    return int(match.group(1)) if match else None
 

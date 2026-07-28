@@ -109,7 +109,7 @@ const VideoDetailItemBaseSchema = z.object({
 export const VideoDetailEpisodeSchema = VideoDetailItemBaseSchema.extend({
   episode_index: z.number().nullable().optional(),
   playlist_size: z.number().nullable().optional(),
-  query: z.literal("view_detail_pages").optional()
+  query: z.string().optional()
 });
 
 export const VideoDetailRelatedSchema = VideoDetailItemBaseSchema.extend({
@@ -134,6 +134,8 @@ export const SeriesInfoSchema = z.object({
   episode_count: z.number(),
   related_count: z.number(),
   source: z.string(),
+  season_id: z.number().nullable().optional(),
+  season_title: z.string().nullable().optional(),
   current: SearchCandidateSchema.nullable().optional(),
   episodes: z.array(VideoDetailEpisodeSchema).optional(),
   related: z.array(VideoDetailRelatedSchema).optional()

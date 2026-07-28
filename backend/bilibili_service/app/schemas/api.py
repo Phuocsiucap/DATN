@@ -104,6 +104,8 @@ class SeriesInfoResponse(BaseModel):
     episode_count: int = 0
     related_count: int = 0
     source: str = "view_detail"
+    season_id: int | None = None
+    season_title: str | None = None
     current: SearchCandidateResponse | None = None
     episodes: list[VideoDetailEpisodeResponse] = Field(default_factory=list)
     related: list[VideoDetailRelatedResponse] = Field(default_factory=list)

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
+import json
 import os
 import re
 import time
-from urllib.parse import quote, quote_plus, urlparse
+from urllib.parse import parse_qs, quote, quote_plus, urlparse
 
 import httpx
 
@@ -133,21 +134,30 @@ class ChinaVideoCrawler:
         with httpx.Client(timeout=20.0, headers=headers, follow_redirects=True) as client:
             warm_bilibili_search_session(client, bvid or str(aid or ""))
             mixin_key = get_bilibili_wbi_mixin_key(client)
-            params: dict[str, object] = {
-                "need_view": 1,
-                "isGaiaAvoided": "false",
-                "web_location": 1315873,
-            }
-            if aid:
-                params["aid"] = aid
-            elif bvid:
-                params["bvid"] = bvid
-            response = client.get(
-                "https://api.bilibili.com/x/web-interface/wbi/view/detail",
-                params=sign_bilibili_wbi_params(params, mixin_key),
-            )
-            response.raise_for_status()
-            return parse_bilibili_series_info(response.json())
+            payload = fetch_bilibili_view_detail_payload(client, mixin_key, aid=aid, bvid=bvid)
+            parsed = parse_bilibili_series_info(payload)
+            parsed = enrich_bilibili_series_archives(client, mixin_key, payload, parsed, url or "")
+            if int(parsed.get("episode_count") or 0) <= 1:
+                fallback_payload = fetch_bilibili_view_payload(client, aid=aid, bvid=bvid)
+                fallback_parsed = parse_bilibili_series_info(fallback_payload)
+                fallback_parsed = enrich_bilibili_series_archives(client, mixin_key, fallback_payload, fallback_parsed, url or "")
+                if int(fallback_parsed.get("episode_count") or 0) > int(parsed.get("episode_count") or 0):
+                    parsed = fallback_parsed
+            if url and int(parsed.get("episode_count") or 0) <= 1:
+                parsed = enrich_bilibili_series_archives_from_page(client, mixin_key, url, parsed)
+
+            query_bvid = extract_query_bvid(url or "")
+            if query_bvid and query_bvid != bvid and int(parsed.get("episode_count") or 0) <= 1:
+                try:
+                    alt_payload = fetch_bilibili_view_detail_payload(client, mixin_key, bvid=query_bvid)
+                    alt_parsed = parse_bilibili_series_info(alt_payload)
+                    alt_parsed = enrich_bilibili_series_archives(client, mixin_key, alt_payload, alt_parsed, url or "")
+                    alt_parsed = enrich_bilibili_series_archives_from_page(client, mixin_key, url or "", alt_parsed)
+                    if int(alt_parsed.get("episode_count") or 0) > int(parsed.get("episode_count") or 0):
+                        return alt_parsed
+                except Exception:
+                    pass
+            return parsed
 
     def iter_bilibili_search_pages(self, query: str, max_duration_seconds: int, limit: int = 12):
         headers = {
@@ -294,19 +304,229 @@ def parse_bilibili_series_info(payload: dict) -> dict[str, object]:
     pages = view.get("pages") or []
     related = data.get("Related") or data.get("related") or []
     current = candidate_from_view_detail(view)
-    episodes = parse_bilibili_detail_pages(view, pages)
+    ugc_episodes = parse_bilibili_ugc_season_episodes(view)
+    page_episodes = parse_bilibili_detail_pages(view, pages)
+    episodes = ugc_episodes if len(ugc_episodes) > len(page_episodes) else page_episodes
     related_candidates = parse_bilibili_detail_related(related)
+    ugc_season = view.get("ugc_season") if isinstance(view.get("ugc_season"), dict) else {}
     return {
         "aid": parse_int(view.get("aid")),
         "bvid": str(view.get("bvid") or "") or None,
         "title": strip_html(str(view.get("title") or "")),
         "episode_count": len(episodes),
         "related_count": len(related) if isinstance(related, list) else 0,
-        "source": "view_detail",
+        "source": "ugc_season" if ugc_episodes and episodes is ugc_episodes else "view_detail",
+        "season_id": parse_int(ugc_season.get("id")) if ugc_season else None,
+        "season_title": strip_html(str(ugc_season.get("title") or "")) if ugc_season else None,
         "current": current.__dict__ if current else None,
         "episodes": [candidate.__dict__ for candidate in episodes],
         "related": [candidate.__dict__ for candidate in related_candidates],
     }
+
+
+def fetch_bilibili_view_detail_payload(
+    client: httpx.Client,
+    mixin_key: str,
+    *,
+    aid: int | None = None,
+    bvid: str | None = None,
+) -> dict:
+    params: dict[str, object] = {
+        "need_view": 1,
+        "isGaiaAvoided": "false",
+        "web_location": 1315873,
+    }
+    if aid:
+        params["aid"] = aid
+    elif bvid:
+        params["bvid"] = bvid
+    response = client.get(
+        "https://api.bilibili.com/x/web-interface/wbi/view/detail",
+        params=sign_bilibili_wbi_params(params, mixin_key),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_bilibili_view_payload(
+    client: httpx.Client,
+    *,
+    aid: int | None = None,
+    bvid: str | None = None,
+) -> dict:
+    params: dict[str, object] = {}
+    if aid:
+        params["aid"] = aid
+    elif bvid:
+        params["bvid"] = bvid
+    if not params:
+        return {"data": {"View": {}}}
+    response = client.get(
+        "https://api.bilibili.com/x/web-interface/view",
+        params=params,
+        headers={"Referer": "https://www.bilibili.com/"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    return {"data": {"View": data if isinstance(data, dict) else {}}}
+
+
+def enrich_bilibili_series_archives(
+    client: httpx.Client,
+    mixin_key: str,
+    payload: dict,
+    parsed: dict[str, object],
+    referer: str,
+) -> dict[str, object]:
+    data = payload.get("data") or {}
+    view = data.get("View") or data.get("view") or {}
+    if not isinstance(view, dict):
+        return parsed
+    ugc_season = view.get("ugc_season") if isinstance(view.get("ugc_season"), dict) else {}
+    owner = view.get("owner") if isinstance(view.get("owner"), dict) else {}
+    season_id = parse_int(ugc_season.get("id") or parsed.get("season_id"))
+    mid = parse_int(owner.get("mid") or ugc_season.get("mid"))
+    if not season_id or not mid:
+        return parsed
+
+    season_title = strip_html(str(ugc_season.get("title") or parsed.get("season_title") or view.get("title") or "")).strip()
+    base_description = strip_html(str(view.get("desc") or ""))
+    fallback_referer = referer
+    if not fallback_referer:
+        view_bvid = str(view.get("bvid") or "")
+        fallback_referer = f"https://www.bilibili.com/video/{view_bvid}" if view_bvid else "https://www.bilibili.com/"
+    episodes = fetch_bilibili_ugc_season_archives(
+        client,
+        mixin_key,
+        mid=mid,
+        season_id=season_id,
+        season_title=season_title,
+        base_description=base_description,
+        referer=fallback_referer,
+    )
+    if len(episodes) <= len(parsed.get("episodes") or []):
+        return parsed
+
+    enriched = dict(parsed)
+    enriched["episode_count"] = len(episodes)
+    enriched["source"] = "ugc_season_archives"
+    enriched["season_id"] = season_id
+    enriched["season_title"] = season_title or parsed.get("season_title")
+    enriched["episodes"] = [candidate.__dict__ for candidate in episodes]
+    return enriched
+
+
+def enrich_bilibili_series_archives_from_page(
+    client: httpx.Client,
+    mixin_key: str,
+    url: str,
+    parsed: dict[str, object],
+) -> dict[str, object]:
+    hints = fetch_bilibili_page_series_hints(client, url)
+    season_id = parse_int(hints.get("season_id") or parsed.get("season_id"))
+    mid = parse_int(hints.get("mid"))
+    if not season_id or not mid:
+        return parsed
+    season_title = strip_html(str(hints.get("season_title") or parsed.get("season_title") or parsed.get("title") or "")).strip()
+    episodes = fetch_bilibili_ugc_season_archives(
+        client,
+        mixin_key,
+        mid=mid,
+        season_id=season_id,
+        season_title=season_title,
+        base_description="",
+        referer=url,
+    )
+    if len(episodes) <= len(parsed.get("episodes") or []):
+        return parsed
+    enriched = dict(parsed)
+    enriched["episode_count"] = len(episodes)
+    enriched["source"] = "ugc_season_archives"
+    enriched["season_id"] = season_id
+    enriched["season_title"] = season_title or parsed.get("season_title")
+    enriched["episodes"] = [candidate.__dict__ for candidate in episodes]
+    return enriched
+
+
+def fetch_bilibili_page_series_hints(client: httpx.Client, url: str) -> dict[str, object]:
+    if not url:
+        return {}
+    response = client.get(url, headers={"Referer": "https://www.bilibili.com/"})
+    response.raise_for_status()
+    html = response.text
+    initial_match = re.search(r"__INITIAL_STATE__=(\{.*?\});\s*\(function", html, re.S)
+    state_text = initial_match.group(1) if initial_match else html
+    season_id = first_regex_int(state_text, (
+        r'"season_id"\s*:\s*(\d+)',
+        r'"seasonId"\s*:\s*(\d+)',
+        r'season_id[^0-9]{0,20}(\d+)',
+    ))
+    mid = first_regex_int(state_text, (
+        r'"owner"\s*:\s*\{[^{}]*"mid"\s*:\s*(\d+)',
+        r'"upData"\s*:\s*\{[^{}]*"mid"\s*:\s*(\d+)',
+        r'"mid"\s*:\s*(\d{5,})',
+    ))
+    season_title = first_regex_text(state_text, (
+        r'"season_title"\s*:\s*"([^"]+)"',
+        r'"seasonTitle"\s*:\s*"([^"]+)"',
+        r'"title"\s*:\s*"([^"]+)"',
+    ))
+    return {"season_id": season_id, "mid": mid, "season_title": season_title}
+
+
+def fetch_bilibili_ugc_season_archives(
+    client: httpx.Client,
+    mixin_key: str,
+    *,
+    mid: int,
+    season_id: int,
+    season_title: str,
+    base_description: str,
+    referer: str,
+) -> list[CrawlCandidate]:
+    candidates: list[CrawlCandidate] = []
+    page_size = 50
+    total: int | None = None
+    for page_num in range(1, 21):
+        params = sign_bilibili_wbi_params({
+            "mid": mid,
+            "season_id": season_id,
+            "sort_reverse": "false",
+            "page_num": page_num,
+            "page_size": page_size,
+            "web_location": 333.999,
+        }, mixin_key)
+        response = client.get(
+            "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list",
+            params=params,
+            headers={"Referer": referer or "https://www.bilibili.com/"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            break
+        archives = data.get("archives")
+        if not isinstance(archives, list) or not archives:
+            break
+        for archive in archives:
+            if not isinstance(archive, dict):
+                continue
+            candidate = candidate_from_ugc_archive(archive, season_title, base_description, len(candidates) + 1)
+            if candidate:
+                candidates.append(candidate)
+
+        page = data.get("page") if isinstance(data.get("page"), dict) else {}
+        total = parse_int(page.get("total")) or total
+        returned_page_size = parse_int(page.get("page_size")) or page_size
+        if total and page_num * returned_page_size >= total:
+            break
+
+    playlist_size = len(candidates)
+    if playlist_size <= 0:
+        return []
+    return [replace(candidate, playlist_size=playlist_size) for candidate in candidates]
 
 
 def candidate_from_view_detail(view: dict) -> CrawlCandidate | None:
@@ -411,6 +631,141 @@ def parse_bilibili_detail_pages(view: dict, pages: object) -> list[CrawlCandidat
     return candidates
 
 
+def parse_bilibili_ugc_season_episodes(view: dict) -> list[CrawlCandidate]:
+    ugc_season = view.get("ugc_season")
+    if not isinstance(ugc_season, dict):
+        return []
+
+    sections = ugc_season.get("sections")
+    if not isinstance(sections, list):
+        return []
+
+    season_title = strip_html(str(ugc_season.get("title") or view.get("title") or "")).strip()
+    base_description = strip_html(str(view.get("desc") or ""))
+    candidates: list[CrawlCandidate] = []
+
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        episodes = section.get("episodes")
+        if not isinstance(episodes, list):
+            continue
+        for episode in episodes:
+            if not isinstance(episode, dict):
+                continue
+            candidate = candidate_from_ugc_episode(episode, season_title, base_description, len(candidates) + 1)
+            if candidate:
+                candidates.append(candidate)
+
+    playlist_size = len(candidates)
+    if playlist_size <= 0:
+        return []
+    return [replace(candidate, playlist_size=playlist_size) for candidate in candidates]
+
+
+def candidate_from_ugc_episode(
+    episode: dict,
+    season_title: str,
+    base_description: str,
+    fallback_index: int,
+) -> CrawlCandidate | None:
+    bvid = str(episode.get("bvid") or "") or None
+    aid = parse_int(episode.get("aid"))
+    arc = episode.get("arc") if isinstance(episode.get("arc"), dict) else {}
+    page_index = parse_int(episode.get("page")) or parse_int(episode.get("index")) or None
+    title = strip_html(str(episode.get("title") or arc.get("title") or "")).strip()
+    if not title:
+        title = f"{season_title} P{page_index}" if page_index else season_title
+    video_url = f"https://www.bilibili.com/video/{bvid}" if bvid else f"https://www.bilibili.com/video/av{aid}" if aid else ""
+    if not video_url:
+        return None
+    if page_index and page_index > 1:
+        video_url = f"{video_url}?p={page_index}"
+
+    duration = parse_int(episode.get("duration")) or parse_int(arc.get("duration"))
+    stat = arc.get("stat") if isinstance(arc.get("stat"), dict) else {}
+    series_key, inferred_index = infer_series(title)
+    episode_index = page_index or inferred_index or fallback_index
+    return CrawlCandidate(
+        title=title,
+        url=video_url,
+        platform="bilibili",
+        duration_seconds=duration,
+        aid=aid,
+        bvid=bvid,
+        query="ugc_season",
+        thumbnail_url=normalize_bilibili_image(str(episode.get("cover") or arc.get("pic") or "")),
+        description=strip_html(str(arc.get("desc") or base_description)),
+        review_count=parse_int(stat.get("view")),
+        danmaku_count=parse_int(stat.get("danmaku")),
+        embed_url=build_bilibili_embed_url(bvid, video_url, page_index),
+        series_key=series_key or season_title,
+        series_title=season_title or series_key,
+        episode_index=episode_index,
+    )
+
+
+def candidate_from_ugc_archive(
+    archive: dict,
+    season_title: str,
+    base_description: str,
+    fallback_index: int,
+) -> CrawlCandidate | None:
+    arc = archive.get("arc") if isinstance(archive.get("arc"), dict) else {}
+    source = arc or archive
+    bvid = str(source.get("bvid") or archive.get("bvid") or "") or None
+    aid = parse_int(source.get("aid") or archive.get("aid"))
+    video_url = f"https://www.bilibili.com/video/{bvid}" if bvid else f"https://www.bilibili.com/video/av{aid}" if aid else ""
+    if not video_url:
+        return None
+    title = strip_html(str(source.get("title") or archive.get("title") or "")).strip()
+    if not title:
+        title = f"{season_title} EP {fallback_index}".strip()
+    duration = parse_int(source.get("duration") or archive.get("duration"))
+    stat = source.get("stat") if isinstance(source.get("stat"), dict) else {}
+    series_key, inferred_index = infer_series(title)
+    return CrawlCandidate(
+        title=title,
+        url=video_url,
+        platform="bilibili",
+        duration_seconds=duration,
+        aid=aid,
+        bvid=bvid,
+        query="ugc_season_archives",
+        thumbnail_url=normalize_bilibili_image(str(source.get("pic") or archive.get("pic") or archive.get("cover") or "")),
+        description=strip_html(str(source.get("desc") or archive.get("desc") or base_description)),
+        review_count=parse_int(stat.get("view") or source.get("play") or archive.get("play")),
+        danmaku_count=parse_int(stat.get("danmaku") or source.get("danmaku") or archive.get("danmaku")),
+        embed_url=build_bilibili_embed_url(bvid, video_url),
+        series_key=series_key or season_title,
+        series_title=season_title or series_key,
+        episode_index=inferred_index or fallback_index,
+    )
+
+
+def first_regex_int(value: str, patterns: tuple[str, ...]) -> int | None:
+    for pattern in patterns:
+        match = re.search(pattern, value, re.S)
+        if match:
+            return parse_int(match.group(1))
+    return None
+
+
+def first_regex_text(value: str, patterns: tuple[str, ...]) -> str | None:
+    for pattern in patterns:
+        match = re.search(pattern, value, re.S)
+        if match:
+            return decode_jsonish_text(match.group(1))
+    return None
+
+
+def decode_jsonish_text(value: str) -> str:
+    try:
+        return str(json.loads(f'"{value}"'))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return value
+
+
 def parse_int(value: object) -> int | None:
     try:
         if value in (None, ""):
@@ -487,6 +842,13 @@ def extract_aid(url: str) -> int | None:
 def extract_bvid(url: str) -> str | None:
     match = re.search(r"(BV[0-9A-Za-z]+)", url)
     return match.group(1) if match else None
+
+
+def extract_query_bvid(url: str) -> str | None:
+    query_bvid = parse_qs(urlparse(url).query).get("bvid")
+    if query_bvid and query_bvid[0].startswith("BV"):
+        return query_bvid[0]
+    return None
 
 
 def build_bilibili_search_url(query: str) -> str:

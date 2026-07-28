@@ -1,0 +1,59 @@
+<mxfile host="app.diagrams.net" modified="2026-07-25T15:29:00+07:00" agent="Codex" version="24.7.17">
+  <diagram id="sql-erd" name="SQL Database ERD">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="ERD cơ sở dữ liệu SQL - User Service và Bilibili Service" style="text;html=1;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="240" y="20" width="980" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="users" value="users&#xa;PK id: Integer, index&#xa;email: String, unique, index, not null&#xa;hashed_password: String, not null&#xa;is_active: Boolean, default true&#xa;created_at: DateTime, default utcnow" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="280" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="roles" value="roles&#xa;PK id: Integer, index&#xa;name: String, unique, index, not null" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="680" y="100" width="250" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="user_roles" value="user_roles&#xa;PK/FK user_id: Integer -&gt; users.id, cascade&#xa;PK/FK role_id: Integer -&gt; roles.id, cascade" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="380" y="95" width="250" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="refresh_tokens" value="refresh_tokens&#xa;PK id: Integer, index&#xa;token: String, unique, index, not null&#xa;FK user_id: Integer -&gt; users.id, cascade, not null&#xa;expires_at: DateTime, not null&#xa;created_at: DateTime, default utcnow&#xa;is_revoked: Boolean, default false" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="40" y="310" width="330" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="social_profiles" value="social_profiles&#xa;PK id: Integer, index&#xa;FK user_id: Integer -&gt; users.id, cascade, not null&#xa;platform: String, not null&#xa;profile_name: String, not null&#xa;username: String, nullable&#xa;folder_path: String, unique, not null&#xa;status: String, default active&#xa;created_at: DateTime, default utcnow" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="430" y="300" width="340" height="215" as="geometry"/>
+        </mxCell>
+        <mxCell id="strategies" value="social_profile_strategies&#xa;PK id: Integer, index&#xa;FK user_id: Integer -&gt; users.id, cascade, index, not null&#xa;FK profile_id: Integer -&gt; social_profiles.id, cascade, unique, index, not null&#xa;content_topics: Text, default empty&#xa;avoid_topics: Text, default empty&#xa;tone: String, default ngắn gọn...&#xa;target_audience: String, default empty&#xa;post_frequency_per_day: Integer, default 2&#xa;active_hours: String, default 08:00-11:00,19:00-22:00&#xa;schedule_enabled: Boolean, default true&#xa;schedule_days: String, default 0,1,2,3,4,5,6&#xa;schedule_times: String, default 08:30,20:30&#xa;schedule_timezone: String, default Asia/Bangkok&#xa;approval_mode: String, default manual&#xa;risk_level: String, default medium&#xa;min_score: Float, default 70.0&#xa;require_video: Boolean, default false&#xa;auto_queue_enabled: Boolean, default true&#xa;auto_publish_enabled: Boolean, default false&#xa;created_at: DateTime, default utcnow&#xa;updated_at: DateTime, default utcnow/onupdate" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="820" y="260" width="430" height="430" as="geometry"/>
+        </mxCell>
+        <mxCell id="matches" value="article_profile_matches&#xa;PK id: Integer, index&#xa;FK user_id: Integer -&gt; users.id, cascade, index, not null&#xa;FK profile_id: Integer -&gt; social_profiles.id, cascade, index, not null&#xa;article_link: String, index, not null&#xa;article_title: String, not null&#xa;score: Float, default 0.0&#xa;decision: String, default skip&#xa;reason: Text, nullable&#xa;suggested_platform: String, nullable&#xa;matched_topics: Text, default empty&#xa;created_at: DateTime, default utcnow" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="40" y="590" width="360" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="queue" value="publishing_queue_items&#xa;PK id: Integer, index&#xa;FK user_id: Integer -&gt; users.id, cascade, index, not null&#xa;FK profile_id: Integer -&gt; social_profiles.id, cascade, index, not null&#xa;FK match_id: Integer -&gt; article_profile_matches.id, set null&#xa;article_link: String, index, not null&#xa;article_title: String, not null&#xa;platform: String, not null&#xa;generated_content: Text, nullable&#xa;ai_reason: Text, nullable&#xa;status: String, default queued, index&#xa;scheduled_at: DateTime, nullable, index&#xa;published_at: DateTime, nullable&#xa;error: Text, nullable&#xa;created_at: DateTime, default utcnow&#xa;updated_at: DateTime, default utcnow/onupdate" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="460" y="600" width="410" height="335" as="geometry"/>
+        </mxCell>
+        <mxCell id="posts" value="social_posts&#xa;PK id: Integer, index&#xa;FK profile_id: Integer -&gt; social_profiles.id, cascade, index, not null&#xa;title: String, not null&#xa;post_url: String, nullable&#xa;platform_post_id: String, nullable&#xa;caption: Text, nullable&#xa;status: String, default published&#xa;published_at: DateTime, default utcnow&#xa;created_at: DateTime, default utcnow" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="930" y="760" width="330" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="metrics" value="social_post_metrics&#xa;PK id: Integer, index&#xa;FK post_id: Integer -&gt; social_posts.id, cascade, index, not null&#xa;views: Integer, default 0&#xa;likes: Integer, default 0&#xa;comments: Integer, default 0&#xa;shares: Integer, default 0&#xa;captured_at: DateTime, default utcnow, index" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="980" y="1040" width="330" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="bilibili_jobs" value="bilibili_jobs&#xa;PK id: Integer, index&#xa;user_id: Integer, nullable, index&#xa;status: String, index, not null&#xa;stage: String, index, not null&#xa;progress: Integer, default 0, not null&#xa;input_text: Text, not null&#xa;niche: String, not null&#xa;max_duration_seconds: Integer, default 180, not null&#xa;source_url: Text, nullable&#xa;source_platform: String, nullable&#xa;source_title: Text, nullable&#xa;artifacts_json: Text, default {}, not null&#xa;error_message: Text, nullable&#xa;created_at: DateTime, default utc_now, not null&#xa;updated_at: DateTime, default/onupdate utc_now, not null" style="swimlane;html=1;whiteSpace=wrap;rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;startSize=28;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="280" width="330" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_user_roles_user" value="1 - n" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="users" target="user_roles"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_user_roles_role" value="n - 1" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="user_roles" target="roles"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_refresh_user" value="users 1 - n refresh_tokens" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="users" target="refresh_tokens"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_profile_user" value="users 1 - n social_profiles" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="users" target="social_profiles"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_strategy_profile" value="social_profiles 1 - 0..1 strategies" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="social_profiles" target="strategies"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_match_profile" value="social_profiles 1 - n matches" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="social_profiles" target="matches"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_queue_profile" value="social_profiles 1 - n queue" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="social_profiles" target="queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_queue_match" value="matches 0..1 - n queue" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="matches" target="queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_post_profile" value="social_profiles 1 - n posts" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="social_profiles" target="posts"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e_metric_post" value="social_posts 1 - n metrics" style="endArrow=block;html=1;rounded=0;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="posts" target="metrics"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="note" value="Ghi chú: bilibili_jobs.user_id hiện không khai báo ForeignKey trong code, nhưng về nghiệp vụ tham chiếu người dùng hiện tại." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1275" y="635" width="335" height="85" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

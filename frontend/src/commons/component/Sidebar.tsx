@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { LayoutDashboard, Newspaper, CalendarDays, Settings, HelpCircle, Plus, CircleUserRound, UsersRound, CheckSquare, Languages } from 'lucide-react'
 
-export type Tab = 'dashboard' | 'articles' | 'approvals' | 'schedule' | 'accounts' | 'video-localization' | 'users'
+export type Tab = 'dashboard' | 'articles' | 'approvals' | 'schedule' | 'accounts' | 'video-localization' | 'users' | 'settings'
 
 interface SidebarProps {
   activeTab: Tab
@@ -17,6 +17,7 @@ export const TAB_PATHS: Record<Tab, string> = {
   accounts: '/accounts',
   'video-localization': '/video-localization',
   users: '/users',
+  settings: '/settings',
 }
 
 const NAV_ITEMS: { key: Tab; label: string; icon: ReactNode; path: string; systemOnly?: boolean }[] = [
@@ -27,6 +28,7 @@ const NAV_ITEMS: { key: Tab; label: string; icon: ReactNode; path: string; syste
   { key: 'accounts',   label: 'Social Accounts',  icon: <CircleUserRound size={20} />, path: TAB_PATHS.accounts },
   { key: 'video-localization', label: 'Video Translate', icon: <Languages size={20} />, path: TAB_PATHS['video-localization'] },
   { key: 'users',      label: 'User Management',  icon: <UsersRound size={20} />, path: TAB_PATHS.users, systemOnly: true },
+  { key: 'settings',   label: 'Admin Settings',   icon: <Settings size={20} />, path: TAB_PATHS.settings, systemOnly: true },
 ]
 
 export default function Sidebar({ activeTab, onTabChange, isSystemUser = false }: SidebarProps) {
@@ -76,6 +78,7 @@ export default function Sidebar({ activeTab, onTabChange, isSystemUser = false }
           <Plus size={18} /> Tạo bài viết mới
         </button>
         <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-colors"
+          onClick={() => onTabChange('settings')}
           style={{ color: 'rgba(255,255,255,0.7)' }}>
           <Settings size={18} /><span>Cài đặt</span>
         </button>

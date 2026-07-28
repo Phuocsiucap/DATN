@@ -13,6 +13,7 @@ import AccountsPage from '@/features/accounts/AccountsPage'
 import VideoLocalizationPage from '@/features/video-localization/VideoLocalizationPage'
 import AuthPage from '@/features/auth/AuthPage'
 import UsersPage from '@/features/users/UsersPage'
+import SettingsPage from '@/features/settings/SettingsPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
 import './index.css'
 
@@ -73,7 +74,7 @@ function AppContent() {
   }, [handleTabChange])
 
   useEffect(() => {
-    if (tab === 'users' && !isSystemUser) {
+    if ((tab === 'users' || tab === 'settings') && !isSystemUser) {
       handleTabChange('dashboard', true)
     }
   }, [handleTabChange, isSystemUser, tab])
@@ -125,6 +126,7 @@ function AppContent() {
           {tab === 'accounts' && <AccountsPage currentUser={currentUser} />}
           {tab === 'video-localization' && <VideoLocalizationPage />}
           {tab === 'users' && isSystemUser && <UsersPage currentUser={currentUser} />}
+          {tab === 'settings' && isSystemUser && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>
     </div>

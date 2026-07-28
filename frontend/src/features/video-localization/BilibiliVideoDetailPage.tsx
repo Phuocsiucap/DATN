@@ -26,6 +26,10 @@ export function BilibiliVideoDetailPage({ aid, onBack, onOpenVideo }: Props) {
   const related = detail.data?.related ?? [];
   const currentCandidate = current ? toSearchCandidate(current, "view_detail") : null;
 
+  const bvidToUse = current?.bvid || detail.data?.bvid;
+  const pageToUse = current?.episode_index || 1;
+  const embedUrlToUse = current?.embed_url || (bvidToUse ? `https://player.bilibili.com/player.html?bvid=${bvidToUse}&page=${pageToUse}&autoplay=0` : null);
+
   useEffect(() => {
     setSelectedEpisodeUrl(null);
   }, [aid]);
@@ -68,8 +72,8 @@ export function BilibiliVideoDetailPage({ aid, onBack, onOpenVideo }: Props) {
       <section className="grid min-h-0 grid-cols-[minmax(520px,1fr)_420px] overflow-hidden">
         <div className="min-h-0 overflow-auto bg-[#1e1e1e] p-4">
           <div className="aspect-video overflow-hidden rounded bg-[#111]">
-            {current?.embed_url ? (
-              <iframe className="h-full w-full border-0" src={current.embed_url} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen title={current.title} />
+            {embedUrlToUse ? (
+              <iframe className="h-full w-full border-0" src={embedUrlToUse} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen title={current?.title || "Video player"} />
             ) : current?.thumbnail_url ? (
               <img className="h-full w-full object-contain" src={bilibiliSource.imageProxyUrl(current.thumbnail_url) ?? ""} />
             ) : (

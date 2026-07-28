@@ -1,5 +1,6 @@
 export { api } from './client'
 export * from './adminUsers'
+export * from './adminSettings'
 export * from './articles'
 export * from './auth'
 export * from './bilibiliCrawler'

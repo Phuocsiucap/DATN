@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.gateway.app.api.routes import admin_users, articles, auth, bilibili, bilibili_events, proxy, publish, social_profiles, stats, video_localization
+from backend.gateway.app.api.routes import admin_settings, admin_users, articles, auth, bilibili, bilibili_events, bilibili_feed, proxy, publish, social_profiles, stats, video_localization
 from backend.gateway.app.api.websockets.events import router as ws_router
 from backend.gateway.app.services.scheduler import start_scheduler, stop_scheduler
 from backend.gateway.app.services.publisher_event_consumer import start_publisher_event_consumer
@@ -51,12 +51,14 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(admin_users.router, prefix="/api/admin/users", tags=["admin-users"])
+app.include_router(admin_settings.router, prefix="/api/admin/settings", tags=["admin-settings"])
 app.include_router(articles.router, prefix="/api/articles", tags=["articles"])
 app.include_router(publish.router, prefix="/api/publish", tags=["publish"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(proxy.router, prefix="/api/proxy", tags=["proxy"])
 app.include_router(social_profiles.router, prefix="/api/social-profiles", tags=["social-profiles"])
 app.include_router(bilibili.router, prefix="/api/bilibili-crawler", tags=["bilibili-crawler"])
+app.include_router(bilibili_feed.router, prefix="/api/bilibili-feed", tags=["bilibili-feed"])
 app.include_router(bilibili_events.router, prefix="/api/internal/bilibili", tags=["bilibili-events"])
 app.include_router(video_localization.router, prefix="/api/video-localization", tags=["video-localization"])
 app.include_router(ws_router)

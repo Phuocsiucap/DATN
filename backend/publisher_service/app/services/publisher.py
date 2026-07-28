@@ -5,7 +5,9 @@ from backend.publisher_service.app.core.config import settings
 from backend.publisher_service.app.services.ai_rewriter import rewrite_for_platform
 from backend.publisher_service.app.services.user_client import create_publish_log
 import os
+import re
 import asyncio
+import time
 from playwright.sync_api import sync_playwright
 
 
@@ -101,6 +103,114 @@ def _disable_tiktok_pre_post_checks(frame) -> None:
         _disable_tiktok_check_toggle(frame, label)
 
 
+def _first_visible_locator(*locators):
+    for locator in locators:
+        try:
+            count = locator.count()
+        except Exception:
+            continue
+        for index in range(count):
+            item = locator.nth(index)
+            try:
+                if item.is_visible(timeout=1000):
+                    return item
+            except Exception:
+                continue
+    return None
+
+
+def _find_tiktok_post_button(frame):
+    return _first_visible_locator(
+        frame.locator("[data-e2e='post_button']"),
+        frame.get_by_role("button", name=re.compile(r"^(Post|Đăng|Post now|Đăng ngay)$", re.I)),
+        frame.locator("button:has-text('Post')"),
+        frame.locator("button:has-text('Đăng')"),
+    )
+
+
+def _is_tiktok_post_button_disabled(post_button) -> bool:
+    try:
+        if post_button.is_disabled(timeout=2000):
+            return True
+    except Exception:
+        return True
+    for attr in ("aria-disabled", "disabled"):
+        try:
+            value = post_button.get_attribute(attr)
+            if value in {"", "true", "disabled"}:
+                return True
+        except Exception:
+            pass
+    try:
+        class_name = (post_button.get_attribute("class") or "").lower()
+        if "disabled" in class_name or "disable" in class_name:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _wait_for_tiktok_post_button_ready(frame, page, timeout_seconds: int = 600):
+    deadline = time.time() + timeout_seconds
+    attempt = 0
+    ready_hits = 0
+    while time.time() < deadline:
+        attempt += 1
+        post_button = _find_tiktok_post_button(frame)
+        if not post_button:
+            print(f"[*] Chưa thấy nút Đăng, chờ thêm 5s... (Lần {attempt})")
+            page.wait_for_timeout(5000)
+            continue
+
+        try:
+            post_button.scroll_into_view_if_needed(timeout=5000)
+        except Exception:
+            pass
+
+        is_disabled = _is_tiktok_post_button_disabled(post_button)
+        uploading_text = frame.locator(
+            "div:text-is('Uploading...'), div:text-is('Đang tải lên...'), "
+            "div:text-is('Processing...'), div:text-is('Đang xử lý...')"
+        ).count()
+        is_canceling = frame.locator("button:has-text('Cancel'), button:has-text('Hủy'), [data-e2e='cancel-upload']").count() > 0
+
+        if not is_disabled and uploading_text == 0 and not is_canceling:
+            ready_hits += 1
+            if ready_hits >= 2:
+                print("[*] Nút Đăng đã bật và ổn định, có thể bấm.")
+                return post_button
+            print("[*] Nút Đăng đã bật, kiểm tra ổn định thêm 2s...")
+            page.wait_for_timeout(2000)
+            continue
+
+        ready_hits = 0
+
+        print(f"[*] Tiến trình tải lên đang diễn ra, chờ thêm 5s... (Lần {attempt}/{timeout_seconds // 5})")
+        page.wait_for_timeout(5000)
+    return None
+
+
+def _click_tiktok_post_button(frame, page) -> None:
+    post_button = _find_tiktok_post_button(frame)
+    if not post_button:
+        _save_tiktok_debug_screenshot(page, "post-button-not-found")
+        raise RuntimeError("Không tìm thấy nút Đăng bài trên TikTok")
+    if _is_tiktok_post_button_disabled(post_button):
+        _save_tiktok_debug_screenshot(page, "post-button-disabled")
+        raise RuntimeError("Nút Đăng vẫn đang disabled, chưa thể bấm.")
+
+    try:
+        post_button.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        pass
+
+    try:
+        post_button.click(timeout=15000)
+    except Exception as normal_click_error:
+        print(f"[!] Click thường vào nút Đăng thất bại, thử force click: {normal_click_error}")
+        post_button.click(force=True, timeout=15000)
+
+
 async def publish_to_facebook(content: str, media_path: str = None) -> dict:
     """Post to Facebook Page via Graph API."""
     page_id = settings.fb_page_id
@@ -175,33 +285,12 @@ def _publish_to_tiktok_sync(content: str, video_path: str, user_data_dir: str):
             
             print("[*] Đang chờ tiến trình tải lên 100% hoàn tất...")
             
-            post_button = frame.locator("button:has-text('Post'), button:has-text('Đăng'), [data-e2e='post_button']").last
-            
-            # Chờ linh hoạt: Kiểm tra liên tục trạng thái của nút Đăng và các text trạng thái
-            for i in range(120): # Tối đa 10 phút (120 * 5s)
-                # 1. Nút Đăng có bị mờ/khoá không? Sử dụng hàm chuẩn của Playwright thay vì JS
-                is_disabled = post_button.is_disabled()
-                
-                # 2. Kiểm tra xem có thanh progress hay thông báo Đang tải không
-                uploading_text = frame.locator("div:text-is('Uploading...'), div:text-is('Đang tải lên...'), div:text-is('Processing...'), div:text-is('Đang xử lý...')").count()
-                
-                # 3. Kiểm tra xem nút Huỷ (Cancel) tải lên còn tồn tại không
-                is_canceling = frame.locator("button:has-text('Cancel'), button:has-text('Hủy'), [data-e2e='cancel-upload']").count() > 0
-                
-                if not is_disabled and uploading_text == 0 and not is_canceling:
-                    # Chờ thêm 3 giây để đảm bảo mọi animation đã xong
-                    page.wait_for_timeout(3000)
-                    print("[*] Đã xác nhận file được đẩy lên server TikTok thành công 100%!")
-                    break
-                
-                print(f"[*] Tiến trình tải lên đang diễn ra, chờ thêm 5s... (Lần {i+1}/120)")
-                page.wait_for_timeout(5000)
-            
-            if post_button.count() > 0:
+            post_button = _wait_for_tiktok_post_button_ready(frame, page)
+            if post_button:
                 _disable_tiktok_pre_post_checks(frame)
                 page.wait_for_timeout(1000)
-                post_button.click(force=True)
-                print("[*] Đã tự động bấm nút Đăng!")
+                _click_tiktok_post_button(frame, page)
+                print("[*] Đã tự động bấm nút Đăng khi nút đã bật!")
                 # Chờ tiến trình upload hoàn tất (có thể mất thời gian tuỳ mạng)
                 page.wait_for_timeout(15000)
                 

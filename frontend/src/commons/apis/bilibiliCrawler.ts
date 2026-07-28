@@ -57,7 +57,7 @@ export type BilibiliVideoDetailEpisode = Pick<
   | 'episode_index'
   | 'playlist_size'
 > & {
-  query?: 'view_detail_pages'
+  query?: string
 }
 
 export type BilibiliVideoDetailRelated = Pick<
@@ -106,6 +106,8 @@ export type BilibiliSeriesInfo = {
   episode_count: number
   related_count: number
   source: string
+  season_id?: number | null
+  season_title?: string | null
   current?: BilibiliSearchCandidate | null
   episodes?: BilibiliVideoDetailEpisode[]
   related?: BilibiliVideoDetailRelated[]
@@ -131,7 +133,53 @@ export type BilibiliVideoFilter = {
   speed: number
 }
 
+export type BilibiliFeedEpisode = {
+  episode_index?: number | null
+  title: string
+  url?: string | null
+  duration_seconds?: number | null
+  bvid?: string | null
+  aid?: number | null
+  cid?: number | null
+}
+
+export type BilibiliFeedItem = {
+  link: string
+  title: string
+  description?: string | null
+  content?: string | null
+  status?: string
+  crawled_at?: string
+  source_platform: 'bilibili'
+  thumbnail_url?: string | null
+  preview_url?: string | null
+  duration_seconds?: number | null
+  episode_count?: number | null
+  episodes?: BilibiliFeedEpisode[]
+  series_source?: string | null
+  season_id?: number | null
+  season_title?: string | null
+  aid?: number | null
+  bvid?: string | null
+  author?: string | null
+  play_count?: number | null
+}
+
+export type BilibiliFeedResponse = {
+  items: BilibiliFeedItem[]
+  total: number
+  page: number
+  limit: number
+}
+
+export type BilibiliFeedCrawlResult = {
+  inserted: number
+  skipped: number
+  queued: number
+}
+
 const bilibiliCrawlerPath = (path: string) => `/bilibili-crawler${path}`
+const bilibiliFeedPath = (path: string) => `/bilibili-feed${path}`
 
 export const searchBilibiliCrawlerApi = async (payload: {
   input_text: string
@@ -167,8 +215,48 @@ export const getBilibiliCrawlerSeriesInfoApi = async (payload: {
   aid?: number | null
   bvid?: string | null
 }) => {
-  const { data } = await api.post<BilibiliSeriesInfo>(bilibiliCrawlerPath('/series-info'), payload)
+  const { data } = await api.post<BilibiliSeriesInfo>(bilibiliCrawlerPath('/series-info'), normalizeBilibiliSeriesInfoPayload(payload))
   return data
+}
+
+export const normalizeBilibiliSeriesInfoPayload = (payload: {
+  url?: string | null
+  aid?: number | string | null
+  bvid?: string | null
+}) => {
+  const url = payload.url?.trim() || null
+  const aid = normalizeAid(payload.aid) ?? extractAidFromBilibiliUrl(url)
+  const bvid = normalizeBvid(payload.bvid) ?? extractBvidFromBilibiliUrl(url)
+  if (aid) return { aid }
+  if (bvid) return { bvid }
+  return { url }
+}
+
+const normalizeAid = (value?: number | string | null) => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim())
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+  return null
+}
+
+const normalizeBvid = (value?: string | null) => {
+  const match = value?.match(/BV[0-9A-Za-z]+/)
+  return match?.[0] ?? null
+}
+
+const extractAidFromBilibiliUrl = (url?: string | null) => {
+  if (!url) return null
+  const match = url.match(/\/video\/av(\d+)/i) ?? url.match(/[?&]aid=(\d+)/i)
+  return match ? normalizeAid(match[1]) : null
+}
+
+const extractBvidFromBilibiliUrl = (url?: string | null) => {
+  if (!url) return null
+  const queryBvid = url.match(/[?&]bvid=(BV[0-9A-Za-z]+)/)
+  if (queryBvid) return queryBvid[1]
+  return normalizeBvid(url)
 }
 
 export const fetchBilibiliCrawlerJobsApi = async () => {
@@ -274,4 +362,19 @@ export const getBilibiliCrawlerSegmentUrl = (jobId: number, segmentIndex: number
 
 export const getBilibiliCrawlerImageProxyUrl = (url?: string | null) => {
   return url ? `${api.defaults.baseURL}${bilibiliCrawlerPath(`/image-proxy?url=${encodeURIComponent(url)}`)}` : ''
+}
+
+export const fetchBilibiliFeedApi = async (params: { page?: number; limit?: number; search?: string } = {}) => {
+  const { data } = await api.get<BilibiliFeedResponse>(bilibiliFeedPath(''), { params })
+  return data
+}
+
+export const crawlBilibiliFeedNowApi = async (payload: {
+  keywords?: string[]
+  limit?: number
+  max_duration_seconds?: number
+  evaluate?: boolean
+} = {}) => {
+  const { data } = await api.post<BilibiliFeedCrawlResult>(bilibiliFeedPath('/crawl-now'), payload)
+  return data
 }

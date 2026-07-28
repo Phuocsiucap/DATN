@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from backend.gateway.app.api.proxy import proxy_request
 from backend.gateway.app.api.routes.auth import get_current_user
-from backend.gateway.app.services.scheduler import get_current_interval, scheduler, start_scheduler, stop_scheduler
+from backend.gateway.app.services.scheduler import get_scheduler_status_payload, start_scheduler, stop_scheduler
 from backend.gateway.app.services.scheduler import run_crawl_cycle
 
 router = APIRouter()
@@ -50,13 +50,7 @@ async def stop_scheduler_api():
 
 @router.get("/scheduler/status")
 async def get_scheduler_status():
-    state = scheduler.state
-    interval = get_current_interval()
-    if state == 1:
-        return {"status": "running", "interval": interval}
-    if state == 2:
-        return {"status": "paused", "interval": interval}
-    return {"status": "stopped", "interval": interval}
+    return get_scheduler_status_payload()
 
 
 @router.post("/bilibili/jobs/{job_id}/tiktok")
