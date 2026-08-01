@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: socialcontent
+    ports:
+      - "5432:5432"
+    volumes:
+      - socialcontent_postgres:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - socialcontent_mongo:/data/db
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  api-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/api-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8000:8000"
+
+  crawl-orchestrator:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/crawl-orchestrator
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8010
+    depends_on:
+      - api-service
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8010:8010"
+
+  planning-orchestrator:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/planning-orchestrator
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8050
+    depends_on:
+      - api-service
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8050:8050"
+
+  crawler-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/crawler-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8020
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8020:8020"
+
+  normalization-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/normalization-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8030
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8030:8030"
+
+  story-processing-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/Dockerfile
+    working_dir: /app/services/story-processing-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8040
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8040:8040"
+
+volumes:
+  socialcontent_postgres:
+  socialcontent_mongo:

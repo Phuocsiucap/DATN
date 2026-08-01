@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { LayoutDashboard, Newspaper, CalendarDays, Settings, HelpCircle, Plus, CircleUserRound, UsersRound, CheckSquare, Languages } from 'lucide-react'
+import { LayoutDashboard, Newspaper, CalendarDays, Settings, HelpCircle, Plus, CircleUserRound, UsersRound, CheckSquare, Languages, Workflow, Sparkles } from 'lucide-react'
 
-export type Tab = 'dashboard' | 'articles' | 'approvals' | 'schedule' | 'accounts' | 'video-localization' | 'users' | 'settings'
+export type Tab = 'dashboard' | 'module1' | 'module2' | 'articles' | 'approvals' | 'schedule' | 'accounts' | 'video-localization' | 'users' | 'settings'
 
 interface SidebarProps {
   activeTab: Tab
@@ -11,6 +11,8 @@ interface SidebarProps {
 
 export const TAB_PATHS: Record<Tab, string> = {
   dashboard: '/',
+  module1: '/module-1',
+  module2: '/module-2',
   articles: '/articles',
   approvals: '/approvals',
   schedule: '/schedule',
@@ -22,6 +24,8 @@ export const TAB_PATHS: Record<Tab, string> = {
 
 const NAV_ITEMS: { key: Tab; label: string; icon: ReactNode; path: string; systemOnly?: boolean }[] = [
   { key: 'dashboard',  label: 'Dashboard',        icon: <LayoutDashboard size={20} />, path: TAB_PATHS.dashboard },
+  { key: 'module1', label: 'Module 1', icon: <Workflow size={20} />, path: TAB_PATHS.module1 },
+  { key: 'module2', label: 'Module 2', icon: <Sparkles size={20} />, path: TAB_PATHS.module2 },
   { key: 'articles',   label: 'Content Collection', icon: <Newspaper size={20} />, path: TAB_PATHS.articles },
   { key: 'approvals',  label: 'AI Approvals',     icon: <CheckSquare size={20} />, path: TAB_PATHS.approvals },
   { key: 'schedule',   label: 'Posting Schedule',  icon: <CalendarDays size={20} />, path: TAB_PATHS.schedule },

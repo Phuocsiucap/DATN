@@ -6,6 +6,8 @@ import Sidebar from '@/commons/component/Sidebar'
 import { TAB_PATHS, type Tab } from '@/commons/component/Sidebar'
 import TopNavBar from '@/commons/component/TopNavBar'
 import DashboardPage from '@/features/dashboard/DashboardPage'
+import Module1Page from '@/features/module1/Module1Page'
+import Module2Page from '@/features/module2/Module2Page'
 import ArticlesPage from '@/features/articles/ArticlesPage'
 import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
@@ -120,6 +122,8 @@ function AppContent() {
         <TopNavBar email={currentUser.email} onLogout={() => void handleLogout()} />
         <div className={tab === 'video-localization' ? 'flex-1 min-h-0 w-full overflow-hidden' : 'p-6 max-w-[1440px] mx-auto w-full'}>
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
+          {tab === 'module1' && <Module1Page />}
+          {tab === 'module2' && <Module2Page />}
           {tab === 'articles' && <ArticlesPage />}
           {tab === 'approvals' && <ApprovalsPage />}
           {tab === 'schedule' && <SchedulePage />}

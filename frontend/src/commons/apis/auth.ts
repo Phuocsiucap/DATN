@@ -1,7 +1,8 @@
-import { api } from './client'
+import { api, setAccessToken } from './client'
 
 export const loginApi = async (payload: any) => {
   const { data } = await api.post('/auth/login', payload)
+  setAccessToken(data.access_token)
   return data
 }
 
@@ -17,5 +18,6 @@ export const getCurrentUserApi = async () => {
 
 export const logoutApi = async () => {
   const { data } = await api.post('/auth/logout')
+  setAccessToken(null)
   return data
 }

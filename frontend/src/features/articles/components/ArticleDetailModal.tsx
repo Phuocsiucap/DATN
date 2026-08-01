@@ -60,7 +60,7 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, s
   };
 
   const getProxyUrl = (url: string) => {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
     return `${baseUrl}/proxy?url=${encodeURIComponent(url)}`;
   };
 

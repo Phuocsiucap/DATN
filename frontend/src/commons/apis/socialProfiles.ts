@@ -5,17 +5,17 @@ export const fetchSocialProfilesApi = async (platform?: string) => {
   return data
 }
 
-export const fetchSocialProfileStrategyApi = async (profileId: number) => {
+export const fetchSocialProfileStrategyApi = async (profileId: string | number) => {
   const { data } = await api.get(`/social-profiles/${profileId}/strategy`)
   return data
 }
 
-export const updateSocialProfileStrategyApi = async (profileId: number, payload: any) => {
+export const updateSocialProfileStrategyApi = async (profileId: string | number, payload: any) => {
   const { data } = await api.put(`/social-profiles/${profileId}/strategy`, payload)
   return data
 }
 
-export const fetchSocialProfileQueueApi = async (profileId: number, queueStatus?: string) => {
+export const fetchSocialProfileQueueApi = async (profileId: string | number, queueStatus?: string) => {
   const { data } = await api.get(`/social-profiles/${profileId}/queue`, {
     params: queueStatus ? { queue_status: queueStatus } : undefined,
   })
@@ -39,12 +39,12 @@ export const createSocialProfileApi = async (payload: any) => {
   return data
 }
 
-export const deleteSocialProfileApi = async (profileId: number) => {
+export const deleteSocialProfileApi = async (profileId: string | number) => {
   const { data } = await api.delete(`/social-profiles/${profileId}`)
   return data
 }
 
-export const fetchSocialPostsApi = async (profileId: number) => {
+export const fetchSocialPostsApi = async (profileId: string | number) => {
   const { data } = await api.get(`/social-profiles/${profileId}/posts`)
   return data
 }
@@ -54,7 +54,7 @@ export const fetchSocialPostOverviewApi = async () => {
   return data
 }
 
-export const createSocialPostApi = async (profileId: number, payload: any) => {
+export const createSocialPostApi = async (profileId: string | number, payload: any) => {
   const { data } = await api.post(`/social-profiles/${profileId}/posts`, payload)
   return data
 }
@@ -84,17 +84,17 @@ export const stopPendingTikTokQrLoginApi = async (sessionId: string) => {
   return data
 }
 
-export const startTikTokQrLoginApi = async (profileId: number) => {
+export const startTikTokQrLoginApi = async (profileId: string | number) => {
   const { data } = await api.post(`/social-profiles/${profileId}/tiktok/qr/start`)
   return data
 }
 
-export const getTikTokQrLoginStatusApi = async (profileId: number) => {
+export const getTikTokQrLoginStatusApi = async (profileId: string | number) => {
   const { data } = await api.get(`/social-profiles/${profileId}/tiktok/qr/status`)
   return data
 }
 
-export const stopTikTokQrLoginApi = async (profileId: number) => {
+export const stopTikTokQrLoginApi = async (profileId: string | number) => {
   const { data } = await api.post(`/social-profiles/${profileId}/tiktok/qr/stop`)
   return data
 }

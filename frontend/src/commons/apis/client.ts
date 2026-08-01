@@ -1,7 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1',
   withCredentials: true,
 })
 
@@ -11,9 +11,26 @@ type RetryableRequestConfig = InternalAxiosRequestConfig & {
 
 let refreshPromise: Promise<void> | null = null
 
-const refreshAccessToken = async () => {
-  await api.post('/auth/refresh')
+export const setAccessToken = (token: string | null) => {
+  if (token) {
+    localStorage.setItem('access_token', token)
+  } else {
+    localStorage.removeItem('access_token')
+  }
 }
+
+const refreshAccessToken = async () => {
+  const { data } = await api.post('/auth/refresh')
+  setAccessToken(data.access_token)
+}
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
 
 api.interceptors.response.use(
   (response) => response,
@@ -38,6 +55,7 @@ api.interceptors.response.use(
       await refreshPromise
       return api(originalRequest)
     } catch (refreshError) {
+      setAccessToken(null)
       window.dispatchEvent(new Event('auth:expired'))
       return Promise.reject(refreshError)
     }

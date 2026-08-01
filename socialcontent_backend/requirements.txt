@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlalchemy
+psycopg2-binary
+pymongo
+kafka-python
+python-dotenv
+PyJWT
+bcrypt
+httpx
+playwright
