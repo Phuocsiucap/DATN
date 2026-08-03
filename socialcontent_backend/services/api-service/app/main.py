@@ -14,7 +14,9 @@ from app.api.routes import (
     contents,
     crawl_jobs,
     data_quality,
+    embeddings,
     handoffs,
+    media_proxy,
     module3_handoffs,
     planning_jobs,
     social_profiles,
@@ -48,8 +50,10 @@ app.include_router(social_profiles.router, prefix="/api/v1/social-profiles", tag
 app.include_router(crawl_jobs.router, prefix="/api/v1/crawl-jobs", tags=["crawl-jobs"])
 app.include_router(sources.router, prefix="/api/v1", tags=["sources"])
 app.include_router(contents.router, prefix="/api/v1/contents", tags=["contents"])
+app.include_router(media_proxy.router, prefix="/api/v1/media-proxy", tags=["media-proxy"])
 app.include_router(stories.router, prefix="/api/v1", tags=["stories"])
 app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["data-quality"])
+app.include_router(embeddings.router, prefix="/api/v1/embeddings", tags=["embeddings"])
 app.include_router(handoffs.router, prefix="/api/v1/module2/handoffs", tags=["module2-handoffs"])
 app.include_router(planning_jobs.router, prefix="/api/v1/planning-jobs", tags=["planning-jobs"])
 app.include_router(content_plans.router, prefix="/api/v1/content-plans", tags=["content-plans"])

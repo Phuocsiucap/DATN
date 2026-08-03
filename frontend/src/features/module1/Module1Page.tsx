@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import ReactPlayer from 'react-player'
 import {
-  BookOpen,
   CheckCircle2,
   Database,
   FileText,
@@ -13,33 +13,33 @@ import {
   Send,
   Square,
 } from 'lucide-react'
+import { Sheet, SheetContent, SheetTrigger } from '@/commons/component/ui/sheet'
 import {
   cancelCrawlJobApi,
+  fetchContentDetailApi,
   createCrawlJobApi,
-  fetchContentsApi,
   fetchCrawlJobLogsApi,
   fetchCrawlJobsApi,
+  fetchFinalContentViewApi,
   fetchQualityIssuesApi,
   fetchQualitySummaryApi,
-  fetchStoriesApi,
-  fetchStoryEpisodesApi,
-  regroupStoryApi,
   retryCrawlJobApi,
   type ContentItem,
+  type ContentDetail,
   type CrawlJob,
   type CrawlLog,
-  type Episode,
+  type FinalContentItem,
+  type FinalContentView,
   type QualitySummary,
-  type Story,
 } from '@/commons/apis/module1'
 
-type Module1Tab = 'crawl' | 'content' | 'stories' | 'quality'
+type Module1Tab = 'crawl' | 'final' | 'quality'
+type FinalContentTab = 'normal' | 'series'
 type SourceType = 'BILIBILI' | 'VNEXPRESS'
 
 const tabs: { id: Module1Tab; label: string; icon: React.ElementType }[] = [
   { id: 'crawl', label: 'Crawl Jobs', icon: Play },
-  { id: 'content', label: 'Content Library', icon: Database },
-  { id: 'stories', label: 'Story Library', icon: BookOpen },
+  { id: 'final', label: 'Final Content', icon: Database },
   { id: 'quality', label: 'Quality & Handoff', icon: CheckCircle2 },
 ]
 
@@ -63,12 +63,14 @@ const shortId = (value: string) => value.slice(0, 8)
 
 export default function Module1Page() {
   const [activeTab, setActiveTab] = useState<Module1Tab>('crawl')
+  const [finalContentTab, setFinalContentTab] = useState<FinalContentTab>('normal')
   const [jobs, setJobs] = useState<CrawlJob[]>([])
-  const [contents, setContents] = useState<ContentItem[]>([])
-  const [stories, setStories] = useState<Story[]>([])
-  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [finalContent, setFinalContent] = useState<FinalContentView>({ normal_items: [], series_items: [] })
+  const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null)
+  const [contentDetail, setContentDetail] = useState<ContentDetail | null>(null)
   const [selectedJob, setSelectedJob] = useState<CrawlJob | null>(null)
-  const [selectedStory, setSelectedStory] = useState<Story | null>(null)
+  const [logSheetJob, setLogSheetJob] = useState<CrawlJob | null>(null)
+  const [logSheetOpen, setLogSheetOpen] = useState(false)
   const [logs, setLogs] = useState<CrawlLog[]>([])
   const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [issues, setIssues] = useState<any>(null)
@@ -85,20 +87,19 @@ export default function Module1Page() {
     setLoading(true)
     setMessage('')
     try {
-      const [nextJobs, nextContents, nextStories, nextQuality, nextIssues] = await Promise.all([
+      const [nextJobs, nextFinalContent, nextQuality, nextIssues] = await Promise.all([
         fetchCrawlJobsApi(),
-        fetchContentsApi(),
-        fetchStoriesApi(),
+        fetchFinalContentViewApi(),
         fetchQualitySummaryApi(),
         fetchQualityIssuesApi(),
       ])
+      const nextContents = [...nextFinalContent.normal_items, ...nextFinalContent.series_items]
       setJobs(nextJobs)
-      setContents(nextContents)
-      setStories(nextStories)
+      setFinalContent(nextFinalContent)
       setQuality(nextQuality)
       setIssues(nextIssues)
       setSelectedJob((current) => current ? nextJobs.find((job) => job.id === current.id) ?? current : nextJobs[0] ?? null)
-      setSelectedStory((current) => current ? nextStories.find((story) => story.id === current.id) ?? current : nextStories[0] ?? null)
+      setSelectedContent((current) => current ? nextContents.find((content) => content.id === current.id) ?? current : nextContents[0] ?? null)
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không thể tải dữ liệu Module 1')
     } finally {
@@ -111,20 +112,20 @@ export default function Module1Page() {
   }, [])
 
   useEffect(() => {
-    if (!selectedJob) {
+    if (!logSheetOpen || !logSheetJob) {
       setLogs([])
       return
     }
-    fetchCrawlJobLogsApi(selectedJob.id).then(setLogs).catch(() => setLogs([]))
-  }, [selectedJob])
+    fetchCrawlJobLogsApi(logSheetJob.id).then(setLogs).catch(() => setLogs([]))
+  }, [logSheetJob, logSheetOpen])
 
   useEffect(() => {
-    if (!selectedStory) {
-      setEpisodes([])
+    if (!selectedContent) {
+      setContentDetail(null)
       return
     }
-    fetchStoryEpisodesApi(selectedStory.id).then(setEpisodes).catch(() => setEpisodes([]))
-  }, [selectedStory])
+    fetchContentDetailApi(selectedContent.id).then(setContentDetail).catch(() => setContentDetail(null))
+  }, [selectedContent])
 
   const metrics = useMemo(() => {
     const running = jobs.filter((job) => ['RUNNING', 'QUEUED', 'PENDING'].includes(job.status)).length
@@ -238,13 +239,29 @@ export default function Module1Page() {
                   <Plus size={14} /> New crawl job
                 </button>
               </div>
-              <JobsTable jobs={jobs} selectedJob={selectedJob} onSelect={setSelectedJob} onAction={jobAction} />
-              <JobTrace job={selectedJob} logs={logs} />
+              <JobsTable
+                jobs={jobs}
+                selectedJob={selectedJob}
+                onViewLogs={(job) => {
+                  setSelectedJob(job)
+                  setLogSheetJob(job)
+                  setLogSheetOpen(true)
+                }}
+                onAction={jobAction}
+              />
             </div>
           )}
 
-          {activeTab === 'content' && <ContentLibrary contents={contents} />}
-          {activeTab === 'stories' && <StoryLibrary stories={stories} selectedStory={selectedStory} episodes={episodes} onSelect={setSelectedStory} onRegroup={(story) => regroupStoryApi(story.id).then(loadAll)} />}
+          {activeTab === 'final' && (
+            <FinalContentLibrary
+              view={finalContent}
+              activeView={finalContentTab}
+              selectedContent={selectedContent}
+              detail={contentDetail}
+              onViewChange={setFinalContentTab}
+              onSelect={setSelectedContent}
+            />
+          )}
           {activeTab === 'quality' && <QualityHandoff quality={quality} issues={issues} />}
         </section>
       </div>
@@ -265,6 +282,13 @@ export default function Module1Page() {
           onSubmit={() => void createJob()}
         />
       )}
+
+      <JobLogsSheet
+        job={logSheetJob}
+        logs={logs}
+        open={logSheetOpen}
+        onOpenChange={setLogSheetOpen}
+      />
     </div>
   )
 }
@@ -286,6 +310,15 @@ function FilterPill({ children }: { children: React.ReactNode }) {
   return <button className="h-6 rounded-full border border-[#64748b] bg-white px-3 text-[11px] font-semibold text-[#64748b]">{children}</button>
 }
 
+function MetricMini({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-[#eef2f7] bg-[#f8fafc] px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase text-[#94a3b8]">{label}</div>
+      <div className="mt-1 font-bold text-[#111827]">{value.toLocaleString('vi-VN')}</div>
+    </div>
+  )
+}
+
 function Flow() {
   return (
     <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
@@ -303,12 +336,22 @@ function Flow() {
   )
 }
 
-function JobsTable({ jobs, selectedJob, onSelect, onAction }: { jobs: CrawlJob[]; selectedJob: CrawlJob | null; onSelect: (job: CrawlJob) => void; onAction: (action: 'cancel' | 'retry', job: CrawlJob) => void }) {
+function JobsTable({
+  jobs,
+  selectedJob,
+  onViewLogs,
+  onAction,
+}: {
+  jobs: CrawlJob[]
+  selectedJob: CrawlJob | null
+  onViewLogs: (job: CrawlJob) => void
+  onAction: (action: 'cancel' | 'retry', job: CrawlJob) => void
+}) {
   return (
     <div className="overflow-hidden rounded-lg border border-[#d9e0ea] bg-white">
       <TableHeader columns={['Job', 'Status', 'Stage', 'Progress', 'C/N/F/D', 'Actions']} />
       {jobs.length === 0 ? <EmptyState label="No crawl jobs yet" /> : jobs.map((job) => (
-        <div key={job.id} onClick={() => onSelect(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedJob?.id === job.id ? 'bg-blue-50/60' : 'bg-white'}`}>
+        <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedJob?.id === job.id ? 'bg-blue-50/60' : 'bg-white'}`}>
           <div>
             <div className="font-medium text-[#111827]">{job.name}</div>
             <div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
@@ -318,7 +361,6 @@ function JobsTable({ jobs, selectedJob, onSelect, onAction }: { jobs: CrawlJob[]
           <div className="text-[#64748b]">{Number(job.progress_percent).toFixed(0)}%</div>
           <div className="text-[#64748b]">{job.total_crawled}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
           <div className="flex flex-wrap gap-2">
-            <button className="text-[#2563eb]" onClick={(event) => { event.stopPropagation(); onSelect(job) }}>View</button>
             <button className="text-[#2563eb]" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={13} /></button>
             <button className="text-red-600" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={13} /></button>
           </div>
@@ -328,89 +370,291 @@ function JobsTable({ jobs, selectedJob, onSelect, onAction }: { jobs: CrawlJob[]
   )
 }
 
-function JobTrace({ job, logs }: { job: CrawlJob | null; logs: CrawlLog[] }) {
+function JobLogsSheet({
+  job,
+  logs,
+  open,
+  onOpenChange,
+}: {
+  job: CrawlJob | null
+  logs: CrawlLog[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-      <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
-        <h3 className="text-base font-bold">Raw to canonical trace</h3>
-        <div className="mt-4 overflow-hidden rounded-lg border border-[#d9e0ea]">
-          <TableHeader columns={['Layer', 'Store', 'Important fields']} />
-          {[
-            ['Raw', 'MongoDB', 'metadata_only, raw JSON, source payload, crawler timestamp'],
-            ['Processed', 'MongoDB', 'normalized title, quality score, validation warnings'],
-            ['Canonical', 'PostgreSQL', 'content_items, content_sources, stories, episodes, media'],
-          ].map((row) => <div key={row[0]} className="grid grid-cols-[160px_170px_1fr] border-t border-[#eef2f7] px-3 py-3 text-xs"><span className="font-medium">{row[0]}</span><span className="text-[#64748b]">{row[1]}</span><span className="text-[#64748b]">{row[2]}</span></div>)}
-        </div>
-      </div>
-      <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
-        <h3 className="text-base font-bold">Recent logs</h3>
-        <p className="mt-1 text-xs text-[#64748b]">{job ? job.name : 'Select a job'}</p>
-        <div className="mt-4 space-y-3 text-xs">
-          {logs.length === 0 ? <EmptyState label="No logs for selected job" compact /> : logs.slice(0, 6).map((log) => (
-            <div key={log.id} className="border-l-2 border-[#2563eb] pl-3">
-              <div className="font-semibold">{log.stage} · {log.level}</div>
-              <div className="mt-1 text-[#64748b]">{log.message}</div>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetTrigger asChild>
+        <span className="hidden" />
+      </SheetTrigger>
+      <SheetContent side="right" className="max-w-[920px]">
+        <div className="flex h-full flex-col">
+          <div className="border-b border-[#d9e0ea] px-6 py-5 pr-16">
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#2563eb]">Notification Panel</div>
+            <div>
+              <h3 className="text-xl font-bold text-[#111827]">Crawl job logs</h3>
+              <p className="mt-1 text-xs text-[#64748b]">
+                {job ? `${job.name} · ${logs.length} log entries · ${shortId(job.id)}` : 'Select a job to view logs'}
+              </p>
             </div>
-          ))}
+            {job && <div className="mt-4 flex flex-wrap items-center gap-2"><Badge value={job.status} /><FilterPill>{job.current_stage}</FilterPill><FilterPill>{Number(job.progress_percent).toFixed(0)}%</FilterPill></div>}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto">
+            {job && (
+              <div className="space-y-4 border-b border-[#d9e0ea] bg-[#fbfcfd] p-5">
+                <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
+                  <div className="rounded-lg border border-[#d9e0ea] bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase text-[#94a3b8]">Job detail</div>
+                        <h4 className="mt-1 text-sm font-bold text-[#111827]">{job.name}</h4>
+                      </div>
+                      <Badge value={job.status} />
+                    </div>
+                    <InfoGrid rows={[
+                      ['Job ID', job.id],
+                      ['Mode', job.crawl_mode],
+                      ['Current stage', job.current_stage || '-'],
+                      ['Priority', String(job.priority)],
+                      ['Created', formatDate(job.created_at)],
+                      ['Updated', formatDate(job.updated_at)],
+                    ]} />
+                  </div>
+
+                  <div className="rounded-lg border border-[#d9e0ea] bg-white p-4">
+                    <div className="text-[11px] font-semibold uppercase text-[#94a3b8]">Progress</div>
+                    <div className="mt-2 text-2xl font-bold text-[#111827]">{Number(job.progress_percent).toFixed(0)}%</div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e8f0]">
+                      <div
+                        className="h-full rounded-full bg-[#2563eb]"
+                        style={{ width: `${Math.min(100, Math.max(0, Number(job.progress_percent) || 0))}%` }}
+                      />
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                      <MetricMini label="Discovered" value={job.total_discovered} />
+                      <MetricMini label="Crawled" value={job.total_crawled} />
+                      <MetricMini label="Normalized" value={job.total_normalized} />
+                      <MetricMini label="Failed" value={job.total_failed} />
+                      <MetricMini label="Duplicates" value={job.total_duplicates} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <TableHeader columns={['Time', 'Stage', 'Level', 'Message', 'Source / Task', 'Metadata']} />
+            {!job ? (
+              <EmptyState label="Select a crawl job" />
+            ) : logs.length === 0 ? (
+              <EmptyState label="No logs for selected job" />
+            ) : logs.map((log) => (
+              <div key={log.id} className="grid grid-cols-[1.1fr_0.8fr_0.7fr_2fr_1.2fr_1.4fr] gap-3 border-t border-[#eef2f7] px-4 py-3 text-xs">
+                <div className="text-[#64748b]">{formatDate(log.created_at)}</div>
+                <div className="font-semibold text-[#334155]">{log.stage}</div>
+                <div><Badge value={log.level} /></div>
+                <div className="min-w-0 break-words text-[#334155]">{log.message}</div>
+                <div className="min-w-0 text-[#64748b]">
+                  <div>{log.source_type || '-'}</div>
+                  <div className="mt-1 truncate text-[11px] text-[#94a3b8]">{log.task_id ? shortId(log.task_id) : '-'}</div>
+                </div>
+                <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#f8fafc] p-2 text-[11px] text-[#64748b]">
+                  {Object.keys(log.metadata_json || {}).length ? JSON.stringify(log.metadata_json, null, 2) : '-'}
+                </pre>
+              </div>
+            ))}
+          </div>
         </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function FinalContentLibrary({
+  view,
+  activeView,
+  selectedContent,
+  detail,
+  onViewChange,
+  onSelect,
+}: {
+  view: FinalContentView
+  activeView: FinalContentTab
+  selectedContent: ContentItem | null
+  detail: ContentDetail | null
+  onViewChange: (view: FinalContentTab) => void
+  onSelect: (content: FinalContentItem) => void
+}) {
+  const contents = activeView === 'normal' ? view.normal_items : view.series_items
+  const primarySource = detail?.sources[0]
+  const lastRun = detail?.processing_runs[0]
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+      <Panel title="Final content" subtitle="Canonical output from Module 1">
+        <div className="flex gap-2 border-t border-[#eef2f7] px-3 py-3">
+          <button onClick={() => onViewChange('normal')} className={`h-8 rounded-md border px-3 text-xs font-semibold ${activeView === 'normal' ? 'border-[#2563eb] bg-[#e5f0ff] text-[#2563eb]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>Bài thường ({view.normal_items.length})</button>
+          <button onClick={() => onViewChange('series')} className={`h-8 rounded-md border px-3 text-xs font-semibold ${activeView === 'series' ? 'border-[#2563eb] bg-[#e5f0ff] text-[#2563eb]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>Bài theo series ({view.series_items.length})</button>
+        </div>
+        <TableHeader columns={activeView === 'normal' ? ['Preview', 'Title', 'Source', 'Status', 'Quality', 'Created'] : ['Preview', 'Series', 'Episode', 'Status', 'Quality', 'Created']} />
+        {contents.length === 0 ? <EmptyState label={activeView === 'normal' ? 'No normal content yet' : 'No series content yet'} /> : contents.map((item) => (
+          <div key={item.id} onClick={() => onSelect(item)} className={`grid cursor-pointer grid-cols-[96px_2fr_0.8fr_1fr_0.7fr_1fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedContent?.id === item.id ? 'bg-blue-50/60' : 'bg-white'}`}>
+            <MediaPreview media={item.media} compact />
+            <div className="min-w-0">
+              <div className="truncate font-medium">{activeView === 'series' ? item.series?.canonical_name || item.canonical_title : item.canonical_title}</div>
+              <div className="truncate text-[#94a3b8]">{activeView === 'series' ? item.episode_title || item.canonical_title : item.summary || item.canonical_url || shortId(item.id)}</div>
+            </div>
+            <div className="text-[#64748b]">{activeView === 'series' ? item.episode_number ?? item.sequence_order ?? '-' : item.source_type || item.content_type}</div>
+            <Badge value={item.status} />
+            <div className="text-[#64748b]">{Number(item.quality_score).toFixed(0)}</div>
+            <div className="text-[#64748b]">{formatDate(item.created_at)}</div>
+          </div>
+        ))}
+      </Panel>
+
+      <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
+        <h3 className="text-base font-bold">Content detail</h3>
+        {!selectedContent ? (
+          <EmptyState label="Select a content item" compact />
+        ) : !detail ? (
+          <div className="mt-4 flex items-center gap-2 text-xs text-[#64748b]"><Loader2 className="animate-spin" size={14} /> Loading detail</div>
+        ) : (
+          <div className="mt-4 space-y-5 text-xs">
+            <div>
+              <div className="text-[11px] font-semibold uppercase text-[#94a3b8]">Canonical</div>
+              <h4 className="mt-2 text-sm font-bold leading-5">{detail.canonical_title}</h4>
+              <p className="mt-2 leading-5 text-[#64748b]">{detail.summary || 'No summary'}</p>
+              <div className="mt-3 flex flex-wrap gap-2"><Badge value={detail.status} /><FilterPill>{detail.content_type}</FilterPill><FilterPill>Quality {Number(detail.quality_score).toFixed(0)}</FilterPill></div>
+            </div>
+
+            <InfoGrid rows={[
+              ['Content ID', shortId(detail.id)],
+              ['Source', primarySource?.source_type || '-'],
+              ['Source external ID', primarySource?.source_external_id || '-'],
+              ['Raw document', primarySource?.raw_document_id || '-'],
+              ['Processed document', String(primarySource?.metadata_json?.processed_document_id || lastRun?.input_reference || '-')],
+              ['Author', primarySource?.source_author || '-'],
+              ['Published', formatDate(detail.published_at || primarySource?.source_published_at || undefined)],
+              ['Created', formatDate(detail.created_at)],
+            ]} />
+
+            {detail.canonical_url && <a href={detail.canonical_url} target="_blank" rel="noreferrer" className="block truncate rounded-md border border-[#d9e0ea] px-3 py-2 font-medium text-[#2563eb]">{detail.canonical_url}</a>}
+
+            <div>
+              <div className="mb-2 text-[11px] font-semibold uppercase text-[#94a3b8]">Media</div>
+              {detail.media.length === 0 ? <div className="text-[#94a3b8]">No media captured</div> : <div className="grid gap-3"><MediaGallery media={detail.media.slice(0, 6)} /></div>}
+            </div>
+
+            <div>
+              <div className="mb-2 text-[11px] font-semibold uppercase text-[#94a3b8]">Processing</div>
+              {detail.processing_runs.length === 0 ? <div className="text-[#94a3b8]">No processing runs</div> : detail.processing_runs.slice(0, 3).map((run) => (
+                <div key={run.id} className="mb-2 grid grid-cols-[1fr_auto] gap-3 rounded-md border border-[#eef2f7] px-3 py-2">
+                  <div><div className="font-semibold">{run.processing_type}</div><div className="mt-1 text-[#64748b]">{run.processor_version || 'unknown version'}</div></div>
+                  <Badge value={run.status} />
+                </div>
+              ))}
+            </div>
+
+            <InfoGrid rows={[
+              ['Content hash', detail.content_hash ? `${detail.content_hash.slice(0, 18)}...` : '-'],
+              ['Transcript hash', detail.transcript_hash ? `${detail.transcript_hash.slice(0, 18)}...` : '-'],
+              ['Updated', formatDate(detail.updated_at)],
+            ]} />
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function ContentLibrary({ contents }: { contents: ContentItem[] }) {
+function mediaUrl(item: { source_url?: string | null; storage_url?: string | null; thumbnail_url?: string | null }) {
+  return item.storage_url || item.source_url || item.thumbnail_url || ''
+}
+
+function isVideo(item: { media_type: string; source_url?: string | null; storage_url?: string | null }) {
+  const url = mediaUrl(item).toLowerCase()
+  return item.media_type.toUpperCase().includes('VIDEO') || url.endsWith('.mp4') || url.includes('.m3u8')
+}
+
+function proxiedMediaUrl(url: string) {
+  const isVnExpress = url.includes('vnexpress') || url.includes('vnecdn')
+  const isIframe = url.includes('video-iframe') || url.includes('embed') || url.includes('youtube.com')
+  if (!isVnExpress || isIframe) return url
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+  return `${baseUrl}/media-proxy?url=${encodeURIComponent(url)}`
+}
+
+function isEmbeddableVideo(url: string) {
+  return url.includes('video-iframe') || url.includes('embed') || url.includes('youtube.com')
+}
+
+function MediaPreview({ media, compact = false }: { media?: { media_type: string; source_url?: string | null; storage_url?: string | null; thumbnail_url?: string | null }[]; compact?: boolean }) {
+  const first = media?.[0]
+  if (!first) {
+    return <div className={`${compact ? 'h-14 w-20' : 'h-32 w-full'} rounded-md border border-dashed border-[#d9e0ea] bg-[#fbfcfd] text-[11px] text-[#94a3b8] flex items-center justify-center`}>No media</div>
+  }
+  const url = mediaUrl(first)
+  if (!url) {
+    return <div className={`${compact ? 'h-14 w-20' : 'h-32 w-full'} rounded-md border border-dashed border-[#d9e0ea] bg-[#fbfcfd] text-[11px] text-[#94a3b8] flex items-center justify-center`}>No media</div>
+  }
+  if (isVideo(first)) {
+    const poster = first.thumbnail_url || undefined
+    const finalUrl = proxiedMediaUrl(url)
+    const isM3u8 = url.toLowerCase().includes('.m3u8')
+    if (isEmbeddableVideo(url)) {
+      return (
+        <div className={`${compact ? 'h-14 w-20' : 'h-48 w-full'} overflow-hidden rounded-md border border-[#d9e0ea] bg-black`}>
+          {compact ? (
+            poster ? <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-[11px] text-white">Video</div>
+          ) : (
+            <iframe src={url} className="h-full w-full border-0" allowFullScreen />
+          )}
+        </div>
+      )
+    }
+    if (compact) {
+      return poster
+        ? <img src={poster} alt="" loading="lazy" className="h-14 w-20 rounded-md border border-[#d9e0ea] bg-[#fbfcfd] object-cover" />
+        : <div className="flex h-14 w-20 items-center justify-center rounded-md border border-[#d9e0ea] bg-black text-[11px] text-white">Video</div>
+    }
+    return (
+      <div className="relative h-48 w-full overflow-hidden rounded-md border border-[#d9e0ea] bg-black">
+        <ReactPlayer
+          src={finalUrl}
+          controls
+          width="100%"
+          height="100%"
+          className="absolute inset-0"
+          config={{ file: { forceHLS: isM3u8, attributes: { crossOrigin: 'anonymous', poster } } } as any}
+        />
+      </div>
+    )
+  }
+  return <img src={proxiedMediaUrl(url)} alt="" loading="lazy" className={`${compact ? 'h-14 w-20' : 'h-48 w-full'} rounded-md border border-[#d9e0ea] bg-[#fbfcfd] object-cover`} />
+}
+
+function MediaGallery({ media }: { media: { id?: string; media_type: string; source_url?: string | null; storage_url?: string | null; thumbnail_url?: string | null }[] }) {
   return (
-    <Panel title="Content library" subtitle="Canonical content_items from Module 1">
-      <TableHeader columns={['Title', 'Type', 'Status', 'Language', 'Quality', 'Created']} />
-      {contents.length === 0 ? <EmptyState label="No canonical content yet" /> : contents.map((item) => (
-        <div key={item.id} className="grid grid-cols-[2fr_0.8fr_1fr_0.7fr_0.7fr_1fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-          <div className="min-w-0"><div className="truncate font-medium">{item.canonical_title}</div><div className="truncate text-[#94a3b8]">{item.summary || item.canonical_url || shortId(item.id)}</div></div>
-          <div className="text-[#64748b]">{item.content_type}</div>
-          <Badge value={item.status} />
-          <div className="text-[#64748b]">{item.language}</div>
-          <div className="text-[#64748b]">{Number(item.quality_score).toFixed(0)}</div>
-          <div className="text-[#64748b]">{formatDate(item.created_at)}</div>
+    <div className="grid gap-3">
+      {media.map((item, index) => (
+        <div key={item.id || `${mediaUrl(item)}-${index}`} className="rounded-md border border-[#eef2f7] bg-[#fbfcfd] p-2">
+          <MediaPreview media={[item]} />
+          <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+            <span className="font-semibold text-[#334155]">{item.media_type}</span>
+            <a href={mediaUrl(item)} target="_blank" rel="noreferrer" className="truncate text-[#2563eb]">Open source</a>
+          </div>
         </div>
       ))}
-    </Panel>
+    </div>
   )
 }
 
-function StoryLibrary({ stories, selectedStory, episodes, onSelect, onRegroup }: { stories: Story[]; selectedStory: Story | null; episodes: Episode[]; onSelect: (story: Story) => void; onRegroup: (story: Story) => void }) {
+function InfoGrid({ rows }: { rows: [string, string][] }) {
   return (
-    <div className="space-y-6">
-      <div className="grid gap-5 xl:grid-cols-[1fr_376px]">
-        <Panel title="Story library" subtitle="Canonical stories and completion state">
-          <TableHeader columns={['Story', 'Episodes', 'Status', 'Confidence', 'Ready']} />
-          {stories.length === 0 ? <EmptyState label="No stories yet" /> : stories.map((story) => (
-            <div key={story.id} onClick={() => onSelect(story)} className={`grid cursor-pointer grid-cols-[2fr_0.7fr_1.2fr_0.8fr_0.7fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedStory?.id === story.id ? 'bg-blue-50/60' : ''}`}>
-              <div className="font-medium">{story.canonical_name}</div>
-              <div className="text-[#64748b]">{story.total_episodes}</div>
-              <Badge value={story.completion_status} />
-              <div className="text-[#64748b]">{Number(story.grouping_confidence).toFixed(0)}</div>
-              <div className="text-[#64748b]">{story.completion_status === 'COMPLETE' ? 'Yes' : 'Review'}</div>
-            </div>
-          ))}
-        </Panel>
-        <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
-          <h3 className="text-xl font-bold">{selectedStory?.canonical_name || 'Story detail'}</h3>
-          <p className="mt-1 text-xs text-[#64748b]">{selectedStory ? `${selectedStory.language} · ${shortId(selectedStory.id)}` : 'Select a story'}</p>
-          {selectedStory && <div className="mt-4 flex flex-wrap gap-2"><Badge value={selectedStory.completion_status} /><FilterPill>{selectedStory.total_episodes} episodes</FilterPill></div>}
-          <p className="mt-5 text-sm leading-6 text-[#64748b]">Episode list stays structured so Module 2 can plan series without parsing free-form text.</p>
-          {selectedStory && <button onClick={() => onRegroup(selectedStory)} className="mt-5 inline-flex h-9 items-center gap-2 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold"><RefreshCcw size={14} /> Regroup</button>}
+    <div className="grid grid-cols-2 gap-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="rounded-md border border-[#eef2f7] bg-[#fbfcfd] px-3 py-2">
+          <div className="text-[10px] font-semibold uppercase text-[#94a3b8]">{label}</div>
+          <div className="mt-1 break-words font-medium text-[#334155]">{value}</div>
         </div>
-      </div>
-      <Panel title="Episodes" subtitle="Ordered episode metadata">
-        <TableHeader columns={['No', 'Episode title', 'Duration', 'State']} />
-        {episodes.length === 0 ? <EmptyState label="No episodes for selected story" /> : episodes.map((episode, index) => (
-          <div key={episode.id} className="grid grid-cols-[80px_1fr_120px_160px] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div>{episode.episode_number ?? episode.sequence_order ?? index + 1}</div>
-            <div className="font-medium">{episode.episode_title || 'Untitled episode'}</div>
-            <div className="text-[#64748b]">{episode.duration_seconds ? `${episode.duration_seconds}s` : '-'}</div>
-            <div className="text-[#64748b]">{episode.is_missing ? 'Missing detected' : 'Found'}</div>
-          </div>
-        ))}
-      </Panel>
+      ))}
     </div>
   )
 }

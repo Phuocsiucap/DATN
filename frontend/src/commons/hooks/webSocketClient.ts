@@ -7,17 +7,21 @@ const listeners = new Set<WebSocketEventListener>();
 const pendingMessages: string[] = [];
 
 function dashboardWebSocketUrl() {
-  const backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN || "http://localhost:8000";
-  return `${backendOrigin.replace(/^http/, "ws").replace(/\/$/, "")}/ws`;
+  const websocketOrigin = import.meta.env.VITE_WS_ORIGIN;
+  if (!websocketOrigin) return null;
+  return `${websocketOrigin.replace(/^http/, "ws").replace(/\/$/, "")}/ws`;
 }
 
 function connectWebSocket() {
+  const websocketUrl = dashboardWebSocketUrl();
+  if (!websocketUrl) return null;
+
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return socket;
   }
 
   manuallyClosed = false;
-  socket = new WebSocket(dashboardWebSocketUrl());
+  socket = new WebSocket(websocketUrl);
 
   socket.onmessage = (message) => {
     try {
@@ -75,6 +79,7 @@ export function subscribeWebSocket(listener: WebSocketEventListener) {
 export function sendWebSocketMessage(message: unknown) {
   const encoded = typeof message === "string" ? message : JSON.stringify(message);
   const activeSocket = connectWebSocket();
+  if (!activeSocket) return;
   if (activeSocket.readyState === WebSocket.OPEN) {
     activeSocket.send(encoded);
     return;

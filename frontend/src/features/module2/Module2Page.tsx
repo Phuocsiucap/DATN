@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import {
   approveContentPlanApi,
+  createAutoModule2HandoffFromCrawlApi,
   createModule3HandoffApi,
   createModule2HandoffApi,
   createPlanningJobApi,
@@ -37,7 +38,7 @@ import {
   type SeriesContextResponse,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi, fetchSocialProfileStrategyApi } from '@/commons/apis/socialProfiles'
-import { fetchStoriesApi, type Story } from '@/commons/apis/module1'
+import { fetchCrawlJobsApi, fetchFinalContentViewApi, fetchStoriesApi, type CrawlJob, type FinalContentView, type Story } from '@/commons/apis/module1'
 
 type Profile = {
   id: string
@@ -84,7 +85,9 @@ const shortId = (value: string) => value.slice(0, 8)
 export default function Module2Page() {
   const [activeTab, setActiveTab] = useState<Module2Tab>('jobs')
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [crawlJobs, setCrawlJobs] = useState<CrawlJob[]>([])
   const [stories, setStories] = useState<Story[]>([])
+  const [finalContent, setFinalContent] = useState<FinalContentView>({ normal_items: [], series_items: [] })
   const [handoffs, setHandoffs] = useState<Module2Handoff[]>([])
   const [jobs, setJobs] = useState<PlanningJob[]>([])
   const [plans, setPlans] = useState<ContentPlan[]>([])
@@ -93,7 +96,9 @@ export default function Module2Page() {
   const [seriesContext, setSeriesContext] = useState<SeriesContextResponse | null>(null)
   const [consistency, setConsistency] = useState<ConsistencyCheck | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [selectedCrawlJobId, setSelectedCrawlJobId] = useState('')
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([])
+  const [selectedContentIds, setSelectedContentIds] = useState<string[]>([])
   const [selectedPlan, setSelectedPlan] = useState<ContentPlan | null>(null)
   const [selectedSeries, setSelectedSeries] = useState<ContentSeries | null>(null)
   const [strategy, setStrategy] = useState<Strategy | null>(null)
@@ -109,8 +114,9 @@ export default function Module2Page() {
     setLoading(true)
     setMessage('')
     try {
-      const [nextProfiles, nextStories, nextHandoffs, nextJobs, nextPlans, nextSeries] = await Promise.all([
+      const [nextProfiles, nextCrawlJobs, nextStories, nextHandoffs, nextJobs, nextPlans, nextSeries] = await Promise.all([
         fetchSocialProfilesApi(),
+        fetchCrawlJobsApi(),
         fetchStoriesApi(),
         fetchModule2HandoffsApi(),
         fetchPlanningJobsApi(),
@@ -118,13 +124,18 @@ export default function Module2Page() {
         fetchContentSeriesApi(),
       ])
       const profileItems = nextProfiles.items || nextProfiles
+      const currentCrawlJobId = selectedCrawlJobId || nextCrawlJobs[0]?.id || ''
+      const nextFinalContent = await fetchFinalContentViewApi(currentCrawlJobId ? { crawl_job_id: currentCrawlJobId } : undefined)
       setProfiles(profileItems)
+      setCrawlJobs(nextCrawlJobs)
       setStories(nextStories)
+      setFinalContent(nextFinalContent)
       setHandoffs(nextHandoffs)
       setJobs(nextJobs)
       setPlans(nextPlans)
       setSeries(nextSeries)
       setSelectedProfileId((current) => current || profileItems[0]?.id || '')
+      setSelectedCrawlJobId((current) => current || currentCrawlJobId)
       setSelectedPlan((current) => current ? nextPlans.find((plan) => plan.id === current.id) ?? current : nextPlans[0] ?? null)
       setSelectedSeries((current) => current ? nextSeries.find((item) => item.id === current.id) ?? current : nextSeries[0] ?? null)
     } catch (error: any) {
@@ -137,6 +148,24 @@ export default function Module2Page() {
   useEffect(() => {
     void loadAll()
   }, [])
+
+  useEffect(() => {
+    if (!selectedCrawlJobId) {
+      setFinalContent({ normal_items: [], series_items: [] })
+      return
+    }
+    fetchFinalContentViewApi({ crawl_job_id: selectedCrawlJobId }).then((nextFinalContent) => {
+      setFinalContent(nextFinalContent)
+      setSelectedContentIds((current) => {
+        const validIds = new Set([...nextFinalContent.normal_items, ...nextFinalContent.series_items].map((item) => item.id))
+        return current.filter((id) => validIds.has(id))
+      })
+      setSelectedStoryIds((current) => {
+        const validIds = new Set(nextFinalContent.series_items.map((item) => item.series?.id).filter(Boolean))
+        return current.filter((id) => validIds.has(id))
+      })
+    }).catch(() => setFinalContent({ normal_items: [], series_items: [] }))
+  }, [selectedCrawlJobId])
 
   useEffect(() => {
     if (!selectedProfileId) {
@@ -185,29 +214,50 @@ export default function Module2Page() {
     setLoading(true)
     setMessage('')
     try {
-      const handoff = await createModule2HandoffApi({
-        profile_id: selectedProfileId,
-        story_ids: selectedStoryIds,
-        content_ids: [],
-        episode_ids: [],
-        selection_mode: selectedStoryIds.length > 0 ? 'MANUAL' : 'AUTO',
-        candidate_limit: 20,
-        handoff_note: 'Created from Module 2 planning wizard',
-        filters: {
-          content_types: ['STORY', 'ARTICLE', 'PLAYLIST'],
+      if (selectedStoryIds.length > 0 || selectedContentIds.length > 0) {
+        const handoff = await createModule2HandoffApi({
+          profile_id: selectedProfileId,
+          story_ids: selectedStoryIds,
+          content_ids: selectedContentIds,
+          episode_ids: [],
+          crawl_job_id: selectedCrawlJobId || null,
+          selection_mode: 'MANUAL',
+          candidate_limit: 20,
+          handoff_note: 'Manual dataset from Module 2 planning wizard',
+          filters: {
+            source_crawl_job_id: selectedCrawlJobId || null,
+            content_types: ['STORY', 'ARTICLE', 'PLAYLIST'],
+            min_quality_score: strategy?.min_score ?? 70,
+            languages: ['vi'],
+          },
+        })
+        await createPlanningJobApi({
+          profile_id: selectedProfileId,
+          handoff_id: handoff.id,
+          planning_mode: planningMode,
+          target_duration_seconds: duration,
+          preferred_part_count: planningMode === 'SERIES' ? partCount : null,
+          language: 'vi',
+          instructions,
+        })
+      } else if (selectedCrawlJobId) {
+        await createAutoModule2HandoffFromCrawlApi({
+          profile_id: selectedProfileId,
+          crawl_job_id: selectedCrawlJobId,
+          candidate_limit: 20,
+          max_related_items_per_primary: 5,
           min_quality_score: strategy?.min_score ?? 70,
-          languages: ['vi'],
-        },
-      })
-      await createPlanningJobApi({
-        profile_id: selectedProfileId,
-        handoff_id: handoff.id,
-        planning_mode: planningMode,
-        target_duration_seconds: duration,
-        preferred_part_count: planningMode === 'SERIES' ? partCount : null,
-        language: 'vi',
-        instructions,
-      })
+          create_planning_job: true,
+          planning_mode: planningMode,
+          target_duration_seconds: duration,
+          preferred_part_count: planningMode === 'SERIES' ? partCount : null,
+          language: 'vi',
+          instructions,
+        })
+      } else {
+        setMessage('Hãy chọn nội dung thủ công hoặc chọn một crawl job để tạo auto dataset.')
+        return
+      }
       setShowWizard(false)
       await loadAll()
       setActiveTab('jobs')
@@ -350,12 +400,18 @@ export default function Module2Page() {
       {showWizard && (
         <PlanWizard
           profiles={profiles}
+          crawlJobs={crawlJobs}
           stories={stories}
+          finalContent={finalContent}
           strategy={strategy}
           selectedProfileId={selectedProfileId}
           setSelectedProfileId={setSelectedProfileId}
+          selectedCrawlJobId={selectedCrawlJobId}
+          setSelectedCrawlJobId={setSelectedCrawlJobId}
           selectedStoryIds={selectedStoryIds}
           setSelectedStoryIds={setSelectedStoryIds}
+          selectedContentIds={selectedContentIds}
+          setSelectedContentIds={setSelectedContentIds}
           planningMode={planningMode}
           setPlanningMode={setPlanningMode}
           duration={duration}
@@ -388,13 +444,13 @@ function JobsView({ jobs, handoffs }: { jobs: PlanningJob[]; handoffs: Module2Ha
           </div>
         ))}
       </Panel>
-      <Panel title="Recent handoffs" subtitle="Module 1 datasets ready for planning">
-        <TableHeader columns={['Handoff', 'Mode', 'Eligible']} />
+      <Panel title="Recent datasets" subtitle="Profile-scoped handoffs ready for planning">
+        <TableHeader columns={['Dataset', 'Source', 'Items']} />
         {handoffs.length === 0 ? <Empty label="No handoffs yet" /> : handoffs.slice(0, 8).map((handoff) => (
           <div key={handoff.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div className="font-medium">{shortId(handoff.id)}</div>
+            <div className="font-medium">{shortId(handoff.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(handoff.profile_id)}</div></div>
             <Badge value={handoff.selection_mode} />
-            <div className="text-[#64748b]">{handoff.eligible_count}</div>
+            <div className="text-[#64748b]">{handoff.eligible_count}/{handoff.rejected_count}</div>
           </div>
         ))}
       </Panel>
@@ -519,12 +575,18 @@ function ContextView({ selectedSeries, parts, selectedPlan, context, consistency
 
 function PlanWizard(props: {
   profiles: Profile[]
+  crawlJobs: CrawlJob[]
   stories: Story[]
+  finalContent: FinalContentView
   strategy: Strategy | null
   selectedProfileId: string
   setSelectedProfileId: (value: string) => void
+  selectedCrawlJobId: string
+  setSelectedCrawlJobId: (value: string) => void
   selectedStoryIds: string[]
   setSelectedStoryIds: (value: string[]) => void
+  selectedContentIds: string[]
+  setSelectedContentIds: (value: string[]) => void
   planningMode: 'AUTO' | 'SINGLE' | 'SERIES'
   setPlanningMode: (value: 'AUTO' | 'SINGLE' | 'SERIES') => void
   duration: number
@@ -536,6 +598,16 @@ function PlanWizard(props: {
   onClose: () => void
   onSubmit: () => void
 }) {
+  const [sourceView, setSourceView] = useState<'normal' | 'series'>('normal')
+  const module1Items = sourceView === 'normal' ? props.finalContent.normal_items : props.finalContent.series_items
+  const availableStoryIds = new Set(props.finalContent.series_items.map((item) => item.series?.id).filter(Boolean))
+  const availableStories = props.stories.filter((story) => availableStoryIds.has(story.id))
+  const selectedCount = props.selectedContentIds.length + props.selectedStoryIds.length
+
+  const toggleContent = (contentId: string) => {
+    props.setSelectedContentIds(props.selectedContentIds.includes(contentId) ? props.selectedContentIds.filter((id) => id !== contentId) : [...props.selectedContentIds, contentId])
+  }
+
   const toggleStory = (storyId: string) => {
     props.setSelectedStoryIds(props.selectedStoryIds.includes(storyId) ? props.selectedStoryIds.filter((id) => id !== storyId) : [...props.selectedStoryIds, storyId])
   }
@@ -544,13 +616,23 @@ function PlanWizard(props: {
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4">
       <div className="max-h-[90vh] w-full max-w-[920px] overflow-y-auto rounded-lg border border-[#d9e0ea] bg-white p-6 shadow-xl">
         <h3 className="text-base font-bold">Create content plan</h3>
-        <p className="mt-1 text-xs text-[#64748b]">Profile strategy, source content, requirements and planning job payload.</p>
+        <p className="mt-1 text-xs text-[#64748b]">Create a profile-scoped dataset from Module 1, then start the planning job.</p>
         <div className="mt-5 grid gap-4 lg:grid-cols-[320px_1fr]">
           <div className="space-y-4">
             <label className="block text-xs font-semibold">Profile
               <select value={props.selectedProfileId} onChange={(event) => props.setSelectedProfileId(event.target.value)} className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-3 text-sm font-normal outline-none">
                 {props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.profile_name} · {profile.platform}</option>)}
               </select>
+            </label>
+            <label className="block text-xs font-semibold">Module 1 crawl source
+              <select value={props.selectedCrawlJobId} onChange={(event) => props.setSelectedCrawlJobId(event.target.value)} className="mt-1 h-9 w-full rounded-md border border-[#d9e0ea] px-3 text-sm font-normal outline-none">
+                {props.crawlJobs.length === 0 ? (
+                  <option value="">No crawl jobs</option>
+                ) : props.crawlJobs.map((job) => (
+                  <option key={job.id} value={job.id}>{job.name} · {job.status} · {shortId(job.id)}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] font-normal text-[#64748b]">Nếu không chọn item thủ công, hệ thống sẽ tạo auto dataset từ crawl job này và gộp thêm context liên quan.</span>
             </label>
             <div className="rounded-lg border border-[#d9e0ea] bg-[#fbfcfd] p-4">
               <div className="text-xs font-bold">Strategy snapshot</div>
@@ -569,9 +651,35 @@ function PlanWizard(props: {
           </div>
           <div className="space-y-4">
             <div>
-              <div className="text-xs font-semibold">Stories</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold">Manual include from selected crawl</div>
+                <span className="text-[11px] font-medium text-[#64748b]">{selectedCount} selected</span>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => setSourceView('normal')} className={`h-8 rounded-md border px-3 text-xs font-semibold ${sourceView === 'normal' ? 'border-[#2563eb] bg-[#e5f0ff] text-[#2563eb]' : 'border-[#d9e0ea] text-[#64748b]'}`}>Bài thường ({props.finalContent.normal_items.length})</button>
+                <button onClick={() => setSourceView('series')} className={`h-8 rounded-md border px-3 text-xs font-semibold ${sourceView === 'series' ? 'border-[#2563eb] bg-[#e5f0ff] text-[#2563eb]' : 'border-[#d9e0ea] text-[#64748b]'}`}>Bài theo series ({props.finalContent.series_items.length})</button>
+              </div>
               <div className="mt-2 max-h-[260px] overflow-y-auto rounded-lg border border-[#d9e0ea]">
-                {props.stories.length === 0 ? <Empty label="No stories available" compact /> : props.stories.map((story) => (
+                {module1Items.length === 0 ? <Empty label={sourceView === 'normal' ? 'No normal content available' : 'No series content available'} compact /> : module1Items.map((item) => (
+                  <label key={item.id} className="flex cursor-pointer items-center gap-3 border-t border-[#eef2f7] px-3 py-3 first:border-t-0">
+                    <input type="checkbox" checked={props.selectedContentIds.includes(item.id)} onChange={() => toggleContent(item.id)} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{sourceView === 'series' ? item.series?.canonical_name || item.canonical_title : item.canonical_title}</span>
+                      <span className="block truncate text-xs text-[#64748b]">
+                        {sourceView === 'series'
+                          ? `${item.episode_title || item.canonical_title} · part ${item.episode_number ?? item.sequence_order ?? '-'}`
+                          : `${item.source_type || item.content_type} · quality ${Number(item.quality_score).toFixed(0)}`}
+                      </span>
+                    </span>
+                    <Badge value={item.status} />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold">Series groups</div>
+              <div className="mt-2 max-h-[180px] overflow-y-auto rounded-lg border border-[#d9e0ea]">
+                {availableStories.length === 0 ? <Empty label="No grouped stories for selected crawl job" compact /> : availableStories.map((story) => (
                   <label key={story.id} className="flex cursor-pointer items-center gap-3 border-t border-[#eef2f7] px-3 py-3 first:border-t-0">
                     <input type="checkbox" checked={props.selectedStoryIds.includes(story.id)} onChange={() => toggleStory(story.id)} />
                     <span className="min-w-0 flex-1">
@@ -589,7 +697,7 @@ function PlanWizard(props: {
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={props.onClose} className="h-9 rounded-md border border-[#d9e0ea] px-4 text-xs font-semibold">Cancel</button>
-          <button onClick={props.onSubmit} className="inline-flex h-9 items-center gap-2 rounded-md bg-[#2563eb] px-4 text-xs font-semibold text-white"><Sparkles size={14} /> Create planning job</button>
+          <button onClick={props.onSubmit} className="inline-flex h-9 items-center gap-2 rounded-md bg-[#2563eb] px-4 text-xs font-semibold text-white"><Sparkles size={14} /> Create dataset and job</button>
         </div>
       </div>
     </div>

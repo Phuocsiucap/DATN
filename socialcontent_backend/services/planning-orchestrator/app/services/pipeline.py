@@ -34,6 +34,9 @@ from common.events.topics import (
 )
 
 
+from .ai_planner import AIPlannerService
+
+
 class PlanningPipeline:
     consumer_name = "planning-orchestrator"
 
@@ -86,19 +89,19 @@ class PlanningPipeline:
         self._stage(db, job, "ANALYZING_CONTENT", 35)
         primary = candidates[0]
         input_ref = self._save_planning_input(job, strategy, candidates)
-        plan_payload = self._build_plan_payload(db, job, strategy, primary)
+        plan_payload, provider_name, model_name, latency_ms, confidence = self._build_plan_payload(db, job, strategy, primary)
         output_ref = self._save_planning_output(job, "AI_PLANNER", plan_payload)
         prompt_run = PromptRun(
             planning_job_id=job.id,
             step_name="AI_PLANNER",
-            model_provider="local",
-            model_name="rule-based-planner-v1",
+            model_provider=provider_name,
+            model_name=model_name,
             prompt_version="ai-planner-v1",
             input_reference=input_ref,
             output_reference=output_ref,
             input_tokens=0,
             output_tokens=0,
-            latency_ms=0,
+            latency_ms=latency_ms,
             status="SUCCEEDED",
         )
         db.add(prompt_run)
@@ -185,29 +188,25 @@ class PlanningPipeline:
         episode_count = story.total_episodes if story else 1
         return title, summary, quality, language, media_count, episode_count
 
-    def _build_plan_payload(self, db: Session, job: PlanningJob, strategy: SocialProfileStrategy, candidate: PlanningCandidate) -> dict[str, Any]:
+    def _build_plan_payload(
+        self, db: Session, job: PlanningJob, strategy: SocialProfileStrategy, candidate: PlanningCandidate
+    ) -> tuple[dict[str, Any], str, str, int, int]:
         title, summary, quality, _, _, episode_count = self._candidate_facts(db, candidate)
-        part_count = job.preferred_part_count or min(max(episode_count, 1), 8)
-        mode = job.planning_mode if job.planning_mode != "AUTO" else ("SERIES" if episode_count > 1 else "SINGLE")
-        return {
-            "plan_title": f"{title} - {'Chuoi' if mode == 'SERIES' else 'Video'} {part_count if mode == 'SERIES' else 1} phan",
-            "content_angle": summary[:240] or f"Ke lai noi dung {title} theo huong ro rang, co hook va cao trao.",
-            "target_audience": strategy.target_audience or "Nguoi xem TikTok thich noi dung ke chuyen ngan",
-            "tone": strategy.tone,
-            "format": "NARRATED_STORY",
-            "planning_mode": mode,
-            "recommended_part_count": part_count if mode == "SERIES" else 1,
-            "target_duration_seconds": job.target_duration_seconds or 60,
-            "production_requirements": {
-                "requires_voice": True,
-                "requires_subtitles": True,
-                "requires_background_media": True,
-                "requires_character_consistency": mode == "SERIES",
-            },
-            "risk_flags": [{"type": "GENERAL", "severity": strategy.risk_level.upper(), "note": "Rule-based risk inherited from profile strategy"}],
-            "reasoning": ["Candidate passed quality gate", "Profile strategy is available", f"Canonical quality score: {quality:.0f}"],
-            "confidence_score": min(95, max(60, int(float(candidate.candidate_score)))),
-        }
+        return AIPlannerService().generate_plan(
+            title=title,
+            summary=summary,
+            episode_count=episode_count,
+            quality=quality,
+            strategy_topics=strategy.content_topics,
+            avoid_topics=strategy.avoid_topics,
+            tone=strategy.tone,
+            target_audience=strategy.target_audience,
+            risk_level=strategy.risk_level,
+            planning_mode=job.planning_mode,
+            preferred_part_count=job.preferred_part_count,
+            target_duration=job.target_duration_seconds,
+            instructions=job.instructions,
+        )
 
     def _create_content_plan(self, db: Session, job: PlanningJob, candidate: PlanningCandidate, payload: dict[str, Any]) -> ContentPlan:
         plan = ContentPlan(

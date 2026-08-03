@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,8 @@ from app.services.tiktok_qr import (
     start_tiktok_qr_session,
     stop_tiktok_qr_session,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SocialProfileService:
@@ -64,6 +67,13 @@ class SocialProfileService:
         profile_name = (payload.profile_name or "TikTok account").strip() or "TikTok account"
         folder_path = self.build_profile_path(user.id, "tiktok", profile_name)
         session = start_tiktok_qr_session(session_id, folder_path, user.id)
+        logger.info(
+            "Started pending TikTok QR login session_id=%s user_id=%s folder_path=%s authenticated=%s",
+            session_id,
+            user.id,
+            folder_path,
+            session.is_authenticated(),
+        )
         return {
             "session_id": session_id,
             "authenticated": session.is_authenticated(),
@@ -81,9 +91,18 @@ class SocialProfileService:
     ) -> dict:
         session = get_tiktok_qr_session(session_id, user.id)
         if not session:
+            logger.info("Pending TikTok QR status session missing session_id=%s user_id=%s", session_id, user.id)
             return {"session_active": False, "authenticated": False, "profile": None}
 
         authenticated = session.is_authenticated()
+        logger.info(
+            "Pending TikTok QR status session_id=%s user_id=%s authenticated=%s page_url=%s cookies=%s",
+            session_id,
+            user.id,
+            authenticated,
+            session.page_url(),
+            session.cookie_names(),
+        )
         try:
             refreshed_session = refresh_tiktok_qr_session(session_id, user.id)
             qr_image = qr_image_data_url(refreshed_session)
@@ -112,6 +131,13 @@ class SocialProfileService:
         db.commit()
         db.refresh(profile)
         page_url = session.page_url()
+        logger.info(
+            "Created TikTok profile from QR session_id=%s user_id=%s profile_id=%s folder_path=%s",
+            session_id,
+            user.id,
+            profile.id,
+            profile.folder_path,
+        )
         stop_tiktok_qr_session(session_id, user.id)
         return {
             "session_active": False,
@@ -149,6 +175,16 @@ class SocialProfileService:
             profile.status = "active"
             db.commit()
             db.refresh(profile)
+        if authenticated:
+            page_url = session.page_url()
+            stop_tiktok_qr_session(str(profile.id), profile.user_id)
+            return {
+                "profile": self.serialize_profile(profile),
+                "session_active": False,
+                "authenticated": True,
+                "page_url": page_url,
+                "qr_image": None,
+            }
 
         try:
             refreshed_session = refresh_tiktok_qr_session(str(profile.id), profile.user_id)

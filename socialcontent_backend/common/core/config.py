@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
+    embedding_service_url: str = "http://localhost:8060"
+    planning_orchestrator_url: str = "http://localhost:8050"
+    embedding_model_name: str = "embedding-service"
+    embedding_similarity_threshold: float = 0.62
+    openai_api_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_API_KEY"))
+    openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("OPENAI_MODEL"))
+    deepseek_api_key: str = Field(default="", validation_alias=AliasChoices("ACD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"))
+    deepseek_base_url: str = Field(default="https://api.deepseek.com", validation_alias=AliasChoices("ACD_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"))
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

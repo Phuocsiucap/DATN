@@ -29,7 +29,7 @@ export const fetchPublishingQueueApi = async (queueStatus?: string) => {
   return data
 }
 
-export const updatePublishingQueueItemApi = async (queueItemId: number, status: string) => {
+export const updatePublishingQueueItemApi = async (queueItemId: string | number, status: string) => {
   const { data } = await api.patch(`/social-profiles/queue/items/${queueItemId}`, { status })
   return data
 }
@@ -59,12 +59,12 @@ export const createSocialPostApi = async (profileId: string | number, payload: a
   return data
 }
 
-export const deleteSocialPostApi = async (postId: number) => {
+export const deleteSocialPostApi = async (postId: string | number) => {
   const { data } = await api.delete(`/social-profiles/post-items/${postId}`)
   return data
 }
 
-export const createSocialPostMetricApi = async (postId: number, payload: any) => {
+export const createSocialPostMetricApi = async (postId: string | number, payload: any) => {
   const { data } = await api.post(`/social-profiles/post-items/${postId}/metrics`, payload)
   return data
 }

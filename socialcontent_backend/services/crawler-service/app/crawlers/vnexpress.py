@@ -18,6 +18,7 @@ class VNExpressCrawler(BaseCrawler):
     content_type = "ARTICLE"
     latest_rss_url = "https://vnexpress.net/rss/tin-moi-nhat.rss"
     homepage_url = "https://vnexpress.net/"
+    blocked_image_names = {"nguonuutien.jpg"}
 
     def __init__(self) -> None:
         self.last_errors: list[dict[str, Any]] = []
@@ -186,9 +187,13 @@ class VNExpressCrawler(BaseCrawler):
         for match in re.finditer(r"<img[^>]+>", body, flags=re.IGNORECASE):
             tag = match.group(0)
             src = self._attr(tag, "data-src") or self._attr(tag, "src")
-            if src and not src.startswith("data:") and "svg" not in src:
+            if src and not src.startswith("data:") and "svg" not in src and not self._is_blocked_image(src):
                 urls.append(html.unescape(src))
         return self._dedupe_links(urls)
+
+    def _is_blocked_image(self, url: str) -> bool:
+        clean_url = html.unescape(url).split("?")[0].split("#")[0].lower()
+        return any(clean_url.endswith(f"/{name}") or clean_url.endswith(name) for name in self.blocked_image_names)
 
     def _video_urls(self, body: str) -> list[str]:
         urls = []

@@ -52,7 +52,8 @@ class CanonicalWriter:
 
         content, story, is_duplicate, finalized, job_status = self._save_canonical(db, doc, processed_document_id, message.get("job_id"))
         db.commit()
-        self.producer.story_grouped(job_id=message.get("job_id"), story_id=str(story.id), content_id=str(content.id))
+        if story:
+            self.producer.story_grouped(job_id=message.get("job_id"), story_id=str(story.id), content_id=str(content.id))
         self.producer.canonical_saved(job_id=message.get("job_id"), content_id=str(content.id), duplicate=is_duplicate)
         if finalized:
             self.producer.job_completed(job_id=message.get("job_id"), status=job_status or "SUCCEEDED")
@@ -106,28 +107,30 @@ class CanonicalWriter:
         self._create_media(db, content, normalized)
 
         is_duplicate = find_or_mark_duplicate(db, content)
-        story = self._find_or_create_story(db, content, normalized)
-        self._create_episode_if_needed(db, content, story, normalized)
-        db.flush()
-        db.refresh(story)
-        update_story_completion(story)
+        story = None
+        if self._should_group_as_story(source_type, normalized):
+            story = self._find_or_create_story(db, content, normalized)
+            self._create_episode_if_needed(db, content, story, normalized)
+            db.flush()
+            db.refresh(story)
+            update_story_completion(story)
 
         job = db.get(CrawlJob, job_id) if job_id else None
         if job:
-            job.current_stage = "GROUPING"
+            job.current_stage = "GROUPING" if story else "CANONICAL"
             job.total_duplicates += 1 if is_duplicate else 0
             job.progress_percent = max(float(job.progress_percent), 85)
             add_crawl_log(
                 db,
                 job_id=job.id,
-                stage="GROUPING",
+                stage=job.current_stage,
                 message="Canonical content saved",
                 metadata={
                     "processed_document_id": processed_document_id,
                     "content_id": str(content.id),
-                    "story_id": str(story.id),
                     "duplicate": is_duplicate,
                     "quality_score": quality.get("score", 0),
+                    **({"story_id": str(story.id)} if story else {}),
                 },
             )
 
@@ -167,31 +170,34 @@ class CanonicalWriter:
             **self._source_metadata(normalized, processed_document_id),
             "source_duplicate": True,
         }
-        story = self._find_existing_story(db, content) or self._find_or_create_story(db, content, normalized)
-        self._create_episode_if_needed(db, content, story, normalized)
+        story = None
+        if self._should_group_as_story(existing_source.source_type, normalized):
+            story = self._find_existing_story(db, content) or self._find_or_create_story(db, content, normalized)
+            self._create_episode_if_needed(db, content, story, normalized)
         self._create_media(db, content, normalized)
         db.flush()
-        db.refresh(story)
-        update_story_completion(story)
+        if story:
+            db.refresh(story)
+            update_story_completion(story)
 
         job = db.get(CrawlJob, job_id) if job_id else None
         if job:
-            job.current_stage = "GROUPING"
+            job.current_stage = "GROUPING" if story else "CANONICAL"
             job.total_duplicates += 1
             job.progress_percent = max(float(job.progress_percent), 85)
             add_crawl_log(
                 db,
                 job_id=job.id,
-                stage="GROUPING",
+                stage=job.current_stage,
                 level="INFO",
                 message="Source duplicate linked to existing canonical content",
                 metadata={
                     "processed_document_id": processed_document_id,
                     "content_id": str(content.id),
-                    "story_id": str(story.id),
                     "source_type": existing_source.source_type,
                     "source_external_id": existing_source.source_external_id,
                     "quality_score": quality.get("score", 0),
+                    **({"story_id": str(story.id)} if story else {}),
                 },
             )
 
@@ -210,6 +216,18 @@ class CanonicalWriter:
         )
         finalized = finalize_job_if_ready(db, job)
         return content, story, True, finalized, job.status if job else None
+
+    def _should_group_as_story(self, source_type: str | None, normalized: dict) -> bool:
+        if (source_type or "").upper() == "VNEXPRESS":
+            return False
+        if (source_type or "").upper() == "BILIBILI":
+            return True
+        return bool(
+            normalized.get("season_title")
+            or normalized.get("series_title")
+            or normalized.get("season_id")
+            or normalized.get("episodes")
+        )
 
     def _source_metadata(self, normalized: dict, processed_document_id: str) -> dict:
         return {

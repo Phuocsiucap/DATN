@@ -30,6 +30,80 @@ export type ContentItem = {
   created_at: string
 }
 
+export type ContentSourceDetail = {
+  id: string
+  source_type: string
+  source_external_id: string
+  source_url?: string | null
+  raw_document_id?: string | null
+  source_title?: string | null
+  source_author?: string | null
+  source_published_at?: string | null
+  metadata_json: Record<string, unknown>
+  first_seen_at: string
+  last_seen_at: string
+}
+
+export type ContentMediaDetail = {
+  id: string
+  media_type: string
+  source_url?: string | null
+  storage_url?: string | null
+  thumbnail_url?: string | null
+  mime_type?: string | null
+  duration_seconds?: number | null
+  created_at: string
+}
+
+export type ProcessingRunDetail = {
+  id: string
+  processing_type: string
+  status: string
+  processor_version?: string | null
+  input_reference?: string | null
+  output_reference?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  error_message?: string | null
+  created_at: string
+}
+
+export type ContentDetail = ContentItem & {
+  published_at?: string | null
+  duration_seconds?: number | null
+  content_hash?: string | null
+  transcript_hash?: string | null
+  updated_at: string
+  sources: ContentSourceDetail[]
+  media: ContentMediaDetail[]
+  processing_runs: ProcessingRunDetail[]
+}
+
+export type FinalSeriesInfo = {
+  id: string
+  canonical_name: string
+  completion_status: string
+  total_episodes: number
+  grouping_confidence: number
+}
+
+export type FinalContentItem = ContentItem & {
+  source_type?: string | null
+  source_url?: string | null
+  published_at?: string | null
+  media: ContentMediaDetail[]
+  episode_id?: string | null
+  episode_number?: number | null
+  sequence_order?: number | null
+  episode_title?: string | null
+  series?: FinalSeriesInfo | null
+}
+
+export type FinalContentView = {
+  normal_items: FinalContentItem[]
+  series_items: FinalContentItem[]
+}
+
 export type Story = {
   id: string
   canonical_name: string
@@ -99,6 +173,16 @@ export const fetchCrawlJobLogsApi = async (jobId: string) => {
 export const fetchContentsApi = async (params?: Record<string, string>) => {
   const { data } = await api.get('/contents', { params })
   return data as ContentItem[]
+}
+
+export const fetchContentDetailApi = async (contentId: string) => {
+  const { data } = await api.get(`/contents/${contentId}/detail`)
+  return data as ContentDetail
+}
+
+export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string }) => {
+  const { data } = await api.get('/contents/final-view', { params })
+  return data as FinalContentView
 }
 
 export const fetchStoriesApi = async () => {

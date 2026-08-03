@@ -1,22 +1,39 @@
 import asyncio
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from common.core.config import get_settings
 from common.db.models import PlanningCandidate, PlanningJob, PromptRun, User
 from common.db.session import SessionLocal, get_db
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
-from app.services.planning import PlanningService
 
 router = APIRouter()
 
 
+def _orchestrator_url() -> str:
+    return get_settings().planning_orchestrator_url.rstrip("/")
+
+
 @router.post("", response_model=schemas.PlanningJobResponse)
-def create_planning_job(payload: schemas.PlanningJobCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return PlanningService().create_job(db, payload, user)
+def create_planning_job(payload: schemas.PlanningJobCreateRequest, user: User = Depends(get_current_user)):
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                f"{_orchestrator_url()}/api/v1/planning-jobs",
+                params={"user_id": str(user.id)},
+                json=payload.model_dump(mode="json"),
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.json().get("detail", "Error from planning orchestrator"))
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Planning Orchestrator unavailable: {exc}")
 
 
 @router.get("", response_model=list[schemas.PlanningJobResponse])
@@ -39,19 +56,35 @@ def get_planning_job(job_id: uuid.UUID, user: User = Depends(get_current_user), 
 
 
 @router.post("/{job_id}/cancel", response_model=schemas.PlanningJobResponse)
-def cancel_planning_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    job = db.get(PlanningJob, job_id)
-    if not job or job.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Planning job not found")
-    return PlanningService().cancel_job(db, job, user)
+def cancel_planning_job(job_id: uuid.UUID, user: User = Depends(get_current_user)):
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                f"{_orchestrator_url()}/api/v1/planning-jobs/{job_id}/cancel",
+                params={"user_id": str(user.id)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.json().get("detail", "Error from planning orchestrator"))
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Planning Orchestrator unavailable: {exc}")
 
 
 @router.post("/{job_id}/retry", response_model=schemas.PlanningJobResponse)
-def retry_planning_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    job = db.get(PlanningJob, job_id)
-    if not job or job.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Planning job not found")
-    return PlanningService().retry_job(db, job, user)
+def retry_planning_job(job_id: uuid.UUID, user: User = Depends(get_current_user)):
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                f"{_orchestrator_url()}/api/v1/planning-jobs/{job_id}/retry",
+                params={"user_id": str(user.id)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.json().get("detail", "Error from planning orchestrator"))
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Planning Orchestrator unavailable: {exc}")
 
 
 @router.get("/{job_id}/candidates", response_model=list[schemas.PlanningCandidateResponse])

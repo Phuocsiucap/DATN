@@ -52,6 +52,37 @@ def stop_pending_tiktok_qr_login(session_id: str, current_user: User = Depends(g
     return service.stop_pending_tiktok_qr_login(current_user, session_id)
 
 
+@router.get("/queue/items")
+def list_my_queue(queue_status: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    service = SocialProfileService()
+    items = service.list_user_queue(db, current_user, queue_status)
+    return {"items": [service.serialize_queue_item(item) for item in items]}
+
+
+@router.patch("/queue/items/{queue_item_id}")
+def update_queue_item_status(
+    queue_item_id: uuid.UUID,
+    payload: schemas.QueueStatusRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    item = service.update_queue_status(db, queue_item_id, current_user, payload.status)
+    return service.serialize_queue_item(item)
+
+
+@router.post("/post-items/{post_id}/metrics")
+def create_social_post_metric(
+    post_id: uuid.UUID,
+    payload: schemas.SocialPostMetricCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    metric = service.create_metric(db, post_id, current_user, payload)
+    return service.serialize_metric(metric)
+
+
 @router.delete("/{profile_id}")
 def delete_social_profile(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
@@ -89,25 +120,6 @@ def list_profile_queue(profile_id: uuid.UUID, queue_status: str | None = None, d
     return {"items": [service.serialize_queue_item(item) for item in items]}
 
 
-@router.get("/queue/items")
-def list_my_queue(queue_status: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    service = SocialProfileService()
-    items = service.list_user_queue(db, current_user, queue_status)
-    return {"items": [service.serialize_queue_item(item) for item in items]}
-
-
-@router.patch("/queue/items/{queue_item_id}")
-def update_queue_item_status(
-    queue_item_id: uuid.UUID,
-    payload: schemas.QueueStatusRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    service = SocialProfileService()
-    item = service.update_queue_status(db, queue_item_id, current_user, payload.status)
-    return service.serialize_queue_item(item)
-
-
 @router.get("/{profile_id}/posts")
 def list_social_posts(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
@@ -126,18 +138,6 @@ def create_social_post(
     profile = service.get_owned_profile(db, profile_id, current_user)
     post = service.create_post(db, profile, payload)
     return service.serialize_post(post)
-
-
-@router.post("/post-items/{post_id}/metrics")
-def create_social_post_metric(
-    post_id: uuid.UUID,
-    payload: schemas.SocialPostMetricCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    service = SocialProfileService()
-    metric = service.create_metric(db, post_id, current_user, payload)
-    return service.serialize_metric(metric)
 
 
 @router.post("/{profile_id}/tiktok/qr/start")

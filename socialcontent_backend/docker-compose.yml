@@ -40,33 +40,59 @@ services:
   api-service:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/api-service/Dockerfile
     working_dir: /app/services/api-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: xvfb-run -a uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
       - postgres
       - mongodb
       - kafka
+      - embedding-service
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      BROWSER_HEADLESS: "false"
+      EMBEDDING_SERVICE_URL: http://embedding-service:8060
     ports:
       - "8000:8000"
+    volumes:
+      - socialcontent_social_profile:/app/social_profile
+
+  embedding-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/embedding-service/Dockerfile
+      args:
+        PRELOAD_FASTEMBED: ${PRELOAD_FASTEMBED:-true}
+        FASTEMBED_MODEL_NAME: ${FASTEMBED_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+    working_dir: /app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8060
+    env_file:
+      - ../.env
+    environment:
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fastembed}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-512}
+      FASTEMBED_MODEL_NAME: ${FASTEMBED_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      FASTEMBED_THREADS: ${FASTEMBED_THREADS:-2}
+    ports:
+      - "8060:8060"
 
   crawl-orchestrator:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/crawl-orchestrator/Dockerfile
     working_dir: /app/services/crawl-orchestrator
     command: uvicorn app.main:app --host 0.0.0.0 --port 8010
     depends_on:
       - api-service
       - kafka
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -76,7 +102,7 @@ services:
   planning-orchestrator:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/planning-orchestrator/Dockerfile
     working_dir: /app/services/planning-orchestrator
     command: uvicorn app.main:app --host 0.0.0.0 --port 8050
     depends_on:
@@ -84,7 +110,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -95,7 +121,7 @@ services:
   crawler-service:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/crawler-service/Dockerfile
     working_dir: /app/services/crawler-service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8020
     depends_on:
@@ -103,7 +129,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -114,7 +140,7 @@ services:
   normalization-service:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/normalization-service/Dockerfile
     working_dir: /app/services/normalization-service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8030
     depends_on:
@@ -122,7 +148,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -133,7 +159,7 @@ services:
   story-processing-service:
     build:
       context: ..
-      dockerfile: socialcontent_backend/Dockerfile
+      dockerfile: socialcontent_backend/services/story-processing-service/Dockerfile
     working_dir: /app/services/story-processing-service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8040
     depends_on:
@@ -141,7 +167,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -152,3 +178,4 @@ services:
 volumes:
   socialcontent_postgres:
   socialcontent_mongo:
+  socialcontent_social_profile:

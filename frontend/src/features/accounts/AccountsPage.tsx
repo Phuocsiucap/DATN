@@ -20,13 +20,13 @@ import {
 } from '@/commons/apis/api'
 
 type CurrentUser = {
-  id: number
+  id: string | number
   email: string
   roles: string[]
 }
 
 type SocialProfile = {
-  id: number
+  id: string
   platform: string
   profile_name: string
   username?: string | null
@@ -55,7 +55,7 @@ type SocialProfileStrategy = {
 }
 
 type SocialPostMetric = {
-  id: number
+  id: string
   views: number
   likes: number
   comments: number
@@ -64,8 +64,8 @@ type SocialPostMetric = {
 }
 
 type SocialPost = {
-  id: number
-  profile_id: number
+  id: string
+  profile_id: string
   title: string
   post_url?: string | null
   caption?: string | null
@@ -86,8 +86,8 @@ type SocialPostOverview = {
   posts: Array<SocialPost & { profile: SocialProfile }>
   chart_data: Array<{
     account: string
-    profile_id: number
-    post_id: number
+    profile_id: string
+    post_id: string
     views: number
     likes: number
     comments: number
@@ -132,14 +132,14 @@ const weekDays = [
 
 export default function AccountsPage({ currentUser }: { currentUser: CurrentUser }) {
   const [profiles, setProfiles] = useState<SocialProfile[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null)
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const [posts, setPosts] = useState<SocialPost[]>([])
   const [postOverview, setPostOverview] = useState<SocialPostOverview[]>([])
   const [selectedOverviewKey, setSelectedOverviewKey] = useState<string>('')
   const [postForm, setPostForm] = useState(emptyPostForm)
   const [strategyForm, setStrategyForm] = useState<SocialProfileStrategy>(emptyStrategyForm)
-  const [metricForms, setMetricForms] = useState<Record<number, typeof emptyMetricForm>>({})
-  const [activeProfileId, setActiveProfileId] = useState<number | null>(null)
+  const [metricForms, setMetricForms] = useState<Record<string, typeof emptyMetricForm>>({})
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null)
   const [activeQrSessionId, setActiveQrSessionId] = useState<string | null>(null)
   const [qrImage, setQrImage] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<string>('idle')
@@ -147,7 +147,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
   const [loading, setLoading] = useState(false)
   const [platformForm, setPlatformForm] = useState<PlatformForm>(emptyPlatformForm)
   const [showPlatformForm, setShowPlatformForm] = useState(false)
-  const [configProfileId, setConfigProfileId] = useState<number | null>(null)
+  const [configProfileId, setConfigProfileId] = useState<string | null>(null)
 
   const isSystemUser = useMemo(() => currentUser?.roles.includes('system') ?? false, [currentUser])
   const selectedProfile = useMemo(
@@ -174,7 +174,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const loadPosts = async (profileId: number) => {
+  const loadPosts = async (profileId: string) => {
     try {
       const data = await fetchSocialPostsApi(profileId)
       setPosts(data.items || [])
@@ -183,7 +183,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const loadAutomation = async (profileId: number) => {
+  const loadAutomation = async (profileId: string) => {
     try {
       const strategyData = await fetchSocialProfileStrategyApi(profileId)
       setStrategyForm({ ...emptyStrategyForm, ...strategyData })
@@ -228,6 +228,9 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
         }
         setSessionStatus(data.authenticated ? 'authenticated' : data.session_active ? 'waiting_for_scan' : 'stopped')
         if (data.authenticated) {
+          setActiveProfileId(null)
+          setQrImage(null)
+          await loadProfiles()
           setMessage('TikTok account đã đăng nhập xong và profile đã được đánh dấu active.')
         }
       } catch (error) {
@@ -306,7 +309,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     setPlatformForm(emptyPlatformForm)
   }
 
-  const handleStartQr = async (profileId: number) => {
+  const handleStartQr = async (profileId: string) => {
     setLoading(true)
     setMessage('')
     try {
@@ -324,7 +327,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const handleRefreshStatus = async (profileId: number) => {
+  const handleRefreshStatus = async (profileId: string) => {
     try {
       const data = await getTikTokQrLoginStatusApi(profileId)
       setActiveProfileId(profileId)
@@ -336,7 +339,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const handleStopQr = async (profileId: number) => {
+  const handleStopQr = async (profileId: string) => {
     await stopTikTokQrLoginApi(profileId)
     if (activeProfileId === profileId) {
       setActiveProfileId(null)
@@ -394,7 +397,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const handleOpenConfig = async (profileId: number) => {
+  const handleOpenConfig = async (profileId: string) => {
     setConfigProfileId(profileId)
     await loadAutomation(profileId)
   }
@@ -445,7 +448,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const handleCreateMetric = async (postId: number) => {
+  const handleCreateMetric = async (postId: string) => {
     if (!selectedProfileId) return
 
     const form = metricForms[postId] || emptyMetricForm
@@ -1013,7 +1016,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
                 className="px-3 py-2 rounded-lg border text-sm outline-none"
                 style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
                 value={selectedProfileId ?? ''}
-                onChange={(event) => setSelectedProfileId(event.target.value ? Number(event.target.value) : null)}
+                onChange={(event) => setSelectedProfileId(event.target.value || null)}
               >
                 <option value="">Chọn account</option>
                 {profiles.map((profile) => (

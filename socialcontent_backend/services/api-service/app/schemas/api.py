@@ -1,10 +1,12 @@
 from app.schemas.auth import BootstrapAdminRequest, LoginRequest, RegisterRequest, TokenResponse
-from app.schemas.contents import ContentResponse, ContentUpdateRequest
+from app.schemas.contents import ContentDetailResponse, ContentResponse, ContentUpdateRequest, FinalContentViewResponse
 from app.schemas.crawl_jobs import CrawlJobCreateRequest, CrawlJobResponse, CrawlJobSourceInput, CrawlLogResponse
 from app.schemas.planning import (
     Module2HandoffCreateRequest,
     Module2HandoffItemResponse,
     Module2HandoffResponse,
+    Module2AutoHandoffRequest,
+    Module2AutoHandoffResponse,
     ContentPlanResponse,
     ContentPlanReviewRequest,
     ContentPlanRegenerateRequest,
@@ -42,7 +44,9 @@ __all__ = [
     "BootstrapAdminRequest",
     "AdminUserCreateRequest",
     "ContentResponse",
+    "ContentDetailResponse",
     "ContentUpdateRequest",
+    "FinalContentViewResponse",
     "CrawlJobCreateRequest",
     "CrawlJobResponse",
     "CrawlJobSourceInput",
@@ -58,6 +62,8 @@ __all__ = [
     "Module2HandoffCreateRequest",
     "Module2HandoffItemResponse",
     "Module2HandoffResponse",
+    "Module2AutoHandoffRequest",
+    "Module2AutoHandoffResponse",
     "Module3HandoffCreateRequest",
     "Module3HandoffPartResponse",
     "Module3HandoffResponse",

@@ -16,8 +16,28 @@ export type Module2Handoff = {
   handoff_note?: string | null
   eligible_count: number
   rejected_count: number
+  filters?: Record<string, unknown>
+  strategy_snapshot?: Record<string, unknown>
   created_at: string
   updated_at: string
+  items?: Module2HandoffItem[]
+}
+
+export type Module2HandoffItem = {
+  id: string
+  handoff_id: string
+  content_id?: string | null
+  story_id?: string | null
+  episode_id?: string | null
+  source_crawl_job_id?: string | null
+  item_role: string
+  relation_reason?: string | null
+  similarity_score?: number | null
+  candidate_score?: number | null
+  status: string
+  rejection_reason?: string | null
+  metadata_json?: Record<string, unknown>
+  created_at: string
 }
 
 export type PlanningJob = {
@@ -126,6 +146,11 @@ export const fetchModule2HandoffsApi = async () => {
 export const createModule2HandoffApi = async (payload: Record<string, unknown>) => {
   const { data } = await api.post('/module2/handoffs', payload)
   return data as Module2Handoff
+}
+
+export const createAutoModule2HandoffFromCrawlApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/module2/handoffs/auto-from-crawl', payload)
+  return data as { handoff: Module2Handoff; planning_job?: PlanningJob | null }
 }
 
 export const fetchPlanningJobsApi = async () => {
