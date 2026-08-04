@@ -16,6 +16,10 @@ def run_job_created_consumer() -> None:
     kafka_consumer = consumer([CRAWL_JOB_CREATED], group_id="crawl-orchestrator")
     orchestrator = CrawlOrchestrator()
     for record in kafka_consumer:
-        with SessionLocal() as db:
-            orchestrator.handle_crawl_job_created(db, record.value)
-        kafka_consumer.commit()
+        try:
+            print(f"[crawl-orchestrator] Received event record offset: {record.offset}")
+            with SessionLocal() as db:
+                orchestrator.handle_crawl_job_created(db, record.value)
+            kafka_consumer.commit()
+        except Exception as e:
+            print(f"[crawl-orchestrator] Error processing record offset {record.offset}: {e}")

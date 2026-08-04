@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import logging
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -9,6 +8,8 @@ from common.db.idempotency import claim_event
 from common.db.models import CrawlJob, CrawlTask
 from app.producers.tasks import CrawlTaskProducer
 
+logger = logging.getLogger(__name__)
+
 
 class CrawlOrchestrator:
     consumer_name = "crawl-orchestrator"
@@ -17,14 +18,18 @@ class CrawlOrchestrator:
         self.producer = producer or CrawlTaskProducer()
 
     def handle_crawl_job_created(self, db: Session, message: dict) -> None:
-        if not claim_event(db, message["event_id"], self.consumer_name):
+        event_id = message.get("event_id")
+        if event_id and not claim_event(db, event_id, self.consumer_name):
+            logger.info(f"[CrawlOrchestrator] Event {event_id} already processed, skipping.")
             return
         job_id = message.get("job_id") or message.get("payload", {}).get("job_id")
         if not job_id:
             return
         job = db.get(CrawlJob, job_id)
         if not job or job.status == "CANCELLED":
+            logger.info(f"[CrawlOrchestrator] Job {job_id} not found or cancelled.")
             return
+        logger.info(f"[CrawlOrchestrator] Starting crawl job {job_id} with {len(job.sources)} sources")
 
         job.status = "QUEUED"
         job.current_stage = "DISCOVERING"

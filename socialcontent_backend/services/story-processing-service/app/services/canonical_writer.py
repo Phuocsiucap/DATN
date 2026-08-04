@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import logging
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -12,6 +11,8 @@ from app.grouping.rules import extract_episode_number, grouping_key, normalize_s
 from app.ordering.episodes import update_story_completion
 from app.producers.story_events import StoryEventProducer
 from app.repositories.processed_documents import ProcessedDocumentRepository
+
+logger = logging.getLogger(__name__)
 
 
 class CanonicalWriter:
@@ -26,13 +27,16 @@ class CanonicalWriter:
         self.producer = producer or StoryEventProducer()
 
     def handle_content_normalized(self, db: Session, message: dict) -> None:
-        if not claim_event(db, message["event_id"], self.consumer_name):
+        event_id = message.get("event_id")
+        if event_id and not claim_event(db, event_id, self.consumer_name):
+            logger.info(f"[story-processing-service] Event {event_id} already processed, skipping.")
             return
 
         payload = message.get("payload", {})
         processed_document_id = payload.get("processed_document_id")
         if not processed_document_id:
             return
+        logger.info(f"[story-processing-service] Processing canonical save for processed_doc {processed_document_id}")
 
         doc = self.repository.get(processed_document_id)
         if not doc:
@@ -147,6 +151,7 @@ class CanonicalWriter:
                 completed_at=datetime.utcnow(),
             )
         )
+        db.flush()
         finalized = finalize_job_if_ready(db, job)
         return content, story, is_duplicate, finalized, job.status if job else None
 
@@ -214,6 +219,7 @@ class CanonicalWriter:
                 completed_at=datetime.utcnow(),
             )
         )
+        db.flush()
         finalized = finalize_job_if_ready(db, job)
         return content, story, True, finalized, job.status if job else None
 

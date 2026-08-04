@@ -16,6 +16,10 @@ def run_raw_created_consumer() -> None:
     kafka_consumer = consumer([CONTENT_RAW_CREATED], group_id="normalization-service")
     runner = NormalizationRunner()
     for record in kafka_consumer:
-        with SessionLocal() as db:
-            runner.handle_raw_created(db, record.value)
-        kafka_consumer.commit()
+        try:
+            print(f"[normalization-service] Received raw created record offset: {record.offset}")
+            with SessionLocal() as db:
+                runner.handle_raw_created(db, record.value)
+            kafka_consumer.commit()
+        except Exception as e:
+            print(f"[normalization-service] Error processing record offset {record.offset}: {e}")

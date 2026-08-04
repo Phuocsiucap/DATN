@@ -11,7 +11,10 @@ from app.consumers.raw_created import run_raw_created_consumer
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"[normalization-service] Base.metadata.create_all warning: {e}")
     settings = get_settings()
     task = asyncio.create_task(asyncio.to_thread(run_raw_created_consumer)) if settings.enable_workers else None
     yield

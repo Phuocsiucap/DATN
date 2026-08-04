@@ -10,6 +10,16 @@ services:
     volumes:
       - socialcontent_postgres:/var/lib/postgresql/data
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
   mongodb:
     image: mongo:7
     ports:
@@ -96,6 +106,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      PYTHONUNBUFFERED: "1"
     ports:
       - "8010:8010"
 
@@ -115,6 +126,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      PYTHONUNBUFFERED: "1"
     ports:
       - "8050:8050"
 
@@ -134,6 +146,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      PYTHONUNBUFFERED: "1"
     ports:
       - "8020:8020"
 

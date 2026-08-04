@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import logging
 import time
 from datetime import datetime
 
@@ -12,6 +11,8 @@ from app.crawlers.bilibili import BilibiliCrawler
 from app.crawlers.vnexpress import VNExpressCrawler
 from app.producers.content_events import CrawlerEventProducer
 from app.repositories.raw_documents import RawDocumentRepository
+
+logger = logging.getLogger(__name__)
 
 
 class CrawlerRunner:
@@ -31,13 +32,16 @@ class CrawlerRunner:
         return VNExpressCrawler()
 
     def handle_task_requested(self, db: Session, message: dict) -> None:
-        if not claim_event(db, message["event_id"], self.consumer_name):
+        event_id = message.get("event_id")
+        if event_id and not claim_event(db, event_id, self.consumer_name):
+            logger.info(f"[CrawlerRunner] Event {event_id} already processed, skipping.")
             return
 
         payload = message.get("payload", {})
         task_id = payload.get("task_id")
         job_id = message.get("job_id") or payload.get("job_id")
         source_type = payload.get("source_type", "BILIBILI").upper()
+        logger.info(f"[CrawlerRunner] Executing task {task_id} for job {job_id} ({source_type})")
 
         task = db.get(CrawlTask, task_id)
         job = db.get(CrawlJob, job_id)
@@ -110,7 +114,7 @@ class CrawlerRunner:
                 message="Crawler task completed",
                 metadata={"raw_document_count": len(raw_document_ids), "skipped_count": len(getattr(crawler, "last_errors", []))},
             )
-            finalized = finalize_job_if_ready(db, job)
+            finalized = finalize_job_if_ready(db, job) if len(raw_document_ids) == 0 else False
             db.commit()
 
             for raw_document_id, document in zip(raw_document_ids, documents):

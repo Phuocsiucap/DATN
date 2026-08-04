@@ -12,7 +12,10 @@ from app.scheduler.periodic_sources import run_periodic_source_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"[crawl-orchestrator] Base.metadata.create_all warning: {e}")
     settings = get_settings()
     tasks = []
     if settings.enable_workers:

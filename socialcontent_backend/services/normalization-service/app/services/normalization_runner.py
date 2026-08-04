@@ -22,7 +22,8 @@ class NormalizationRunner:
         self.producer = producer or NormalizationEventProducer()
 
     def handle_raw_created(self, db: Session, message: dict) -> None:
-        if not claim_event(db, message["event_id"], self.consumer_name):
+        event_id = message.get("event_id")
+        if event_id and not claim_event(db, event_id, self.consumer_name):
             return
 
         payload = message.get("payload", {})

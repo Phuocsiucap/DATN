@@ -23,22 +23,26 @@ def run_crawl_job_completed_consumer() -> None:
 
     kafka_consumer = consumer([CRAWL_JOB_COMPLETED], group_id="planning-orchestrator-auto-handoff")
     for record in kafka_consumer:
-        message = record.value
-        event_id = message.get("event_id")
-        with SessionLocal() as db:
-            if event_id and not claim_event(db, event_id, "planning-orchestrator-auto-handoff"):
-                kafka_consumer.commit()
-                continue
-            _handle_crawl_job_completed(db, message)
-        kafka_consumer.commit()
+        try:
+            message = record.value
+            event_id = message.get("event_id")
+            with SessionLocal() as db:
+                if event_id and not claim_event(db, event_id, "planning-orchestrator-auto-handoff"):
+                    kafka_consumer.commit()
+                    continue
+                _handle_crawl_job_completed(db, message)
+            kafka_consumer.commit()
+        except Exception as e:
+            logger.exception(f"[planning-orchestrator] Error processing crawl_job_completed record offset {record.offset}: {e}")
 
 
 def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
     job_id = message.get("job_id") or message.get("payload", {}).get("job_id")
     status = message.get("payload", {}).get("status") or "SUCCEEDED"
+    print(f"[planning-orchestrator] Received crawl.job.completed for job_id={job_id}, status={status}")
 
     if status not in {"SUCCEEDED", "PARTIAL_SUCCESS"}:
-        logger.info("Skipping auto-handoff for non-successful crawl job %s (status=%s)", job_id, status)
+        print(f"[planning-orchestrator] Skipping auto-handoff for non-successful crawl job {job_id} (status={status})")
         return
 
     # Find active social profiles with strategy
@@ -49,12 +53,13 @@ def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
     )
 
     if not profiles:
-        logger.info("No active social profiles found for auto-handoff on crawl job %s", job_id)
+        print(f"[planning-orchestrator] No active social profiles found for auto-handoff on crawl job {job_id}")
         return
 
     planning_service = PlanningService()
     for profile in profiles:
         if not profile.strategy:
+            print(f"[planning-orchestrator] Profile {profile.id} has no strategy, skipping auto-handoff")
             continue
         try:
             payload = Module2AutoHandoffRequest(
@@ -68,12 +73,8 @@ def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
             handoff, planning_job = planning_service.create_auto_handoff_from_crawl(
                 db, payload, profile.user
             )
-            logger.info(
-                "Created auto handoff %s and planning job %s for profile %s from crawl job %s",
-                handoff.id,
-                planning_job.id if planning_job else None,
-                profile.id,
-                job_id,
+            print(
+                f"[planning-orchestrator] Created auto handoff {handoff.id} and planning job {planning_job.id if planning_job else None} for profile {profile.id} from crawl job {job_id}"
             )
         except Exception as exc:
-            logger.exception("Failed auto handoff for profile %s on crawl job %s: %s", profile.id, job_id, exc)
+            print(f"[planning-orchestrator] Failed auto handoff for profile {profile.id} on crawl job {job_id}: {exc}")

@@ -16,6 +16,10 @@ def run_task_requested_consumer() -> None:
     kafka_consumer = consumer([CRAWL_TASK_REQUESTED], group_id="crawler-service")
     runner = CrawlerRunner()
     for record in kafka_consumer:
-        with SessionLocal() as db:
-            runner.handle_task_requested(db, record.value)
-        kafka_consumer.commit()
+        try:
+            print(f"[crawler-service] Received task record offset: {record.offset}")
+            with SessionLocal() as db:
+                runner.handle_task_requested(db, record.value)
+            kafka_consumer.commit()
+        except Exception as e:
+            print(f"[crawler-service] Error processing record offset {record.offset}: {e}")
