@@ -61,6 +61,13 @@ def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
         if not profile.strategy:
             print(f"[planning-orchestrator] Profile {profile.id} has no strategy, skipping auto-handoff")
             continue
+        
+        # Check if auto_handoff is disabled for this profile (MANUAL MODE)
+        strategy = profile.strategy
+        if not getattr(strategy, "auto_handoff_enabled", True):
+            print(f"[planning-orchestrator] Profile {profile.id} is in MANUAL Handoff mode (auto_handoff_enabled=False), skipping automatic Module 2 creation")
+            continue
+
         try:
             payload = Module2AutoHandoffRequest(
                 profile_id=profile.id,

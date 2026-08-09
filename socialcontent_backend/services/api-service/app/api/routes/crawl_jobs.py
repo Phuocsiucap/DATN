@@ -20,8 +20,18 @@ def create_crawl_job(payload: schemas.CrawlJobCreateRequest, user: User = Depend
 
 
 @router.get("", response_model=list[schemas.CrawlJobResponse])
-def list_crawl_jobs(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(CrawlJob).order_by(CrawlJob.created_at.desc()).limit(100).all()
+def list_crawl_jobs(
+    content_scope: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(CrawlJob)
+    if not user.is_system_admin:
+        query = query.filter(CrawlJob.requested_by == user.id)
+    elif content_scope:
+        query = query.filter(CrawlJob.content_scope == content_scope.upper())
+
+    return query.order_by(CrawlJob.created_at.desc()).limit(100).all()
 
 
 @router.get("/{job_id}", response_model=schemas.CrawlJobResponse)

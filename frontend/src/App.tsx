@@ -5,24 +5,23 @@ import { useWebSocket } from '@/commons/hooks/useWebSocket'
 import Sidebar from '@/commons/component/Sidebar'
 import { TAB_PATHS, type Tab } from '@/commons/component/Sidebar'
 import TopNavBar from '@/commons/component/TopNavBar'
+
+// Features
 import DashboardPage from '@/features/dashboard/DashboardPage'
-import Module1Page from '@/features/module1/Module1Page'
-import Module2Page from '@/features/module2/Module2Page'
-import ArticlesPage from '@/features/articles/ArticlesPage'
-import ApprovalsPage from '@/features/approvals/ApprovalsPage'
-import SchedulePage from '@/features/schedule/SchedulePage'
-import AccountsPage from '@/features/accounts/AccountsPage'
-import VideoLocalizationPage from '@/features/video-localization/VideoLocalizationPage'
-import AuthPage from '@/features/auth/AuthPage'
-import UsersPage from '@/features/users/UsersPage'
+import CrawlPage from '@/features/crawl/CrawlPage'
+import ContentPage from '@/features/content/ContentPage'
+import PlanningPage from '@/features/planning/PlanningPage'
 import SettingsPage from '@/features/settings/SettingsPage'
+
+import AuthPage from '@/features/auth/AuthPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
 import './index.css'
 
 type CurrentUser = {
-  id: number
+  id: string | number
   email: string
   roles: string[]
+  is_system_admin?: boolean
 }
 
 const PATH_TABS = Object.fromEntries(
@@ -31,7 +30,6 @@ const PATH_TABS = Object.fromEntries(
 
 const getTabFromPath = (): Tab => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
-  if (normalizedPath.startsWith('/video-localization/')) return 'video-localization'
   return PATH_TABS[normalizedPath] ?? 'dashboard'
 }
 
@@ -39,7 +37,14 @@ function AppContent() {
   const [tab, setTab] = useState<Tab>(getTabFromPath)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const isSystemUser = currentUser?.roles.includes('system') ?? false
+
+  const isSystemUser = Boolean(
+    currentUser?.is_system_admin ||
+    currentUser?.roles?.some((r) => {
+      const lower = r.toLowerCase()
+      return lower === 'system' || lower === 'system_admin' || lower === 'admin'
+    })
+  )
 
   const handleTabChange = useCallback((nextTab: Tab, replace = false) => {
     setTab(nextTab)
@@ -47,6 +52,11 @@ function AppContent() {
     if (window.location.pathname === nextPath) return
     const method = replace ? 'replaceState' : 'pushState'
     window.history[method](null, '', nextPath)
+  }, [])
+
+  const handleOpenProfileSettings = useCallback((profileId: string) => {
+    setTab('settings')
+    window.history.pushState({ openProfileId: profileId, openTab: 'strategy' }, '', TAB_PATHS.settings)
   }, [])
 
   const loadCurrentUser = async () => {
@@ -74,12 +84,6 @@ function AppContent() {
     window.addEventListener('auth:expired', handleAuthExpired)
     return () => window.removeEventListener('auth:expired', handleAuthExpired)
   }, [handleTabChange])
-
-  useEffect(() => {
-    if ((tab === 'users' || tab === 'settings') && !isSystemUser) {
-      handleTabChange('dashboard', true)
-    }
-  }, [handleTabChange, isSystemUser, tab])
 
   useEffect(() => {
     const handlePopState = () => setTab(getTabFromPath())
@@ -116,21 +120,26 @@ function AppContent() {
 
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: 'var(--surface)' }}>
-      <Sidebar activeTab={tab} onTabChange={handleTabChange} isSystemUser={isSystemUser} />
+      <Sidebar
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        isSystemUser={isSystemUser}
+      />
 
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
-        <TopNavBar email={currentUser.email} onLogout={() => void handleLogout()} />
-        <div className={tab === 'video-localization' ? 'flex-1 min-h-0 w-full overflow-hidden' : 'p-6 max-w-[1440px] mx-auto w-full'}>
+        <TopNavBar
+          email={currentUser.email}
+          onLogout={() => void handleLogout()}
+          isSystemUser={isSystemUser}
+        />
+        <div className="p-6 max-w-[1440px] mx-auto w-full">
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
-          {tab === 'module1' && <Module1Page />}
-          {tab === 'module2' && <Module2Page />}
-          {tab === 'articles' && <ArticlesPage />}
-          {tab === 'approvals' && <ApprovalsPage />}
-          {tab === 'schedule' && <SchedulePage />}
-          {tab === 'accounts' && <AccountsPage currentUser={currentUser} />}
-          {tab === 'video-localization' && <VideoLocalizationPage />}
-          {tab === 'users' && isSystemUser && <UsersPage currentUser={currentUser} />}
-          {tab === 'settings' && isSystemUser && <SettingsPage currentUser={currentUser} />}
+          {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} />}
+          {tab === 'content' && <ContentPage isSystemUser={isSystemUser} />}
+          {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
+          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
+          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
+          {tab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>
     </div>

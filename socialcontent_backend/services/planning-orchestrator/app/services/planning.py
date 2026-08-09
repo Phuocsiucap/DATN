@@ -41,12 +41,19 @@ class PlanningService:
         if not strategy:
             raise HTTPException(status_code=400, detail="Profile strategy is required before planning")
 
+        handoff_note_final = payload.handoff_note
+        if not handoff_note_final and getattr(payload, 'content_ids', None):
+            first_content = db.get(ContentItem, payload.content_ids[0])
+            if first_content:
+                title = first_content.canonical_title or first_content.normalized_title or "Nội dung chỉ định"
+                handoff_note_final = f"Bài báo: {title}"
+
         handoff = Module2Handoff(
             user_id=user.id,
             profile_id=profile.id,
             selection_mode=payload.selection_mode.upper(),
             status="READY",
-            handoff_note=payload.handoff_note,
+            handoff_note=handoff_note_final,
             filters=payload.filters,
             strategy_snapshot=self._strategy_snapshot(strategy),
         )
@@ -83,12 +90,20 @@ class PlanningService:
             raise HTTPException(status_code=400, detail="Profile strategy is required before planning")
 
         min_quality_score = payload.min_quality_score if payload.min_quality_score is not None else strategy.min_score
+        
+        crawl_job_name = "Auto dataset from Module 1"
+        if payload.crawl_job_id:
+            from common.db.models import CrawlJob
+            crawl_job = db.get(CrawlJob, payload.crawl_job_id)
+            if crawl_job:
+                crawl_job_name = crawl_job.name
+
         handoff_payload = schemas.Module2HandoffCreateRequest(
             profile_id=profile.id,
             crawl_job_id=payload.crawl_job_id,
             selection_mode="AUTO",
             candidate_limit=payload.candidate_limit,
-            handoff_note="Auto dataset from Module 1 crawl completion",
+            handoff_note=f"Nguồn: {crawl_job_name}",
             filters={
                 "source_crawl_job_id": str(payload.crawl_job_id),
                 "content_types": ["STORY", "ARTICLE", "PLAYLIST"],
@@ -141,7 +156,13 @@ class PlanningService:
             language=payload.language,
             instructions=payload.instructions,
         )
-        for index, item in enumerate([item for item in handoff.items if item.status == "ELIGIBLE"], start=1):
+        planning_items = [
+            item
+            for item in handoff.items
+            if item.status == "ELIGIBLE"
+            and item.item_role in {"NEW_PRIMARY", "AUTO_SELECTED", "MANUAL_INCLUDED"}
+        ]
+        for index, item in enumerate(planning_items, start=1):
             job.candidates.append(
                 PlanningCandidate(
                     content_id=item.content_id,
@@ -261,7 +282,7 @@ class PlanningService:
                         content_id=related_content.id,
                         item_role="RELATED_CONTEXT",
                         relation_reason=reason,
-                        status="ELIGIBLE",
+                        status="CONTEXT_ONLY",
                         candidate_score=score,
                         metadata={"primary_content_id": str(content.id)},
                     )
@@ -282,7 +303,7 @@ class PlanningService:
                             item_role="RELATED_CONTEXT",
                             relation_reason="embedding_similarity",
                             similarity_score=result.similarity,
-                            status="ELIGIBLE",
+                            status="CONTEXT_ONLY",
                             candidate_score=score,
                             metadata={"primary_content_id": str(content.id)},
                         )
@@ -294,7 +315,7 @@ class PlanningService:
             for story in db.query(Story).filter(Story.id.in_(active_story_ids)).limit(10).all():
                 if any(item.story_id == story.id for item in handoff.items):
                     continue
-                handoff.items.append(self._handoff_item(story_id=story.id, item_role="ACTIVE_SERIES_CONTEXT", relation_reason="active_series_context", status="ELIGIBLE", candidate_score=80))
+                handoff.items.append(self._handoff_item(story_id=story.id, item_role="ACTIVE_SERIES_CONTEXT", relation_reason="active_series_context", status="CONTEXT_ONLY", candidate_score=80))
 
     def _find_rule_related_content(self, db: Session, content: ContentItem, limit: int, exclude_ids: set) -> list[tuple[ContentItem, str, float]]:
         reasons: list[tuple[ContentItem, str, float]] = []

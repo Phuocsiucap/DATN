@@ -16,7 +16,7 @@ const PLATFORM_COLOR: Record<string, string> = {
 }
 
 type SocialProfileOption = {
-  id: number
+  id: number | string
   platform: string
   profile_name: string
   username?: string | null
@@ -27,15 +27,17 @@ export default function ArticleRow({
   article,
   onView,
   socialProfiles = [],
+  workspaceMode = 'admin',
 }: {
   article: Article
   onView?: () => void
   socialProfiles?: SocialProfileOption[]
+  workspaceMode?: 'admin' | 'user'
 }) {
   const dispatch = useAppDispatch()
   const isPublishing = useAppSelector(s => s.articles.publishing[article.link])
   const [platforms, setPlatforms] = useState<string[]>(['tiktok'])
-  const [profileIds, setProfileIds] = useState<number[]>([])
+  const [profileIds, setProfileIds] = useState<(number | string)[]>([])
 
   const activeTikTokProfiles = socialProfiles.filter(profile => profile.platform === 'tiktok' && profile.status === 'active')
 
@@ -54,7 +56,8 @@ export default function ArticleRow({
     dispatch(publishArticle({ link: article.link, platforms, profileIds: selectedProfileIds }))
   }
 
-  const status = STATUS_CONFIG[article.status]
+  const status = STATUS_CONFIG[article.status] || { label: 'READY', style: { backgroundColor: '#e2e8f0', color: '#334155' } }
+  const isAdmin = workspaceMode === 'admin'
 
   return (
     <tr className="hover:bg-[#f8f9ff] transition-colors" style={{ borderBottom: '1px solid var(--outline-variant)', opacity: 1 }}>
@@ -82,7 +85,7 @@ export default function ArticleRow({
             {new Date(article.crawled_at).toLocaleString('vi-VN')}
           </p>
         )}
-        {article.match_score !== undefined && (
+        {!isAdmin && article.match_score !== undefined && (
           <p className="text-xs mt-1" style={{ color: 'var(--secondary)' }}>
             Match {article.match_score}/100
             {article.matched_keywords?.length ? ` | ${article.matched_keywords.join(', ')}` : ''}
@@ -90,53 +93,66 @@ export default function ArticleRow({
         )}
       </td>
 
-      {/* Platform checkboxes */}
+      {/* Scope / Source / Quality (Admin) vs Platform Checkboxes (User) */}
       <td className="px-6 py-4">
-        <div className="flex items-center gap-3">
-          {['facebook', 'tiktok'].map(p => (
-            <label key={p} className="flex items-center gap-1.5 text-xs cursor-pointer select-none"
-              style={{ color: 'var(--on-surface-variant)' }}>
-              <input
-                type="checkbox"
-                checked={platforms.includes(p)}
-                onChange={() => togglePlatform(p)}
-                className="w-3.5 h-3.5 rounded"
-                style={{ accentColor: PLATFORM_COLOR[p] }}
-              />
-              {p}
-            </label>
-          ))}
-        </div>
-        {platforms.includes('tiktok') && (
-          <div className="mt-2 flex flex-col gap-1">
-            {activeTikTokProfiles.length === 0 ? (
-              <span className="text-[11px]" style={{ color: 'rgb(185,28,28)' }}>
-                Chưa có TikTok account active
-              </span>
-            ) : activeTikTokProfiles.map(profile => (
-              <label key={profile.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none"
-                style={{ color: 'var(--on-surface-variant)' }}>
-                <input
-                  type="checkbox"
-                  checked={profileIds.includes(profile.id)}
-                  onChange={() => setProfileIds(prev => prev.includes(profile.id) ? prev.filter(id => id !== profile.id) : [...prev, profile.id])}
-                  className="w-3 h-3 rounded"
-                  style={{ accentColor: PLATFORM_COLOR.tiktok }}
-                />
-                {profile.profile_name}{profile.username ? ` (${profile.username})` : ''}
-              </label>
-            ))}
+        {isAdmin ? (
+          <div className="space-y-1">
+            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+              SCOPE: {article.content_scope || 'GLOBAL'}
+            </span>
+            {article.quality_score !== undefined && (
+              <p className="text-xs font-semibold text-emerald-700">
+                Quality Score: {Number(article.quality_score).toFixed(1)}/10
+              </p>
+            )}
           </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              {['facebook', 'tiktok'].map(p => (
+                <label key={p} className="flex items-center gap-1.5 text-xs cursor-pointer select-none"
+                  style={{ color: 'var(--on-surface-variant)' }}>
+                  <input
+                    type="checkbox"
+                    checked={platforms.includes(p)}
+                    onChange={() => togglePlatform(p)}
+                    className="w-3.5 h-3.5 rounded"
+                    style={{ accentColor: PLATFORM_COLOR[p] }}
+                  />
+                  {p}
+                </label>
+              ))}
+            </div>
+            {platforms.includes('tiktok') && (
+              <div className="mt-2 flex flex-col gap-1">
+                {activeTikTokProfiles.length === 0 ? (
+                  <span className="text-[11px]" style={{ color: 'rgb(185,28,28)' }}>
+                    Chưa có TikTok account active
+                  </span>
+                ) : activeTikTokProfiles.map(profile => (
+                  <label key={profile.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none"
+                    style={{ color: 'var(--on-surface-variant)' }}>
+                    <input
+                      type="checkbox"
+                      checked={profileIds.includes(profile.id)}
+                      onChange={() => setProfileIds(prev => prev.includes(profile.id) ? prev.filter(id => id !== profile.id) : [...prev, profile.id])}
+                      className="w-3 h-3 rounded"
+                      style={{ accentColor: PLATFORM_COLOR.tiktok }}
+                    />
+                    {profile.profile_name}{profile.username ? ` (${profile.username})` : ''}
+                  </label>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </td>
 
       {/* Status */}
       <td className="px-6 py-4">
-        {status && (
-          <span className="px-2 py-1 rounded text-[10px] font-bold" style={status.style}>
-            {status.label}
-          </span>
-        )}
+        <span className="px-2 py-1 rounded text-[10px] font-bold" style={status.style}>
+          {status.label}
+        </span>
       </td>
 
       {/* Actions */}
@@ -145,30 +161,31 @@ export default function ArticleRow({
           {onView && (
             <button
               onClick={onView}
-              className="p-2 rounded transition-colors hover:opacity-70"
-              style={{ color: 'var(--on-surface-variant)' }}
+              className="p-2 rounded transition-colors hover:opacity-70 flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1"
               title="Xem chi tiết"
             >
-              <Eye size={16} />
+              <Eye size={15} /> {isAdmin ? 'Xem Bản Crawl' : 'Xem Chi Tiết'}
             </button>
           )}
-          <button
-            className="p-2 rounded transition-colors hover:opacity-70"
-            style={{ color: 'var(--on-surface-variant)' }}
-            title="Chỉnh sửa"
-          >
-            <Pencil size={16} />
-          </button>
-          <button
-            onClick={handlePublish}
-            disabled={isPublishing || platforms.length === 0 || (platforms.includes('tiktok') && profileIds.length === 0)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ml-1 transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }}
-          >
-            {isPublishing
-              ? <><Loader2 size={13} className="animate-spin" /> Đăng...</>
-              : <><Send size={13} /> Đăng</>}
-          </button>
+          {isAdmin ? (
+            <button
+              className="p-2 rounded transition-colors hover:opacity-70 text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-1"
+              title="Quản lý Canonical"
+            >
+              <Pencil size={14} /> Sửa
+            </button>
+          ) : (
+            <button
+              onClick={handlePublish}
+              disabled={isPublishing || platforms.length === 0 || (platforms.includes('tiktok') && profileIds.length === 0)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ml-1 transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }}
+            >
+              {isPublishing
+                ? <><Loader2 size={13} className="animate-spin" /> Đăng...</>
+                : <><Send size={13} /> Đăng bài</>}
+            </button>
+          )}
         </div>
       </td>
     </tr>

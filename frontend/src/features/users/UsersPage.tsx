@@ -8,7 +8,7 @@ import {
 } from '@/commons/apis/api'
 
 type AdminUser = {
-  id: number
+  id: string | number
   email: string
   roles: string[]
   is_active: boolean
@@ -16,9 +16,10 @@ type AdminUser = {
 }
 
 type CurrentUser = {
-  id: number
+  id: string | number
   email: string
   roles: string[]
+  is_system_admin?: boolean
 }
 
 type UsersPageProps = {

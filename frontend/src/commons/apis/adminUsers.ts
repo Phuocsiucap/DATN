@@ -10,12 +10,12 @@ export const createAdminUserApi = async (payload: any) => {
   return data
 }
 
-export const updateAdminUserApi = async (userId: number, payload: any) => {
+export const updateAdminUserApi = async (userId: number | string, payload: any) => {
   const { data } = await api.patch(`/admin/users/${userId}`, payload)
   return data
 }
 
-export const deleteAdminUserApi = async (userId: number) => {
+export const deleteAdminUserApi = async (userId: number | string) => {
   const { data } = await api.delete(`/admin/users/${userId}`)
   return data
 }

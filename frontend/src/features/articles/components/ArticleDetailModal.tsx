@@ -1,59 +1,65 @@
 import { useEffect, useState } from 'react';
 import ReactPlayer from 'react-player';
-import { X, Calendar, Link as LinkIcon, Image as ImageIcon, Video as VideoIcon, Loader2, Send } from 'lucide-react';
+import {
+  X, Calendar, Link as LinkIcon, Image as ImageIcon, Video as VideoIcon,
+  Loader2, FileText, Sparkles, ArrowRight, CheckCircle, AlertCircle, ChevronDown
+} from 'lucide-react';
 import type { Article } from '@/commons/store/slices/articlesSlice';
-import { fetchArticleDetailApi } from '@/commons/apis/api';
-import { useAppDispatch, useAppSelector } from '@/commons/hooks/useAppDispatch';
-import { publishArticle } from '@/commons/store/slices/articlesSlice';
+import { fetchArticleDetailApi, createModule2HandoffApi, type PlanningProfile } from '@/commons/apis/api';
+import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles';
 
 interface ArticleDetailModalProps {
   article: Article;
   onClose: () => void;
-  socialProfiles?: Array<{
-    id: number;
-    platform: string;
-    profile_name: string;
-    username?: string | null;
-    status: string;
-  }>;
+  workspaceMode?: string;
 }
 
-export default function ArticleDetailModal({ article: initialArticle, onClose, socialProfiles = [] }: ArticleDetailModalProps) {
+export default function ArticleDetailModal({ article: initialArticle, onClose, workspaceMode }: ArticleDetailModalProps) {
   const [article, setArticle] = useState<Article>(initialArticle);
-  const [loading, setLoading] = useState<boolean>(!initialArticle.content);
-  const dispatch = useAppDispatch();
-  const isPublishing = useAppSelector(s => s.articles.publishing[initialArticle.link]);
-  const [platforms, setPlatforms] = useState<string[]>(['tiktok']);
-  const [profileIds, setProfileIds] = useState<number[]>([]);
-  const activeTikTokProfiles = socialProfiles.filter(profile => profile.platform === 'tiktok' && profile.status === 'active');
-
-  const togglePlatform = (p: string) =>
-    setPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
-
-  const handlePublish = () => {
-    if (platforms.length === 0) return;
-    dispatch(publishArticle({
-      link: initialArticle.link,
-      platforms,
-      profileIds: platforms.includes('tiktok') ? profileIds : [],
-    }));
-  };
+  const [loading, setLoading] = useState<boolean>(true);
+  const [sendingToModule2, setSendingToModule2] = useState(false);
+  const [module2Result, setModule2Result] = useState<{ success: boolean; message: string } | null>(null);
+  const [profiles, setProfiles] = useState<PlanningProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
 
   useEffect(() => {
-    if (profileIds.length === 0 && activeTikTokProfiles.length > 0) {
-      setProfileIds([activeTikTokProfiles[0].id]);
-    }
-  }, [activeTikTokProfiles, profileIds.length]);
-
-  useEffect(() => {
-    if (!initialArticle.content) {
+    const targetId = initialArticle.id || initialArticle.link;
+    if (targetId) {
       setLoading(true);
-      fetchArticleDetailApi(initialArticle.link)
+      fetchArticleDetailApi(targetId)
         .then(data => setArticle(data))
         .catch(err => console.error('Failed to load article detail:', err))
         .finally(() => setLoading(false));
     }
+    // Load planning profiles
+    fetchSocialProfilesApi()
+      .then((res: any) => {
+        const items = res?.items || res || []
+        setProfiles(items)
+        if (items.length > 0) setSelectedProfileId(items[0].id)
+      })
+      .catch(() => setProfiles([]))
   }, [initialArticle]);
+
+  const handleSendToModule2 = async () => {
+    if (!article.id || !selectedProfileId) return;
+    setSendingToModule2(true);
+    setModule2Result(null);
+    try {
+      await createModule2HandoffApi({
+        profile_id: selectedProfileId,
+        content_ids: [article.id],
+        selection_mode: 'MANUAL',
+        handoff_note: `Chuyển thủ công từ Global Content Store: "${article.title}"`,
+      });
+      setModule2Result({ success: true, message: 'Đã chuyển thành công sang Module 2 - AI Planning!' });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || 'Không thể chuyển sang Module 2';
+      setModule2Result({ success: false, message: detail });
+    } finally {
+      setSendingToModule2(false);
+    }
+  };
 
   const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose();
@@ -65,18 +71,45 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, s
   };
 
   const renderContent = () => {
-    if (!article.content) {
-      return <p className="italic text-sm" style={{ color: 'var(--on-surface-variant)' }}>Không có nội dung</p>;
-    }
-    const paragraphs = Array.isArray(article.content)
-      ? article.content
-      : article.content.split('\n');
-    return paragraphs.map((p, i) => (
-      <p key={i} className="mb-4 leading-relaxed text-justify text-sm"
-        style={{ color: 'var(--on-surface-variant)' }}>
-        {p}
-      </p>
-    ));
+    return (
+      <div className="space-y-6">
+        <div>
+          <div className="flex items-center justify-between border-b pb-2 mb-4">
+            <h3 className="text-sm font-bold text-[#0f172a] uppercase tracking-wider flex items-center gap-2">
+              <FileText size={16} className="text-[#2563eb]" /> Văn Bản Crawl Đầy Đủ
+            </h3>
+            {article.quality_score !== undefined && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                Quality: {Number(article.quality_score).toFixed(1)}/10
+              </span>
+            )}
+          </div>
+
+          {article.summary && article.summary !== article.content && (
+            <div className="mb-5 p-4 rounded-xl bg-blue-50/70 border border-blue-200">
+              <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                <Sparkles size={14} /> AI Tóm Tắt (Canonical Summary)
+              </div>
+              <p className="text-xs leading-relaxed text-blue-950 font-medium">{article.summary}</p>
+            </div>
+          )}
+
+          {!article.content ? (
+            <p className="italic text-sm text-[#64748b]">Không có nội dung văn bản thô</p>
+          ) : (
+            <div className="max-w-none text-sm leading-relaxed text-[#334155] space-y-3">
+              {(Array.isArray(article.content) ? article.content : article.content.split('\n')).map((paragraph, idx) => (
+                paragraph.trim() && (
+                  <p key={idx} className="text-justify font-normal leading-6 bg-slate-50/60 p-2.5 rounded-lg border border-slate-100">
+                    {paragraph}
+                  </p>
+                )
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -91,77 +124,79 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, s
       >
         {/* Header */}
         <div
-          className="sticky top-0 z-10 flex flex-col lg:flex-row items-start lg:items-center gap-4 px-6 py-4 border-b"
+          className="sticky top-0 z-10 flex flex-col gap-3 px-6 py-4 border-b"
           style={{ backgroundColor: 'var(--surface-container-lowest)', borderColor: 'var(--outline-variant)' }}
         >
-          <div className="flex-1 pr-8 min-w-0">
-            <h2 className="font-semibold text-base leading-snug" style={{ color: 'var(--on-surface)' }}>
-              {article.title}
-            </h2>
-            <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs"
-              style={{ color: 'var(--on-surface-variant)' }}>
-              {article.crawled_at && (
-                <span className="flex items-center gap-1">
-                  <Calendar size={12} />
-                  {new Date(article.crawled_at).toLocaleString('vi-VN')}
-                </span>
-              )}
-              <a href={article.link} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1 transition-colors hover:opacity-70">
-                <LinkIcon size={12} /> Bài gốc
-              </a>
+          <div className="flex items-start gap-4 pr-8">
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-base leading-snug" style={{ color: 'var(--on-surface)' }}>
+                {article.title}
+              </h2>
+              <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+                {article.crawled_at && (
+                  <span className="flex items-center gap-1">
+                    <Calendar size={12} />
+                    {new Date(article.crawled_at).toLocaleString('vi-VN')}
+                  </span>
+                )}
+                <a href={article.link} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 transition-colors hover:opacity-70">
+                  <LinkIcon size={12} /> Bài gốc
+                </a>
+              </div>
             </div>
           </div>
 
+          {/* Action bar - Chuyển sang Module 2 */}
           <div className="flex items-center gap-3 flex-wrap">
-            {['facebook', 'tiktok'].map(p => (
-              <label key={p} className="flex items-center gap-1.5 text-xs cursor-pointer select-none"
-                style={{ color: 'var(--on-surface-variant)' }}>
-                <input type="checkbox" checked={platforms.includes(p)} onChange={() => togglePlatform(p)}
-                  className="w-3.5 h-3.5" style={{ accentColor: 'var(--secondary)' }} />
-                {p}
-              </label>
-            ))}
-            {platforms.includes('tiktok') && (
-              <div className="flex flex-col gap-1 min-w-[180px]">
-                {activeTikTokProfiles.length === 0 ? (
-                  <span className="text-[11px]" style={{ color: 'rgb(185,28,28)' }}>
-                    Chưa có TikTok account active
-                  </span>
-                ) : activeTikTokProfiles.map(profile => (
-                  <label key={profile.id} className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none"
-                    style={{ color: 'var(--on-surface-variant)' }}>
-                    <input
-                      type="checkbox"
-                      checked={profileIds.includes(profile.id)}
-                      onChange={() => setProfileIds(prev => prev.includes(profile.id) ? prev.filter(id => id !== profile.id) : [...prev, profile.id])}
-                      className="w-3 h-3"
-                      style={{ accentColor: 'var(--secondary)' }}
-                    />
-                    {profile.profile_name}{profile.username ? ` (${profile.username})` : ''}
-                  </label>
-                ))}
+            {module2Result ? (
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
+                module2Result.success
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-red-50 text-red-800 border border-red-200'
+              }`}>
+                {module2Result.success
+                  ? <CheckCircle size={13} />
+                  : <AlertCircle size={13} />}
+                {module2Result.message}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                {profiles.length > 1 && (
+                  <div className="relative">
+                    <select
+                      value={selectedProfileId}
+                      onChange={e => setSelectedProfileId(e.target.value)}
+                      className="pl-3 pr-7 py-1.5 rounded-lg text-xs border border-[#d9e0ea] bg-white text-[#0f172a] outline-none appearance-none"
+                    >
+                      {profiles.map((p: any) => (
+                        <option key={p.id} value={p.id}>{p.profile_name} ({p.platform})</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#64748b] pointer-events-none" />
+                  </div>
+                )}
+                <button
+                  onClick={handleSendToModule2}
+                  disabled={sendingToModule2 || !article.id || loading || !selectedProfileId}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm"
+                >
+                  {sendingToModule2
+                    ? <><Loader2 size={13} className="animate-spin" /> Đang chuyển...</>
+                    : <><ArrowRight size={13} /> Chuyển sang Module 2 (Lên Kế Hoạch)</>}
+                </button>
               </div>
             )}
-            <button
-              onClick={handlePublish}
-              disabled={isPublishing || platforms.length === 0 || (platforms.includes('tiktok') && profileIds.length === 0)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }}
-            >
-              {isPublishing
-                ? <><Loader2 size={13} className="animate-spin" /> Đăng...</>
-                : <><Send size={13} /> Đăng bài</>}
-            </button>
-          </div>
 
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-1.5 rounded-lg transition-all hover:opacity-70"
-            style={{ backgroundColor: 'var(--surface-container)', color: 'var(--on-surface-variant)' }}
-          >
-            <X size={16} />
-          </button>
+            {module2Result && (
+              <button
+                onClick={() => setModule2Result(null)}
+                className="text-xs text-[#64748b] hover:text-[#0f172a] underline"
+              >
+                Thử lại
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Body */}
@@ -242,6 +277,14 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, s
             </div>
           )}
         </div>
+
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1.5 rounded-lg transition-all hover:opacity-70"
+          style={{ backgroundColor: 'var(--surface-container)', color: 'var(--on-surface-variant)' }}
+        >
+          <X size={16} />
+        </button>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ from app.api.routes import (
     media_proxy,
     module3_handoffs,
     planning_jobs,
+    profile_planning,
     social_profiles,
     sources,
     stories,
@@ -59,6 +60,7 @@ app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["da
 app.include_router(embeddings.router, prefix="/api/v1/embeddings", tags=["embeddings"])
 app.include_router(handoffs.router, prefix="/api/v1/module2/handoffs", tags=["module2-handoffs"])
 app.include_router(planning_jobs.router, prefix="/api/v1/planning-jobs", tags=["planning-jobs"])
+app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["profile-planning"])
 app.include_router(content_plans.router, prefix="/api/v1/content-plans", tags=["content-plans"])
 app.include_router(content_series.router, prefix="/api/v1/content-series", tags=["content-series"])
 app.include_router(module3_handoffs.router, prefix="/api/v1/module3/handoffs", tags=["module3-handoffs"])

@@ -1,58 +1,63 @@
 import { useEffect, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '@/commons/hooks/useAppDispatch'
-import { fetchArticles, setStatusFilter } from '@/commons/store/slices/articlesSlice'
+import { fetchArticles } from '@/commons/store/slices/articlesSlice'
 import ArticleRow from '@/features/articles/components/ArticleRow'
-import { ChevronLeft, ChevronRight, Filter, Loader2, Radar, Save, Search, Sparkles } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Loader2,
+  Newspaper,
+  RefreshCcw,
+  Search,
+  Sparkles,
+  Building2,
+  User,
+} from 'lucide-react'
 import ArticleDetailModal from '@/features/articles/components/ArticleDetailModal'
 import type { Article } from '@/commons/store/slices/articlesSlice'
 import {
-  customTopicCrawlApi,
-  fetchCrawlSettingsApi,
   fetchMyArticleFeedApi,
   fetchSocialProfilesApi,
   matchArticlesForMeApi,
-  updateCrawlSettingsApi,
 } from '@/commons/apis/api'
-
-const FILTERS = [
-  { label: 'Tất cả', value: '' },
-  { label: 'Mới crawl', value: 'crawled' },
-  { label: 'Đã đăng', value: 'published' },
-  { label: 'Thất bại', value: 'failed' },
-]
+import { fetchCrawlJobsApi, type CrawlJob } from '@/commons/apis/module1'
 
 const PAGE_SIZE = 20
 
 type SocialProfileOption = {
-  id: number
+  id: number | string
   platform: string
   profile_name: string
   username?: string | null
   status: string
 }
 
-export default function ArticlesPage() {
+type TabType = 'recommendations' | 'global' | 'private'
+
+export default function ArticlesPage({ workspaceMode = 'admin' }: { workspaceMode?: 'admin' | 'user' }) {
   const dispatch = useAppDispatch()
-  const { items, total, page, loading, statusFilter } = useAppSelector(s => s.articles)
+  const { items, total, page, loading, statusFilter } = useAppSelector((s) => s.articles)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
-  const [viewMode, setViewMode] = useState<'global' | 'feed'>('global')
+  const [activeTab, setActiveTab] = useState<TabType>(workspaceMode === 'user' ? 'recommendations' : 'global')
+
   const [feedItems, setFeedItems] = useState<Article[]>([])
   const [feedTotal, setFeedTotal] = useState(0)
   const [feedPage, setFeedPage] = useState(1)
   const [feedLoading, setFeedLoading] = useState(false)
   const [feedMessage, setFeedMessage] = useState('')
   const [socialProfiles, setSocialProfiles] = useState<SocialProfileOption[]>([])
-  const [keywordsInput, setKeywordsInput] = useState('')
-  const [excludeKeywordsInput, setExcludeKeywordsInput] = useState('')
-  const [minScore, setMinScore] = useState(70)
-  const [includeLow, setIncludeLow] = useState(false)
-  const [useAiScoring, setUseAiScoring] = useState(true)
-  const [customCrawlLimit, setCustomCrawlLimit] = useState(10)
+  const [crawlJobs, setCrawlJobs] = useState<CrawlJob[]>([])
+
   const [searchInput, setSearchInput] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [hasVideoInput, setHasVideoInput] = useState('')
+  const [selectedJobId, setSelectedJobId] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+
+  const isUserMode = workspaceMode === 'user'
 
   const buildParams = (p = page) => ({
     page: p,
@@ -61,35 +66,22 @@ export default function ArticlesPage() {
     startDate: startDate ? new Date(startDate).toISOString() : undefined,
     endDate: endDate ? new Date(endDate).toISOString() : undefined,
     hasVideo: hasVideoInput || undefined,
+    sourceType: categoryFilter || undefined,
+    crawlJobId: selectedJobId || undefined,
   })
-
-  const parseKeywords = (value: string) => value.split(',').map(item => item.trim()).filter(Boolean)
 
   const loadFeed = async (p = feedPage) => {
     setFeedLoading(true)
     setFeedMessage('')
     try {
-      const data = await fetchMyArticleFeedApi(p, includeLow)
+      const data = await fetchMyArticleFeedApi(p, true)
       setFeedItems(data.items || [])
       setFeedTotal(data.total || 0)
       setFeedPage(data.page || p)
     } catch (error: any) {
-      setFeedMessage(error?.response?.data?.detail || 'Không thể tải feed cá nhân')
+      setFeedMessage(error?.response?.data?.detail || 'Không thể tải danh sách gợi ý cho kênh')
     } finally {
       setFeedLoading(false)
-    }
-  }
-
-  const loadCrawlSettings = async () => {
-    try {
-      const data = await fetchCrawlSettingsApi()
-      setKeywordsInput((data.keywords || []).join(', '))
-      setExcludeKeywordsInput((data.exclude_keywords || []).join(', '))
-      setMinScore(data.min_score ?? 70)
-      setIncludeLow(Boolean(data.include_low_suggestions))
-      setUseAiScoring(data.use_ai_scoring ?? true)
-    } catch {
-      setFeedMessage('Chưa tải được cấu hình crawl cá nhân')
     }
   }
 
@@ -102,366 +94,303 @@ export default function ArticlesPage() {
     }
   }
 
+  const loadJobs = async () => {
+    try {
+      const jobs = await fetchCrawlJobsApi()
+      setCrawlJobs(jobs)
+    } catch {
+      setCrawlJobs([])
+    }
+  }
+
   useEffect(() => {
     dispatch(fetchArticles(buildParams()))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch, page, statusFilter])
+  }, [dispatch, page, statusFilter, selectedJobId, categoryFilter])
 
   useEffect(() => {
-    void loadCrawlSettings()
     void loadSocialProfiles()
+    void loadJobs()
   }, [])
 
   useEffect(() => {
-    if (viewMode === 'feed') {
+    if (activeTab === 'recommendations') {
       void loadFeed(1)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, includeLow])
+  }, [activeTab])
 
   const handleApplyFilters = () => {
     dispatch(fetchArticles(buildParams(1)))
-  }
-
-  const handleSaveCrawlSettings = async () => {
-    setFeedLoading(true)
-    setFeedMessage('')
-    try {
-      await updateCrawlSettingsApi({
-        keywords: parseKeywords(keywordsInput),
-        exclude_keywords: parseKeywords(excludeKeywordsInput),
-        min_score: minScore,
-        include_low_suggestions: includeLow,
-        use_ai_scoring: useAiScoring,
-        recent_limit: 50,
-      })
-      setFeedMessage('Đã lưu cấu hình crawl cá nhân.')
-    } catch (error: any) {
-      setFeedMessage(error?.response?.data?.detail || 'Không thể lưu cấu hình')
-      throw error
-    } finally {
-      setFeedLoading(false)
-    }
   }
 
   const handleMatchForMe = async () => {
     setFeedLoading(true)
     setFeedMessage('')
     try {
-      await updateCrawlSettingsApi({
-        keywords: parseKeywords(keywordsInput),
-        exclude_keywords: parseKeywords(excludeKeywordsInput),
-        min_score: minScore,
-        include_low_suggestions: includeLow,
-        use_ai_scoring: useAiScoring,
-        recent_limit: 50,
-      })
-      const data = await matchArticlesForMeApi({ force_ai: useAiScoring })
-      setViewMode('feed')
+      const data = await matchArticlesForMeApi({ force_ai: true })
       await loadFeed(1)
-      setFeedMessage(`Đã chấm ${data.processed} bài: ${data.matched} bài phù hợp, ${data.low_suggestions} gợi ý thấp.`)
+      setFeedMessage(`Đã chạy AI Matcher: ${data.matched || 0} bài viết phù hợp với chiến lược các kênh của bạn.`)
     } catch (error: any) {
-      setFeedMessage(error?.response?.data?.detail || 'Không thể chấm điểm bài viết')
+      setFeedMessage(error?.response?.data?.detail || 'Không thể chạy AI matching')
     } finally {
       setFeedLoading(false)
     }
   }
 
-  const handleCustomTopicCrawl = async () => {
-    const topics = parseKeywords(keywordsInput)
-    if (topics.length === 0) {
-      setFeedMessage('Hãy nhập ít nhất một chủ đề để crawl riêng.')
-      return
-    }
-
-    setFeedLoading(true)
-    setFeedMessage('')
-    try {
-      const data = await customTopicCrawlApi({
-        topics,
-        exclude_keywords: parseKeywords(excludeKeywordsInput),
-        limit: customCrawlLimit,
-        use_ai_scoring: useAiScoring,
-      })
-      setViewMode('feed')
-      await loadFeed(1)
-      setFeedMessage(
-        `Custom crawl xong: lưu mới ${data.stored}, có sẵn ${data.skipped_existing}, phù hợp ${data.matched}, gợi ý thấp ${data.low_suggestions}.`,
-      )
-    } catch (error: any) {
-      setFeedMessage(error?.response?.data?.detail || 'Không thể crawl theo chủ đề')
-    } finally {
-      setFeedLoading(false)
-    }
-  }
-
-  const visibleItems = viewMode === 'feed' ? feedItems : items
-  const visibleTotal = viewMode === 'feed' ? feedTotal : total
-  const visiblePage = viewMode === 'feed' ? feedPage : page
-  const visibleLoading = viewMode === 'feed' ? feedLoading : loading
-  const totalPages = Math.ceil(visibleTotal / PAGE_SIZE)
+  const visibleItems = activeTab === 'recommendations' ? feedItems : items
+  const visibleTotal = activeTab === 'recommendations' ? feedTotal : total
+  const visiblePage = activeTab === 'recommendations' ? feedPage : page
+  const visibleLoading = activeTab === 'recommendations' ? feedLoading : loading
+  const totalPages = Math.ceil(visibleTotal / PAGE_SIZE) || 1
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight" style={{ color: 'var(--on-surface)' }}>
-            Content Collection
-          </h2>
-          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-            {visibleTotal.toLocaleString('vi-VN')} bài viết {viewMode === 'feed' ? 'phù hợp với bạn' : 'được thu thập'}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setViewMode('global')}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            style={viewMode === 'global'
-              ? { backgroundColor: 'var(--primary)', color: 'var(--on-primary)' }
-              : { backgroundColor: 'var(--surface-container-lowest)', color: 'var(--on-surface)', border: '1px solid var(--outline-variant)' }}
-          >
-            Tất cả
-          </button>
-          <button
-            onClick={() => setViewMode('feed')}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            style={viewMode === 'feed'
-              ? { backgroundColor: 'var(--primary)', color: 'var(--on-primary)' }
-              : { backgroundColor: 'var(--surface-container-lowest)', color: 'var(--on-surface)', border: '1px solid var(--outline-variant)' }}
-          >
-            Feed của tôi
-          </button>
-          {viewMode === 'global' && FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => dispatch(setStatusFilter(f.value))}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-              style={
-                statusFilter === f.value
-                  ? { backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }
-                  : {
-                      backgroundColor: 'var(--surface-container-lowest)',
-                      color: 'var(--on-surface)',
-                      border: '1px solid var(--outline-variant)',
-                    }
-              }
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bento-card rounded-xl p-5 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
-          <label className="flex-1 space-y-2 text-sm">
-            <span>Keyword quan tâm</span>
-            <input
-              value={keywordsInput}
-              onChange={(event) => setKeywordsInput(event.target.value)}
-              className="w-full px-4 py-2 rounded-lg border outline-none"
-              style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
-              placeholder="ai, công nghệ, marketing"
-            />
-          </label>
-          <label className="flex-1 space-y-2 text-sm">
-            <span>Keyword loại trừ</span>
-            <input
-              value={excludeKeywordsInput}
-              onChange={(event) => setExcludeKeywordsInput(event.target.value)}
-              className="w-full px-4 py-2 rounded-lg border outline-none"
-              style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
-              placeholder="tai nạn, giật gân"
-            />
-          </label>
-          <label className="w-full lg:w-32 space-y-2 text-sm">
-            <span>Min score</span>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={minScore}
-              onChange={(event) => setMinScore(Number(event.target.value))}
-              className="w-full px-4 py-2 rounded-lg border outline-none"
-              style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
-            />
-          </label>
-          <label className="w-full lg:w-32 space-y-2 text-sm">
-            <span>Số bài crawl</span>
-            <input
-              type="number"
-              min="1"
-              max="30"
-              value={customCrawlLimit}
-              onChange={(event) => setCustomCrawlLimit(Number(event.target.value || 10))}
-              className="w-full px-4 py-2 rounded-lg border outline-none"
-              style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
-            />
-          </label>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-4 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={useAiScoring} onChange={(event) => setUseAiScoring(event.target.checked)} />
-              Gọi API AI scoring
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={includeLow} onChange={(event) => setIncludeLow(event.target.checked)} />
-              Hiện gợi ý thấp
-            </label>
+      {/* Header Container */}
+      <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold text-[#0f172a]">
+                {isUserMode ? 'Content Discovery & Recommendations' : 'Global Content Store & Story Library'}
+              </h2>
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${isUserMode ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                {isUserMode ? 'CREATOR HUB' : 'SYSTEM CONTENT STORE'}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-[#64748b]">
+              {isUserMode
+                ? 'Khám phá các nội dung được AI chấm điểm phù hợp với từng kênh TikTok của bạn, sẵn sàng tạo Plan.'
+                : 'Kho nội dung chuẩn hóa toàn hệ thống (Canonical Content Store), quản lý nhóm bài viết và truyện.'}
+            </p>
           </div>
+
           <div className="flex items-center gap-2">
             <button
-              onClick={() => void handleSaveCrawlSettings()}
-              disabled={feedLoading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-50"
-              style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+              onClick={() => (activeTab === 'recommendations' ? void loadFeed(1) : dispatch(fetchArticles(buildParams(1))))}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9e0ea] bg-white px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50"
             >
-              <Save size={16} />
-              Lưu cấu hình
+              <RefreshCcw size={14} /> Tải lại
             </button>
+            {isUserMode && (
+              <button
+                onClick={() => void handleMatchForMe()}
+                disabled={feedLoading}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2563eb] px-4 text-xs font-bold text-white shadow-sm hover:bg-[#1d4ed8] disabled:opacity-50"
+              >
+                <Sparkles size={14} /> Chạy AI Re-Match
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Dynamic Navigation Tabs */}
+        <div className="mt-6 flex gap-2 border-t border-[#eef2f7] pt-4 overflow-x-auto">
+          {isUserMode ? (
+            <>
+              <button
+                onClick={() => setActiveTab('recommendations')}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                  activeTab === 'recommendations'
+                    ? 'bg-[#2563eb] text-white shadow-sm'
+                    : 'bg-[#f8fafc] text-[#64748b] border border-[#e2e8f0] hover:bg-[#f1f5f9] hover:text-[#0f172a]'
+                }`}
+              >
+                <Sparkles size={15} /> Gợi Ý Khớp Profile ({feedTotal})
+              </button>
+              <button
+                onClick={() => setActiveTab('global')}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                  activeTab === 'global'
+                    ? 'bg-[#2563eb] text-white shadow-sm'
+                    : 'bg-[#f8fafc] text-[#64748b] border border-[#e2e8f0] hover:bg-[#f1f5f9] hover:text-[#0f172a]'
+                }`}
+              >
+                <Building2 size={15} /> Kho Nội Dung Global ({total})
+              </button>
+              <button
+                onClick={() => setActiveTab('private')}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                  activeTab === 'private'
+                    ? 'bg-[#2563eb] text-white shadow-sm'
+                    : 'bg-[#f8fafc] text-[#64748b] border border-[#e2e8f0] hover:bg-[#f1f5f9] hover:text-[#0f172a]'
+                }`}
+              >
+                <User size={15} /> Dữ Liệu Crawl Riêng
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setActiveTab('global')}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+                  activeTab === 'global'
+                    ? 'bg-[#2563eb] text-white shadow-sm'
+                    : 'bg-[#f8fafc] text-[#64748b] border border-[#e2e8f0] hover:bg-[#f1f5f9] hover:text-[#0f172a]'
+                }`}
+              >
+                <Building2 size={15} /> Kho Nội Dung Canonical (System Global) ({total})
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {feedMessage && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-medium text-blue-800 flex items-center justify-between">
+          <span>{feedMessage}</span>
+          <button onClick={() => setFeedMessage('')} className="text-blue-600 hover:text-blue-900">✕</button>
+        </div>
+      )}
+
+      {/* Main Content Card */}
+      <div className="rounded-xl border border-[#d9e0ea] bg-white overflow-hidden shadow-sm">
+        {/* Table Top Controls */}
+        <div className="p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#eef2f7]">
+          <div>
+            <h3 className="text-base font-bold text-[#0f172a]">
+              {isUserMode
+                ? activeTab === 'recommendations'
+                  ? 'Danh sách Bài Viết Phù Hợp Kênh'
+                  : activeTab === 'global'
+                  ? 'Kho Dữ Liệu Global Content Store'
+                  : 'Dữ Liệu Riêng do Bạn Crawl'
+                : 'Kho Nội Dung Chuẩn Hóa toàn Hệ Thống (Canonical Content Store)'}
+            </h3>
+            <p className="text-xs text-[#64748b] mt-0.5">
+              Hiển thị {visibleItems.length} trên tổng số {visibleTotal.toLocaleString('vi-VN')} nội dung chuẩn hóa
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]" />
+              <input
+                type="text"
+                placeholder="Tìm tiêu đề, từ khóa..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleApplyFilters()}
+                className="pl-9 pr-4 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-[#f8fafc] focus:bg-white focus:border-[#2563eb] w-48 sm:w-64 transition-all"
+              />
+            </div>
+
             <button
-              onClick={() => void handleMatchForMe()}
-              disabled={feedLoading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }}
+              onClick={() => setShowFilters((v) => !v)}
+              className={`p-2 rounded-lg border text-xs transition-colors ${
+                showFilters ? 'bg-blue-50 text-[#2563eb] border-blue-200' : 'bg-white text-[#64748b] border-[#d9e0ea] hover:bg-slate-50'
+              }`}
+              title="Bộ lọc chi tiết"
             >
-              <Sparkles size={16} />
-              AI match
-            </button>
-            <button
-              onClick={() => void handleCustomTopicCrawl()}
-              disabled={feedLoading}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: 'var(--primary)', color: 'var(--on-primary)' }}
-            >
-              <Radar size={16} />
-              Crawl theo chủ đề
+              <Filter size={16} />
             </button>
           </div>
         </div>
-        {feedMessage && <div className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>{feedMessage}</div>}
-      </div>
 
-      <div className="bento-card rounded-xl overflow-hidden">
-        <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b"
-          style={{ borderColor: 'var(--outline-variant)' }}>
-          <h3 className="text-lg font-semibold" style={{ color: 'var(--on-surface)' }}>
-            {viewMode === 'feed' ? 'My Matched Feed' : 'Recent Content Collection'}
-          </h3>
-          {viewMode === 'global' && (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--on-surface-variant)' }} />
-                <input
-                  type="text"
-                  placeholder="Tìm kiếm..."
-                  value={searchInput}
-                  onChange={e => setSearchInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleApplyFilters()}
-                  className="pl-9 pr-4 py-2 rounded-lg text-sm outline-none"
-                  style={{
-                    backgroundColor: 'var(--surface-container-low)',
-                    color: 'var(--on-surface)',
-                    border: 'none',
-                    width: '200px',
-                  }}
-                />
-              </div>
-
-              <button
-                onClick={() => setShowFilters(v => !v)}
-                className="p-2 rounded-lg transition-colors"
-                style={{
-                  color: showFilters ? 'var(--secondary)' : 'var(--on-surface-variant)',
-                  backgroundColor: showFilters ? 'var(--surface-container)' : 'transparent',
-                }}
-                title="Bộ lọc"
-              >
-                <Filter size={18} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {showFilters && viewMode === 'global' && (
-          <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b"
-            style={{ backgroundColor: 'var(--surface-container-low)', borderColor: 'var(--outline-variant)' }}>
+        {/* Filter Drawer */}
+        {showFilters && (
+          <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-[#eef2f7] bg-[#f8fafc]">
+            {/* Category / Source Type Filter */}
             <select
-              value={hasVideoInput}
-              onChange={e => setHasVideoInput(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm outline-none border"
-              style={{
-                backgroundColor: 'var(--surface-container-lowest)',
-                borderColor: 'var(--outline-variant)',
-                color: 'var(--on-surface)',
-              }}
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-white text-[#0f172a]"
             >
-              <option value="">Tất cả media</option>
-              <option value="true">Có video</option>
-              <option value="false">Không video</option>
+              <option value="">Tất cả Category / Loại Nguồn</option>
+              <option value="BILIBILI">Bilibili Video</option>
+              <option value="VNEXPRESS">VNExpress News</option>
+              <option value="STORY_SERIES">Truyện / Series</option>
             </select>
 
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm outline-none border"
-              style={{
-                backgroundColor: 'var(--surface-container-lowest)',
-                borderColor: 'var(--outline-variant)',
-                color: 'var(--on-surface)',
-              }} title="Từ ngày"
+            {/* Crawl Job Filter */}
+            <select
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-white text-[#0f172a] max-w-[220px] truncate"
+            >
+              <option value="">Tất cả Crawl Jobs</option>
+              {crawlJobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  Job: {job.name} ({job.status})
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={hasVideoInput}
+              onChange={(e) => setHasVideoInput(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-white text-[#0f172a]"
+            >
+              <option value="">Tất cả định dạng</option>
+              <option value="true">Có Video (Bilibili/Vlog)</option>
+              <option value="false">Văn bản / Bài báo</option>
+            </select>
+
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-white text-[#0f172a]"
+              title="Từ ngày"
             />
-            <span className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>đến</span>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm outline-none border"
-              style={{
-                backgroundColor: 'var(--surface-container-lowest)',
-                borderColor: 'var(--outline-variant)',
-                color: 'var(--on-surface)',
-              }} title="Đến ngày"
+            <span className="text-xs text-[#64748b]">đến</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-xs outline-none border border-[#d9e0ea] bg-white text-[#0f172a]"
+              title="Đến ngày"
             />
             <button
               onClick={handleApplyFilters}
-              className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)' }}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
             >
               Áp dụng
             </button>
           </div>
         )}
 
+        {/* Table Body */}
         {visibleLoading ? (
-          <div className="flex justify-center py-20">
-            <Loader2 className="animate-spin" size={28} style={{ color: 'var(--secondary)' }} />
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#64748b]">
+            <Loader2 className="animate-spin text-[#2563eb]" size={32} />
+            <span className="text-xs font-medium">Đang tải danh sách bài viết...</span>
           </div>
         ) : visibleItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-2"
-            style={{ color: 'var(--on-surface-variant)' }}>
-            <Search size={32} className="opacity-30" />
-            <p className="text-sm">Không tìm thấy bài viết nào</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-[#64748b]">
+            <Newspaper size={40} className="opacity-30 text-[#64748b]" />
+            <p className="text-sm font-semibold">Chưa có bài viết nào trong mục này</p>
+            {activeTab === 'recommendations' && (
+              <button
+                onClick={() => void handleMatchForMe()}
+                className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-[#2563eb] text-white"
+              >
+                <Sparkles size={14} /> Chạy AI Match cho các Kênh
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead style={{ backgroundColor: 'var(--surface-container-low)' }}>
+            <table className="w-full text-left border-collapse text-xs">
+              <thead className="bg-[#f8fafc] border-b border-[#eef2f7]">
                 <tr>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider"
-                    style={{ color: 'var(--on-surface-variant)' }}>Tiêu đề</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider"
-                    style={{ color: 'var(--on-surface-variant)' }}>Platform</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider"
-                    style={{ color: 'var(--on-surface-variant)' }}>Trạng thái</th>
-                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-right"
-                    style={{ color: 'var(--on-surface-variant)' }}>Actions</th>
+                  <th className="px-6 py-3 font-semibold text-[#64748b] uppercase tracking-wider">
+                    {isUserMode ? 'Tiêu đề bài viết' : 'Nội dung Canonical (Tiêu đề)'}
+                  </th>
+                  <th className="px-6 py-3 font-semibold text-[#64748b] uppercase tracking-wider">
+                    {isUserMode ? 'Kênh & Phân phối' : 'Nguồn & Quality Score'}
+                  </th>
+                  <th className="px-6 py-3 font-semibold text-[#64748b] uppercase tracking-wider">Trạng thái</th>
+                  <th className="px-6 py-3 font-semibold text-[#64748b] uppercase tracking-wider text-right">Thao tác</th>
                 </tr>
               </thead>
-              <tbody>
-                {visibleItems.map(article => (
+              <tbody className="divide-y divide-[#eef2f7]">
+                {visibleItems.map((article, idx) => (
                   <ArticleRow
-                    key={article.link}
+                    key={article.link || idx}
                     article={article}
                     socialProfiles={socialProfiles}
+                    workspaceMode={workspaceMode}
                     onView={() => setSelectedArticle(article)}
                   />
                 ))}
@@ -470,40 +399,37 @@ export default function ArticlesPage() {
           </div>
         )}
 
-        <div className="px-6 py-4 flex items-center justify-between border-t"
-          style={{ backgroundColor: 'var(--surface-container-low)', borderColor: 'var(--outline-variant)' }}>
-          <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-            Showing {visibleItems.length} of {visibleTotal.toLocaleString('vi-VN')} items
+        {/* Pagination Footer */}
+        <div className="px-6 py-4 flex items-center justify-between border-t border-[#eef2f7] bg-[#f8fafc]">
+          <span className="text-xs text-[#64748b]">
+            Hiển thị {visibleItems.length} trên tổng {visibleTotal.toLocaleString('vi-VN')}
           </span>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
               <button
                 disabled={visiblePage <= 1}
-                onClick={() => viewMode === 'feed' ? void loadFeed(feedPage - 1) : dispatch(fetchArticles(buildParams(page - 1)))}
-                className="p-1.5 rounded border transition-all disabled:opacity-30"
-                style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
+                onClick={() => (activeTab === 'recommendations' ? void loadFeed(feedPage - 1) : dispatch(fetchArticles(buildParams(page - 1))))}
+                className="p-1.5 rounded border border-[#d9e0ea] bg-white text-[#475569] hover:bg-slate-50 disabled:opacity-30"
               >
                 <ChevronLeft size={14} />
               </button>
-              {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1).map(p => (
+              {Array.from({ length: Math.min(totalPages, 8) }, (_, i) => i + 1).map((p) => (
                 <button
                   key={p}
-                  onClick={() => viewMode === 'feed' ? void loadFeed(p) : dispatch(fetchArticles(buildParams(p)))}
-                  className="w-8 h-8 rounded border text-xs font-medium transition-all"
-                  style={
+                  onClick={() => (activeTab === 'recommendations' ? void loadFeed(p) : dispatch(fetchArticles(buildParams(p))))}
+                  className={`w-7 h-7 rounded border text-xs font-bold transition-all ${
                     visiblePage === p
-                      ? { backgroundColor: 'var(--secondary)', color: 'var(--on-secondary)', borderColor: 'var(--secondary)' }
-                      : { backgroundColor: 'var(--surface-container-lowest)', color: 'var(--on-surface)', borderColor: 'var(--outline-variant)' }
-                  }
+                      ? 'bg-[#2563eb] text-white border-[#2563eb]'
+                      : 'bg-white text-[#475569] border-[#d9e0ea] hover:bg-slate-50'
+                  }`}
                 >
                   {p}
                 </button>
               ))}
               <button
                 disabled={visiblePage >= totalPages}
-                onClick={() => viewMode === 'feed' ? void loadFeed(feedPage + 1) : dispatch(fetchArticles(buildParams(page + 1)))}
-                className="p-1.5 rounded border transition-all disabled:opacity-30"
-                style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
+                onClick={() => (activeTab === 'recommendations' ? void loadFeed(feedPage + 1) : dispatch(fetchArticles(buildParams(page + 1))))}
+                className="p-1.5 rounded border border-[#d9e0ea] bg-white text-[#475569] hover:bg-slate-50 disabled:opacity-30"
               >
                 <ChevronRight size={14} />
               </button>
@@ -515,7 +441,7 @@ export default function ArticlesPage() {
       {selectedArticle && (
         <ArticleDetailModal
           article={selectedArticle}
-          socialProfiles={socialProfiles}
+          workspaceMode={workspaceMode}
           onClose={() => setSelectedArticle(null)}
         />
       )}

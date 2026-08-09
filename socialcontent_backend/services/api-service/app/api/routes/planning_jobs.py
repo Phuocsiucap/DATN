@@ -38,13 +38,10 @@ def create_planning_job(payload: schemas.PlanningJobCreateRequest, user: User = 
 
 @router.get("", response_model=list[schemas.PlanningJobResponse])
 def list_planning_jobs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return (
-        db.query(PlanningJob)
-        .filter(PlanningJob.user_id == user.id)
-        .order_by(PlanningJob.created_at.desc())
-        .limit(100)
-        .all()
-    )
+    query = db.query(PlanningJob)
+    if not user.is_system_admin:
+        query = query.filter(PlanningJob.user_id == user.id)
+    return query.order_by(PlanningJob.created_at.desc()).limit(100).all()
 
 
 @router.get("/{job_id}", response_model=schemas.PlanningJobResponse)

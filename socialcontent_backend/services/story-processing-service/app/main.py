@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from common.core.config import get_settings
 from common.db.models import Base
 from common.db.session import engine
+from common.workers import run_thread_worker_forever
 from app.consumers.content_normalized import run_content_normalized_consumer
 
 
@@ -16,7 +17,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[story-processing-service] Base.metadata.create_all warning: {e}")
     settings = get_settings()
-    task = asyncio.create_task(asyncio.to_thread(run_content_normalized_consumer)) if settings.enable_workers else None
+    task = (
+        asyncio.create_task(run_thread_worker_forever("story-processing-service:content-normalized", run_content_normalized_consumer))
+        if settings.enable_workers
+        else None
+    )
     yield
     if task:
         task.cancel()

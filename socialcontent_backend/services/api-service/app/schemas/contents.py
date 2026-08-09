@@ -74,6 +74,7 @@ class ProcessingRunDetailResponse(BaseModel):
 
 
 class ContentDetailResponse(ContentResponse):
+    full_text: str | None = None
     published_at: datetime | None
     duration_seconds: int | None
     content_hash: str | None

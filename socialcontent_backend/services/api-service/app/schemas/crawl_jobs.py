@@ -17,6 +17,8 @@ class CrawlJobSourceInput(BaseModel):
 class CrawlJobCreateRequest(BaseModel):
     name: str
     crawl_mode: str = "ONE_TIME"
+    content_scope: str = "GLOBAL"
+    created_by_type: str = "SYSTEM"
     priority: int = 5
     sources: list[CrawlJobSourceInput]
 
@@ -27,6 +29,8 @@ class CrawlJobResponse(BaseModel):
     id: uuid.UUID
     name: str
     crawl_mode: str
+    content_scope: str = "GLOBAL"
+    created_by_type: str = "SYSTEM"
     status: str
     current_stage: str
     priority: int

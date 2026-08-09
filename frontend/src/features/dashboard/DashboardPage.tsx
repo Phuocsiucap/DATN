@@ -8,9 +8,10 @@ import StatCard from '@/features/dashboard/components/StatCard'
 import EventFeed from '@/features/dashboard/components/EventFeed'
 
 type CurrentUser = {
-  id: number
+  id: string | number
   email: string
   roles: string[]
+  is_system_admin?: boolean
 }
 
 export default function DashboardPage({ currentUser }: { currentUser: CurrentUser }) {

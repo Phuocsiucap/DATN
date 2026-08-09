@@ -78,12 +78,20 @@ class CanonicalWriter:
         if existing_source:
             return self._handle_source_duplicate(db, existing_source, normalized, quality, doc.get("raw_document_id"), processed_document_id, job_id)
 
+        job = db.get(CrawlJob, job_id) if job_id else None
+        scope = job.content_scope if job and hasattr(job, "content_scope") else "GLOBAL"
+        owner = job.requested_by if job and scope == "PRIVATE" else None
+        created_by = job.created_by_type if job and hasattr(job, "created_by_type") else "SYSTEM"
+
         content = ContentItem(
             content_type=normalized.get("content_type", "VIDEO"),
             canonical_title=normalized.get("title") or "Untitled",
             normalized_title=normalized.get("normalized_title"),
             summary=normalized.get("description"),
             language=normalized.get("language") or "vi",
+            content_scope=scope,
+            owner_user_id=owner,
+            created_by_type=created_by,
             status=quality.get("status", "NEEDS_REVIEW"),
             published_at=self._parse_datetime(normalized.get("published_at")),
             duration_seconds=self._as_int(normalized.get("duration_seconds")),

@@ -89,6 +89,7 @@ class PlanningJobResponse(BaseModel):
     status: str
     current_stage: str
     progress_percent: float
+    display_name: str | None = None
     target_duration_seconds: int | None
     preferred_part_count: int | None
     language: str
@@ -114,6 +115,8 @@ class PlanningCandidateResponse(BaseModel):
     score_breakdown: dict[str, Any]
     selection_reasons: list[Any]
     rejection_reasons: list[Any]
+    content_title: str | None = None
+    content_url: str | None = None
     created_at: datetime
 
 
@@ -201,6 +204,27 @@ class SeriesPartResponse(BaseModel):
     updated_at: datetime
 
 
+class ProfileSeriesReviewSourceResponse(BaseModel):
+    id: uuid.UUID
+    content_type: str
+    canonical_title: str
+    summary: str | None = None
+    full_text: str | None = None
+    language: str
+    status: str
+    canonical_url: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    source_author: str | None = None
+    source_published_at: datetime | None = None
+    quality_score: float
+    published_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    media: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SeriesUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -264,6 +288,17 @@ class ContentSeriesResponse(BaseModel):
     context_version: int
     created_at: datetime
     updated_at: datetime
+
+
+class ProfileSeriesReviewArticleResponse(BaseModel):
+    plan: ContentPlanResponse | None = None
+    source_content: ProfileSeriesReviewSourceResponse | None = None
+    parts: list[SeriesPartResponse] = Field(default_factory=list)
+
+
+class ProfileSeriesReviewResponse(BaseModel):
+    series: ContentSeriesResponse
+    articles: list[ProfileSeriesReviewArticleResponse] = Field(default_factory=list)
 
 
 class Module3HandoffCreateRequest(BaseModel):

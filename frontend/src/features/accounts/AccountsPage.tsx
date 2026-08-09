@@ -50,6 +50,10 @@ type SocialProfileStrategy = {
   risk_level: string
   min_score: number
   require_video: boolean
+  receive_system_content: boolean
+  auto_handoff_enabled: boolean
+  auto_planning_enabled: boolean
+  max_system_recommendations: number
   auto_queue_enabled: boolean
   auto_publish_enabled: boolean
 }
@@ -115,6 +119,10 @@ const emptyStrategyForm: SocialProfileStrategy = {
   risk_level: 'medium',
   min_score: 70,
   require_video: true,
+  receive_system_content: true,
+  auto_handoff_enabled: false,
+  auto_planning_enabled: false,
+  max_system_recommendations: 20,
   auto_queue_enabled: true,
   auto_publish_enabled: false,
 }
@@ -883,6 +891,9 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
 
                 <div className="flex flex-wrap gap-4 text-sm">
                   {[
+                    ['receive_system_content', 'Nhận dữ liệu Crawl hệ thống'],
+                    ['auto_handoff_enabled', 'Tự động Handoff bài viết'],
+                    ['auto_planning_enabled', 'Tự động AI Planning'],
                     ['auto_queue_enabled', 'AI tự đưa vào queue'],
                     ['require_video', 'Yêu cầu video'],
                     ['auto_publish_enabled', 'Tự đăng khi đến giờ'],

@@ -3,9 +3,14 @@ import { Search, Bell, Radio, LogOut, CircleUserRound } from 'lucide-react'
 type TopNavBarProps = {
   email?: string
   onLogout?: () => void
+  isSystemUser?: boolean
 }
 
-export default function TopNavBar({ email, onLogout }: TopNavBarProps) {
+export default function TopNavBar({
+  email,
+  onLogout,
+  isSystemUser = false,
+}: TopNavBarProps) {
   return (
     <header
       className="w-full sticky top-0 z-40 flex justify-between items-center h-16 px-6 border-b"
@@ -15,8 +20,8 @@ export default function TopNavBar({ email, onLogout }: TopNavBarProps) {
       }}
     >
       {/* Search */}
-      <div className="flex items-center flex-1 max-w-xl">
-        <div className="relative w-full">
+      <div className="flex items-center gap-4 flex-1 max-w-2xl">
+        <div className="relative w-full max-w-md">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2"
             style={{ color: 'var(--on-surface-variant)' }} />
           <input
@@ -71,21 +76,18 @@ export default function TopNavBar({ email, onLogout }: TopNavBarProps) {
           <div className="flex items-center gap-3 cursor-pointer group">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-semibold leading-none" style={{ color: 'var(--on-surface)' }}>
-                {email ? 'Logged in' : 'Admin'}
+                {isSystemUser ? 'System Admin' : 'Creator User'}
               </p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--on-surface-variant)' }}>
                 {email || 'Content Manager'}
               </p>
             </div>
             <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all"
-              style={{
-                backgroundColor: 'var(--secondary)',
-                color: 'var(--on-secondary)',
-                borderColor: 'var(--outline-variant)',
-              }}
+              className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
+                isSystemUser ? 'bg-amber-500 text-black border-amber-400' : 'bg-emerald-500 text-black border-emerald-400'
+              }`}
             >
-              A
+              {isSystemUser ? 'SA' : 'U'}
             </div>
           </div>
         </div>

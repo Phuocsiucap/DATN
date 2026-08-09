@@ -17,9 +17,14 @@ logger = logging.getLogger(__name__)
 
 class CrawlJobService:
     def create(self, db: Session, payload: schemas.CrawlJobCreateRequest, user: User) -> CrawlJob:
+        # If user is not system admin, force PRIVATE scope and USER created_by_type
+        scope = payload.content_scope if user.is_system_admin else "PRIVATE"
+        created_by = payload.created_by_type if user.is_system_admin else "USER"
         job = CrawlJob(
             name=payload.name,
             crawl_mode=payload.crawl_mode,
+            content_scope=scope,
+            created_by_type=created_by,
             priority=payload.priority,
             requested_by=user.id,
             status="PENDING",

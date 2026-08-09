@@ -1,0 +1,734 @@
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from common.db.idempotency import claim_event
+from common.db.models import (
+    ContentContext,
+    ContentItem,
+    ContentMedia,
+    ContentPlan,
+    ContentSeries,
+    Episode,
+    Module2Handoff,
+    PlanningCandidate,
+    PlanningJob,
+    ProfileSeriesTrack,
+    PromptRun,
+    SeriesPart,
+    SocialProfileStrategy,
+    Story,
+)
+from common.db.mongo import planning_inputs, planning_outputs, series_contexts
+from common.events.envelope import build_event
+from common.events.kafka import publish
+from common.events.topics import (
+    PLANNING_CONTEXT_COMPLETED,
+    PLANNING_JOB_COMPLETED,
+    PLANNING_JOB_FAILED,
+    PLANNING_SERIES_COMPLETED,
+)
+
+from .ai_planner import AIPlannerService
+from .context_manager import ContextManagerService
+from .series_planner import SeriesPlannerService
+from .embeddings import EmbeddingService
+
+
+class PlanningPipeline:
+    consumer_name = "planning-orchestrator"
+
+    def handle_planning_job_created(self, db: Session, message: dict[str, Any]) -> None:
+        event_id = message.get("event_id")
+        if event_id and not claim_event(db, event_id, self.consumer_name):
+            return
+
+        job_id = message.get("job_id") or message.get("payload", {}).get("job_id")
+        job = db.get(PlanningJob, uuid.UUID(str(job_id))) if job_id else None
+        if not job:
+            return
+
+        try:
+            self._run(db, job)
+        except Exception as exc:  # noqa: BLE001
+            job.status = "FAILED"
+            job.current_stage = "COMPLETED"
+            job.progress_percent = 100
+            job.error_code = exc.__class__.__name__
+            job.error_message = str(exc)
+            job.completed_at = datetime.utcnow()
+            db.commit()
+            publish(
+                PLANNING_JOB_FAILED,
+                build_event(
+                    event_type=PLANNING_JOB_FAILED,
+                    source=self.consumer_name,
+                    job_id=job.id,
+                    payload={"job_id": str(job.id), "error": str(exc)},
+                ),
+            )
+
+    def _run(self, db: Session, job: PlanningJob) -> None:
+        if job.status not in {"PENDING", "QUEUED", "FAILED", "PARTIAL_SUCCESS", "CANCELLED"}:
+            return
+        job.status = "RUNNING"
+        job.started_at = datetime.utcnow()
+        self._stage(db, job, "SELECTING_CANDIDATES", 15)
+
+        handoff = db.get(Module2Handoff, job.handoff_id)
+        strategy = db.query(SocialProfileStrategy).filter(SocialProfileStrategy.profile_id == job.profile_id).first()
+        if not handoff or not strategy:
+            raise ValueError("Missing handoff or profile strategy")
+
+        candidates = self._score_candidates(db, job, strategy)
+        if not candidates:
+            raise ValueError("No eligible planning candidates")
+
+        # 1. Thu thập Active Series của profile
+        active_series = self._get_active_series(db, job.profile_id)
+
+        # 2. AI Planner: Lặp qua từng candidate, dùng LLM làm màng lọc cuối cùng
+        self._stage(db, job, "ANALYZING_CONTENT", 35)
+        
+        primary = None
+        plan_payload = None
+        provider_name = ""
+        model_name = ""
+        latency_ms = 0
+        input_ref = ""
+        
+        for candidate in candidates:
+            title, summary, quality, _, _, _ = self._candidate_facts(db, candidate)
+            
+            # Ghi nhận input cho candidate này
+            input_ref = self._save_planning_input(job, strategy, [candidate])
+            
+            payload, p_name, m_name, lat, confidence = self._build_plan_payload(
+                db, job, strategy, candidate, active_series
+            )
+            
+            output_ref = self._save_planning_output(job, "AI_PLANNER", payload)
+            
+            if not payload.get("is_suitable", True):
+                # LLM từ chối bài này
+                prompt_run_planner = PromptRun(
+                    planning_job_id=job.id,
+                    step_name="AI_PLANNER_VALIDATION",
+                    model_provider=p_name,
+                    model_name=m_name,
+                    prompt_version="ai-planner-v2",
+                    input_reference=input_ref,
+                    output_reference=output_ref,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=lat,
+                    status="FAILED",
+                    error_message=payload.get("rejection_reason")
+                )
+                db.add(prompt_run_planner)
+                candidate.eligible = False
+                candidate.rejection_reasons = [f"LLM Rejected: {payload.get('rejection_reason')}"]
+                db.commit()
+                continue # Thử bài tiếp theo!
+                
+            # Nếu LLM đồng ý (is_suitable = True)
+            primary = candidate
+            plan_payload = payload
+            provider_name = p_name
+            model_name = m_name
+            latency_ms = lat
+            
+            prompt_run_planner = PromptRun(
+                planning_job_id=job.id,
+                step_name="AI_PLANNER",
+                model_provider=provider_name,
+                model_name=model_name,
+                prompt_version="ai-planner-v2",
+                input_reference=input_ref,
+                output_reference=output_ref,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                status="SUCCEEDED",
+            )
+            db.add(prompt_run_planner)
+            db.commit()
+            break
+            
+        if not primary or not plan_payload:
+            raise ValueError("LLM đã từ chối toàn bộ các Ứng viên vì không phù hợp với chiến lược (Tone/Audience/Topics).")
+
+        REFACTOR_POINT
+        self._stage(db, job, "CREATING_PLAN", 50)
+        plan = self._create_content_plan(db, job, primary, plan_payload)
+
+        # 4. Kiểm tra xem có nối tiếp chuỗi cũ không (Mode NEW vs CONTINUE)
+        existing_series, existing_track = self._find_existing_series(
+            db, job.profile_id, primary.story_id, plan_payload.get("target_series_id")
+        )
+        mode = "CONTINUE" if existing_series else "NEW"
+
+        # 5. Sinh Series Parts bằng SeriesPlannerService
+        self._stage(db, job, "CREATING_SERIES", 68)
+        
+        part_count = max(1, plan.recommended_part_count or 1)
+        source_refs = self._source_refs(db, primary, part_count)
+
+        if mode == "CONTINUE" and existing_series:
+            existing_parts_data = [
+                {
+                    "part_number": p.part_number,
+                    "part_type": p.part_type,
+                    "title": p.title,
+                    "goal": p.goal,
+                    "hook_direction": p.hook_direction,
+                    "ending_direction": p.ending_direction,
+                }
+                for p in existing_series.parts
+            ]
+            continuation_from = len(existing_series.parts) + 1
+
+            parts_payload, sp_provider, sp_model, sp_latency = SeriesPlannerService().plan_series(
+                mode="CONTINUE",
+                title=existing_series.title,
+                summary=summary,
+                plan_angle=plan.content_angle or "",
+                tone=plan.tone or "",
+                part_count=part_count,
+                target_duration=plan.target_duration_seconds or 60,
+                existing_parts=existing_parts_data,
+                continuation_from_part=continuation_from,
+                instructions=job.instructions,
+            )
+
+            sp_output_ref = self._save_planning_output(job, "SERIES_PLANNER", {"parts": parts_payload})
+            db.add(
+                PromptRun(
+                    planning_job_id=job.id,
+                    step_name="SERIES_PLANNER",
+                    model_provider=sp_provider,
+                    model_name=sp_model,
+                    prompt_version="series-planner-v1",
+                    input_reference=input_ref,
+                    output_reference=sp_output_ref,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=sp_latency,
+                    status="SUCCEEDED",
+                )
+            )
+
+            series = existing_series
+            series.content_plan_id = plan.id
+            new_part_objs: list[SeriesPart] = []
+            for idx, p_data in enumerate(parts_payload):
+                part = SeriesPart(
+                    series_id=series.id,
+                    part_number=p_data["part_number"],
+                    part_type=p_data["part_type"],
+                    title=p_data["title"],
+                    goal=p_data["goal"],
+                    hook_direction=p_data["hook_direction"],
+                    ending_direction=p_data["ending_direction"],
+                    previous_part_recap=p_data["previous_part_recap"],
+                    next_part_tease=p_data["next_part_tease"],
+                    target_duration_seconds=p_data["target_duration_seconds"],
+                    status="READY_FOR_PRODUCTION" if plan.status == "APPROVED" else "DRAFT",
+                    source_refs=source_refs[idx] if idx < len(source_refs) else [],
+                    main_beats=p_data["main_beats"],
+                    production_notes=p_data["production_notes"],
+                    risk_notes=p_data["risk_notes"],
+                )
+                db.add(part)
+                new_part_objs.append(part)
+
+            series.total_parts = len(series.parts) + len(new_part_objs)
+            db.flush()
+            parts_for_context = parts_payload
+        else:
+            # Mode NEW
+            parts_payload, sp_provider, sp_model, sp_latency = SeriesPlannerService().plan_series(
+                mode="NEW",
+                title=plan.title,
+                summary=summary,
+                plan_angle=plan.content_angle or "",
+                tone=plan.tone or "",
+                part_count=part_count,
+                target_duration=plan.target_duration_seconds or 60,
+                continuation_from_part=1,
+                instructions=job.instructions,
+            )
+
+            sp_output_ref = self._save_planning_output(job, "SERIES_PLANNER", {"parts": parts_payload})
+            db.add(
+                PromptRun(
+                    planning_job_id=job.id,
+                    step_name="SERIES_PLANNER",
+                    model_provider=sp_provider,
+                    model_name=sp_model,
+                    prompt_version="series-planner-v1",
+                    input_reference=input_ref,
+                    output_reference=sp_output_ref,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=sp_latency,
+                    status="SUCCEEDED",
+                )
+            )
+
+            series = ContentSeries(
+                content_plan_id=plan.id,
+                profile_id=plan.profile_id,
+                title=plan.title,
+                description=plan.content_angle,
+                series_type="NARRATIVE" if part_count > 1 else "SINGLE",
+                total_parts=part_count,
+                current_part=0,
+                status="GENERATED",
+            )
+            db.add(series)
+            db.flush()
+
+            new_part_objs = []
+            for idx, p_data in enumerate(parts_payload):
+                part = SeriesPart(
+                    series_id=series.id,
+                    part_number=p_data["part_number"],
+                    part_type=p_data["part_type"],
+                    title=p_data["title"],
+                    goal=p_data["goal"],
+                    hook_direction=p_data["hook_direction"],
+                    ending_direction=p_data["ending_direction"],
+                    previous_part_recap=p_data["previous_part_recap"],
+                    next_part_tease=p_data["next_part_tease"],
+                    target_duration_seconds=p_data["target_duration_seconds"],
+                    status="READY_FOR_PRODUCTION" if plan.status == "APPROVED" else "DRAFT",
+                    source_refs=source_refs[idx] if idx < len(source_refs) else [],
+                    main_beats=p_data["main_beats"],
+                    production_notes=p_data["production_notes"],
+                    risk_notes=p_data["risk_notes"],
+                )
+                db.add(part)
+                new_part_objs.append(part)
+
+            db.flush()
+            parts_for_context = parts_payload
+
+        publish(
+            PLANNING_SERIES_COMPLETED,
+            build_event(
+                event_type=PLANNING_SERIES_COMPLETED,
+                source=self.consumer_name,
+                job_id=job.id,
+                payload={"series_id": str(series.id), "mode": mode},
+            ),
+        )
+
+        # 6. Xây dựng Context bằng ContextManagerService
+        self._stage(db, job, "BUILDING_CONTEXT", 84)
+
+        existing_ctx_doc = self._load_existing_context(db, series) if mode == "CONTINUE" else None
+        ctx_doc, cm_provider, cm_model, cm_latency = ContextManagerService().build_or_update_context(
+            mode=mode,
+            series_id=str(series.id),
+            title=series.title,
+            content_angle=plan.content_angle or "",
+            tone=plan.tone or "",
+            parts=parts_for_context,
+            existing_context_doc=existing_ctx_doc,
+            instructions=job.instructions,
+        )
+
+        cm_output_ref = self._save_planning_output(job, "CONTEXT_MANAGER", ctx_doc)
+        db.add(
+            PromptRun(
+                planning_job_id=job.id,
+                step_name="CONTEXT_MANAGER",
+                model_provider=cm_provider,
+                model_name=cm_model,
+                prompt_version="context-manager-v1",
+                input_reference=input_ref,
+                output_reference=cm_output_ref,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=cm_latency,
+                status="SUCCEEDED",
+            )
+        )
+
+        if mode == "CONTINUE":
+            series.context_version += 1
+
+        result = series_contexts().insert_one(ctx_doc)
+        checksum = hashlib.sha256(str(ctx_doc).encode("utf-8")).hexdigest()
+        context_record = ContentContext(
+            series_id=series.id,
+            context_type="SERIES_CONTEXT",
+            version=series.context_version,
+            mongo_document_id=str(result.inserted_id),
+            checksum=checksum,
+            is_active=True,
+        )
+        db.add(context_record)
+        db.flush()
+
+        # Update series track
+        self._update_series_track(db, job, series, primary.story_id, existing_track)
+
+        publish(
+            PLANNING_CONTEXT_COMPLETED,
+            build_event(
+                event_type=PLANNING_CONTEXT_COMPLETED,
+                source=self.consumer_name,
+                job_id=job.id,
+                payload={"series_id": str(series.id), "context_id": str(result.inserted_id), "mode": mode},
+            ),
+        )
+
+        # 7. Hoàn tất pipeline
+        self._stage(db, job, "VALIDATING_PLAN", 94)
+        plan.status = "NEEDS_REVIEW"
+        series.status = "NEEDS_REVIEW"
+        job.status = "WAITING_REVIEW"
+        job.current_stage = "COMPLETED"
+        job.progress_percent = 100
+        job.completed_at = datetime.utcnow()
+        db.commit()
+
+        publish(
+            PLANNING_JOB_COMPLETED,
+            build_event(
+                event_type=PLANNING_JOB_COMPLETED,
+                source=self.consumer_name,
+                job_id=job.id,
+                payload={"job_id": str(job.id), "plan_id": str(plan.id), "series_id": str(series.id)},
+            ),
+        )
+
+    def _get_active_series(self, db: Session, profile_id: uuid.UUID) -> list[dict[str, Any]]:
+        tracks = (
+            db.query(ProfileSeriesTrack)
+            .filter(
+                ProfileSeriesTrack.profile_id == profile_id,
+                ProfileSeriesTrack.status.in_(["ACTIVE", "PAUSED"]),
+            )
+            .all()
+        )
+        result = []
+        for track in tracks:
+            result.append(
+                {
+                    "series_track_id": str(track.id),
+                    "content_series_id": str(track.content_series_id) if track.content_series_id else None,
+                    "story_id": str(track.story_id) if track.story_id else None,
+                    "title": track.title,
+                    "current_part": track.current_part,
+                    "total_parts": track.total_parts,
+                }
+            )
+        return result
+
+    def _find_existing_series(
+        self,
+        db: Session,
+        profile_id: uuid.UUID,
+        story_id: uuid.UUID | None,
+        target_series_id_str: str | None,
+    ) -> tuple[ContentSeries | None, ProfileSeriesTrack | None]:
+        # Priority 1: Match by story_id
+        if story_id:
+            track = (
+                db.query(ProfileSeriesTrack)
+                .filter(ProfileSeriesTrack.profile_id == profile_id, ProfileSeriesTrack.story_id == story_id)
+                .first()
+            )
+            if track and track.content_series_id:
+                series = db.get(ContentSeries, track.content_series_id)
+                if series:
+                    return series, track
+            
+            # Direct match in ContentPlan
+            plan = (
+                db.query(ContentPlan)
+                .filter(ContentPlan.profile_id == profile_id, ContentPlan.primary_story_id == story_id)
+                .order_by(ContentPlan.created_at.desc())
+                .first()
+            )
+            if plan and plan.series:
+                return plan.series, track
+
+        # Priority 2: Match by target_series_id from AI Planner
+        if target_series_id_str:
+            try:
+                target_uuid = uuid.UUID(str(target_series_id_str))
+                # Check direct ContentSeries
+                series = db.get(ContentSeries, target_uuid)
+                if series and series.profile_id == profile_id:
+                    track = (
+                        db.query(ProfileSeriesTrack)
+                        .filter(ProfileSeriesTrack.content_series_id == series.id)
+                        .first()
+                    )
+                    return series, track
+
+                # Check ProfileSeriesTrack
+                track = db.get(ProfileSeriesTrack, target_uuid)
+                if track and track.profile_id == profile_id and track.content_series_id:
+                    series = db.get(ContentSeries, track.content_series_id)
+                    if series:
+                        return series, track
+            except Exception:
+                pass
+
+        return None, None
+
+    def _load_existing_context(self, db: Session, series: ContentSeries) -> dict[str, Any] | None:
+        try:
+            doc = series_contexts().find_one({"series_id": str(series.id)}, sort=[("version", -1)])
+            if doc:
+                doc["_id"] = str(doc["_id"])
+            return doc
+        except Exception:
+            return None
+
+    def _update_series_track(
+        self,
+        db: Session,
+        job: PlanningJob,
+        series: ContentSeries,
+        story_id: uuid.UUID | None,
+        existing_track: ProfileSeriesTrack | None = None,
+    ) -> ProfileSeriesTrack:
+        track = existing_track
+        if not track:
+            track = (
+                db.query(ProfileSeriesTrack)
+                .filter(ProfileSeriesTrack.profile_id == job.profile_id, ProfileSeriesTrack.content_series_id == series.id)
+                .first()
+            )
+        if not track and story_id:
+            track = (
+                db.query(ProfileSeriesTrack)
+                .filter(ProfileSeriesTrack.profile_id == job.profile_id, ProfileSeriesTrack.story_id == story_id)
+                .first()
+            )
+
+        if not track:
+            track = ProfileSeriesTrack(
+                user_id=job.user_id,
+                profile_id=job.profile_id,
+                story_id=story_id,
+                content_series_id=series.id,
+                title=series.title,
+                status="ACTIVE",
+                current_part=series.current_part,
+                total_parts=series.total_parts,
+                last_planned_at=datetime.utcnow(),
+            )
+            db.add(track)
+        else:
+            track.content_series_id = series.id
+            track.title = series.title
+            track.total_parts = series.total_parts
+            track.last_planned_at = datetime.utcnow()
+
+        db.flush()
+        return track
+
+    def _stage(self, db: Session, job: PlanningJob, stage: str, progress: int) -> None:
+        job.current_stage = stage
+        job.progress_percent = progress
+        db.commit()
+
+    def _score_candidates(self, db: Session, job: PlanningJob, strategy: SocialProfileStrategy) -> list[PlanningCandidate]:
+        candidates = db.query(PlanningCandidate).filter(PlanningCandidate.planning_job_id == job.id, PlanningCandidate.eligible == True).all()  # noqa: E712
+        topic_terms = self._split_terms(strategy.content_topics)
+        avoid_terms = self._split_terms(strategy.avoid_topics)
+        
+        # Cố gắng sử dụng Semantic Search (Embedding)
+        emb_service = EmbeddingService()
+        topic_vectors = []
+        if topic_terms:
+            try:
+                # Đúc từng topic thành các Vector riêng biệt để tránh bị loãng ngữ nghĩa khi gom chung.
+                # VD: "bóng đá, chứng khoán" -> Vector("bóng đá") và Vector("chứng khoán")
+                topic_vectors = emb_service.create_embeddings(topic_terms, is_query=True)
+            except Exception as e:
+                print("Lỗi embedding topics:", e)
+            
+        scored: list[PlanningCandidate] = []
+        for candidate in candidates:
+            title, summary, quality, language, media_count, episode_count = self._candidate_facts(db, candidate)
+            haystack = f"{title} {summary}".lower()
+            if any(term in haystack for term in avoid_terms):
+                candidate.eligible = False
+                candidate.rejection_reasons = ["Matched avoid_topics"]
+                continue
+                
+            similarity = 0.0
+            best_topic = None
+            content = db.get(ContentItem, candidate.content_id) if candidate.content_id else None
+            if topic_vectors and content:
+                try:
+                    content_emb = emb_service.refresh_content_embedding(db, content)
+                    content_vector = [float(v) for v in content_emb.embedding]
+                    
+                    # Tính Cosine Similarity với từng Topic riêng lẻ, rồi lấy độ tương đồng CAO NHẤT (MAX)
+                    similarities = [emb_service.cosine_similarity(t_vec, content_vector) for t_vec in topic_vectors]
+                    if similarities:
+                        similarity = max(similarities)
+                        best_topic = topic_terms[similarities.index(similarity)]
+                    else:
+                        similarity = 0.0
+                except Exception as e:
+                    print("Lỗi tính similarity:", e)
+            
+            if similarity > 0:
+                # Dùng Semantic Similarity (0.0 -> 1.0) để tính điểm topic_match
+                # Trọng số: 25 điểm tối đa
+                topic_score = min(25, int(similarity * 30))  # Scale up slightly
+                reason = f"Trúng chủ đề '{best_topic}' (độ khớp: {similarity:.2f})"
+            else:
+                # Fallback to Rule-based
+                topic_score = 25 if not topic_terms else min(25, sum(8 for term in topic_terms if term in haystack))
+                reason = "Dựa trên metadata và từ khóa cứng"
+
+            quality_score = min(10, int(float(quality or 0) / 10))
+            completeness = 15 if summary else 8
+            continuity = 15 if episode_count >= 3 else 8
+            media = 5 if media_count else 2
+            series_potential = 5 if episode_count >= 3 else 2
+            total = topic_score + 12 + completeness + continuity + quality_score + 8 + media + series_potential
+            candidate.candidate_score = min(100, total)
+            candidate.score_breakdown = {
+                "topic_match": topic_score,
+                "audience_match": 12,
+                "completeness": completeness,
+                "continuity": continuity,
+                "quality": quality_score,
+                "freshness": 8,
+                "media": media,
+                "series_potential": series_potential,
+                "semantic_similarity": round(similarity, 4)
+            }
+            candidate.selection_reasons = [reason, f"language={language}", f"episodes={episode_count}"]
+            scored.append(candidate)
+        scored.sort(key=lambda item: float(item.candidate_score), reverse=True)
+        for index, candidate in enumerate(scored, start=1):
+            candidate.rank_order = index
+        db.commit()
+        return scored
+
+    def _candidate_facts(self, db: Session, candidate: PlanningCandidate) -> tuple[str, str, float, str, int, int]:
+        content = db.get(ContentItem, candidate.content_id) if candidate.content_id else None
+        story = db.get(Story, candidate.story_id) if candidate.story_id else None
+        episode = db.get(Episode, candidate.episode_id) if candidate.episode_id else None
+        if story and not content and story.content_id:
+            content = db.get(ContentItem, story.content_id)
+        if episode and not story:
+            story = db.get(Story, episode.story_id)
+        if episode and not content:
+            content = db.get(ContentItem, episode.content_id)
+        title = (story.canonical_name if story else None) or (content.canonical_title if content else None) or (episode.episode_title if episode else None) or "Untitled"
+        summary = (story.description if story else None) or (content.summary if content else None) or ""
+        quality = float(content.quality_score) if content else float(story.grouping_confidence) if story else 0
+        language = (content.language if content else None) or (story.language if story else None) or "vi"
+        media_count = db.query(ContentMedia).filter(ContentMedia.content_id == content.id).count() if content else 0
+        episode_count = story.total_episodes if story else 1
+        return title, summary, quality, language, media_count, episode_count
+
+    def _build_plan_payload(
+        self,
+        db: Session,
+        job: PlanningJob,
+        strategy: SocialProfileStrategy,
+        candidate: PlanningCandidate,
+        active_series: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], str, str, int, int]:
+        title, summary, quality, _, _, episode_count = self._candidate_facts(db, candidate)
+        return AIPlannerService().generate_plan(
+            title=title,
+            summary=summary,
+            episode_count=episode_count,
+            quality=quality,
+            strategy_topics=strategy.content_topics,
+            avoid_topics=strategy.avoid_topics,
+            tone=strategy.tone,
+            target_audience=strategy.target_audience,
+            risk_level=strategy.risk_level,
+            planning_mode=job.planning_mode,
+            preferred_part_count=job.preferred_part_count,
+            target_duration=job.target_duration_seconds,
+            active_series=active_series,
+            instructions=job.instructions,
+        )
+
+    def _create_content_plan(self, db: Session, job: PlanningJob, candidate: PlanningCandidate, payload: dict[str, Any]) -> ContentPlan:
+        plan = ContentPlan(
+            planning_job_id=job.id,
+            profile_id=job.profile_id,
+            primary_content_id=candidate.content_id,
+            primary_story_id=candidate.story_id,
+            title=payload["plan_title"],
+            content_angle=payload["content_angle"],
+            target_audience=payload["target_audience"],
+            tone=payload["tone"],
+            format=payload["format"],
+            planning_mode=payload["planning_mode"],
+            target_duration_seconds=payload["target_duration_seconds"],
+            recommended_part_count=payload["recommended_part_count"],
+            confidence_score=payload["confidence_score"],
+            risk_level=payload["risk_flags"][0]["severity"],
+            status="GENERATED",
+            ai_reasoning=payload["reasoning"],
+            production_requirements=payload["production_requirements"],
+        )
+        db.add(plan)
+        db.flush()
+        return plan
+
+    def _source_refs(self, db: Session, candidate: PlanningCandidate, part_count: int) -> list[list[dict[str, Any]]]:
+        if candidate.story_id:
+            episodes = db.query(Episode).filter(Episode.story_id == candidate.story_id).order_by(Episode.sequence_order.asc().nullslast(), Episode.episode_number.asc().nullslast()).all()
+            if episodes:
+                chunks = [[] for _ in range(part_count)]
+                for index, episode in enumerate(episodes):
+                    chunks[min(part_count - 1, int(index * part_count / max(1, len(episodes))))].append({"episode_id": str(episode.id)})
+                return chunks
+        ref: dict[str, Any] = {}
+        if candidate.content_id:
+            ref["content_id"] = str(candidate.content_id)
+        if candidate.episode_id:
+            ref["episode_id"] = str(candidate.episode_id)
+        return [[ref] for _ in range(part_count)]
+
+    def _save_planning_input(self, job: PlanningJob, strategy: SocialProfileStrategy, candidates: list[PlanningCandidate]) -> str:
+        doc = {
+            "planning_job_id": str(job.id),
+            "profile_id": str(job.profile_id),
+            "strategy_snapshot": {
+                "content_topics": strategy.content_topics,
+                "avoid_topics": strategy.avoid_topics,
+                "tone": strategy.tone,
+                "target_audience": strategy.target_audience,
+                "risk_level": strategy.risk_level,
+                "min_score": strategy.min_score,
+            },
+            "candidate_snapshot": [{"candidate_id": str(item.id), "score": float(item.candidate_score), "rank_order": item.rank_order} for item in candidates],
+            "requirements": {"planning_mode": job.planning_mode, "target_duration_seconds": job.target_duration_seconds, "preferred_part_count": job.preferred_part_count, "language": job.language},
+            "created_at": datetime.now(timezone.utc),
+        }
+        return str(planning_inputs().insert_one(doc).inserted_id)
+
+    def _save_planning_output(self, job: PlanningJob, step: str, payload: dict[str, Any]) -> str:
+        doc = {"planning_job_id": str(job.id), "step": step, "prompt_version": "v1", "raw_response": payload, "parsed_response": payload, "validation_errors": [], "created_at": datetime.now(timezone.utc)}
+        return str(planning_outputs().insert_one(doc).inserted_id)
+
+    def _split_terms(self, value: str | None) -> list[str]:
+        return [item.strip().lower() for item in (value or "").replace("\n", ",").split(",") if item.strip()]
+

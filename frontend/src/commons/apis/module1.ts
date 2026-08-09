@@ -145,8 +145,8 @@ export type QualitySummary = {
   failed_tasks: number
 }
 
-export const fetchCrawlJobsApi = async () => {
-  const { data } = await api.get('/crawl-jobs')
+export const fetchCrawlJobsApi = async (params?: Record<string, string>) => {
+  const { data } = await api.get('/crawl-jobs', { params })
   return data as CrawlJob[]
 }
 
@@ -180,7 +180,7 @@ export const fetchContentDetailApi = async (contentId: string) => {
   return data as ContentDetail
 }
 
-export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string }) => {
+export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string }) => {
   const { data } = await api.get('/contents/final-view', { params })
   return data as FinalContentView
 }

@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.db.models import AuditLog, ContentPlan, PlanningFeedback, PlanningJob, SocialProfile, User
+from common.db.models import AuditLog, ContentItem, ContentPlan, Module2Handoff, Module2HandoffItem, PlanningFeedback, PlanningJob, SocialProfile, User
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
@@ -54,6 +54,16 @@ def approve_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewR
     plan.status = "APPROVED"
     plan.approved_by = user.id
     plan.approved_at = datetime.utcnow()
+
+    # Duyệt Cả Cụm (Approve Plan + Series)
+    from common.db.models import ContentSeries, SeriesPart
+    series_list = db.query(ContentSeries).filter(ContentSeries.content_plan_id == plan.id).all()
+    for series in series_list:
+        series.status = "APPROVED"
+        parts = db.query(SeriesPart).filter(SeriesPart.series_id == series.id).all()
+        for part in parts:
+            part.status = "READY_FOR_PRODUCTION"
+
     if payload and payload.feedback_text:
         db.add(PlanningFeedback(content_plan_id=plan.id, feedback_type="APPROVAL", feedback_text=payload.feedback_text, created_by=user.id))
     db.add(AuditLog(actor_id=user.id, action="content_plan.approved", target_type="content_plan", target_id=str(plan.id)))
@@ -87,16 +97,47 @@ def regenerate_content_plan(
     original_job = db.get(PlanningJob, plan.planning_job_id)
     if not original_job:
         raise HTTPException(status_code=404, detail="Planning job not found")
+    if not plan.primary_content_id and not plan.primary_story_id:
+        raise HTTPException(status_code=400, detail="Content plan has no source to regenerate")
+
+    content = db.get(ContentItem, plan.primary_content_id) if plan.primary_content_id else None
+    is_article = bool(content and (content.content_type or "").upper() == "ARTICLE")
+
     plan.status = "SUPERSEDED"
+    handoff = Module2Handoff(
+        user_id=user.id,
+        profile_id=plan.profile_id,
+        selection_mode="MANUAL",
+        status="READY",
+        handoff_note=f"Regenerate bài: {plan.title}",
+        eligible_count=1,
+        rejected_count=0,
+        filters={"regenerated_from_plan_id": str(plan.id)},
+        strategy_snapshot={},
+    )
+    handoff.items.append(
+        Module2HandoffItem(
+            content_id=plan.primary_content_id,
+            story_id=plan.primary_story_id,
+            item_role="MANUAL_INCLUDED",
+            relation_reason="regenerate_plan",
+            candidate_score=100,
+            status="ELIGIBLE",
+            metadata_json={"regenerated_from_plan_id": str(plan.id)},
+        )
+    )
+    db.add(handoff)
+    db.flush()
+
     next_job = PlanningJob(
         user_id=user.id,
         profile_id=plan.profile_id,
-        handoff_id=original_job.handoff_id,
-        planning_mode=original_job.planning_mode,
+        handoff_id=handoff.id,
+        planning_mode=plan.planning_mode,
         status="PENDING",
         current_stage="VALIDATING_INPUT",
-        target_duration_seconds=original_job.target_duration_seconds,
-        preferred_part_count=original_job.preferred_part_count,
+        target_duration_seconds=plan.target_duration_seconds or original_job.target_duration_seconds,
+        preferred_part_count=None if is_article else original_job.preferred_part_count,
         language=original_job.language,
         instructions=payload.instructions if payload and payload.instructions else original_job.instructions,
     )

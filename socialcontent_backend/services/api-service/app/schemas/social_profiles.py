@@ -32,6 +32,10 @@ class SocialProfileStrategyRequest(BaseModel):
     risk_level: str | None = None
     min_score: float | None = None
     require_video: bool | None = None
+    receive_system_content: bool | None = None
+    auto_handoff_enabled: bool | None = None
+    auto_planning_enabled: bool | None = None
+    max_system_recommendations: int | None = None
     auto_queue_enabled: bool | None = None
     auto_publish_enabled: bool | None = None
 

@@ -100,6 +100,8 @@ class CrawlJob(Base):
     id = uuid_pk()
     name = Column(String(255), nullable=False)
     crawl_mode = Column(String(40), nullable=False, default="ONE_TIME")
+    content_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
+    created_by_type = Column(String(40), default="SYSTEM", nullable=False)
     status = Column(String(40), nullable=False, default="PENDING", index=True)
     current_stage = Column(String(40), nullable=False, default="DISCOVERING")
     priority = Column(SmallInteger, default=5, nullable=False)
@@ -185,6 +187,9 @@ class ContentItem(Base):
     normalized_title = Column(Text, nullable=True, index=True)
     summary = Column(Text, nullable=True)
     language = Column(String(12), default="vi", nullable=False)
+    content_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by_type = Column(String(40), default="SYSTEM", nullable=False)
     status = Column(String(40), default="NEEDS_REVIEW", nullable=False, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     duration_seconds = Column(Integer, nullable=True)
@@ -375,6 +380,10 @@ class SocialProfileStrategy(Base):
     risk_level = Column(String(40), default="medium", nullable=False)
     min_score = Column(Float, default=70.0, nullable=False)
     require_video = Column(Boolean, default=False, nullable=False)
+    receive_system_content = Column(Boolean, default=True, nullable=False)
+    auto_handoff_enabled = Column(Boolean, default=False, nullable=False)
+    auto_planning_enabled = Column(Boolean, default=False, nullable=False)
+    max_system_recommendations = Column(Integer, default=20, nullable=False)
     auto_queue_enabled = Column(Boolean, default=True, nullable=False)
     auto_publish_enabled = Column(Boolean, default=False, nullable=False)
     created_at = now_col()
@@ -488,6 +497,8 @@ class ProfileContentLink(Base):
     story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=True, index=True)
     relation_type = Column(String(60), nullable=False, index=True)
     relation_reason = Column(String(80), nullable=True, index=True)
+    source_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
+    recommendation_status = Column(String(60), default="RECOMMENDED", nullable=False, index=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)
     status = Column(String(40), default="ACTIVE", nullable=False, index=True)
     metadata_json = Column("metadata", JSON, nullable=False, default=dict)
@@ -567,6 +578,15 @@ class PlanningCandidate(Base):
     created_at = now_col()
 
     planning_job = relationship("PlanningJob", back_populates="candidates")
+    content = relationship("ContentItem")
+
+    @property
+    def content_title(self) -> str | None:
+        return self.content.canonical_title if self.content else None
+
+    @property
+    def content_url(self) -> str | None:
+        return self.content.canonical_url if self.content else None
 
 
 class ContentPlan(Base):

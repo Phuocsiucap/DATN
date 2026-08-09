@@ -3,14 +3,18 @@ import type { PayloadAction } from '@reduxjs/toolkit'
 import { fetchArticlesApi, publishArticleApi } from '@/commons/apis/api'
 
 export interface Article {
+  id?: string
   title: string
   link: string
   content?: string | string[]
+  summary?: string
   image?: string
   images?: string[]
   videos?: string[]
   status: 'crawled' | 'published' | 'failed'
   crawled_at?: string
+  quality_score?: number
+  content_scope?: string
   published?: Record<string, boolean>
   match_score?: number
   match_status?: 'matched' | 'low_suggestion'
@@ -41,14 +45,32 @@ const initialState: ArticlesState = {
 
 export const fetchArticles = createAsyncThunk(
   'articles/fetch',
-  async ({ page, status, search, startDate, endDate, hasVideo }: { page: number; status?: string; search?: string; startDate?: string; endDate?: string; hasVideo?: string | boolean }) => {
-    return await fetchArticlesApi(page, status, search, startDate, endDate, hasVideo)
+  async ({
+    page,
+    status,
+    search,
+    startDate,
+    endDate,
+    hasVideo,
+    sourceType,
+    crawlJobId,
+  }: {
+    page: number
+    status?: string
+    search?: string
+    startDate?: string
+    endDate?: string
+    hasVideo?: string | boolean
+    sourceType?: string
+    crawlJobId?: string
+  }) => {
+    return await fetchArticlesApi(page, status, search, startDate, endDate, hasVideo, sourceType, crawlJobId)
   }
 )
 
 export const publishArticle = createAsyncThunk(
   'articles/publish',
-  async ({ link, platforms, profileIds = [] }: { link: string; platforms: string[]; profileIds?: number[] }) => {
+  async ({ link, platforms, profileIds = [] }: { link: string; platforms: string[]; profileIds?: (number | string)[] }) => {
     return await publishArticleApi(link, platforms, profileIds)
   }
 )
@@ -90,7 +112,7 @@ const articlesSlice = createSlice({
       .addCase(publishArticle.fulfilled, (state, action) => {
         state.publishing[action.meta.arg.link] = false
       })
-      .addCase(publishArticle.rejected, (state, action) => {
+      .addCase(publishArticle.rejected, (state) => {
         state.publishing[action.meta.arg.link] = false
       })
   },

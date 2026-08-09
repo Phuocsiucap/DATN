@@ -155,6 +155,42 @@ class EmbeddingService:
             f"Sources: {', '.join(source_bits)}",
             f"Keywords/entities/category: {', '.join(dict.fromkeys(keywords))}",
         ]
+        
+        try:
+            from bson import ObjectId
+            from common.db.mongo import processed_documents, raw_documents
+            proc_coll = processed_documents()
+            raw_coll = raw_documents()
+            
+            full_text = None
+            for source in sources:
+                metadata = dict(source.metadata_json or {})
+                proc_id_str = metadata.get("processed_document_id")
+                if proc_id_str:
+                    try:
+                        proc_doc = proc_coll.find_one({"_id": ObjectId(proc_id_str)})
+                        if proc_doc and "normalized" in proc_doc:
+                            full_text = proc_doc["normalized"].get("content") or proc_doc["normalized"].get("description")
+                    except Exception:
+                        pass
+
+                if not full_text and source.raw_document_id:
+                    try:
+                        raw_doc = raw_coll.find_one({"_id": ObjectId(source.raw_document_id)})
+                        if raw_doc and "raw" in raw_doc:
+                            full_text = raw_doc["raw"].get("text") or raw_doc["raw"].get("raw_text")
+                    except Exception:
+                        pass
+                
+                if full_text:
+                    # Cắt ngắn văn bản để tránh vượt quá giới hạn token của mô hình Embedding (thường là 512-8192 tokens)
+                    # Lấy 2500 ký tự đầu tiên thường đủ để mô hình hiểu được ngữ nghĩa cốt lõi của bài báo.
+                    truncated_text = full_text[:2500] + ("..." if len(full_text) > 2500 else "")
+                    parts.append(f"Full Text Snippet: {truncated_text}")
+                    break
+        except Exception as e:
+            print("Error fetching full text for embedding:", e)
+            
         return "\n".join(part for part in parts if part.strip())
 
     @staticmethod

@@ -36,7 +36,9 @@ class BaseCrawler:
         return {"title": title, "description": "", "author": "", "url": url, "text": text[:20000]}
 
     def _html_to_text(self, value: str) -> str:
-        text = re.sub(r"<[^>]+>", " ", value)
+        text = re.sub(r"<script.*?</script>", " ", value, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<style.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
         text = (
             text.replace("&nbsp;", " ")
             .replace("&amp;", "&")

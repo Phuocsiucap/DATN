@@ -163,11 +163,14 @@ class VNExpressCrawler(BaseCrawler):
         try:
             root = ET.fromstring(body)
         except ET.ParseError:
-            return re.findall(r"<link>\s*(https?://[^<]+)\s*</link>", body, flags=re.IGNORECASE)
+            candidates = re.findall(r"<link>\s*(https?://[^<]+)\s*</link>", body, flags=re.IGNORECASE)
+            return [link for link in candidates if self._looks_like_article(link)]
         links = []
         for link in root.findall(".//link"):
             if link.text and link.text.startswith("http"):
-                links.append(link.text.strip())
+                clean_link = link.text.strip()
+                if self._looks_like_article(clean_link):
+                    links.append(clean_link)
         return links
 
     def _parse_page_links(self, body: str) -> list[str]:
@@ -175,12 +178,23 @@ class VNExpressCrawler(BaseCrawler):
         return [html.unescape(link).split("#")[0] for link in candidates if self._looks_like_article(link)]
 
     def _article_paragraphs(self, body: str) -> list[str]:
-        article_match = re.search(r"<article[^>]*class=[\"'][^\"']*fck_detail[^\"']*[\"'][^>]*>(.*?)</article>", body, flags=re.IGNORECASE | re.DOTALL)
+        article_match = re.search(r'<article[^>]*class=["\'][^"\']*fck_detail[^"\']*["\'][^>]*>(.*?)</article>', body, flags=re.IGNORECASE | re.DOTALL)
         scope = article_match.group(1) if article_match else body
-        paragraphs = re.findall(r"<p[^>]*class=[\"'][^\"']*Normal[^\"']*[\"'][^>]*>(.*?)</p>", scope, flags=re.IGNORECASE | re.DOTALL)
-        if not paragraphs:
-            paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", scope, flags=re.IGNORECASE | re.DOTALL)
-        return [self._html_to_text(paragraph) for paragraph in paragraphs if self._html_to_text(paragraph)]
+
+        # Grab all <p> tags inside the article body, covering Normal, Intermezzo, ArticleIntro, and plain <p>
+        paragraphs_html = re.findall(r'<p[^>]*>(.*?)</p>', scope, flags=re.IGNORECASE | re.DOTALL)
+
+        result = []
+        seen = set()
+        for raw_p in paragraphs_html:
+            # Skip nav/ads: paragraphs inside certain meta containers
+            if re.search(r'class=["\'][^"\']*(?:breadcrumb|tag_|author|copyright|ads|social|comment)[^"\']*["\']', raw_p, re.IGNORECASE):
+                continue
+            text = self._html_to_text(raw_p)
+            if text and text not in seen:
+                seen.add(text)
+                result.append(text)
+        return result
 
     def _image_urls(self, body: str) -> list[str]:
         urls = []
