@@ -40,7 +40,6 @@ class CrawlJobResponse(BaseModel):
     total_failed: int
     total_duplicates: int
     progress_percent: float
-    requested_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -49,8 +48,6 @@ class CrawlLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    job_id: uuid.UUID
-    task_id: uuid.UUID | None
     source_type: str | None
     stage: str
     level: str

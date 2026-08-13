@@ -5,7 +5,7 @@ import {
   Loader2, FileText, Sparkles, ArrowRight, CheckCircle, AlertCircle, ChevronDown
 } from 'lucide-react';
 import type { Article } from '@/commons/store/slices/articlesSlice';
-import { fetchArticleDetailApi, createModule2HandoffApi, type PlanningProfile } from '@/commons/apis/api';
+import { fetchArticleDetailApi, createModule2HandoffApi, createPlanningJobApi, type PlanningProfile } from '@/commons/apis/api';
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles';
 
 interface ArticleDetailModalProps {
@@ -14,7 +14,7 @@ interface ArticleDetailModalProps {
   workspaceMode?: string;
 }
 
-export default function ArticleDetailModal({ article: initialArticle, onClose, workspaceMode }: ArticleDetailModalProps) {
+export default function ArticleDetailModal({ article: initialArticle, onClose }: ArticleDetailModalProps) {
   const [article, setArticle] = useState<Article>(initialArticle);
   const [loading, setLoading] = useState<boolean>(true);
   const [sendingToModule2, setSendingToModule2] = useState(false);
@@ -27,7 +27,7 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, w
     if (targetId) {
       setLoading(true);
       fetchArticleDetailApi(targetId)
-        .then(data => setArticle(data))
+        .then(data => setArticle({ ...initialArticle, ...data, status: (data as Partial<Article>).status || initialArticle.status }))
         .catch(err => console.error('Failed to load article detail:', err))
         .finally(() => setLoading(false));
     }
@@ -46,13 +46,29 @@ export default function ArticleDetailModal({ article: initialArticle, onClose, w
     setSendingToModule2(true);
     setModule2Result(null);
     try {
-      await createModule2HandoffApi({
+      const handoff = await createModule2HandoffApi({
         profile_id: selectedProfileId,
         content_ids: [article.id],
         selection_mode: 'MANUAL',
+        candidate_limit: 1,
         handoff_note: `Chuyển thủ công từ Global Content Store: "${article.title}"`,
+        filters: {
+          manual_direct_script: true,
+          bypass_scoring: true,
+          source: 'legacy_article_modal',
+          content_ids: [article.id],
+        },
       });
-      setModule2Result({ success: true, message: 'Đã chuyển thành công sang Module 2 - AI Planning!' });
+      await createPlanningJobApi({
+        profile_id: selectedProfileId,
+        handoff_id: handoff.id,
+        planning_mode: 'SINGLE',
+        target_duration_seconds: 60,
+        preferred_part_count: 1,
+        language: 'vi',
+        instructions: 'manual_direct_script: true. Bỏ qua chấm điểm và tạo luôn kịch bản video đơn lẻ từ đúng bài người dùng đã chọn.',
+      })
+      setModule2Result({ success: true, message: 'Đã tạo job kịch bản trực tiếp trong Module 2.' });
     } catch (err: any) {
       const detail = err?.response?.data?.detail || 'Không thể chuyển sang Module 2';
       setModule2Result({ success: false, message: detail });

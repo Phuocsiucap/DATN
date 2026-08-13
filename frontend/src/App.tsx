@@ -11,6 +11,8 @@ import DashboardPage from '@/features/dashboard/DashboardPage'
 import CrawlPage from '@/features/crawl/CrawlPage'
 import ContentPage from '@/features/content/ContentPage'
 import PlanningPage from '@/features/planning/PlanningPage'
+import Module3ProjectsPage from '@/features/module3/Module3ProjectsPage'
+import VideoProductionWorkspace from '@/features/module3/VideoProductionWorkspace'
 import SettingsPage from '@/features/settings/SettingsPage'
 
 import AuthPage from '@/features/auth/AuthPage'
@@ -30,11 +32,20 @@ const PATH_TABS = Object.fromEntries(
 
 const getTabFromPath = (): Tab => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (normalizedPath.startsWith('/module3')) return 'module3'
   return PATH_TABS[normalizedPath] ?? 'dashboard'
+}
+
+const getModule3HandoffIdFromPath = () => {
+  const normalizedPath = window.location.pathname.replace(/\/+$/, '')
+  const match = normalizedPath.match(/^\/module3\/([^/?#]+)/)
+  if (match?.[1]) return decodeURIComponent(match[1])
+  return new URLSearchParams(window.location.search).get('handoff_id') || ''
 }
 
 function AppContent() {
   const [tab, setTab] = useState<Tab>(getTabFromPath)
+  const [module3HandoffId, setModule3HandoffId] = useState(getModule3HandoffIdFromPath)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -48,6 +59,7 @@ function AppContent() {
 
   const handleTabChange = useCallback((nextTab: Tab, replace = false) => {
     setTab(nextTab)
+    setModule3HandoffId('')
     const nextPath = TAB_PATHS[nextTab]
     if (window.location.pathname === nextPath) return
     const method = replace ? 'replaceState' : 'pushState'
@@ -57,6 +69,19 @@ function AppContent() {
   const handleOpenProfileSettings = useCallback((profileId: string) => {
     setTab('settings')
     window.history.pushState({ openProfileId: profileId, openTab: 'strategy' }, '', TAB_PATHS.settings)
+  }, [])
+
+  const handleOpenModule3 = useCallback((handoffId?: string) => {
+    setTab('module3')
+    setModule3HandoffId(handoffId || '')
+    const suffix = handoffId ? `/${encodeURIComponent(handoffId)}` : ''
+    window.history.pushState({ handoffId }, '', `${TAB_PATHS.module3}${suffix}`)
+  }, [])
+
+  const handleOpenModule2 = useCallback((jobId?: string) => {
+    setTab('planning')
+    const suffix = jobId ? `?job_id=${encodeURIComponent(jobId)}` : ''
+    window.history.pushState({ jobId }, '', `${TAB_PATHS.planning}${suffix}`)
   }, [])
 
   const loadCurrentUser = async () => {
@@ -86,7 +111,10 @@ function AppContent() {
   }, [handleTabChange])
 
   useEffect(() => {
-    const handlePopState = () => setTab(getTabFromPath())
+    const handlePopState = () => {
+      setTab(getTabFromPath())
+      setModule3HandoffId(getModule3HandoffIdFromPath())
+    }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
@@ -106,8 +134,8 @@ function AppContent() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="bento-card rounded-2xl px-6 py-4 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
+      <div className="compact-ui min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="bento-card px-4 py-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
           Loading session...
         </div>
       </div>
@@ -119,7 +147,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--surface)' }}>
+    <div className="compact-ui flex min-h-screen" style={{ backgroundColor: 'var(--surface)' }}>
       <Sidebar
         activeTab={tab}
         onTabChange={handleTabChange}
@@ -132,13 +160,18 @@ function AppContent() {
           onLogout={() => void handleLogout()}
           isSystemUser={isSystemUser}
         />
-        <div className="p-6 max-w-[1440px] mx-auto w-full">
+        <div className="w-full max-w-[1680px] mx-auto px-4 py-4 pb-20 md:px-5 md:pb-4">
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
-          {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} />}
-          {tab === 'content' && <ContentPage isSystemUser={isSystemUser} />}
-          {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
-          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
-          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} />}
+          {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
+          {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
+          {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
+          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
+          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
+          {tab === 'module3' && (module3HandoffId ? (
+            <VideoProductionWorkspace handoffId={module3HandoffId} onBackToList={() => handleOpenModule3()} />
+          ) : (
+            <Module3ProjectsPage onOpenProject={(handoffId) => handleOpenModule3(handoffId)} />
+          ))}
           {tab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

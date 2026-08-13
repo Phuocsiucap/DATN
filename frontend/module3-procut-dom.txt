@@ -1,0 +1,15 @@
+SOCIALCONTENT
+
+STUDIO
+
+Đăng nhập hệ thống
+
+Dùng tài khoản được cấp để vào dashboard.
+
+Login
+Register
+Email
+Password
+Đăng nhập dashboard
+
+SocialContent Studio

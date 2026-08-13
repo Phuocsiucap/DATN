@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.db.bootstrap import ensure_roles
 from common.db.models import Base
 from common.db.session import SessionLocal, engine
+from app.services.module3_video_production import enqueue_unfinished_render_jobs
 from app.api.routes import (
     admin,
     auth,
@@ -18,6 +19,7 @@ from app.api.routes import (
     handoffs,
     media_proxy,
     module3_handoffs,
+    module3_video_production,
     planning_jobs,
     profile_planning,
     social_profiles,
@@ -35,6 +37,10 @@ async def lifespan(app: FastAPI):
         print(f"[api-service] Base.metadata.create_all warning: {e}")
     with SessionLocal() as db:
         ensure_roles(db)
+    try:
+        enqueue_unfinished_render_jobs()
+    except Exception as e:
+        print(f"[api-service] module3 render queue resume warning: {e}")
     yield
 
 
@@ -64,6 +70,7 @@ app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["pro
 app.include_router(content_plans.router, prefix="/api/v1/content-plans", tags=["content-plans"])
 app.include_router(content_series.router, prefix="/api/v1/content-series", tags=["content-series"])
 app.include_router(module3_handoffs.router, prefix="/api/v1/module3/handoffs", tags=["module3-handoffs"])
+app.include_router(module3_video_production.router, prefix="/api/v1/module3/video-production", tags=["module3-video-production"])
 
 
 @app.get("/health")

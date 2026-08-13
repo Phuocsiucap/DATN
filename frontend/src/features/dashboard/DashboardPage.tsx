@@ -62,53 +62,50 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
   const isRunning = schedulerStatus === 'running'
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="space-y-5">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-semibold tracking-tight" style={{ color: 'var(--on-surface)' }}>
+          <h2 className="text-xl font-semibold" style={{ color: 'var(--on-surface)' }}>
             {isSystemUser ? 'System Dashboard' : 'My Dashboard'}
           </h2>
-          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
+          <p className="text-xs mt-1 max-w-2xl" style={{ color: 'var(--on-surface-variant)' }}>
             {isSystemUser
               ? 'Theo dõi toàn bộ hoạt động crawl, queue, account và publish của hệ thống.'
               : 'Theo dõi bài phù hợp, queue sắp đăng và hiệu quả các social account của bạn.'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all"
+            className="inline-flex h-8 items-center gap-1.5 px-3 rounded-md text-xs font-semibold border transition-colors hover:bg-[var(--surface-container-low)]"
             style={{
               color: 'var(--on-surface)',
               borderColor: 'var(--outline-variant)',
-              backgroundColor: 'transparent',
+              backgroundColor: 'var(--surface-container-lowest)',
             }}
           >
-            <Download size={16} />
+            <Download size={14} />
             Export Report
           </button>
           <button
             onClick={handleCrawl}
             disabled={crawling || loading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50 shadow-lg"
+            className="inline-flex h-8 items-center gap-1.5 px-3 rounded-md text-xs font-semibold transition-colors disabled:opacity-50"
             style={{
-              backgroundColor: 'var(--primary)',
+              backgroundColor: 'var(--accent)',
               color: 'var(--on-primary)',
-              boxShadow: '0 0 15px -3px rgba(33,112,228,0.2)',
             }}
           >
-            <Sparkles size={16} className={crawling ? 'animate-spin' : ''} />
+            <Sparkles size={14} className={crawling ? 'animate-spin' : ''} />
             {crawling ? 'Scanning...' : 'AI Content Scan'}
           </button>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label={isSystemUser ? 'Total Collected' : 'Matched Articles'}
           value={stats?.total_articles.toLocaleString() ?? '—'}
-          icon={<Newspaper size={20} />}
+          icon={<Newspaper size={18} />}
           trend={isSystemUser ? '+system' : `${stats?.feed_low_suggestions ?? 0} low`}
           trendUp={true}
           iconBg="var(--surface-container)"
@@ -117,7 +114,7 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
         <StatCard
           label={isSystemUser ? 'Active Users' : 'Active Accounts'}
           value={isSystemUser ? (stats?.users_active ?? '—') : (stats?.profiles_active ?? '—')}
-          icon={isSystemUser ? <UsersRound size={20} /> : <CircleUserRound size={20} />}
+          icon={isSystemUser ? <UsersRound size={18} /> : <CircleUserRound size={18} />}
           trend={isSystemUser ? `${stats?.users_total ?? 0} total` : `${stats?.profiles_total ?? 0} total`}
           trendUp={true}
           iconBg="#dcfce7"
@@ -126,42 +123,40 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
         <StatCard
           label={isSystemUser ? 'Upcoming Queue' : 'Sắp đăng'}
           value={stats?.queue_status?.upcoming ?? '—'}
-          icon={<Clock size={20} />}
-          badge={<span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
+          icon={<Clock size={18} />}
+          badge={<span className="text-[11px]" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
           iconBg="#dbeafe"
           iconColor="#2563eb"
         />
         <StatCard
           label={isSystemUser ? 'System Health' : 'Published'}
           value={isSystemUser ? (isRunning ? 'Active' : 'Stopped') : (stats?.published_total ?? '—')}
-          icon={isSystemUser ? <TrendingUp size={20} /> : <CheckCircle size={20} />}
+          icon={isSystemUser ? <TrendingUp size={18} /> : <CheckCircle size={18} />}
           accentBorder
           iconBg="rgba(0,164,114,0.1)"
           iconColor="#00a472"
           badge={
-            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">
+            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">
               {isSystemUser ? (isRunning ? 'LIVE' : 'OFF') : `${stats?.published_failed ?? 0} failed`}
             </span>
           }
         />
       </div>
 
-      {/* Chart + Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chart */}
-        <div className="lg:col-span-2 bento-card rounded-xl p-6">
-          <div className="flex items-center justify-between mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bento-card rounded-xl p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--on-surface)' }}>
+              <h3 className="text-base font-semibold" style={{ color: 'var(--on-surface)' }}>
                 Content Distribution
               </h3>
-              <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
+              <p className="text-xs mt-1" style={{ color: 'var(--on-surface-variant)' }}>
                 {isSystemUser ? 'Breakdown of posts across primary channels' : 'Queue trạng thái của các account của bạn'}
               </p>
             </div>
             <select
-              className="px-4 py-2 rounded-lg text-sm border-none outline-none"
-              style={{ backgroundColor: 'var(--surface-container-low)' }}
+              className="h-8 rounded-md border px-3 text-xs outline-none"
+              style={{ backgroundColor: 'var(--surface-container-low)', borderColor: 'var(--outline-variant)' }}
             >
               <option>Last 7 Days</option>
               <option>Last 30 Days</option>
@@ -169,16 +164,16 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
           </div>
 
           {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={280}>
               <BarChart data={chartData}>
                 <XAxis
                   dataKey="name"
-                  tick={{ fill: 'var(--on-surface-variant)', fontSize: 12 }}
+                  tick={{ fill: 'var(--on-surface-variant)', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
-                  tick={{ fill: 'var(--on-surface-variant)', fontSize: 12 }}
+                  tick={{ fill: 'var(--on-surface-variant)', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -191,11 +186,11 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
                     fontSize: '13px',
                   }}
                 />
-                <Bar dataKey="value" fill="var(--secondary)" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill="var(--accent)" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex items-center justify-center h-[300px]" style={{ color: 'var(--on-surface-variant)' }}>
+            <div className="flex items-center justify-center h-[280px]" style={{ color: 'var(--on-surface-variant)' }}>
               <p className="text-sm">Chưa có dữ liệu</p>
             </div>
           )}
@@ -205,20 +200,19 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
         <EventFeed />
       </div>
 
-      {/* Scheduler Control */}
-      <div className="bento-card rounded-xl p-6">
+      <div className="bento-card rounded-xl p-5">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="flex flex-col">
-              <span className="text-xs font-semibold uppercase tracking-wider mb-1"
+              <span className="text-xs font-semibold uppercase mb-1"
                 style={{ color: 'var(--on-surface-variant)' }}>
                 {isSystemUser ? 'Scheduler Status' : 'Automation Status'}
               </span>
               <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${
+                <span className={`w-2 h-2 rounded-full ${
                   isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
                 }`} />
-                <span className="text-base font-semibold capitalize" style={{ color: 'var(--on-surface)' }}>
+                <span className="text-sm font-semibold capitalize" style={{ color: 'var(--on-surface)' }}>
                   {schedulerStatus}
                 </span>
               </div>
@@ -229,18 +223,18 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
             {isSystemUser && (!isRunning ? (
               <button
                 onClick={handleStartScheduler}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all"
+                className="inline-flex h-8 items-center gap-1.5 px-3 rounded-md text-xs font-semibold transition-colors"
                 style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}
               >
-                <Play size={14} fill="currentColor" /> Start Scheduler
+                <Play size={13} fill="currentColor" /> Start Scheduler
               </button>
             ) : (
               <button
                 onClick={handleStopScheduler}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all"
+                className="inline-flex h-8 items-center gap-1.5 px-3 rounded-md text-xs font-semibold transition-colors"
                 style={{ backgroundColor: '#fef3c7', color: '#d97706' }}
               >
-                <Pause size={14} fill="currentColor" /> Pause Scheduler
+                <Pause size={13} fill="currentColor" /> Pause Scheduler
               </button>
             ))}
           </div>

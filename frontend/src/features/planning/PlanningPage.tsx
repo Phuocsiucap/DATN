@@ -4,7 +4,6 @@ import { Loader2, RefreshCcw, Video, CheckCircle2, XCircle, ChevronRight, Filter
 
 import {
   approveContentPlanApi,
-  fetchModule2HandoffsApi,
   fetchPlanningJobsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
@@ -33,14 +32,15 @@ export default function PlanningPage({
   initialStep = 'jobs',
   isSystemUser = false,
   onOpenProfileSettings,
+  onOpenModule3,
 }: {
   initialStep?: PipelineStep
   isSystemUser?: boolean
   onOpenProfileSettings?: (profileId: string) => void
+  onOpenModule3?: (handoffId?: string) => void
 }) {
   const [activeStep] = useState<PipelineStep>(initialStep)
   const [jobs, setJobs] = useState<PlanningJob[]>([])
-  const [handoffs, setHandoffs] = useState<Record<string, string>>({})
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
@@ -83,32 +83,8 @@ export default function PlanningPage({
     setMessage('')
     try {
       if (activeStep === 'jobs') {
-        const [nextJobs, nextHandoffs] = await Promise.all([
-          fetchPlanningJobsApi(),
-          fetchModule2HandoffsApi(),
-        ])
-        const handoffMap: Record<string, string> = {}
-        nextHandoffs.forEach(h => {
-          let note = h.handoff_note
-          if (note === 'Auto dataset from Module 1 crawl completion') {
-            note = 'Nguồn Crawl: Hệ thống tự động'
-          }
-
-          let title = note || 'Auto Handoff'
-          if (h.selection_mode === 'CRAWL_JOB_SOURCE' && !note) title = 'Duyệt theo Crawl Job'
-          if (h.selection_mode === 'MANUAL_SELECTION' && !note) title = 'Chỉ định thủ công'
-
-          if (h.selection_mode === 'AUTO' || h.selection_mode === 'MANUAL') {
-            title = note || title
-          } else {
-            title = title + (note && title !== note ? ` - ${note}` : '')
-          }
-
-          handoffMap[h.id] = title
-        })
-
+        const nextJobs = await fetchPlanningJobsApi()
         setJobs(nextJobs)
-        setHandoffs(handoffMap)
         return
       }
 
@@ -193,19 +169,19 @@ export default function PlanningPage({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
+    <div className="workspace-page">
+      <div className="workspace-header">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-bold text-[#0f172a]">{pageTitle}</h2>
+              <h2 className="workspace-title">{pageTitle}</h2>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${!isSystemUser ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
                 {!isSystemUser ? 'PRIVATE WORKSPACE' : 'SYSTEM OVERVIEW'}
               </span>
             </div>
-            <p className="mt-1 text-sm text-[#64748b]">{pageDescription}</p>
+            <p className="workspace-subtitle">{pageDescription}</p>
           </div>
-          <button onClick={handleRefresh} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9e0ea] bg-white px-4 text-sm font-semibold text-[#475569] hover:bg-slate-50 transition-colors">
+          <button onClick={handleRefresh} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] bg-white px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50 transition-colors">
             <RefreshCcw size={15} /> Tải lại
           </button>
         </div>
@@ -221,22 +197,22 @@ export default function PlanningPage({
         <div className="min-h-[600px]">
           {activeStep === 'jobs' && (
             <div className="space-y-4">
-              {jobs.length === 0 ? <div className="rounded-xl border border-[#d9e0ea] bg-white"><Empty label="Không có Job AI nào đang chạy" /></div> : jobs.map((job) => (
-                <div key={job.id} onClick={() => setSelectedJob(job)} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:border-slate-300 transition-all relative overflow-hidden group">
-                  <div className="flex justify-between items-start mb-8">
+              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Không có Job AI nào đang chạy" /></div> : jobs.map((job) => (
+                <div key={job.id} onClick={() => setSelectedJob(job)} className="workspace-card p-4 cursor-pointer hover:border-slate-300 transition-all relative overflow-hidden group">
+                  <div className="flex justify-between items-start mb-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-mono text-sm font-bold text-slate-700">#{shortId(job.id)}</span>
                         <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase">{job.planning_mode}</span>
                         <Badge value={job.status} />
                       </div>
-                      <div className="text-sm font-bold text-[#3525cd] mt-2 mb-1">
-                        {handoffs[job.handoff_id] || 'Đang xử lý dữ liệu...'}
+                      <div className="mt-2 mb-1 text-sm font-bold text-[var(--accent)]">
+                        Job AI Planning
                       </div>
                       <div className="text-xs text-slate-500 font-mono">Started: {formatDate(job.created_at)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-bold text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
+                      <div className="text-lg font-bold text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
                       <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Tiến độ</div>
                     </div>
                   </div>
@@ -244,7 +220,7 @@ export default function PlanningPage({
                   {/* Pipeline Topology */}
                   <div className="relative px-2 pb-2">
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-[2px] bg-slate-100 z-0 rounded-full"></div>
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] bg-gradient-to-r from-[#3525cd] to-[#006c49] z-0 transition-all duration-1000 rounded-full" style={{ width: `${job.progress_percent}%` }}></div>
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] bg-[var(--accent)] z-0 transition-all duration-1000 rounded-full" style={{ width: `${job.progress_percent}%` }}></div>
 
                     <div className="flex items-center justify-between relative z-10">
                       {[
@@ -268,8 +244,8 @@ export default function PlanningPage({
                         let boxClass = 'bg-white border-slate-200 text-slate-400'
                         let iconClass = 'text-slate-400'
                         if (state === 'done') {
-                          boxClass = 'bg-[#f5f2ff] border-[#3525cd] text-[#3525cd] shadow-sm'
-                          iconClass = 'text-[#3525cd]'
+                          boxClass = 'bg-blue-50 border-[var(--accent)] text-[var(--accent-strong)] shadow-sm'
+                          iconClass = 'text-[var(--accent)]'
                         } else if (state === 'current') {
                           boxClass = 'bg-blue-50 border-blue-400 text-blue-700 ring-4 ring-blue-100/50 shadow-sm'
                           iconClass = 'text-blue-600 animate-pulse'
@@ -286,7 +262,7 @@ export default function PlanningPage({
                             </div>
                             {idx < arr.length - 1 && (
                               <div className="px-2">
-                                <ChevronRight size={16} className={`${state === 'done' ? 'text-[#3525cd]' : 'text-slate-300'}`} />
+                                <ChevronRight size={16} className={`${state === 'done' ? 'text-[var(--accent)]' : 'text-slate-300'}`} />
                               </div>
                             )}
                           </div>
@@ -345,11 +321,11 @@ export default function PlanningPage({
 
               <div className="space-y-6">
                 {plansLoading ? (
-                  <div className="flex items-center justify-center rounded-xl border border-[#d9e0ea] bg-white p-12 text-sm text-slate-500">
+                  <div className="loading-state">
                     <Loader2 className="mr-2 animate-spin" size={18} /> Đang tải series của profile...
                   </div>
                 ) : reviewSeries.length === 0 ? (
-                  <div className="rounded-xl border border-[#d9e0ea] bg-white"><Empty label="Profile này chưa có series nào để duyệt" /></div>
+                  <div className="workspace-card"><Empty label="Profile này chưa có series nào để duyệt" /></div>
                 ) : reviewSeries.map((item) => (
                   <section key={item.series.id} className="rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-sm">
                     <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -364,15 +340,16 @@ export default function PlanningPage({
                       </div>
                     </div>
 
-                    <div className="overflow-hidden rounded-lg border border-[#eef2f7] bg-white">
-                      <div className="grid grid-cols-[96px_2fr_0.8fr_0.8fr_0.8fr_1.4fr] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#64748b]">
-                        <div>Preview</div>
-                        <div>Bài báo gốc</div>
-                        <div>Nguồn</div>
-                        <div>Quality</div>
-                        <div>Part</div>
-                        <div className="text-right">Thao tác</div>
-                      </div>
+                    <div className="table-scroll rounded-lg border border-[#eef2f7] bg-white">
+                      <div className="data-grid-lg">
+                        <div className="grid grid-cols-[96px_2fr_0.8fr_0.8fr_0.8fr_1.4fr] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#64748b]">
+                          <div>Preview</div>
+                          <div>Bài báo gốc</div>
+                          <div>Nguồn</div>
+                          <div>Quality</div>
+                          <div>Part</div>
+                          <div className="text-right">Thao tác</div>
+                        </div>
                       {item.articles.length === 0 ? (
                         <div className="w-full rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Series này chưa có bài.</div>
                       ) : item.articles.map((article, articleIndex) => (
@@ -423,8 +400,9 @@ export default function PlanningPage({
                                   onClick={async (event) => {
                                     event.stopPropagation()
                                     try {
-                                      await approveContentPlanApi(article.plan!.id)
+                                      const result = await approveContentPlanApi(article.plan!.id)
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
+                                      onOpenModule3?.(result.module3_handoffs?.[0]?.id)
                                     } catch {
                                       alert('Lỗi phê duyệt!')
                                     }
@@ -452,6 +430,7 @@ export default function PlanningPage({
                           </div>
                         </div>
                       ))}
+                      </div>
                     </div>
                   </section>
                 ))}
@@ -465,7 +444,7 @@ export default function PlanningPage({
                 <Video size={48} className="mx-auto text-slate-400 mb-4" />
                 <h3 className="text-lg font-bold text-slate-700 mb-2">Sản xuất Video (Module 3)</h3>
                 <p className="text-sm text-slate-500 mb-6">Đầu ra của Series đã sẵn sàng chuyển sang Module 3 để tự động dựng video và lồng tiếng.</p>
-                <button className="px-6 py-3 rounded-xl bg-[#091426] text-white font-bold shadow-md hover:bg-[#1e293b] transition-colors">
+                <button onClick={() => onOpenModule3?.()} className="h-9 rounded-md bg-[var(--primary)] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#1e293b]">
                   Chuyển sang Sản Xuất Video
                 </button>
               </div>
@@ -496,31 +475,31 @@ export default function PlanningPage({
       />
 
       <Sheet open={!!regeneratePlan} onOpenChange={(open) => !open && setRegeneratePlan(null)}>
-        <SheetContent side="right" className="max-w-[560px]">
-          <div className="flex h-full flex-col bg-white">
-            <div className="border-b border-[#eef2f7] bg-[#f8fafc] px-7 py-6 pr-16">
-              <div className="mb-2 inline-flex rounded-lg bg-blue-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-blue-800">Regenerate bài</div>
-              <h2 className="text-2xl font-black leading-tight text-[#0f172a]">{regeneratePlan?.title || 'Viết lại bài'}</h2>
-              <p className="mt-2 text-sm leading-6 text-[#64748b]">Nhập yêu cầu cụ thể để AI viết lại đúng bài này.</p>
+        <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[560px]">
+          <div className="detail-shell">
+            <div className="detail-header">
+              <div className="mb-2 inline-flex rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-black uppercase text-blue-800">Regenerate bài</div>
+              <h2 className="text-xl font-black leading-tight text-[#0f172a]">{regeneratePlan?.title || 'Viết lại bài'}</h2>
+              <p className="mt-2 text-xs leading-5 text-[#64748b]">Nhập yêu cầu cụ thể để AI viết lại đúng bài này.</p>
             </div>
 
-            <div className="flex-1 space-y-4 overflow-y-auto px-7 py-6">
+            <div className="detail-body space-y-4">
               <label className="block">
-                <span className="mb-2 block text-xs font-black uppercase tracking-wider text-slate-500">Yêu cầu viết lại</span>
+                <span className="detail-label mb-2 block">Yêu cầu viết lại</span>
                 <textarea
                   value={regenerateInstructions}
                   onChange={(event) => setRegenerateInstructions(event.target.value)}
-                  className="min-h-[180px] w-full resize-none rounded-lg border border-[#d9e0ea] bg-white px-4 py-3 text-sm leading-6 text-[#0f172a] outline-none focus:border-[#3525cd] focus:ring-2 focus:ring-[#3525cd]/10"
+                  className="min-h-[180px] w-full resize-none rounded-md border border-[#d9e0ea] bg-white px-3 py-2 text-sm leading-6 text-[#0f172a] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
                   placeholder="Ví dụ: viết hook mạnh hơn, giọng căng hơn, chỉ giữ 1 part. Nếu muốn chia nhiều part, ghi rõ: chia thành 3 part..."
                 />
               </label>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-[#eef2f7] px-7 py-4">
+            <div className="flex items-center justify-end gap-2 border-t border-[#eef2f7] px-5 py-3">
               <button
                 type="button"
                 onClick={() => setRegeneratePlan(null)}
-                className="inline-flex h-10 items-center rounded-lg border border-[#d9e0ea] bg-white px-4 text-sm font-bold text-[#475569] hover:bg-slate-50"
+                className="inline-flex h-8 items-center rounded-md border border-[#d9e0ea] bg-white px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50"
               >
                 Hủy
               </button>
@@ -528,7 +507,7 @@ export default function PlanningPage({
                 type="button"
                 onClick={() => void submitRegenerateArticle()}
                 disabled={regenerateSubmitting}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#3525cd] px-4 text-sm font-bold text-white hover:bg-[#2b1faa] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {regenerateSubmitting ? <Loader2 size={16} className="animate-spin" /> : <RefreshCcw size={16} />}
                 Gửi viết lại
@@ -560,30 +539,30 @@ function ArticleReviewSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="max-w-[920px]">
-        <div className="flex h-full flex-col bg-white">
-          <div className="border-b border-[#eef2f7] bg-[#f8fafc] px-7 py-6 pr-16">
+      <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[920px]">
+        <div className="detail-shell">
+          <div className="detail-header">
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="rounded-lg bg-[#091426] px-3 py-1 text-xs font-black uppercase tracking-wider text-white">Bài review</span>
+              <span className="rounded-md bg-[var(--primary)] px-2 py-0.5 text-[10px] font-black uppercase text-white">Bài review</span>
               {article.plan ? <Badge value={article.plan.status} /> : <Badge value="UNLINKED" />}
-              <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{article.parts.length} part</span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{article.parts.length} part</span>
             </div>
-            <h2 className="text-2xl font-black leading-tight text-[#0f172a]">{article.plan?.title || source?.canonical_title || 'Bài chưa liên kết kế hoạch'}</h2>
-            <p className="mt-2 text-sm font-semibold text-[#64748b]">{seriesTitle}</p>
+            <h2 className="text-xl font-black leading-tight text-[#0f172a]">{article.plan?.title || source?.canonical_title || 'Bài chưa liên kết kế hoạch'}</h2>
+            <p className="mt-2 text-xs font-semibold text-[#64748b]">{seriesTitle}</p>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-7 py-6">
-            <div className="grid gap-6">
+          <div className="detail-body">
+            <div className="grid gap-4">
               {source && (
-                <section className="rounded-lg border border-blue-200 bg-blue-50/40 p-5">
+                <section className="detail-section border-blue-200 bg-blue-50/40">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <span className="rounded bg-blue-100 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-blue-800">Bài gốc</span>
+                        <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-black uppercase text-blue-800">Bài gốc</span>
                         {source.source_type && <span className="text-xs font-bold text-slate-500">{source.source_type}</span>}
                         <span className="text-xs font-bold text-slate-500">Quality {Number(source.quality_score || 0).toFixed(0)}</span>
                       </div>
-                      <h3 className="text-lg font-black text-[#0f172a]">{source.canonical_title}</h3>
+                      <h3 className="text-base font-black text-[#0f172a]">{source.canonical_title}</h3>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
                       {sourceUrl && (
@@ -592,7 +571,7 @@ function ArticleReviewSheet({
                           target="_blank"
                           rel="noreferrer"
                           onClick={(event) => event.stopPropagation()}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50"
                         >
                           <ExternalLink size={15} /> Link nguồn
                         </a>
@@ -600,7 +579,7 @@ function ArticleReviewSheet({
                       <button
                         type="button"
                         onClick={() => onOpenSource(source)}
-                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-700 px-3 text-xs font-bold text-white hover:bg-blue-800"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-bold text-white hover:bg-[var(--accent-strong)]"
                       >
                         <FileText size={15} /> View full
                       </button>
@@ -613,8 +592,8 @@ function ArticleReviewSheet({
                     <ReviewMediaPreview source={source} onOpen={() => onOpenSource(source)} />
                   )}
 
-                  <div className="max-h-[260px] overflow-y-auto rounded-lg border border-blue-100 bg-white p-4">
-                    <div className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-500">Nội dung gốc</div>
+                  <div className="max-h-[260px] overflow-y-auto rounded-md border border-blue-100 bg-white p-3">
+                    <div className="detail-label mb-2">Nội dung gốc</div>
                     <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
                       {source.full_text || source.summary || 'Backend chưa có full text cho bài này.'}
                     </div>
@@ -623,9 +602,9 @@ function ArticleReviewSheet({
               )}
 
               {article.plan && (
-                <section className="rounded-lg border border-slate-200 bg-white p-5">
-                  <div className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-500">Plan</div>
-                  <h3 className="text-lg font-black text-[#0f172a]">{article.plan.title}</h3>
+                <section className="detail-section">
+                  <div className="detail-label mb-2">Plan</div>
+                  <h3 className="text-base font-black text-[#0f172a]">{article.plan.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-700">{article.plan.content_angle || 'Chưa có góc khai thác.'}</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-lg border border-slate-200 p-3">
@@ -644,9 +623,9 @@ function ArticleReviewSheet({
                 </section>
               )}
 
-              <section className="rounded-lg border border-slate-200 bg-white p-5">
+              <section className="detail-section">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="text-[11px] font-black uppercase tracking-wider text-slate-500">Part / kịch bản sinh ra</div>
+                  <div className="detail-label">Part / kịch bản sinh ra</div>
                   <span className="text-xs font-bold text-slate-400">{article.parts.length} part</span>
                 </div>
                 {article.parts.length === 0 ? (
@@ -654,10 +633,10 @@ function ArticleReviewSheet({
                 ) : (
                   <div className="grid gap-4">
                     {article.parts.map((part) => (
-                      <div key={part.id} className="rounded-lg border border-slate-200 bg-[#fbfcfe] p-4">
+                      <div key={part.id} className="rounded-md border border-slate-200 bg-[#fbfcfe] p-4">
                         <div className="mb-3 flex flex-wrap items-center gap-2">
-                          <span className="rounded-lg bg-[#091426] px-3 py-1 text-xs font-black uppercase tracking-wider text-white">Part {part.part_number}</span>
-                          <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{part.part_type}</span>
+                          <span className="rounded-md bg-[var(--primary)] px-2 py-0.5 text-[10px] font-black uppercase text-white">Part {part.part_number}</span>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{part.part_type}</span>
                           <Badge value={part.status} />
                         </div>
                         <h4 className="text-base font-black text-[#0f172a]">{part.title}</h4>
@@ -705,9 +684,9 @@ function ReviewMediaPreview({
   const remainingCount = Math.max(0, (source.media || []).length - mediaItems.length)
 
   return (
-    <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+    <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Ảnh / video gốc</div>
+        <div className="detail-label">Ảnh / video gốc</div>
         <button
           type="button"
           onClick={onOpen}
@@ -818,15 +797,15 @@ function SourceContentSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="max-w-[860px]">
-        <div className="flex h-full flex-col bg-white">
-          <div className="border-b border-[#eef2f7] bg-[#f8fafc] px-7 py-6 pr-16">
+      <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[860px]">
+        <div className="detail-shell">
+          <div className="detail-header">
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="rounded-lg bg-blue-100 px-3 py-1 text-xs font-black uppercase tracking-wider text-blue-800">Bài gốc</span>
+              <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-black uppercase text-blue-800">Bài gốc</span>
               <Badge value={source.status} />
-              <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{source.content_type}</span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{source.content_type}</span>
             </div>
-            <h2 className="text-2xl font-black leading-tight text-[#0f172a]">{source.canonical_title}</h2>
+            <h2 className="text-xl font-black leading-tight text-[#0f172a]">{source.canonical_title}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-[#64748b]">
               {source.source_type && <span>{source.source_type}</span>}
               {source.source_author && <span>{source.source_author}</span>}
@@ -835,14 +814,14 @@ function SourceContentSheet({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-7 py-6">
-            <div className="grid gap-5">
+          <div className="detail-body">
+            <div className="grid gap-4">
               {sourceUrl && (
                 <a
                   href={sourceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
+                  className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
                 >
                   <ExternalLink size={16} /> Mở link nguồn
                 </a>
@@ -855,9 +834,9 @@ function SourceContentSheet({
               )}
 
               {mediaItems.length > 0 && (
-                <section className="rounded-lg border border-slate-200 bg-white p-5">
+                <section className="detail-section">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-[11px] font-black uppercase tracking-wider text-slate-500">Ảnh / video gốc</div>
+                    <div className="detail-label">Ảnh / video gốc</div>
                     <span className="text-xs font-bold text-slate-400">{mediaItems.length} media</span>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -891,16 +870,16 @@ function SourceContentSheet({
                 </section>
               )}
 
-              <section className="rounded-lg border border-slate-200 bg-white p-5">
-                <div className="mb-3 text-[11px] font-black uppercase tracking-wider text-slate-500">Nội dung đầy đủ</div>
+              <section className="detail-section">
+                <div className="detail-label mb-3">Nội dung đầy đủ</div>
                 <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
                   {source.full_text || source.summary || 'Backend chưa có full text cho bài này. Có thể nguồn crawl chưa lưu raw document hoặc chưa normalize xong.'}
                 </div>
               </section>
 
               {sources.length > 0 && (
-                <section className="rounded-lg border border-slate-200 bg-white p-5">
-                  <div className="mb-3 text-[11px] font-black uppercase tracking-wider text-slate-500">Nguồn crawl</div>
+                <section className="detail-section">
+                  <div className="detail-label mb-3">Nguồn crawl</div>
                   <div className="space-y-2">
                     {sources.map((item) => (
                       <a
@@ -943,8 +922,8 @@ function DetailBlock({
   }
 
   return (
-    <section className={`rounded-lg border p-4 ${styles[tone]}`}>
-      <div className="mb-2 text-[11px] font-black uppercase tracking-wider opacity-75">{title}</div>
+    <section className={`rounded-md border p-3 ${styles[tone]}`}>
+      <div className="mb-2 text-[11px] font-black uppercase opacity-75">{title}</div>
       <p className="text-sm leading-6">{children}</p>
     </section>
   )
@@ -964,8 +943,8 @@ function DetailList({
   const normalizedItems = normalizeDetailItems(items)
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="mb-3 text-[11px] font-black uppercase tracking-wider text-slate-500">{title}</div>
+    <section className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="detail-label mb-3">{title}</div>
       {normalizedItems.length === 0 ? (
         <p className="text-sm text-slate-500">{emptyLabel}</p>
       ) : (
@@ -1012,5 +991,5 @@ function Badge({ value }: { value: string }) {
 }
 
 function Empty({ label }: { label: string }) {
-  return <div className="p-12 text-center text-sm text-slate-500">{label}</div>
+  return <div className="empty-state m-3">{label}</div>
 }

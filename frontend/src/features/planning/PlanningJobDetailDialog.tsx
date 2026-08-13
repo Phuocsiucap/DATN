@@ -36,58 +36,55 @@ export function PlanningJobDetailDialog({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="max-w-[900px]">
-        <div className="flex h-full flex-col overflow-hidden bg-white">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#eef2f7] bg-[#f8fafc] px-6 py-4">
+      <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[900px]">
+        <div className="detail-shell">
+        <div className="detail-header flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-[#0f172a]">Chi Tiết Tiến Trình AI</h2>
+              <h2 className="text-base font-bold text-[#0f172a]">Chi Tiết Tiến Trình AI</h2>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                 job.status === 'COMPLETED' || job.status === 'WAITING_REVIEW' ? 'bg-emerald-100 text-emerald-800' : 
                 job.status === 'FAILED' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
               }`}>{job.status}</span>
             </div>
-            <p className="mt-1 text-sm text-[#64748b] font-mono">Job ID: {job.id.slice(0, 8)} • Mode: {job.planning_mode}</p>
+            <p className="mt-1 font-mono text-xs text-[#64748b]">Job ID: {job.id.slice(0, 8)} • Mode: {job.planning_mode}</p>
           </div>
-          <button onClick={() => onOpenChange(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors">
-            <X size={20} />
+          <button onClick={() => onOpenChange(false)} className="icon-button shrink-0 text-slate-500 hover:bg-slate-200 hover:text-slate-700">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex gap-1 border-b border-slate-200 px-6 pt-4 bg-white">
+        <div className="flex gap-1 border-b border-slate-200 bg-white px-5 pt-3">
           <button
             onClick={() => setActiveTab('candidates')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition-colors ${
-              activeTab === 'candidates' ? 'border-[#3525cd] text-[#3525cd]' : 'border-transparent text-slate-500 hover:text-slate-800'
+            className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-bold transition-colors ${
+              activeTab === 'candidates' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <FileCheck size={16} /> Ứng Viên ({candidates.length})
+            <FileCheck size={14} /> Ứng Viên ({candidates.length})
           </button>
           <button
             onClick={() => setActiveTab('logs')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition-colors ${
-              activeTab === 'logs' ? 'border-[#3525cd] text-[#3525cd]' : 'border-transparent text-slate-500 hover:text-slate-800'
+            className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-bold transition-colors ${
+              activeTab === 'logs' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Terminal size={16} /> Lịch Sử Chạy AI ({logs.length})
+            <Terminal size={14} /> Lịch Sử Chạy AI ({logs.length})
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
+        <div className="detail-body">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
-              <Loader2 className="h-8 w-8 animate-spin mb-4" />
-              <p>Đang tải dữ liệu tiến trình...</p>
+              <Loader2 className="mb-3 h-6 w-6 animate-spin" />
+              <p className="text-sm">Đang tải dữ liệu tiến trình...</p>
             </div>
           ) : activeTab === 'candidates' ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {candidates.length === 0 ? (
-                <div className="text-center p-10 text-slate-500">Không có ứng viên nào được chọn.</div>
+                <div className="empty-state">Không có ứng viên nào được chọn.</div>
               ) : candidates.map(c => (
-                <div key={c.id} className={`rounded-xl border bg-white p-5 shadow-sm ${c.eligible ? 'border-emerald-200' : 'border-slate-200 opacity-60'}`}>
+                <div key={c.id} className={`detail-section ${c.eligible ? 'border-emerald-200' : 'border-slate-200 opacity-70'}`}>
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
@@ -98,7 +95,7 @@ export function PlanningJobDetailDialog({
                         )}
                         <span className="font-mono text-[10px] text-slate-400">ID: {c.content_id?.slice(0, 8)}</span>
                       </div>
-                      <h4 className="font-bold text-[#091426] leading-snug">
+                      <h4 className="text-sm font-bold leading-snug text-[#091426]">
                         {c.content_title || 'Nội dung không xác định'}
                       </h4>
                       {c.content_url && (
@@ -107,12 +104,12 @@ export function PlanningJobDetailDialog({
                         </a>
                       )}
                     </div>
-                    <div className="font-bold text-lg text-[#091426] whitespace-nowrap ml-4">{c.candidate_score.toFixed(1)} đ</div>
+                    <div className="ml-4 whitespace-nowrap text-base font-bold text-[#091426]">{c.candidate_score.toFixed(1)} đ</div>
                   </div>
                   
                   <div className="grid gap-3">
                     {c.selection_reasons.length > 0 && (
-                      <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100">
+                      <div className="rounded-md border border-blue-100 bg-blue-50/50 p-3">
                         <div className="text-[10px] font-bold uppercase text-blue-800 mb-1">Lý do chọn</div>
                         <ul className="list-disc pl-4 text-sm text-blue-900 space-y-1">
                           {c.selection_reasons.map((r, i) => <li key={i}>{String(r)}</li>)}
@@ -120,7 +117,7 @@ export function PlanningJobDetailDialog({
                       </div>
                     )}
                     {c.rejection_reasons.length > 0 && (
-                      <div className="bg-red-50/50 p-3 rounded-lg border border-red-100">
+                      <div className="rounded-md border border-red-100 bg-red-50/50 p-3">
                         <div className="text-[10px] font-bold uppercase text-red-800 mb-1">Lý do loại</div>
                         <ul className="list-disc pl-4 text-sm text-red-900 space-y-1">
                           {c.rejection_reasons.map((r, i) => <li key={i}>{String(r)}</li>)}
@@ -134,7 +131,7 @@ export function PlanningJobDetailDialog({
           ) : (
             <div className="space-y-3">
               {logs.length === 0 ? (
-                <div className="text-center p-10 text-slate-500">Chưa có log chạy AI.</div>
+                <div className="empty-state">Chưa có log chạy AI.</div>
               ) : logs.map((log, i) => (
                 <div key={log.id} className="rounded-lg bg-slate-900 overflow-hidden shadow-sm text-slate-300 font-mono text-xs border border-slate-700">
                   <div className="bg-slate-950 px-4 py-2 border-b border-slate-700 flex justify-between items-center text-slate-400">

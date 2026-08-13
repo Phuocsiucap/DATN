@@ -347,17 +347,19 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
-        <h2 className="text-2xl font-bold text-[#0f172a]">Cài Đặt & Tài Khoản</h2>
-        <p className="mt-1 text-sm text-[#64748b]">Quản lý thông tin đăng nhập, profile mạng xã hội và cấu hình hệ thống.</p>
+    <div className="workspace-page">
+      <div className="workspace-header">
+        <div>
+          <h2 className="workspace-title">Cài Đặt & Tài Khoản</h2>
+          <p className="workspace-subtitle">Quản lý thông tin đăng nhập, profile mạng xã hội và cấu hình hệ thống.</p>
+        </div>
         
-        <div className="mt-6 flex gap-2 border-t border-[#eef2f7] pt-4">
-          <button onClick={() => setActiveTab('profiles')} className={`h-9 rounded-lg border px-4 text-sm font-semibold transition-colors ${activeTab === 'profiles' ? 'border-[#091426] bg-[#f5f2ff] text-[#091426]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
+        <div className="flex flex-wrap gap-2 border-t border-[#eef2f7] pt-3">
+          <button onClick={() => setActiveTab('profiles')} className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'profiles' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
             Kênh Mạng Xã Hội
           </button>
           {isSystemUser && (
-            <button onClick={() => setActiveTab('scheduler')} className={`h-9 rounded-lg border px-4 text-sm font-semibold transition-colors ${activeTab === 'scheduler' ? 'border-[#091426] bg-[#f5f2ff] text-[#091426]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
+            <button onClick={() => setActiveTab('scheduler')} className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'scheduler' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
               Cấu hình Scheduler (Admin)
             </button>
           )}
@@ -371,44 +373,44 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       )}
 
       {activeTab === 'profiles' && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
-              <CircleUserRound size={24} />
+        <div className="space-y-4">
+          <div className="workspace-card flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-100 text-slate-400">
+              <CircleUserRound size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-[#0f172a]">{currentUser?.email || 'Người dùng'}</h3>
-              <div className="flex items-center gap-2 text-sm text-[#64748b] mt-1">
-                <ShieldCheck size={16} className={isSystemUser ? 'text-amber-500' : 'text-emerald-500'} />
+              <h3 className="text-sm font-bold text-[#0f172a]">{currentUser?.email || 'Người dùng'}</h3>
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-[#64748b]">
+                <ShieldCheck size={14} className={isSystemUser ? 'text-amber-500' : 'text-emerald-500'} />
                 {isSystemUser ? 'System Administrator' : 'Content Creator'}
               </div>
             </div>
           </div>
 
-          <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
+          <div className="workspace-card p-5">
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <QrCode size={20} className="text-[#091426]" />
-                <h3 className="text-lg font-bold text-[#0f172a]">TikTok Profiles</h3>
+                <QrCode size={18} className="text-[var(--accent)]" />
+                <h3 className="text-base font-bold text-[#0f172a]">TikTok Profiles</h3>
               </div>
-              <button onClick={() => setAddProfileOpen(true)} className="flex items-center gap-2 text-sm font-bold text-[#091426] hover:text-[#1e293b]">
-                <PlusCircle size={16} /> Thêm tài khoản
+              <button onClick={() => setAddProfileOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)]">
+                <PlusCircle size={14} /> Thêm tài khoản
               </button>
             </div>
 
             <div className="grid gap-3">
-              {profiles.length === 0 && <div className="text-center p-8 text-sm text-slate-500 border rounded-xl border-dashed">Chưa kết nối tài khoản nào</div>}
+              {profiles.length === 0 && <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">Chưa kết nối tài khoản nào</div>}
               {profiles.map(profile => (
-                <div key={profile.id} className="rounded-xl border border-[#eef2f7] p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div key={profile.id} className="flex flex-col justify-between gap-3 rounded-md border border-[#eef2f7] p-3 md:flex-row md:items-center">
                   <div>
                     <div className="font-bold text-[#0f172a]">{profile.profile_name}</div>
                     <div className="text-xs text-[#64748b] mt-1">{profile.username || '—'} | {profile.status}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => openStrategyModal(profile)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-[#091426] border border-[#d9e0ea] hover:bg-slate-200 flex items-center gap-1"><Settings size={14}/> Config</button>
-                    <button onClick={() => void handleStartQr(profile.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#f5f2ff] text-[#091426] border border-[#e0e7ff] hover:bg-[#e0e7ff]">Open QR</button>
-                    {activeProfileId === profile.id && <button onClick={() => void handleStopQr(profile.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#d9e0ea] text-[#64748b]">Stop</button>}
-                    <button onClick={() => void handleDeleteProfile(profile.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-100 hover:bg-red-100"><Trash2 size={14} /></button>
+                    <button onClick={() => openStrategyModal(profile)} className="inline-flex h-8 items-center gap-1 rounded-md border border-[#d9e0ea] bg-slate-100 px-3 text-xs font-bold text-[#091426] hover:bg-slate-200"><Settings size={14}/> Config</button>
+                    <button onClick={() => void handleStartQr(profile.id)} className="h-8 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100">Open QR</button>
+                    {activeProfileId === profile.id && <button onClick={() => void handleStopQr(profile.id)} className="h-8 rounded-md border border-[#d9e0ea] px-3 text-xs font-bold text-[#64748b]">Stop</button>}
+                    <button onClick={() => void handleDeleteProfile(profile.id)} className="icon-button border border-red-100 bg-red-50 text-red-600 hover:bg-red-100"><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
@@ -431,14 +433,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       )}
 
       {activeTab === 'scheduler' && isSystemUser && (
-        <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
+        <div className="workspace-card p-5">
            <div className="flex items-center justify-between gap-3 mb-6">
             <div>
-              <h2 className="text-lg font-bold text-[#0f172a]">Cấu Hình Scheduler</h2>
-              <p className="text-sm text-[#64748b] mt-1">Trạng thái: <span className="font-semibold">{schedulerStatus?.status || '...'}</span></p>
+              <h2 className="text-base font-bold text-[#0f172a]">Cấu Hình Scheduler</h2>
+              <p className="mt-1 text-xs text-[#64748b]">Trạng thái: <span className="font-semibold">{schedulerStatus?.status || '...'}</span></p>
             </div>
-            <button onClick={() => void loadSchedulerSettings()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm font-semibold text-[#475569] hover:bg-slate-50">
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Tải lại
+            <button onClick={() => void loadSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Tải lại
             </button>
           </div>
 
@@ -457,15 +459,15 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             </label>
           </div>
 
-          <button onClick={() => void saveSchedulerSettings()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg bg-[#091426] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#1e293b] transition-colors shadow-sm">
-            <Save size={16} /> Lưu cấu hình
+          <button onClick={() => void saveSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)]">
+            <Save size={14} /> Lưu cấu hình
           </button>
         </div>
       )}
 
       {addProfileOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+          <div className="w-full max-w-lg rounded-lg border border-[#d9e0ea] bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#eef2f7] px-6 py-4">
               <div>
                 <h3 className="text-lg font-bold text-[#0f172a]">Thêm TikTok Profile</h3>
@@ -518,11 +520,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                 </button>
               ) : (
                 <>
-                  <button onClick={() => void handleCreateProfile()} disabled={addingProfile} className="rounded-lg border border-[#d9e0ea] px-4 py-2 text-sm font-bold text-[#475569] hover:bg-white disabled:opacity-60">
+                  <button onClick={() => void handleCreateProfile()} disabled={addingProfile} className="h-8 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-white disabled:opacity-60">
                     Tạo trước, đăng nhập sau
                   </button>
-                  <button onClick={() => void handleStartPendingQr()} disabled={addingProfile} className="inline-flex items-center gap-2 rounded-lg bg-[#091426] px-4 py-2 text-sm font-bold text-white hover:bg-[#1e293b] disabled:opacity-60">
-                    <QrCode size={16} /> Thêm bằng QR
+                  <button onClick={() => void handleStartPendingQr()} disabled={addingProfile} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60">
+                    <QrCode size={14} /> Thêm bằng QR
                   </button>
                 </>
               )}
@@ -534,7 +536,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       {/* Strategy Configuration Modal */}
       {strategyModalOpen && activeStrategyProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-5xl my-8 overflow-hidden flex flex-col max-h-[90vh] shadow-2xl animate-in fade-in zoom-in-95">
+          <div className="my-8 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d9e0ea] bg-white shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[#eef2f7] sticky top-0 bg-white z-10">
               <div>
                 <h3 className="text-xl font-bold text-[#0f172a]">Cấu Hình Chiến Lược (Strategy)</h3>
@@ -545,7 +547,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto flex-1 bg-[#fcf8ff]">
+            <div className="flex-1 overflow-y-auto bg-[var(--surface)] p-5">
               {strategyLoading ? (
                 <div className="py-12 flex justify-center text-[#64748b]">
                   <RefreshCw className="animate-spin mr-2" /> Đang tải cấu hình...
@@ -646,7 +648,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   {/* Right Column: System & Automation */}
                   <div className="lg:col-span-5 flex flex-col gap-6">
                     {/* System Content */}
-                    <section className="bg-gradient-to-br from-indigo-50 to-white rounded-xl p-5 border border-indigo-100 shadow-sm">
+                    <section className="rounded-xl border border-indigo-100 bg-white p-5 shadow-sm">
                       <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-indigo-100 pb-2">System Content</h4>
                       <div className="space-y-5">
                         <div className="flex items-center justify-between">
@@ -660,7 +662,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                               checked={strategyForm.system_content_enabled || false}
                               onChange={e => handleUpdateStrategyField('system_content_enabled', e.target.checked)}
                             />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#3525cd]"></div>
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
                         </div>
                         
@@ -704,7 +706,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                               checked={strategyForm.auto_handoff_enabled || false}
                               onChange={e => handleUpdateStrategyField('auto_handoff_enabled', e.target.checked)}
                             />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#3525cd]"></div>
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
                         </div>
                         
@@ -721,7 +723,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                               checked={strategyForm.auto_planning_enabled || false}
                               onChange={e => handleUpdateStrategyField('auto_planning_enabled', e.target.checked)}
                             />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#3525cd]"></div>
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
                         </div>
                       </div>
@@ -741,9 +743,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               <button 
                 onClick={handleSaveStrategy}
                 disabled={loading}
-                className="px-6 py-2.5 rounded-lg bg-[#3525cd] text-white font-bold text-sm hover:bg-blue-800 transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50"
               >
-                <Save size={16} />
+                <Save size={14} />
                 Lưu Cấu Hình (Save)
               </button>
             </div>

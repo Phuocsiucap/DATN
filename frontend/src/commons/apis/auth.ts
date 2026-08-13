@@ -12,7 +12,7 @@ export const registerApi = async (payload: any) => {
 }
 
 export const getCurrentUserApi = async () => {
-  const { data } = await api.get('/auth/me')
+  const { data } = await api.get('/auth/me', { timeout: 3500 })
   return data
 }
 

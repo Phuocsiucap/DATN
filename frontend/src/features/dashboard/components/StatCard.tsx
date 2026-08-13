@@ -17,26 +17,26 @@ export default function StatCard({
 }: StatCardProps) {
   return (
     <div
-      className="bento-card p-6 rounded-xl flex flex-col justify-between"
-      style={accentBorder ? { borderLeft: '4px solid #6ffbbe' } : {}}
+      className="bento-card p-5 rounded-xl flex min-h-[116px] flex-col justify-between"
+      style={accentBorder ? { borderLeft: '3px solid var(--success)' } : {}}
     >
       <div className="flex items-start justify-between">
-        <div className="p-2 rounded-lg" style={{ backgroundColor: iconBg, color: iconColor }}>
+        <div className="flex h-8 w-8 items-center justify-center rounded-md" style={{ backgroundColor: iconBg, color: iconColor }}>
           {icon}
         </div>
         {trend && (
-          <span className="text-xs font-semibold flex items-center gap-0.5"
-            style={{ color: trendUp ? '#00a472' : 'var(--error)' }}>
+          <span className="text-[11px] font-semibold flex items-center gap-0.5"
+            style={{ color: trendUp ? 'var(--success)' : 'var(--error)' }}>
             {trendUp ? '↑' : '↓'}{trend}
           </span>
         )}
         {badge && badge}
       </div>
-      <div className="mt-6">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--on-surface-variant)' }}>
+      <div className="mt-5">
+        <p className="text-[11px] font-semibold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
           {label}
         </p>
-        <p className="text-2xl font-bold mt-1 tabular-nums" style={{ color: 'var(--on-surface)' }}>
+        <p className="text-xl font-bold mt-1 tabular-nums" style={{ color: 'var(--on-surface)' }}>
           {value}
         </p>
       </div>

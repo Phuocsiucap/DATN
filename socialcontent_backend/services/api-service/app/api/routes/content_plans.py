@@ -10,6 +10,7 @@ from common.events.envelope import build_event
 from common.events.kafka import publish
 from common.events.topics import PLANNING_JOB_CREATED, PLANNING_PLAN_APPROVED, PLANNING_PLAN_REJECTED
 from app.api.deps import get_current_user
+from app.api.routes.module3_handoffs import create_module3_handoff_for_series, publish_module3_handoff_created
 from app.schemas import api as schemas
 
 router = APIRouter()
@@ -48,7 +49,7 @@ def update_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanUpdateRe
     return plan
 
 
-@router.post("/{plan_id}/approve", response_model=schemas.ContentPlanResponse)
+@router.post("/{plan_id}/approve")
 def approve_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewRequest | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     plan = _get_owned_plan(db, plan_id, user)
     plan.status = "APPROVED"
@@ -58,11 +59,21 @@ def approve_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewR
     # Duyệt Cả Cụm (Approve Plan + Series)
     from common.db.models import ContentSeries, SeriesPart
     series_list = db.query(ContentSeries).filter(ContentSeries.content_plan_id == plan.id).all()
+    module3_handoffs = []
     for series in series_list:
         series.status = "APPROVED"
         parts = db.query(SeriesPart).filter(SeriesPart.series_id == series.id).all()
         for part in parts:
             part.status = "READY_FOR_PRODUCTION"
+        module3_handoffs.append(
+            create_module3_handoff_for_series(
+                db,
+                user=user,
+                series=series,
+                plan=plan,
+                handoff_note="Auto-created when Module 2 approved the content plan",
+            )
+        )
 
     if payload and payload.feedback_text:
         db.add(PlanningFeedback(content_plan_id=plan.id, feedback_type="APPROVAL", feedback_text=payload.feedback_text, created_by=user.id))
@@ -70,7 +81,23 @@ def approve_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewR
     db.commit()
     db.refresh(plan)
     publish(PLANNING_PLAN_APPROVED, build_event(event_type=PLANNING_PLAN_APPROVED, source="api-service", job_id=plan.planning_job_id, payload={"plan_id": str(plan.id)}))
-    return plan
+    for handoff in module3_handoffs:
+        handoff_series = db.get(ContentSeries, handoff.content_series_id)
+        if handoff_series:
+            publish_module3_handoff_created(handoff, handoff_series, plan)
+    return {
+        "plan": plan,
+        "module3_handoffs": [
+            {
+                "id": handoff.id,
+                "status": handoff.status,
+                "content_series_id": handoff.content_series_id,
+                "content_plan_id": handoff.content_plan_id,
+                "title": (handoff.payload or {}).get("series_title") or (handoff.payload or {}).get("plan_title"),
+            }
+            for handoff in module3_handoffs
+        ],
+    }
 
 
 @router.post("/{plan_id}/reject", response_model=schemas.ContentPlanResponse)

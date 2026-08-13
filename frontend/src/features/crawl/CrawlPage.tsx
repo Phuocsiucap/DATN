@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Play, Plus, RefreshCcw, RotateCcw, Square } from 'lucide-react'
+import { Loader2, Plus, RefreshCcw, RotateCcw, Square } from 'lucide-react'
 import { Sheet, SheetContent, SheetTrigger } from '@/commons/component/ui/sheet'
 import {
   cancelCrawlJobApi,
@@ -18,7 +18,7 @@ const stageSteps = ['API', 'ORCHESTRATOR', 'CRAWLER', 'RAW', 'NORMALIZE', 'STORY
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
-export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boolean }) {
+export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isSystemUser?: boolean; onOpenModule2?: (jobId?: string) => void }) {
   const [jobs, setJobs] = useState<CrawlJob[]>([])
   const [selectedJob, setSelectedJob] = useState<CrawlJob | null>(null)
   const [logSheetJob, setLogSheetJob] = useState<CrawlJob | null>(null)
@@ -109,17 +109,17 @@ export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boo
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
+    <div className="workspace-page">
+      <div className="workspace-header">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-bold text-[#0f172a]">Thu Thập Dữ Liệu</h2>
+              <h2 className="workspace-title">Thu Thập Dữ Liệu</h2>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${!isSystemUser ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
                 {!isSystemUser ? 'PRIVATE CRAWL' : 'GLOBAL CRAWL'}
               </span>
             </div>
-            <p className="mt-1 text-sm text-[#64748b]">
+            <p className="workspace-subtitle">
               {!isSystemUser
                 ? 'Tạo các tác vụ thu thập dữ liệu riêng cho kênh cá nhân của bạn.'
                 : 'Quản lý crawler toàn hệ thống, chuẩn hóa canonical content & phân phối tới các kênh eligible.'}
@@ -127,10 +127,10 @@ export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boo
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => void loadCrawlData()} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9e0ea] bg-white px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50">
+            <button onClick={() => void loadCrawlData()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--outline-variant)] bg-white px-3 text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]">
               <RefreshCcw size={14} /> Tải lại
             </button>
-            <button onClick={() => setShowCreate(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#091426] px-4 text-xs font-bold text-white shadow-sm hover:bg-[#1e293b] transition-colors">
+            <button onClick={() => setShowCreate(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)]">
               <Plus size={14} /> Tạo Job Crawl
             </button>
           </div>
@@ -145,7 +145,7 @@ export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boo
           </div>
         )}
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <MetricGrid items={[
             ['Đang chạy', metrics.running, 'bg-blue-500'],
             ['Thành công', metrics.succeeded, 'bg-emerald-500'],
@@ -190,6 +190,7 @@ export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boo
         logs={logs}
         open={logSheetOpen}
         onOpenChange={setLogSheetOpen}
+        onOpenModule2={onOpenModule2}
       />
     </div>
   )
@@ -197,11 +198,11 @@ export default function CrawlPage({ isSystemUser = false }: { isSystemUser?: boo
 
 function MetricGrid({ items }: { items: [string, number, string][] }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {items.map(([label, value, marker]) => (
-        <div key={label} className="h-[82px] rounded-lg border border-[#d9e0ea] bg-white p-4">
+        <div key={label} className="h-[70px] rounded-md border border-[#d9e0ea] bg-white p-3">
           <div className="flex items-center gap-2 text-[11px] font-medium text-[#64748b]"><span className={`h-2 w-2 rounded-full ${marker}`} />{label}</div>
-          <div className="mt-2 text-[22px] font-bold leading-[30px]">{value.toLocaleString('vi-VN')}</div>
+          <div className="mt-1.5 text-lg font-bold leading-6">{value.toLocaleString('vi-VN')}</div>
         </div>
       ))}
     </div>
@@ -210,11 +211,11 @@ function MetricGrid({ items }: { items: [string, number, string][] }) {
 
 function Flow() {
   return (
-    <div className="rounded-lg border border-[#d9e0ea] bg-white p-5">
-      <h3 className="text-base font-bold">Data Pipeline</h3>
-      <div className="mt-4 grid gap-3 md:grid-cols-7">
+    <div className="workspace-card p-3">
+      <h3 className="text-sm font-bold">Data Pipeline</h3>
+      <div className="mt-3 grid gap-2 md:grid-cols-7">
         {stageSteps.map((step, index) => (
-          <div key={step} className="rounded-lg border border-[#d9e0ea] bg-[#fbfcfd] p-3 text-center md:text-left">
+          <div key={step} className="rounded-md border border-[#d9e0ea] bg-[#fbfcfd] p-2.5 text-center md:text-left">
             <div className="text-[11px] font-bold text-[#091426]">{String(index + 1).padStart(2, '0')}</div>
             <div className="mt-2 text-[10px] sm:text-[11px] font-semibold">{step}</div>
           </div>
@@ -236,24 +237,26 @@ function JobsTable({
   onAction: (action: 'cancel' | 'retry', job: CrawlJob) => void
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-[#d9e0ea] bg-white">
-      <TableHeader columns={['Job', 'Trạng thái', 'Stage', 'Tiến độ', 'Khám phá/Tải/Lỗi/Trùng', 'Hành động']} />
-      {jobs.length === 0 ? <EmptyState label="Chưa có crawl jobs nào" /> : jobs.map((job) => (
-        <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedJob?.id === job.id ? 'bg-blue-50/60' : 'bg-white hover:bg-slate-50'}`}>
-          <div>
-            <div className="font-medium text-[#111827]">{job.name}</div>
-            <div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
+    <div className="table-scroll rounded-lg border border-[#d9e0ea] bg-white">
+      <div className="data-grid-lg">
+        <TableHeader columns={['Job', 'Trạng thái', 'Stage', 'Tiến độ', 'Khám phá/Tải/Lỗi/Trùng', 'Hành động']} />
+        {jobs.length === 0 ? <EmptyState label="Chưa có crawl jobs nào" /> : jobs.map((job) => (
+          <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedJob?.id === job.id ? 'bg-blue-50/60' : 'bg-white hover:bg-slate-50'}`}>
+            <div>
+              <div className="font-medium text-[#111827]">{job.name}</div>
+              <div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
+            </div>
+            <Badge value={job.status} />
+            <div className="text-[#64748b]">{job.current_stage}</div>
+            <div className="text-[#64748b] font-medium">{Number(job.progress_percent).toFixed(0)}%</div>
+            <div className="text-[#64748b]">{job.total_discovered}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
+            <div className="flex flex-wrap gap-1">
+              <button className="icon-button text-[var(--accent)] hover:bg-blue-50" title="Chạy lại" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>
+              <button className="icon-button text-red-600 hover:bg-red-50" title="Dừng job" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
+            </div>
           </div>
-          <Badge value={job.status} />
-          <div className="text-[#64748b]">{job.current_stage}</div>
-          <div className="text-[#64748b] font-medium">{Number(job.progress_percent).toFixed(0)}%</div>
-          <div className="text-[#64748b]">{job.total_discovered}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
-          <div className="flex flex-wrap gap-2">
-            <button className="text-[#3525cd] p-1.5 hover:bg-blue-50 rounded" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>
-            <button className="text-red-600 p-1.5 hover:bg-red-50 rounded" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }
@@ -261,8 +264,8 @@ function JobsTable({
 function CreateDialog(props: any) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" style={{ backgroundColor: 'rgba(9,20,38,0.5)' }}>
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-        <h3 className="text-xl font-bold text-[#0f172a] mb-6">Tạo Crawl Job</h3>
+      <div className="w-full max-w-lg rounded-lg border border-[var(--outline-variant)] bg-white p-5 shadow-xl">
+        <h3 className="text-lg font-bold text-[#0f172a] mb-5">Tạo Crawl Job</h3>
         <div className="space-y-4">
           <label className="block text-sm font-medium">
             Tên Job
@@ -284,9 +287,9 @@ function CreateDialog(props: any) {
             <input type="number" className="mt-1 w-full rounded-md border p-2 text-sm outline-none" value={props.maxItems} onChange={e => props.setMaxItems(Number(e.target.value))} />
           </label>
         </div>
-        <div className="mt-8 flex justify-end gap-3">
-          <button onClick={props.onClose} className="px-4 py-2 rounded-lg border text-sm font-medium">Hủy</button>
-          <button onClick={props.onSubmit} className="px-4 py-2 rounded-lg bg-[#3525cd] text-white text-sm font-bold shadow-sm hover:bg-[#4f46e5]">Tạo mới</button>
+        <div className="mt-6 flex justify-end gap-2">
+          <button onClick={props.onClose} className="h-8 rounded-md border px-3 text-xs font-semibold">Hủy</button>
+          <button onClick={props.onSubmit} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)]">Tạo mới</button>
         </div>
       </div>
     </div>
@@ -324,50 +327,50 @@ function JobLogsSheet(props: any) {
     <>
       <Sheet open={props.open} onOpenChange={props.onOpenChange}>
         <SheetTrigger asChild><span className="hidden" /></SheetTrigger>
-        <SheetContent side="right" className="max-w-[800px] sm:w-[800px] w-full p-0">
-          <div className="h-full flex flex-col bg-white">
-            <div className="p-6 border-b">
-              <h3 className="text-xl font-bold">Chi tiết Job - {props.job?.name}</h3>
-              <p className="text-sm text-slate-500 mt-1">{props.job ? `ID: ${props.job.id}` : ''}</p>
+        <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[800px] p-0">
+          <div className="detail-shell">
+            <div className="detail-header">
+              <h3 className="text-base font-bold">Chi tiết Job - {props.job?.name}</h3>
+              <p className="mt-1 font-mono text-xs text-slate-500">{props.job ? `ID: ${props.job.id}` : ''}</p>
               
-              <div className="mt-4 flex gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button 
                   onClick={() => setActiveTab('logs')} 
-                  className={`h-8 rounded-lg border px-4 text-xs font-semibold transition-colors ${activeTab === 'logs' ? 'border-[#091426] bg-[#f8f9ff] text-[#091426]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
+                  className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'logs' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
                 >
                   Logs Hệ thống
                 </button>
                 <button 
                   onClick={() => setActiveTab('contents')} 
-                  className={`h-8 rounded-lg border px-4 text-xs font-semibold transition-colors ${activeTab === 'contents' ? 'border-[#091426] bg-[#f8f9ff] text-[#091426]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
+                  className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'contents' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
                 >
                   Nội dung Crawl được
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-6">
+            <div className="detail-body">
               {activeTab === 'logs' ? (
                 <div className="space-y-3">
                   {props.logs.map((log: any) => (
-                    <div key={log.id} className="text-xs p-3 rounded bg-slate-50 border font-mono">
+                    <div key={log.id} className="rounded-md border bg-white p-3 font-mono text-xs">
                       <div className="text-slate-500 mb-1">{formatDate(log.created_at)} - {log.stage} [{log.level}]</div>
                       <div>{log.message}</div>
                     </div>
                   ))}
-                  {props.logs.length === 0 && <div className="text-sm text-slate-500 text-center py-10">Chưa có log nào</div>}
+                  {props.logs.length === 0 && <div className="empty-state">Chưa có log nào</div>}
                 </div>
               ) : (
                 <div>
                   {loadingContents ? (
-                    <div className="flex items-center justify-center py-10 text-slate-500"><Loader2 className="animate-spin mr-2" size={16}/> Đang tải nội dung...</div>
+                    <div className="loading-state"><Loader2 className="animate-spin" size={16}/> Đang tải nội dung...</div>
                   ) : contents.length === 0 ? (
-                    <div className="text-sm text-slate-500 text-center py-10">Chưa có bài nào được crawl thành công</div>
+                    <div className="empty-state">Chưa có bài nào được crawl thành công</div>
                   ) : (
-                    <div className="grid gap-3">
+                    <div className="grid gap-2">
                       {contents.map((item: any) => (
-                        <div key={item.id} onClick={() => setSelectedContentId(item.id)} className="cursor-pointer border rounded-lg p-3 hover:bg-slate-50 transition-colors flex gap-4">
-                          <div className="w-20 h-14 bg-black rounded shrink-0 overflow-hidden">
+                        <div key={item.id} onClick={() => setSelectedContentId(item.id)} className="flex cursor-pointer gap-3 rounded-md border bg-white p-3 transition-colors hover:bg-slate-50">
+                          <div className="h-12 w-[72px] shrink-0 overflow-hidden rounded bg-black">
                             {item.media?.[0] ? (
                               <img src={item.media[0].storage_url || item.media[0].thumbnail_url || item.media[0].source_url} className="w-full h-full object-cover" alt="Preview"/>
                             ) : (
@@ -375,7 +378,7 @@ function JobLogsSheet(props: any) {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-bold text-sm text-[#0f172a] truncate">{item.canonical_title}</div>
+                            <div className="truncate text-sm font-bold text-[#0f172a]">{item.canonical_title}</div>
                             <div className="text-xs text-slate-500 mt-1 truncate">{item.summary || item.canonical_url || shortId(item.id)}</div>
                             <div className="mt-2"><Badge value={item.status} /></div>
                           </div>
@@ -393,6 +396,7 @@ function JobLogsSheet(props: any) {
       <ContentDetailDialog 
         contentId={selectedContentId} 
         onClose={() => setSelectedContentId(null)} 
+        onOpenModule2={props.onOpenModule2}
       />
     </>
   )
@@ -416,5 +420,5 @@ function TableHeader({ columns }: { columns: string[] }) {
 }
 
 function EmptyState({ label }: { label: string }) {
-  return <div className="p-8 text-center text-sm text-slate-500">{label}</div>
+  return <div className="empty-state m-3">{label}</div>
 }

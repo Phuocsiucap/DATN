@@ -112,7 +112,7 @@ const articlesSlice = createSlice({
       .addCase(publishArticle.fulfilled, (state, action) => {
         state.publishing[action.meta.arg.link] = false
       })
-      .addCase(publishArticle.rejected, (state) => {
+      .addCase(publishArticle.rejected, (state, action) => {
         state.publishing[action.meta.arg.link] = false
       })
   },

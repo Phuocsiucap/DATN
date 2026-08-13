@@ -87,14 +87,14 @@ function SheetContent({
       />
       <div
         className={cn(
-          'absolute top-0 h-full w-full max-w-[760px] overflow-hidden border-[#d9e0ea] bg-white shadow-2xl',
+          'absolute top-0 h-full w-full max-w-[680px] overflow-hidden border-[var(--outline-variant)] bg-white shadow-xl',
           side === 'left' ? 'left-0 border-r' : 'right-0 border-l',
           className,
         )}
       >
         <button
           aria-label="Close"
-          className="absolute right-4 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#d9e0ea] bg-white text-[#64748b] hover:bg-[#f8fafc]"
+          className="absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--outline-variant)] bg-white text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
           onClick={() => onOpenChange(false)}
         >
           <X size={16} />

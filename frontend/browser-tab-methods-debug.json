@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "message": "browser.user.claimTab expects a tab returned by browser.user.openTabs() or a tab id",
+  "stack": "Error: browser.user.claimTab expects a tab returned by browser.user.openTabs() or a tab id\n    at iF (C:\\Users\\nguye\\.codex\\plugins\\cache\\openai-bundled\\browser\\26.803.81509\\scripts\\browser-client.mjs:939:2720)\n    at vo.claimTab (C:\\Users\\nguye\\.codex\\plugins\\cache\\openai-bundled\\browser\\26.803.81509\\scripts\\browser-client.mjs:939:1863)\n    at Proxy.x (C:\\Users\\nguye\\.codex\\plugins\\cache\\openai-bundled\\browser\\26.803.81509\\scripts\\browser-client.mjs:4117:2247)\n    at D:\\DATN\\.node_repl_cell_9.mjs:24:45"
+}

@@ -134,7 +134,6 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
     media_lookup: dict[uuid.UUID, list[ContentMedia]] = {}
     for item in media:
         media_lookup.setdefault(item.content_id, []).append(item)
-    full_text_lookup = _load_full_texts(sources)
 
     return [
         {
@@ -149,7 +148,6 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
                 source_lookup,
                 sources_lookup,
                 media_lookup,
-                full_text_lookup,
                 episode_lookup,
             ),
         }
@@ -167,7 +165,6 @@ def _build_review_articles(
     source_lookup: dict[uuid.UUID, ContentSource],
     sources_lookup: dict[uuid.UUID, list[ContentSource]],
     media_lookup: dict[uuid.UUID, list[ContentMedia]],
-    full_text_lookup: dict[uuid.UUID, str],
     episode_lookup: dict[uuid.UUID, Episode],
 ) -> list[dict]:
     grouped: dict[str, list[SeriesPart]] = {}
@@ -178,13 +175,13 @@ def _build_review_articles(
     fallback_plan = plans_by_id.get(series.content_plan_id)
     for key, article_parts in grouped.items():
         plan = _find_plan_for_article_key(key, plans_by_content, plans_by_story) or fallback_plan
-        source_content = _source_content_for_article_key(key, plan, content_lookup, source_lookup, sources_lookup, media_lookup, full_text_lookup)
+        source_content = _source_content_for_article_key(key, plan, content_lookup, source_lookup, sources_lookup, media_lookup)
         articles.append({"plan": plan, "source_content": source_content, "parts": article_parts})
 
     if not articles and fallback_plan:
         articles.append({
             "plan": fallback_plan,
-            "source_content": _source_content_for_plan(fallback_plan, content_lookup, source_lookup, sources_lookup, media_lookup, full_text_lookup),
+            "source_content": _source_content_for_plan(fallback_plan, content_lookup, source_lookup, sources_lookup, media_lookup),
             "parts": [],
         })
 
@@ -202,7 +199,6 @@ def _source_content_for_article_key(
     source_lookup: dict[uuid.UUID, ContentSource],
     sources_lookup: dict[uuid.UUID, list[ContentSource]],
     media_lookup: dict[uuid.UUID, list[ContentMedia]],
-    full_text_lookup: dict[uuid.UUID, str],
 ) -> dict | None:
     kind, _, raw_id = key.partition(":")
     if kind == "content" and raw_id:
@@ -216,9 +212,8 @@ def _source_content_for_article_key(
                 source_lookup.get(content_id),
                 sources_lookup.get(content_id, []),
                 media_lookup.get(content_id, []),
-                full_text_lookup.get(content_id),
             )
-    return _source_content_for_plan(plan, content_lookup, source_lookup, sources_lookup, media_lookup, full_text_lookup)
+    return _source_content_for_plan(plan, content_lookup, source_lookup, sources_lookup, media_lookup)
 
 
 def _source_content_for_plan(
@@ -227,7 +222,6 @@ def _source_content_for_plan(
     source_lookup: dict[uuid.UUID, ContentSource],
     sources_lookup: dict[uuid.UUID, list[ContentSource]],
     media_lookup: dict[uuid.UUID, list[ContentMedia]],
-    full_text_lookup: dict[uuid.UUID, str],
 ) -> dict | None:
     if not plan or not plan.primary_content_id:
         return None
@@ -239,7 +233,6 @@ def _source_content_for_plan(
         source_lookup.get(content.id),
         sources_lookup.get(content.id, []),
         media_lookup.get(content.id, []),
-        full_text_lookup.get(content.id),
     )
 
 
@@ -248,14 +241,14 @@ def _serialize_source_content(
     source: ContentSource | None,
     sources: list[ContentSource],
     media: list[ContentMedia],
-    full_text: str | None,
 ) -> dict:
+    preview_media = media[:1]
     return {
         "id": content.id,
         "content_type": content.content_type,
         "canonical_title": content.canonical_title,
         "summary": content.summary,
-        "full_text": full_text or content.summary,
+        "full_text": None,
         "language": content.language,
         "status": content.status,
         "canonical_url": content.canonical_url,
@@ -273,15 +266,13 @@ def _serialize_source_content(
                 "source_type": item.source_type,
                 "source_external_id": item.source_external_id,
                 "source_url": item.source_url,
-                "raw_document_id": item.raw_document_id,
                 "source_title": item.source_title,
                 "source_author": item.source_author,
                 "source_published_at": item.source_published_at,
-                "metadata_json": item.metadata_json,
                 "first_seen_at": item.first_seen_at,
                 "last_seen_at": item.last_seen_at,
             }
-            for item in sources
+            for item in sources[:1]
         ],
         "media": [
             {
@@ -296,7 +287,7 @@ def _serialize_source_content(
                 "duration_seconds": item.duration_seconds,
                 "created_at": item.created_at,
             }
-            for item in media
+            for item in preview_media
         ],
     }
 

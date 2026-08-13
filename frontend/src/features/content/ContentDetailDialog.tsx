@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2, Square } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle, Loader2, Square } from 'lucide-react'
 import { fetchContentDetailApi } from '@/commons/apis/module1'
+import { createModule2HandoffApi, createPlanningJobApi, type PlanningProfile } from '@/commons/apis/planning'
+import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 
 type ContentDetailDialogProps = {
   contentId: string | null
   onClose: () => void
+  onOpenModule2?: (jobId?: string) => void
 }
 
-export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogProps) {
+export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: ContentDetailDialogProps) {
   const [contentDetail, setContentDetail] = useState<any | null>(null)
   const [loading, setLoading] = useState(false)
+  const [profiles, setProfiles] = useState<PlanningProfile[]>([])
+  const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [creatingScript, setCreatingScript] = useState(false)
+  const [scriptResult, setScriptResult] = useState<{ success: boolean; message: string } | null>(null)
 
   useEffect(() => {
     if (contentId) {
@@ -26,12 +33,60 @@ export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogP
     }
   }, [contentId])
 
+  useEffect(() => {
+    fetchSocialProfilesApi()
+      .then((res: any) => {
+        const items = res?.items || res || []
+        setProfiles(items)
+        setSelectedProfileId((current) => current || items[0]?.id || '')
+      })
+      .catch(() => setProfiles([]))
+  }, [])
+
+  const createDirectScript = async () => {
+    if (!contentDetail?.id || !selectedProfileId) return
+    setCreatingScript(true)
+    setScriptResult(null)
+    try {
+      const handoff = await createModule2HandoffApi({
+        profile_id: selectedProfileId,
+        content_ids: [contentDetail.id],
+        story_ids: [],
+        episode_ids: [],
+        selection_mode: 'MANUAL',
+        candidate_limit: 1,
+        handoff_note: `Tạo kịch bản trực tiếp từ kho: "${contentDetail.canonical_title || contentDetail.normalized_title || contentDetail.id}"`,
+        filters: {
+          manual_direct_script: true,
+          bypass_scoring: true,
+          source: 'content_store',
+          content_ids: [contentDetail.id],
+        },
+      })
+      const job = await createPlanningJobApi({
+        profile_id: selectedProfileId,
+        handoff_id: handoff.id,
+        planning_mode: 'SINGLE',
+        target_duration_seconds: 60,
+        preferred_part_count: 1,
+        language: 'vi',
+        instructions: 'manual_direct_script: true. Bỏ qua chấm điểm và lọc phù hợp; tạo luôn kịch bản video đơn lẻ từ đúng bài người dùng đã chọn.',
+      })
+      setScriptResult({ success: true, message: 'Đã tạo job kịch bản trực tiếp trong Module 2.' })
+      onOpenModule2?.(job.id)
+    } catch (error: any) {
+      setScriptResult({ success: false, message: error?.response?.data?.detail || error?.message || 'Không tạo được kịch bản trực tiếp' })
+    } finally {
+      setCreatingScript(false)
+    }
+  }
+
   if (!contentId) return null
 
   const dialogContent = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6" style={{ backgroundColor: 'rgba(9,20,38,0.5)' }}>
-      <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl relative flex flex-col">
-        <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100">
+      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-y-auto rounded-lg border border-[var(--outline-variant)] bg-white p-5 shadow-xl">
+        <button onClick={onClose} className="icon-button absolute right-4 top-4 hover:bg-slate-100">
           <Square size={16} className="rotate-45" />
         </button>
         
@@ -41,26 +96,58 @@ export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogP
           </div>
         ) : (
           <>
-            <h3 className="text-xl font-bold text-[#0f172a] mb-4 pr-8 leading-snug">{contentDetail.canonical_title}</h3>
+            <h3 className="mb-4 pr-8 text-lg font-bold leading-snug text-[#0f172a]">{contentDetail.canonical_title}</h3>
             
             <div className="grid lg:grid-cols-[1fr_300px] gap-6 flex-1 overflow-hidden">
               <div className="overflow-y-auto space-y-4 pr-2">
                 <div>
                   <h4 className="font-bold text-sm text-slate-800 mb-2">Tóm tắt (Summary)</h4>
-                  <div className="bg-slate-50 p-4 rounded-lg border text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+                  <div className="rounded-md border bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
                     {contentDetail.summary || 'Không có tóm tắt.'}
                   </div>
                 </div>
                 
                 <div>
                   <h4 className="font-bold text-sm text-slate-800 mb-2">Dữ liệu gốc (Full Text)</h4>
-                  <div className="bg-[#f8f9ff] p-4 rounded-lg border border-[#e0e7ff] text-sm text-[#091426] leading-relaxed whitespace-pre-wrap break-all font-mono">
+                  <div className="rounded-md border border-[#e0e7ff] bg-[#f8f9ff] p-3 font-mono text-sm leading-relaxed text-[#091426] whitespace-pre-wrap break-all">
                     {contentDetail.full_text || 'Không lấy được text gốc.'}
                   </div>
                 </div>
               </div>
               
               <div className="space-y-4">
+                <div className="rounded-md border border-blue-200 bg-blue-50/60 p-3">
+                  <div className="mb-2 text-[10px] font-black uppercase text-blue-800">Module 2 manual</div>
+                  <div className="grid gap-2">
+                    <select
+                      value={selectedProfileId}
+                      onChange={(event) => setSelectedProfileId(event.target.value)}
+                      className="h-8 rounded-md border border-blue-200 bg-white px-2 text-xs font-semibold text-[#0f172a]"
+                    >
+                      {profiles.length === 0 && <option value="">Chưa có profile</option>}
+                      {profiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''} - {profile.platform}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => void createDirectScript()}
+                      disabled={creatingScript || loading || !contentDetail?.id || !selectedProfileId}
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {creatingScript ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                      Tạo luôn kịch bản
+                    </button>
+                    {scriptResult && (
+                      <div className={`flex items-start gap-2 rounded border px-2 py-1.5 text-xs font-semibold ${scriptResult.success ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                        {scriptResult.success ? <CheckCircle size={13} className="mt-0.5 shrink-0" /> : <AlertCircle size={13} className="mt-0.5 shrink-0" />}
+                        <span>{scriptResult.message}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="border rounded-lg p-3">
                     <div className="text-[10px] uppercase text-slate-500 font-bold mb-1">Nguồn</div>
@@ -77,7 +164,7 @@ export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogP
                 </div>
 
                 {contentDetail.canonical_url && (
-                  <a href={contentDetail.canonical_url} target="_blank" rel="noreferrer" className="block text-center w-full rounded-lg border border-[#091426] py-2 text-sm font-bold text-[#091426] hover:bg-slate-50">
+                  <a href={contentDetail.canonical_url} target="_blank" rel="noreferrer" className="block w-full rounded-md border border-[var(--outline-variant)] py-2 text-center text-xs font-bold text-[var(--on-surface)] hover:bg-slate-50">
                     Mở bài đăng gốc
                   </a>
                 )}
@@ -98,7 +185,7 @@ export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogP
             </div>
             
             <div className="mt-6 pt-4 border-t flex justify-end">
-              <button onClick={onClose} className="px-5 py-2 rounded-lg bg-[#091426] text-white text-sm font-bold shadow-sm hover:bg-[#1e293b]">Đóng lại</button>
+              <button onClick={onClose} className="h-8 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white hover:bg-[#1e293b]">Đóng lại</button>
             </div>
           </>
         )}

@@ -79,14 +79,18 @@ class PlanningPipeline:
             return
         job.status = "RUNNING"
         job.started_at = datetime.utcnow()
-        self._stage(db, job, "SELECTING_CANDIDATES", 15)
 
         handoff = db.get(Module2Handoff, job.handoff_id)
         strategy = db.query(SocialProfileStrategy).filter(SocialProfileStrategy.profile_id == job.profile_id).first()
         if not handoff or not strategy:
             raise ValueError("Missing handoff or profile strategy")
 
-        candidates = self._score_candidates(db, job, strategy)
+        direct_script = self._is_manual_direct_script_job(job, handoff)
+        if direct_script:
+            candidates = self._manual_direct_candidates(db, job, handoff)
+        else:
+            self._stage(db, job, "SELECTING_CANDIDATES", 15)
+            candidates = self._score_candidates(db, job, strategy)
         if not candidates:
             raise ValueError("No eligible planning candidates")
 
@@ -98,7 +102,7 @@ class PlanningPipeline:
 
         approved_plans = 0
         input_ref = ""
-        min_score = strategy.min_score if strategy.min_score is not None else 70
+        min_score = 0 if direct_script else (strategy.min_score if strategy.min_score is not None else 70)
 
         for candidate in candidates:
             if candidate.candidate_score < min_score:
@@ -115,6 +119,9 @@ class PlanningPipeline:
             )
 
             output_ref = self._save_planning_output(job, "AI_PLANNER", payload)
+
+            if direct_script and (not payload.get("is_suitable", True) or not payload.get("plan_title")):
+                payload = self._manual_direct_fallback_payload(job, title, summary, quality)
 
             if not payload.get("is_suitable", True):
                 # LLM từ chối bài này
@@ -653,6 +660,102 @@ class PlanningPipeline:
         job.current_stage = stage
         job.progress_percent = progress
         db.commit()
+
+    def _is_manual_direct_script_job(self, job: PlanningJob, handoff: Module2Handoff) -> bool:
+        filters = handoff.filters if isinstance(handoff.filters, dict) else {}
+        instructions = (job.instructions or "").lower()
+        return (
+            handoff.selection_mode == "MANUAL"
+            and (
+                filters.get("manual_direct_script") is True
+                or "manual_direct_script" in instructions
+                or "tạo luôn kịch bản" in instructions
+                or "tao luon kich ban" in instructions
+            )
+        )
+
+    def _manual_direct_candidates(self, db: Session, job: PlanningJob, handoff: Module2Handoff) -> list[PlanningCandidate]:
+        allowed_roles = {"MANUAL_INCLUDED", "NEW_PRIMARY", "AUTO_SELECTED"}
+        candidates = (
+            db.query(PlanningCandidate)
+            .filter(
+                PlanningCandidate.planning_job_id == job.id,
+                PlanningCandidate.eligible == True,  # noqa: E712
+            )
+            .order_by(PlanningCandidate.created_at.asc())
+            .all()
+        )
+        handoff_items = [
+            item for item in handoff.items
+            if item.status == "ELIGIBLE" and item.item_role in allowed_roles
+        ]
+        allowed_content_ids = {item.content_id for item in handoff_items if item.content_id}
+        allowed_story_ids = {item.story_id for item in handoff_items if item.story_id}
+        allowed_episode_ids = {item.episode_id for item in handoff_items if item.episode_id}
+        direct_candidates: list[PlanningCandidate] = []
+        for candidate in candidates:
+            in_scope = (
+                (candidate.content_id and candidate.content_id in allowed_content_ids)
+                or (candidate.story_id and candidate.story_id in allowed_story_ids)
+                or (candidate.episode_id and candidate.episode_id in allowed_episode_ids)
+            )
+            if not in_scope:
+                candidate.eligible = False
+                candidate.rejection_reasons = ["Excluded: outside manually selected source"]
+                continue
+            candidate.rank_order = len(direct_candidates) + 1
+            candidate.candidate_score = 100.0
+            candidate.score_breakdown = {"manual_direct_script": True, "scoring_bypassed": True}
+            candidate.selection_reasons = ["Nguoi dung chon truc tiep tu kho/crawl, bo qua cham diem"]
+            direct_candidates.append(candidate)
+        db.commit()
+        return direct_candidates
+
+    def _manual_direct_fallback_payload(self, job: PlanningJob, title: str, summary: str, quality: float) -> dict[str, Any]:
+        target_duration = job.target_duration_seconds or 60
+        basis = summary or title
+        return {
+            "is_suitable": True,
+            "rejection_reason": None,
+            "plan_title": f"{title} - Video đơn lẻ",
+            "content_angle": basis[:240] or f"Kể lại nội dung {title} thành video ngắn trực tiếp từ bài đã chọn.",
+            "target_audience": "Khán giả thích video ngắn",
+            "tone": "ngắn gọn, tự nhiên, đáng tin",
+            "format": "NARRATED_STORY",
+            "planning_mode": "SINGLE",
+            "recommended_part_count": 1,
+            "target_duration_seconds": target_duration,
+            "target_series_id": None,
+            "production_requirements": {
+                "requires_voice": True,
+                "requires_subtitles": True,
+                "requires_background_media": True,
+                "requires_character_consistency": False,
+            },
+            "script_part": {
+                "part_type": "OPENING",
+                "title": title,
+                "goal": basis[:220] or f"Tóm tắt và kể lại điểm chính của {title}.",
+                "hook_direction": f"Mở bằng chi tiết đáng chú ý nhất của bài: {title}.",
+                "ending_direction": "Kết bằng câu hỏi ngắn để kéo tương tác.",
+                "previous_part_recap": None,
+                "next_part_tease": None,
+                "main_beats": [
+                    "Nêu bối cảnh và chi tiết gây chú ý nhất",
+                    "Triển khai các ý chính của bài theo thứ tự dễ hiểu",
+                    "Chốt lại ý nghĩa hoặc điểm cần theo dõi tiếp",
+                ],
+                "production_notes": {
+                    "visuals": "Dùng hình ảnh/video có trong bài hoặc media liên quan trực tiếp.",
+                    "voice": "Rõ ràng, tự nhiên, không thêm dữ kiện ngoài nguồn.",
+                    "editing": "Nhịp dựng gọn, phụ đề bám sát lời dẫn.",
+                },
+                "risk_notes": ["Không thêm dữ kiện ngoài bài nguồn."],
+            },
+            "risk_flags": [{"type": "GENERAL", "severity": "LOW", "note": "Manual direct script from selected content"}],
+            "reasoning": ["Người dùng chọn trực tiếp bài này từ kho/crawl nên bỏ qua chấm điểm và tạo kịch bản ngay."],
+            "confidence_score": min(95, max(70, int(quality or 80))),
+        }
 
     def _score_candidates(self, db: Session, job: PlanningJob, strategy: SocialProfileStrategy) -> list[PlanningCandidate]:
         import re as _re

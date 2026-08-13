@@ -59,7 +59,7 @@ services:
       - kafka
       - embedding-service
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -81,7 +81,7 @@ services:
     working_dir: /app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8060
     env_file:
-      - ../.env
+      - .env
     environment:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fastembed}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -102,7 +102,7 @@ services:
       - api-service
       - kafka
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -121,7 +121,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -141,7 +141,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -161,7 +161,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
@@ -181,7 +181,7 @@ services:
       - mongodb
       - kafka
     env_file:
-      - ../.env
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017

@@ -42,7 +42,6 @@ class Module2HandoffItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    handoff_id: uuid.UUID
     content_id: uuid.UUID | None
     story_id: uuid.UUID | None
     episode_id: uuid.UUID | None
@@ -55,8 +54,6 @@ class Module2HandoffResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    user_id: uuid.UUID
-    profile_id: uuid.UUID
     selection_mode: str
     status: str
     handoff_note: str | None
@@ -82,9 +79,6 @@ class PlanningJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    user_id: uuid.UUID
-    profile_id: uuid.UUID
-    handoff_id: uuid.UUID
     planning_mode: str
     status: str
     current_stage: str
@@ -105,7 +99,6 @@ class PlanningCandidateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    planning_job_id: uuid.UUID
     content_id: uuid.UUID | None
     story_id: uuid.UUID | None
     episode_id: uuid.UUID | None
@@ -157,8 +150,6 @@ class ContentPlanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    planning_job_id: uuid.UUID
-    profile_id: uuid.UUID
     primary_content_id: uuid.UUID | None
     primary_story_id: uuid.UUID | None
     title: str
@@ -175,7 +166,6 @@ class ContentPlanResponse(BaseModel):
     version: int
     ai_reasoning: list[Any]
     production_requirements: dict[str, Any]
-    approved_by: uuid.UUID | None
     approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -185,7 +175,6 @@ class SeriesPartResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    series_id: uuid.UUID
     part_number: int
     part_type: str
     title: str
@@ -277,8 +266,6 @@ class ContentSeriesResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    content_plan_id: uuid.UUID
-    profile_id: uuid.UUID
     title: str
     description: str | None
     series_type: str
@@ -308,12 +295,17 @@ class Module3HandoffCreateRequest(BaseModel):
     handoff_note: str | None = None
 
 
+class Module3HandoffUpdateRequest(BaseModel):
+    status: str | None = None
+    handoff_note: str | None = None
+    payload: dict[str, Any] | None = None
+    parts: list[dict[str, Any]] | None = None
+
+
 class Module3HandoffPartResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    handoff_id: uuid.UUID
-    series_part_id: uuid.UUID
     part_number: int
     status: str
     payload: dict[str, Any]
@@ -324,11 +316,6 @@ class Module3HandoffResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    user_id: uuid.UUID
-    profile_id: uuid.UUID
-    content_plan_id: uuid.UUID
-    content_series_id: uuid.UUID
-    context_id: uuid.UUID | None
     status: str
     handoff_note: str | None
     payload: dict[str, Any]

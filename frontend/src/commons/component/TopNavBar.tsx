@@ -1,4 +1,4 @@
-import { Search, Bell, Radio, LogOut, CircleUserRound } from 'lucide-react'
+import { Search, Bell, Radio, LogOut } from 'lucide-react'
 
 type TopNavBarProps = {
   email?: string
@@ -13,23 +13,23 @@ export default function TopNavBar({
 }: TopNavBarProps) {
   return (
     <header
-      className="w-full sticky top-0 z-40 flex justify-between items-center h-16 px-6 border-b"
+      className="w-full sticky top-0 z-40 flex justify-between items-center h-[var(--app-topbar-height)] px-4 md:px-5 border-b backdrop-blur"
       style={{
-        backgroundColor: 'var(--surface)',
+        backgroundColor: 'rgba(244,246,249,0.92)',
         borderColor: 'var(--outline-variant)',
       }}
     >
       {/* Search */}
-      <div className="flex items-center gap-4 flex-1 max-w-2xl">
+      <div className="flex items-center gap-3 flex-1 max-w-xl">
         <div className="relative w-full max-w-md">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2"
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2"
             style={{ color: 'var(--on-surface-variant)' }} />
           <input
-            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none transition-all"
+            className="h-8 w-full pl-8 pr-3 rounded-md text-xs outline-none transition-colors border"
             style={{
               backgroundColor: 'var(--surface-container-low)',
               color: 'var(--on-surface)',
-              border: 'none',
+              borderColor: 'var(--outline-variant)',
             }}
             placeholder="Tìm kiếm nội dung, bài viết..."
             type="text"
@@ -38,57 +38,54 @@ export default function TopNavBar({
       </div>
 
       {/* Right side */}
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-3">
         {/* System status */}
-        <div className="hidden lg:flex items-center gap-2 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          System: Active
+        <div className="hidden lg:flex items-center gap-1.5 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Live
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {/* Notifications */}
-          <button className="relative p-1 transition-colors" style={{ color: 'var(--on-surface-variant)' }}>
-            <Bell size={20} />
+          <button className="relative inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-container-low)]" style={{ color: 'var(--on-surface-variant)' }}>
+            <Bell size={16} />
             <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full border-2"
               style={{ backgroundColor: 'var(--error)', borderColor: 'var(--surface)' }} />
           </button>
 
           {/* Live indicator */}
-          <button className="p-1 transition-colors" style={{ color: 'var(--on-surface-variant)' }}>
-            <Radio size={20} />
+          <button className="inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-container-low)]" style={{ color: 'var(--on-surface-variant)' }}>
+            <Radio size={16} />
           </button>
 
           <div className="h-7 w-px" style={{ backgroundColor: 'var(--outline-variant)' }} />
 
-          {email && onLogout && (
-            <button
-              onClick={onLogout}
-              className="hidden sm:flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium border transition-all hover:opacity-90"
-              style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
-            >
-              <CircleUserRound size={16} />
-              <span className="max-w-[180px] truncate">{email}</span>
-              <LogOut size={16} />
-            </button>
-          )}
-
-          {/* User avatar */}
-          <div className="flex items-center gap-3 cursor-pointer group">
+          <div className="flex items-center gap-2">
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-semibold leading-none" style={{ color: 'var(--on-surface)' }}>
+              <p className="text-xs font-semibold leading-none" style={{ color: 'var(--on-surface)' }}>
                 {isSystemUser ? 'System Admin' : 'Creator User'}
               </p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--on-surface-variant)' }}>
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--on-surface-variant)' }}>
                 {email || 'Content Manager'}
               </p>
             </div>
             <div
-              className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
-                isSystemUser ? 'bg-amber-500 text-black border-amber-400' : 'bg-emerald-500 text-black border-emerald-400'
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${
+                isSystemUser ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200'
               }`}
             >
               {isSystemUser ? 'SA' : 'U'}
             </div>
+            {email && onLogout && (
+              <button
+                onClick={onLogout}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-[var(--surface-container-low)]"
+                style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+                title="Đăng xuất"
+              >
+                <LogOut size={14} />
+              </button>
+            )}
           </div>
         </div>
       </div>

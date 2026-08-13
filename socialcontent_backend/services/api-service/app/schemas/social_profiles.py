@@ -63,7 +63,6 @@ class SocialPostMetricCreateRequest(BaseModel):
 
 class SocialProfileResponse(BaseModel):
     id: uuid.UUID
-    user_id: uuid.UUID
     platform: str
     profile_name: str
     username: str | None

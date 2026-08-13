@@ -319,7 +319,6 @@ class SocialProfileService:
     def serialize_profile(self, profile: SocialProfile) -> dict:
         data = {
             "id": profile.id,
-            "user_id": profile.user_id,
             "platform": profile.platform,
             "profile_name": profile.profile_name,
             "username": profile.username,
@@ -334,8 +333,6 @@ class SocialProfileService:
     def serialize_strategy(self, strategy: SocialProfileStrategy) -> dict:
         return {
             "id": strategy.id,
-            "user_id": strategy.user_id,
-            "profile_id": strategy.profile_id,
             "content_topics": strategy.content_topics,
             "avoid_topics": strategy.avoid_topics,
             "tone": strategy.tone,
@@ -363,9 +360,6 @@ class SocialProfileService:
     def serialize_queue_item(self, item: PublishingQueueItem) -> dict:
         return {
             "id": item.id,
-            "user_id": item.user_id,
-            "profile_id": item.profile_id,
-            "content_id": item.content_id,
             "article_link": item.article_link,
             "article_title": item.article_title,
             "platform": item.platform,
@@ -396,7 +390,6 @@ class SocialProfileService:
 
         return {
             "id": post.id,
-            "profile_id": post.profile_id,
             "title": post.title,
             "post_url": post.post_url,
             "platform_post_id": post.platform_post_id,
@@ -412,7 +405,6 @@ class SocialProfileService:
     def serialize_metric(self, metric: SocialPostMetric) -> dict:
         return {
             "id": metric.id,
-            "post_id": metric.post_id,
             "views": metric.views,
             "likes": metric.likes,
             "comments": metric.comments,

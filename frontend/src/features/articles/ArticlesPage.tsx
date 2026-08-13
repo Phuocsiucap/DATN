@@ -35,6 +35,13 @@ type SocialProfileOption = {
 
 type TabType = 'recommendations' | 'global' | 'private'
 
+const normalizeArticle = (item: any): Article => ({
+  ...item,
+  match_status: item.match_status === 'matched' || item.match_status === 'low_suggestion'
+    ? item.match_status
+    : undefined,
+})
+
 export default function ArticlesPage({ workspaceMode = 'admin' }: { workspaceMode?: 'admin' | 'user' }) {
   const dispatch = useAppDispatch()
   const { items, total, page, loading, statusFilter } = useAppSelector((s) => s.articles)
@@ -75,7 +82,7 @@ export default function ArticlesPage({ workspaceMode = 'admin' }: { workspaceMod
     setFeedMessage('')
     try {
       const data = await fetchMyArticleFeedApi(p, true)
-      setFeedItems(data.items || [])
+      setFeedItems((data.items || []).map(normalizeArticle))
       setFeedTotal(data.total || 0)
       setFeedPage(data.page || p)
     } catch (error: any) {

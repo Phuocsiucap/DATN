@@ -738,6 +738,8 @@ class Module3Handoff(Base):
 
     profile = relationship("SocialProfile", back_populates="module3_handoffs")
     parts = relationship("Module3HandoffPart", back_populates="handoff", cascade="all, delete-orphan")
+    story_versions = relationship("Module3StoryVersion", back_populates="handoff", cascade="all, delete-orphan")
+    render_jobs = relationship("Module3RenderJob", back_populates="handoff", cascade="all, delete-orphan")
 
 
 class Module3HandoffPart(Base):
@@ -752,3 +754,39 @@ class Module3HandoffPart(Base):
     created_at = now_col()
 
     handoff = relationship("Module3Handoff", back_populates="parts")
+
+
+class Module3StoryVersion(Base):
+    __tablename__ = "module3_story_versions"
+    __table_args__ = (UniqueConstraint("handoff_id", "version_number", name="uq_module3_story_versions_handoff_version"),)
+
+    id = uuid_pk()
+    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module3_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    reason = Column(String(60), default="RENDER", nullable=False, index=True)
+    story = Column(JSON, nullable=False, default=dict)
+    created_at = now_col()
+
+    handoff = relationship("Module3Handoff", back_populates="story_versions")
+    render_jobs = relationship("Module3RenderJob", back_populates="story_version")
+
+
+class Module3RenderJob(Base):
+    __tablename__ = "module3_render_jobs"
+
+    id = uuid_pk()
+    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module3_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
+    story_version_id = Column(UUID(as_uuid=True), ForeignKey("module3_story_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(40), default="QUEUED", nullable=False, index=True)
+    progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
+    output_path = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    handoff = relationship("Module3Handoff", back_populates="render_jobs")
+    story_version = relationship("Module3StoryVersion", back_populates="render_jobs")

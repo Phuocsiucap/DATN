@@ -213,11 +213,31 @@ export type ConsistencyCheck = {
 
 export type Module3Handoff = {
   id: string
+  user_id?: string
+  profile_id?: string
   content_series_id: string
   content_plan_id: string
+  context_id?: string | null
   status: string
   handoff_note?: string | null
+  title?: string | null
+  part_count?: number | null
+  priority?: number | null
+  project_status?: string | null
+  timeline_duration?: number | null
+  rendered_video?: string | null
+  payload?: Record<string, unknown>
   created_at: string
+  updated_at?: string
+  parts?: Array<{
+    id: string
+    handoff_id: string
+    series_part_id: string
+    part_number: number
+    status: string
+    payload: Record<string, unknown>
+    created_at: string
+  }>
 }
 
 export type ProfileSeriesReview = {
@@ -276,7 +296,8 @@ export const fetchContentPlansApi = async (profileId: string) => {
 
 export const approveContentPlanApi = async (planId: string, feedbackText?: string) => {
   const { data } = await api.post(`/content-plans/${planId}/approve`, { feedback_text: feedbackText })
-  return data as ContentPlan
+  if (data?.plan) return data as { plan: ContentPlan; module3_handoffs: Module3Handoff[] }
+  return { plan: data as ContentPlan, module3_handoffs: [] }
 }
 
 export const rejectContentPlanApi = async (planId: string, feedbackText?: string) => {
@@ -331,6 +352,21 @@ export const fetchSeriesConsistencyApi = async (seriesId: string) => {
 
 export const createModule3HandoffApi = async (payload: { content_series_id: string; part_ids?: string[]; priority?: number; handoff_note?: string }) => {
   const { data } = await api.post('/module3/handoffs', payload)
+  return data as Module3Handoff
+}
+
+export const fetchModule3HandoffsApi = async () => {
+  const { data } = await api.get('/module3/handoffs')
+  return data as Module3Handoff[]
+}
+
+export const fetchModule3HandoffApi = async (handoffId: string) => {
+  const { data } = await api.get(`/module3/handoffs/${handoffId}`)
+  return data as Module3Handoff
+}
+
+export const updateModule3HandoffApi = async (handoffId: string, payload: Partial<Pick<Module3Handoff, 'status' | 'handoff_note' | 'payload' | 'parts'>>) => {
+  const { data } = await api.patch(`/module3/handoffs/${handoffId}`, payload)
   return data as Module3Handoff
 }
 
