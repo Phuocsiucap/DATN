@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, ArrowRight, CheckCircle, Loader2, Square } from 'lucide-react'
 import { fetchContentDetailApi } from '@/commons/apis/module1'
-import { createModule2HandoffApi, createPlanningJobApi, type PlanningProfile } from '@/commons/apis/planning'
+import { createContentProjectFromSourcesApi, createProjectRunApi, type PlanningProfile } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
@@ -48,14 +48,15 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
     setCreatingScript(true)
     setScriptResult(null)
     try {
-      const handoff = await createModule2HandoffApi({
+      const project = await createContentProjectFromSourcesApi({
         profile_id: selectedProfileId,
         content_ids: [contentDetail.id],
         story_ids: [],
         episode_ids: [],
         selection_mode: 'MANUAL',
         candidate_limit: 1,
-        handoff_note: `Tạo kịch bản trực tiếp từ kho: "${contentDetail.canonical_title || contentDetail.normalized_title || contentDetail.id}"`,
+        title: contentDetail.canonical_title || contentDetail.normalized_title || 'Content project',
+        note: `Tạo kịch bản trực tiếp từ kho: "${contentDetail.canonical_title || contentDetail.normalized_title || contentDetail.id}"`,
         filters: {
           manual_direct_script: true,
           bypass_scoring: true,
@@ -63,13 +64,14 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
           content_ids: [contentDetail.id],
         },
       })
-      const job = await createPlanningJobApi({
+      const job = await createProjectRunApi({
         profile_id: selectedProfileId,
-        handoff_id: handoff.id,
+        project_id: project.id,
         planning_mode: 'SINGLE',
         target_duration_seconds: 60,
         preferred_part_count: 1,
         language: 'vi',
+        skip_ai_evaluation: true,
         instructions: 'manual_direct_script: true. Bỏ qua chấm điểm và lọc phù hợp; tạo luôn kịch bản video đơn lẻ từ đúng bài người dùng đã chọn.',
       })
       setScriptResult({ success: true, message: 'Đã tạo job kịch bản trực tiếp trong Module 2.' })

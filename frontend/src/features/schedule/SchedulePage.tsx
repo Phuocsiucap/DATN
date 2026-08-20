@@ -3,7 +3,7 @@ import { AlertCircle, CalendarDays, CheckCircle, Clock3, RefreshCw, Send } from 
 import { fetchPublishingQueueApi, fetchSocialProfilesApi } from '@/commons/apis/api'
 
 type SocialProfile = {
-  id: number
+  id: string
   platform: string
   profile_name: string
   username?: string | null
@@ -11,8 +11,8 @@ type SocialProfile = {
 }
 
 type QueueItem = {
-  id: number
-  profile_id: number
+  id: string
+  profile_id: string
   profile_name?: string | null
   article_title: string
   platform: string
@@ -74,7 +74,7 @@ export default function SchedulePage() {
   const visibleItems = useMemo(() => {
     const filtered = selectedProfileId === 'all'
       ? items
-      : items.filter((item) => item.profile_id === Number(selectedProfileId))
+      : items.filter((item) => item.profile_id === selectedProfileId)
     return [...filtered].sort((a, b) => {
       const left = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER
       const right = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER

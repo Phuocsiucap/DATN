@@ -4,26 +4,26 @@ import { Loader2, RefreshCcw, Video, CheckCircle2, XCircle, ChevronRight, Filter
 
 import {
   approveContentPlanApi,
-  fetchPlanningJobsApi,
+  fetchProjectRunsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
   rejectContentPlanApi,
   type ContentPlan,
   type PlanningProfile,
-  type PlanningJob,
+  type ProjectRun,
   type ProfileSeriesReview,
   type ReviewSourceContent,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
-import { PlanningJobDetailDialog } from './PlanningJobDetailDialog'
+import { ProjectRunDetailDialog } from './ProjectRunDetailDialog'
 
-const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
+const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
 type PipelineStep = 'jobs' | 'plans' | 'series' | 'output'
 
-const isTopicConfigError = (job: PlanningJob) =>
+const isTopicConfigError = (job: ProjectRun) =>
   job.status === 'FAILED' &&
   !!job.error_message &&
   (job.error_message.includes('Content Topics') || job.error_message.includes('content_topics') || job.error_message.includes('chu de') || job.error_message.includes('Chua cau hinh'))
@@ -32,20 +32,20 @@ export default function PlanningPage({
   initialStep = 'jobs',
   isSystemUser = false,
   onOpenProfileSettings,
-  onOpenModule3,
+  onOpenGenerateVideo,
 }: {
   initialStep?: PipelineStep
   isSystemUser?: boolean
   onOpenProfileSettings?: (profileId: string) => void
-  onOpenModule3?: (handoffId?: string) => void
+  onOpenGenerateVideo?: (projectId?: string) => void
 }) {
-  const [activeStep] = useState<PipelineStep>(initialStep)
-  const [jobs, setJobs] = useState<PlanningJob[]>([])
+  const activeStep = initialStep
+  const [jobs, setJobs] = useState<ProjectRun[]>([])
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
 
-  const [selectedJob, setSelectedJob] = useState<PlanningJob | null>(null)
+  const [selectedJob, setSelectedJob] = useState<ProjectRun | null>(null)
   const [selectedReviewArticle, setSelectedReviewArticle] = useState<{
     article: ProfileSeriesReview['articles'][number]
     seriesTitle: string
@@ -83,7 +83,7 @@ export default function PlanningPage({
     setMessage('')
     try {
       if (activeStep === 'jobs') {
-        const nextJobs = await fetchPlanningJobsApi()
+        const nextJobs = await fetchProjectRunsApi()
         setJobs(nextJobs)
         return
       }
@@ -135,7 +135,7 @@ export default function PlanningPage({
     ? 'Theo dõi các job AI Planning, trạng thái xử lý và log chi tiết.'
     : activeStep === 'plans'
       ? 'Duyệt kế hoạch theo từng social profile, nhóm theo series và xem từng bài trong series.'
-      : 'Xem đầu ra đã sẵn sàng chuyển sang Module 3 để sản xuất video.'
+      : 'Xem đầu ra đã sẵn sàng chuyển sang Generate Video để sản xuất video.'
 
   const handleRefresh = () => {
     if (activeStep === 'plans' && selectedProfileId) {
@@ -282,7 +282,7 @@ export default function PlanningPage({
                         <p className="mt-0.5 text-amber-700">Profile này chưa có <strong>Content Topics</strong>. Auto Planning cần ít nhất 1 chủ đề để chọn bài phù hợp.</p>
                       </div>
                       <button
-                        onClick={() => onOpenProfileSettings?.(job.profile_id)}
+                        onClick={() => job.profile_id && onOpenProfileSettings?.(job.profile_id)}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors"
                       >
                         <Settings2 size={13} /> Cấu hình ngay
@@ -402,7 +402,9 @@ export default function PlanningPage({
                                     try {
                                       const result = await approveContentPlanApi(article.plan!.id)
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
-                                      onOpenModule3?.(result.module3_handoffs?.[0]?.id)
+                                      const projectId = result.content_projects?.[0]?.id
+                                      if (!projectId) throw new Error('Backend did not return project_id')
+                                      onOpenGenerateVideo?.(projectId)
                                     } catch {
                                       alert('Lỗi phê duyệt!')
                                     }
@@ -442,9 +444,9 @@ export default function PlanningPage({
             <div className="flex items-center justify-center h-[500px] border-2 border-dashed border-slate-300 rounded-xl bg-slate-50">
               <div className="text-center max-w-sm">
                 <Video size={48} className="mx-auto text-slate-400 mb-4" />
-                <h3 className="text-lg font-bold text-slate-700 mb-2">Sản xuất Video (Module 3)</h3>
-                <p className="text-sm text-slate-500 mb-6">Đầu ra của Series đã sẵn sàng chuyển sang Module 3 để tự động dựng video và lồng tiếng.</p>
-                <button onClick={() => onOpenModule3?.()} className="h-9 rounded-md bg-[var(--primary)] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#1e293b]">
+                <h3 className="text-lg font-bold text-slate-700 mb-2">Generate Video</h3>
+                <p className="text-sm text-slate-500 mb-6">Đầu ra của Series đã sẵn sàng chuyển sang Generate Video để tự động dựng video và lồng tiếng.</p>
+                <button onClick={() => onOpenGenerateVideo?.()} className="h-9 rounded-md bg-[var(--primary)] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#1e293b]">
                   Chuyển sang Sản Xuất Video
                 </button>
               </div>
@@ -454,7 +456,7 @@ export default function PlanningPage({
       )}
 
       {selectedJob && (
-        <PlanningJobDetailDialog
+        <ProjectRunDetailDialog
           job={selectedJob}
           open={!!selectedJob}
           onOpenChange={(open) => !open && setSelectedJob(null)}

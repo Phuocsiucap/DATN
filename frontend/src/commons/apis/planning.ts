@@ -8,59 +8,143 @@ export type PlanningProfile = {
   status: string
 }
 
-export type Module2Handoff = {
+export type ProjectSource = {
   id: string
-  profile_id: string
-  selection_mode: string
-  status: string
-  handoff_note?: string | null
-  eligible_count: number
-  rejected_count: number
-  filters?: Record<string, unknown>
-  strategy_snapshot?: Record<string, unknown>
-  created_at: string
-  updated_at: string
-  items?: Module2HandoffItem[]
-}
-
-export type Module2HandoffItem = {
-  id: string
-  handoff_id: string
+  source_type: string
+  source_id?: string | null
   content_id?: string | null
   story_id?: string | null
   episode_id?: string | null
-  source_crawl_job_id?: string | null
-  item_role: string
-  relation_reason?: string | null
-  similarity_score?: number | null
-  candidate_score?: number | null
+  role: string
   status: string
-  rejection_reason?: string | null
-  metadata_json?: Record<string, unknown>
-  created_at: string
+  score: number
+  metadata: Record<string, unknown>
 }
 
-export type PlanningJob = {
+export type ProjectCandidate = {
   id: string
-  profile_id: string
-  handoff_id: string
-  planning_mode: string
+  project_run_id?: string | null
+  content_id?: string | null
+  story_id?: string | null
+  episode_id?: string | null
+  rank_order?: number | null
+  score?: number
+  candidate_score: number
+  eligible: boolean
+  score_breakdown?: Record<string, unknown>
+  selection_reasons: string[]
+  rejection_reasons: string[]
+  content_title?: string | null
+  content_url?: string | null
+  metadata?: Record<string, unknown>
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ProjectRun = {
+  id: string
+  project_id: string
+  profile_id?: string | null
+  run_type?: 'PLANNING' | 'RENDER' | string
+  planning_mode?: string | null
   status: string
-  current_stage: string
+  current_stage?: string | null
   progress_percent: number
   target_duration_seconds?: number | null
   preferred_part_count?: number | null
-  language: string
+  language?: string | null
   instructions?: string | null
-  attempt_count: number
+  attempt_count?: number
+  error_code?: string | null
   error_message?: string | null
+  metadata?: Record<string, unknown>
+  started_at?: string | null
+  completed_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ProjectArtifact = {
+  id: string
+  artifact_type: string
+  uri: string
+  status: string
+  metadata: Record<string, unknown>
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ProjectPart = {
+  id: string
+  series_id?: string | null
+  part_number: number
+  part_type?: string | null
+  title: string
+  goal?: string | null
+  hook_direction?: string | null
+  ending_direction?: string | null
+  previous_part_recap?: string | null
+  next_part_tease?: string | null
+  target_duration_seconds?: number | null
+  status: string
+  source_refs?: unknown[]
+  main_beats?: string[]
+  production_notes?: unknown
+  risk_notes?: string[]
+  payload?: Record<string, unknown>
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ProjectSeries = {
+  id: string
+  content_plan_id?: string | null
+  profile_id?: string | null
+  title: string
+  description?: string | null
+  series_type: string
+  total_parts: number
+  current_part: number
+  status: string
+  context_version: number
+  created_at?: string
+  updated_at?: string
+}
+
+export type ContentProject = {
+  id: string
+  user_id: string
+  profile_id: string
+  series_id?: string | null
+  title: string
+  status: string
+  planning_mode?: string | null
+  primary_content_id?: string | null
+  primary_story_id?: string | null
+  content_plan_id?: string | null
+  video_draft_id?: string | null
+  current_stage?: string | null
+  progress_percent: number
+  timeline_duration?: number | null
+  rendered_video?: string | null
+  metadata?: Record<string, unknown>
+  source_content?: ReviewSourceContent | null
+  media?: NonNullable<ReviewSourceContent['media']>
+  images?: string[]
+  series?: ProjectSeries | null
+  sources?: ProjectSource[]
+  candidates?: ProjectCandidate[]
+  parts?: ProjectPart[]
+  runs?: ProjectRun[]
+  artifacts?: ProjectArtifact[]
   created_at: string
-  updated_at: string
+  updated_at?: string | null
 }
 
 export type ContentPlan = {
   id: string
-  planning_job_id: string
+  project_id?: string | null
+  project_run_id?: string | null
   profile_id: string
   primary_content_id?: string | null
   primary_story_id?: string | null
@@ -79,20 +163,6 @@ export type ContentPlan = {
   ai_reasoning: string[]
   production_requirements: Record<string, unknown>
   created_at: string
-  updated_at: string
-}
-
-export type ContentSeries = {
-  id: string
-  content_plan_id: string
-  profile_id: string
-  title: string
-  description?: string | null
-  series_type: string
-  total_parts: number
-  current_part: number
-  status: string
-  context_version: number
   updated_at: string
 }
 
@@ -140,24 +210,13 @@ export type ReviewSourceContent = {
   }>
 }
 
-export type SeriesPart = {
-  id: string
-  series_id: string
-  part_number: number
-  part_type: string
-  title: string
-  goal?: string | null
-  hook_direction?: string | null
-  ending_direction?: string | null
-  previous_part_recap?: string | null
-  next_part_tease?: string | null
-  target_duration_seconds?: number | null
-  status: string
-  main_beats: string[]
-  production_notes?: unknown
-  risk_notes?: string[]
-  created_at?: string
-  updated_at?: string
+export type ProfileSeriesReview = {
+  series: ProjectSeries
+  articles: Array<{
+    plan?: ContentPlan | null
+    source_content?: ReviewSourceContent | null
+    parts: ProjectPart[]
+  }>
 }
 
 export type SeriesCharacterContext = {
@@ -211,77 +270,96 @@ export type ConsistencyCheck = {
   warnings: ConsistencyWarning[]
 }
 
-export type Module3Handoff = {
+export type PromptRun = {
   id: string
-  user_id?: string
-  profile_id?: string
-  content_series_id: string
-  content_plan_id: string
-  context_id?: string | null
+  project_run_id: string
+  step_name: string
+  model_provider?: string | null
+  model_name?: string | null
+  prompt_version?: string | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  latency_ms?: number | null
   status: string
-  handoff_note?: string | null
-  title?: string | null
-  part_count?: number | null
-  priority?: number | null
-  project_status?: string | null
-  timeline_duration?: number | null
-  rendered_video?: string | null
-  payload?: Record<string, unknown>
+  error_message?: string | null
   created_at: string
-  updated_at?: string
-  parts?: Array<{
-    id: string
-    handoff_id: string
-    series_part_id: string
-    part_number: number
-    status: string
-    payload: Record<string, unknown>
-    created_at: string
-  }>
 }
 
-export type ProfileSeriesReview = {
-  series: ContentSeries
-  articles: Array<{
-    plan?: ContentPlan | null
-    source_content?: ReviewSourceContent | null
-    parts: SeriesPart[]
-  }>
+export const fetchContentProjectsApi = async () => {
+  const { data } = await api.get('/content-projects')
+  return data as ContentProject[]
 }
 
-export const fetchModule2HandoffsApi = async () => {
-  const { data } = await api.get('/module2/handoffs')
-  return data as Module2Handoff[]
+export const fetchContentProjectApi = async (projectId: string) => {
+  const { data } = await api.get(`/content-projects/${projectId}`)
+  return data as ContentProject
 }
 
-export const createModule2HandoffApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/module2/handoffs', payload)
-  return data as Module2Handoff
+export const fetchContentPlanApi = async (planId: string) => {
+  const { data } = await api.get(`/content-plans/${planId}`)
+  return data as ContentPlan
 }
 
-export const createAutoModule2HandoffFromCrawlApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/module2/handoffs/auto-from-crawl', payload)
-  return data as { handoff: Module2Handoff; planning_job?: PlanningJob | null }
+export const createContentProjectFromSourcesApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/content-projects/from-sources', payload)
+  return data as ContentProject
 }
 
-export const fetchPlanningJobsApi = async () => {
-  const { data } = await api.get('/planning-jobs')
-  return data as PlanningJob[]
+export const createContentProjectFromCrawlApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/content-projects/from-crawl', payload)
+  const project = data as ContentProject
+  let projectRun: ProjectRun | null = null
+  if (payload.create_project_run !== false) {
+    projectRun = await createProjectRunApi({
+      profile_id: payload.profile_id,
+      project_id: project.id,
+      planning_mode: payload.planning_mode || 'SERIES',
+      target_duration_seconds: payload.target_duration_seconds || 60,
+      preferred_part_count: payload.preferred_part_count || null,
+      language: payload.language || 'vi',
+      instructions: payload.instructions || null,
+    })
+  }
+  return { project, project_run: projectRun }
 }
 
-export const createPlanningJobApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/planning-jobs', payload)
-  return data as PlanningJob
+export const createContentProjectFromProjectSeriesApi = async (payload: { series_id: string; part_ids?: string[]; priority?: number; note?: string }) => {
+  const projects = await fetchContentProjectsApi()
+  const project = projects.find((item) => item.series_id === payload.series_id)
+  if (!project) {
+    throw new Error('Series này chưa có content project. Hãy duyệt plan trước khi mở Generate Video.')
+  }
+  return project
 }
 
-export const cancelPlanningJobApi = async (jobId: string) => {
-  const { data } = await api.post(`/planning-jobs/${jobId}/cancel`)
-  return data as PlanningJob
+export const fetchProjectRunsApi = async () => {
+  const { data } = await api.get('/project-runs')
+  return data as ProjectRun[]
 }
 
-export const retryPlanningJobApi = async (jobId: string) => {
-  const { data } = await api.post(`/planning-jobs/${jobId}/retry`)
-  return data as PlanningJob
+export const createProjectRunApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/project-runs', payload)
+  return data as ProjectRun
+}
+
+export const cancelProjectRunApi = async (runId: string) => {
+  const { data } = await api.post(`/project-runs/${runId}/cancel`)
+  return data as ProjectRun
+}
+
+export const retryProjectRunApi = async (runId: string) => {
+  const { data } = await api.post(`/project-runs/${runId}/retry`)
+  return data as ProjectRun
+}
+
+export const fetchProjectRunCandidatesApi = async (runId: string) => {
+  const { data } = await api.get(`/project-runs/${runId}/candidates`)
+  return data as ProjectCandidate[]
+}
+
+export const fetchProjectRunLogsApi = async (runId: string) => {
+  const { data } = await api.get(`/project-runs/${runId}/logs`)
+  return data as PromptRun[]
 }
 
 export const fetchAllContentPlansApi = async () => {
@@ -296,8 +374,8 @@ export const fetchContentPlansApi = async (profileId: string) => {
 
 export const approveContentPlanApi = async (planId: string, feedbackText?: string) => {
   const { data } = await api.post(`/content-plans/${planId}/approve`, { feedback_text: feedbackText })
-  if (data?.plan) return data as { plan: ContentPlan; module3_handoffs: Module3Handoff[] }
-  return { plan: data as ContentPlan, module3_handoffs: [] }
+  if (data?.plan) return data as { plan: ContentPlan; content_projects: ContentProject[] }
+  return { plan: data as ContentPlan, content_projects: [] }
 }
 
 export const rejectContentPlanApi = async (planId: string, feedbackText?: string) => {
@@ -306,18 +384,29 @@ export const rejectContentPlanApi = async (planId: string, feedbackText?: string
 }
 
 export const regenerateContentPlanApi = async (planId: string, instructions?: string) => {
-  const { data } = await api.post(`/content-plans/${planId}/regenerate`, { instructions })
-  return data as PlanningJob
+  const plan = await fetchContentPlanApi(planId)
+  if (!plan.project_id) {
+    throw new Error('Plan này chưa gắn content project. Hãy tạo project run mới từ nguồn nội dung.')
+  }
+  return createProjectRunApi({
+    profile_id: plan.profile_id,
+    project_id: plan.project_id,
+    planning_mode: plan.planning_mode || 'SERIES',
+    target_duration_seconds: plan.target_duration_seconds || 60,
+    preferred_part_count: plan.recommended_part_count || null,
+    language: 'vi',
+    instructions: instructions || null,
+  })
 }
 
-export const fetchAllContentSeriesApi = async () => {
-  const { data } = await api.get('/content-series')
-  return data as ContentSeries[]
+export const fetchAllProjectSeriesApi = async () => {
+  const { data } = await api.get('/project-series')
+  return data as ProjectSeries[]
 }
 
-export const fetchContentSeriesApi = async (profileId: string) => {
-  const { data } = await api.get(`/profile/${profileId}/content-series`)
-  return data as ContentSeries[]
+export const fetchProjectSeriesApi = async (profileId: string) => {
+  const { data } = await api.get(`/profile/${profileId}/project-series`)
+  return data as ProjectSeries[]
 }
 
 export const fetchProfileSeriesReviewApi = async (profileId: string) => {
@@ -325,86 +414,39 @@ export const fetchProfileSeriesReviewApi = async (profileId: string) => {
   return data as ProfileSeriesReview[]
 }
 
-export const fetchSeriesPartsApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/parts`)
-  return data as SeriesPart[]
+export const fetchProjectPartsApi = async (seriesId: string) => {
+  const { data } = await api.get(`/project-series/${seriesId}/parts`)
+  return data as ProjectPart[]
 }
 
-export const regenerateContentSeriesApi = async (seriesId: string, instructions?: string) => {
-  const { data } = await api.post(`/content-series/${seriesId}/regenerate`, { instructions })
-  return data as PlanningJob
+export const regenerateProjectSeriesApi = async (seriesId: string, instructions?: string) => {
+  const projects = await fetchContentProjectsApi()
+  const project = projects.find((item) => item.series_id === seriesId)
+  if (!project) {
+    throw new Error('Series này chưa có content project để tạo project run mới.')
+  }
+  return createProjectRunApi({
+    profile_id: project.profile_id,
+    project_id: project.id,
+    planning_mode: project.planning_mode || 'SERIES',
+    target_duration_seconds: 60,
+    preferred_part_count: project.parts?.length || null,
+    language: 'vi',
+    instructions: instructions || null,
+  })
 }
 
 export const fetchSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/context`)
+  const { data } = await api.get(`/project-series/${seriesId}/context`)
   return data as SeriesContextResponse
 }
 
 export const rebuildSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.post(`/content-series/${seriesId}/context/rebuild`)
+  const { data } = await api.post(`/project-series/${seriesId}/context/rebuild`)
   return data as { series_id: string; context_id: string; context_version: number; mongo_document_id?: string | null }
 }
 
 export const fetchSeriesConsistencyApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/consistency-check`)
+  const { data } = await api.get(`/project-series/${seriesId}/consistency-check`)
   return data as ConsistencyCheck
-}
-
-export const createModule3HandoffApi = async (payload: { content_series_id: string; part_ids?: string[]; priority?: number; handoff_note?: string }) => {
-  const { data } = await api.post('/module3/handoffs', payload)
-  return data as Module3Handoff
-}
-
-export const fetchModule3HandoffsApi = async () => {
-  const { data } = await api.get('/module3/handoffs')
-  return data as Module3Handoff[]
-}
-
-export const fetchModule3HandoffApi = async (handoffId: string) => {
-  const { data } = await api.get(`/module3/handoffs/${handoffId}`)
-  return data as Module3Handoff
-}
-
-export const updateModule3HandoffApi = async (handoffId: string, payload: Partial<Pick<Module3Handoff, 'status' | 'handoff_note' | 'payload' | 'parts'>>) => {
-  const { data } = await api.patch(`/module3/handoffs/${handoffId}`, payload)
-  return data as Module3Handoff
-}
-
-export type PlanningCandidate = {
-  id: string
-  planning_job_id: string
-  content_id?: string | null
-  candidate_score: number
-  eligible: boolean
-  rank_order?: number | null
-  selection_reasons: string[]
-  rejection_reasons: string[]
-  content_title?: string | null
-  content_url?: string | null
-  created_at: string
-}
-
-export type PromptRun = {
-  id: string
-  planning_job_id: string
-  step_name: string
-  model_provider?: string | null
-  model_name?: string | null
-  prompt_version?: string | null
-  input_tokens?: number | null
-  output_tokens?: number | null
-  latency_ms?: number | null
-  status: string
-  error_message?: string | null
-  created_at: string
-}
-
-export const fetchPlanningJobCandidatesApi = async (jobId: string) => {
-  const { data } = await api.get(`/planning-jobs/${jobId}/candidates`)
-  return data as PlanningCandidate[]
-}
-
-export const fetchPlanningJobLogsApi = async (jobId: string) => {
-  const { data } = await api.get(`/planning-jobs/${jobId}/logs`)
-  return data as PromptRun[]
 }

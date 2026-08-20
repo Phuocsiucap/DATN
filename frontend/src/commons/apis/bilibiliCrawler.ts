@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, assertLegacyGatewayApiBase, isSocialContentApiBase } from './client'
 
 export type BilibiliCrawlerJob = {
   id: number
@@ -188,6 +188,7 @@ export const searchBilibiliCrawlerApi = async (payload: {
   limit?: number
   mode?: BilibiliSearchMode
 }) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliSearchResponse>(bilibiliCrawlerPath('/search'), {
     sources: ['bilibili'],
     max_duration_seconds: 7200,
@@ -201,11 +202,13 @@ export const createBilibiliCrawlerKeywordPlanApi = async (payload: {
   input_text: string
   niche: string
 }) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliKeywordPlan>(bilibiliCrawlerPath('/keyword-plan'), payload)
   return data
 }
 
 export const getBilibiliCrawlerPreviewUrlApi = async (url: string) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliPreviewUrl>(bilibiliCrawlerPath('/preview-url'), { url })
   return data
 }
@@ -215,6 +218,7 @@ export const getBilibiliCrawlerSeriesInfoApi = async (payload: {
   aid?: number | null
   bvid?: string | null
 }) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliSeriesInfo>(bilibiliCrawlerPath('/series-info'), normalizeBilibiliSeriesInfoPayload(payload))
   return data
 }
@@ -260,6 +264,7 @@ const extractBvidFromBilibiliUrl = (url?: string | null) => {
 }
 
 export const fetchBilibiliCrawlerJobsApi = async () => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.get<BilibiliCrawlerJob[]>(bilibiliCrawlerPath('/jobs'))
   return data
 }
@@ -271,6 +276,7 @@ export const createBilibiliCrawlerJobApi = async (payload: {
   source_title?: string | null
   max_duration_seconds?: number
 }) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath('/jobs'), {
     niche: 'smart_home',
     max_duration_seconds: 7200,
@@ -280,61 +286,73 @@ export const createBilibiliCrawlerJobApi = async (payload: {
 }
 
 export const deleteBilibiliCrawlerJobApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.delete<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}`))
   return data
 }
 
 export const retryBilibiliCrawlerJobApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/retry`))
   return data
 }
 
 export const cancelBilibiliCrawlerJobApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/cancel`))
   return data
 }
 
 export const retranslateBilibiliCrawlerJobApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/retranslate`))
   return data
 }
 
 export const applyBilibiliCrawlerSubtitlesApi = async (jobId: number, style: BilibiliSubtitleStyle) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/apply-subtitles`), style)
   return data
 }
 
 export const applyBilibiliCrawlerFilterApi = async (jobId: number, style: BilibiliVideoFilter) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/apply-filter`), style)
   return data
 }
 
 export const mergeBilibiliCrawlerPartsApi = async (jobId: number, segment_indexes: number[]) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/${jobId}/merge-parts`), { segment_indexes })
   return data
 }
 
 export const mergeBilibiliCrawlerJobsApi = async (job_ids: number[]) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post<BilibiliCrawlerJob>(bilibiliCrawlerPath(`/jobs/merge-jobs`), { job_ids })
   return data
 }
 
 export const generateBilibiliCrawlerTikTokMetadataApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post(bilibiliCrawlerPath(`/jobs/${jobId}/tiktok-metadata`))
   return data
 }
 
 export const openBilibiliCrawlerOutputFolderApi = async (jobId: number) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post(bilibiliCrawlerPath(`/jobs/${jobId}/open-folder`))
   return data
 }
 
 export const translateBilibiliCrawlerTitleApi = async (title: string) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.post(bilibiliCrawlerPath('/translate-title'), { title })
   return data
 }
 
 export const fetchBilibiliCrawlerDeepSeekConfigApi = async () => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.get<BilibiliDeepSeekConfig>(bilibiliCrawlerPath('/config/deepseek'))
   return data
 }
@@ -346,25 +364,30 @@ export const updateBilibiliCrawlerDeepSeekConfigApi = async (payload: {
   subtitle_model: string
   reasoning_effort?: string
 }) => {
+  assertLegacyGatewayApiBase('Bilibili crawler')
   const { data } = await api.put<BilibiliDeepSeekConfig>(bilibiliCrawlerPath('/config/deepseek'), payload)
   return data
 }
 
 export const getBilibiliCrawlerMediaUrl = (jobId: number, key: 'raw_video_path' | 'output_video_path', version?: string) => {
+  if (isSocialContentApiBase()) return ''
   const suffix = version ? `?v=${encodeURIComponent(version)}` : ''
   return `${api.defaults.baseURL}${bilibiliCrawlerPath(`/jobs/${jobId}/media/${key}`)}${suffix}`
 }
 
 export const getBilibiliCrawlerSegmentUrl = (jobId: number, segmentIndex: number, version?: string) => {
+  if (isSocialContentApiBase()) return ''
   const suffix = version ? `?v=${encodeURIComponent(version)}` : ''
   return `${api.defaults.baseURL}${bilibiliCrawlerPath(`/jobs/${jobId}/segments/${segmentIndex}`)}${suffix}`
 }
 
 export const getBilibiliCrawlerImageProxyUrl = (url?: string | null) => {
+  if (isSocialContentApiBase()) return ''
   return url ? `${api.defaults.baseURL}${bilibiliCrawlerPath(`/image-proxy?url=${encodeURIComponent(url)}`)}` : ''
 }
 
 export const fetchBilibiliFeedApi = async (params: { page?: number; limit?: number; search?: string } = {}) => {
+  assertLegacyGatewayApiBase('Bilibili feed')
   const { data } = await api.get<BilibiliFeedResponse>(bilibiliFeedPath(''), { params })
   return data
 }
@@ -375,6 +398,7 @@ export const crawlBilibiliFeedNowApi = async (payload: {
   max_duration_seconds?: number
   evaluate?: boolean
 } = {}) => {
+  assertLegacyGatewayApiBase('Bilibili feed')
   const { data } = await api.post<BilibiliFeedCrawlResult>(bilibiliFeedPath('/crawl-now'), payload)
   return data
 }

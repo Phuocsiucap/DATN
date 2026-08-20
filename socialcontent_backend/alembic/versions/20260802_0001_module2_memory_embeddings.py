@@ -17,17 +17,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("module2_handoffs", sa.Column("strategy_snapshot", sa.JSON(), nullable=False, server_default=sa.text("'{}'::json")))
-
-    op.add_column("module2_handoff_items", sa.Column("source_crawl_job_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.add_column("module2_handoff_items", sa.Column("item_role", sa.String(length=60), nullable=False, server_default="MANUAL_INCLUDED"))
-    op.add_column("module2_handoff_items", sa.Column("relation_reason", sa.String(length=80), nullable=True))
-    op.add_column("module2_handoff_items", sa.Column("similarity_score", sa.Numeric(6, 4), nullable=True))
-    op.add_column("module2_handoff_items", sa.Column("candidate_score", sa.Numeric(5, 2), nullable=True))
-    op.add_column("module2_handoff_items", sa.Column("metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'::json")))
-    op.create_index("ix_module2_handoff_items_source_crawl_job_id", "module2_handoff_items", ["source_crawl_job_id"])
-    op.create_index("ix_module2_handoff_items_item_role", "module2_handoff_items", ["item_role"])
-    op.create_index("ix_module2_handoff_items_relation_reason", "module2_handoff_items", ["relation_reason"])
+    op.execute("ALTER TABLE IF EXISTS project_source_selections ADD COLUMN IF NOT EXISTS strategy_snapshot JSON DEFAULT '{}'::json NOT NULL")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('project_source_selection_items') IS NOT NULL THEN
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS source_crawl_job_id UUID;
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS item_role VARCHAR(60) DEFAULT 'MANUAL_INCLUDED' NOT NULL;
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS relation_reason VARCHAR(80);
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS similarity_score NUMERIC(6, 4);
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS candidate_score NUMERIC(5, 2);
+                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS metadata JSON DEFAULT '{}'::json NOT NULL;
+                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_source_crawl_job_id ON project_source_selection_items (source_crawl_job_id);
+                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_item_role ON project_source_selection_items (item_role);
+                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_relation_reason ON project_source_selection_items (relation_reason);
+            END IF;
+        END $$;
+        """
+    )
 
     op.create_table(
         "content_embeddings",
@@ -86,7 +94,7 @@ def upgrade() -> None:
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("profile_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("story_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("content_series_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("project_series_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=40), nullable=False),
         sa.Column("current_part", sa.Integer(), nullable=False),
@@ -96,7 +104,6 @@ def upgrade() -> None:
         sa.Column("metadata", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["content_series_id"], ["content_series.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["profile_id"], ["social_profiles.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["story_id"], ["stories.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
@@ -105,13 +112,13 @@ def upgrade() -> None:
     op.create_index("ix_profile_series_tracks_user_id", "profile_series_tracks", ["user_id"])
     op.create_index("ix_profile_series_tracks_profile_id", "profile_series_tracks", ["profile_id"])
     op.create_index("ix_profile_series_tracks_story_id", "profile_series_tracks", ["story_id"])
-    op.create_index("ix_profile_series_tracks_content_series_id", "profile_series_tracks", ["content_series_id"])
+    op.create_index("ix_profile_series_tracks_project_series_id", "profile_series_tracks", ["project_series_id"])
     op.create_index("ix_profile_series_tracks_status", "profile_series_tracks", ["status"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_profile_series_tracks_status", table_name="profile_series_tracks")
-    op.drop_index("ix_profile_series_tracks_content_series_id", table_name="profile_series_tracks")
+    op.drop_index("ix_profile_series_tracks_project_series_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_story_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_profile_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_user_id", table_name="profile_series_tracks")
@@ -131,13 +138,24 @@ def downgrade() -> None:
     op.drop_index("ix_content_embeddings_content_id", table_name="content_embeddings")
     op.drop_table("content_embeddings")
 
-    op.drop_index("ix_module2_handoff_items_relation_reason", table_name="module2_handoff_items")
-    op.drop_index("ix_module2_handoff_items_item_role", table_name="module2_handoff_items")
-    op.drop_index("ix_module2_handoff_items_source_crawl_job_id", table_name="module2_handoff_items")
-    op.drop_column("module2_handoff_items", "metadata")
-    op.drop_column("module2_handoff_items", "candidate_score")
-    op.drop_column("module2_handoff_items", "similarity_score")
-    op.drop_column("module2_handoff_items", "relation_reason")
-    op.drop_column("module2_handoff_items", "item_role")
-    op.drop_column("module2_handoff_items", "source_crawl_job_id")
-    op.drop_column("module2_handoffs", "strategy_snapshot")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('project_source_selection_items') IS NOT NULL THEN
+                DROP INDEX IF EXISTS ix_project_source_selection_items_relation_reason;
+                DROP INDEX IF EXISTS ix_project_source_selection_items_item_role;
+                DROP INDEX IF EXISTS ix_project_source_selection_items_source_crawl_job_id;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS metadata;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS candidate_score;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS similarity_score;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS relation_reason;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS item_role;
+                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS source_crawl_job_id;
+            END IF;
+            IF to_regclass('project_source_selections') IS NOT NULL THEN
+                ALTER TABLE project_source_selections DROP COLUMN IF EXISTS strategy_snapshot;
+            END IF;
+        END $$;
+        """
+    )

@@ -205,7 +205,6 @@ class ContentItem(Base):
 
 class ContentSource(Base):
     __tablename__ = "content_sources"
-    __table_args__ = (UniqueConstraint("source_type", "source_external_id", name="uq_content_source_external"),)
 
     id = uuid_pk()
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -352,12 +351,8 @@ class SocialProfile(Base):
     strategy = relationship("SocialProfileStrategy", back_populates="profile", cascade="all, delete-orphan", uselist=False)
     queue_items = relationship("PublishingQueueItem", back_populates="profile", cascade="all, delete-orphan")
     posts = relationship("SocialPost", back_populates="profile", cascade="all, delete-orphan")
-    module2_handoffs = relationship("Module2Handoff", back_populates="profile", cascade="all, delete-orphan")
-    planning_jobs = relationship("PlanningJob", back_populates="profile", cascade="all, delete-orphan")
     content_plans = relationship("ContentPlan", back_populates="profile", cascade="all, delete-orphan")
-    module3_handoffs = relationship("Module3Handoff", back_populates="profile", cascade="all, delete-orphan")
     content_links = relationship("ProfileContentLink", back_populates="profile", cascade="all, delete-orphan")
-    series_tracks = relationship("ProfileSeriesTrack", back_populates="profile", cascade="all, delete-orphan")
 
 
 class SocialProfileStrategy(Base):
@@ -381,8 +376,9 @@ class SocialProfileStrategy(Base):
     min_score = Column(Float, default=70.0, nullable=False)
     require_video = Column(Boolean, default=False, nullable=False)
     receive_system_content = Column(Boolean, default=True, nullable=False)
-    auto_handoff_enabled = Column(Boolean, default=False, nullable=False)
+    auto_project_queue_enabled = Column(Boolean, default=False, nullable=False)
     auto_planning_enabled = Column(Boolean, default=False, nullable=False)
+    video_render_mode = Column(String(40), default="manual", nullable=False)
     max_system_recommendations = Column(Integer, default=20, nullable=False)
     auto_queue_enabled = Column(Boolean, default=True, nullable=False)
     auto_publish_enabled = Column(Boolean, default=False, nullable=False)
@@ -445,48 +441,6 @@ class SocialPostMetric(Base):
     post = relationship("SocialPost", back_populates="metrics")
 
 
-class Module2Handoff(Base):
-    __tablename__ = "module2_handoffs"
-
-    id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    selection_mode = Column(String(40), nullable=False)
-    status = Column(String(40), default="READY", nullable=False, index=True)
-    handoff_note = Column(Text, nullable=True)
-    eligible_count = Column(Integer, default=0, nullable=False)
-    rejected_count = Column(Integer, default=0, nullable=False)
-    filters = Column(JSON, nullable=False, default=dict)
-    strategy_snapshot = Column(JSON, nullable=False, default=dict)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    profile = relationship("SocialProfile", back_populates="module2_handoffs")
-    items = relationship("Module2HandoffItem", back_populates="handoff", cascade="all, delete-orphan")
-    planning_jobs = relationship("PlanningJob", back_populates="handoff")
-
-
-class Module2HandoffItem(Base):
-    __tablename__ = "module2_handoff_items"
-
-    id = uuid_pk()
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module2_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
-    source_crawl_job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
-    item_role = Column(String(60), default="MANUAL_INCLUDED", nullable=False, index=True)
-    relation_reason = Column(String(80), nullable=True, index=True)
-    similarity_score = Column(Numeric(6, 4), nullable=True)
-    candidate_score = Column(Numeric(5, 2), nullable=True)
-    status = Column(String(40), default="ELIGIBLE", nullable=False, index=True)
-    rejection_reason = Column(Text, nullable=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
-    created_at = now_col()
-
-    handoff = relationship("Module2Handoff", back_populates="items")
-
-
 class ProfileContentLink(Base):
     __tablename__ = "profile_content_links"
 
@@ -510,90 +464,12 @@ class ProfileContentLink(Base):
     profile = relationship("SocialProfile", back_populates="content_links")
 
 
-class ProfileSeriesTrack(Base):
-    __tablename__ = "profile_series_tracks"
-
-    id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    content_series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="SET NULL"), nullable=True, index=True)
-    title = Column(Text, nullable=False)
-    status = Column(String(40), default="ACTIVE", nullable=False, index=True)
-    current_part = Column(Integer, default=0, nullable=False)
-    total_parts = Column(Integer, default=0, nullable=False)
-    last_planned_at = Column(DateTime(timezone=True), nullable=True)
-    last_published_at = Column(DateTime(timezone=True), nullable=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    profile = relationship("SocialProfile", back_populates="series_tracks")
-
-
-class PlanningJob(Base):
-    __tablename__ = "planning_jobs"
-
-    id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module2_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
-    planning_mode = Column(String(40), nullable=False)
-    status = Column(String(40), default="PENDING", nullable=False, index=True)
-    current_stage = Column(String(80), default="VALIDATING_INPUT", nullable=False)
-    progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
-    target_duration_seconds = Column(Integer, nullable=True)
-    preferred_part_count = Column(Integer, nullable=True)
-    language = Column(String(12), default="vi", nullable=False)
-    instructions = Column(Text, nullable=True)
-    attempt_count = Column(Integer, default=0, nullable=False)
-    error_code = Column(String(120), nullable=True)
-    error_message = Column(Text, nullable=True)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    profile = relationship("SocialProfile", back_populates="planning_jobs")
-    handoff = relationship("Module2Handoff", back_populates="planning_jobs")
-    candidates = relationship("PlanningCandidate", back_populates="planning_job", cascade="all, delete-orphan")
-    plans = relationship("ContentPlan", back_populates="planning_job", cascade="all, delete-orphan")
-    prompt_runs = relationship("PromptRun", back_populates="planning_job", cascade="all, delete-orphan")
-
-
-class PlanningCandidate(Base):
-    __tablename__ = "planning_candidates"
-
-    id = uuid_pk()
-    planning_job_id = Column(UUID(as_uuid=True), ForeignKey("planning_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
-    candidate_score = Column(Numeric(5, 2), default=0, nullable=False)
-    eligible = Column(Boolean, default=True, nullable=False)
-    rank_order = Column(Integer, nullable=True)
-    score_breakdown = Column(JSON, nullable=False, default=dict)
-    selection_reasons = Column(JSON, nullable=False, default=list)
-    rejection_reasons = Column(JSON, nullable=False, default=list)
-    created_at = now_col()
-
-    planning_job = relationship("PlanningJob", back_populates="candidates")
-    content = relationship("ContentItem")
-
-    @property
-    def content_title(self) -> str | None:
-        return self.content.canonical_title if self.content else None
-
-    @property
-    def content_url(self) -> str | None:
-        return self.content.canonical_url if self.content else None
-
-
 class ContentPlan(Base):
     __tablename__ = "content_plans"
 
     id = uuid_pk()
-    planning_job_id = Column(UUID(as_uuid=True), ForeignKey("planning_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_run_id = Column(UUID(as_uuid=True), ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -616,73 +492,10 @@ class ContentPlan(Base):
     created_at = now_col()
     updated_at = updated_col()
 
-    planning_job = relationship("PlanningJob", back_populates="plans")
+    project = relationship("ContentProject", foreign_keys=[project_id])
+    project_run = relationship("ProjectRun", foreign_keys=[project_run_id], back_populates="plans")
     profile = relationship("SocialProfile", back_populates="content_plans")
-    series = relationship("ContentSeries", back_populates="content_plan", cascade="all, delete-orphan", uselist=False)
     feedback = relationship("PlanningFeedback", back_populates="content_plan", cascade="all, delete-orphan")
-
-
-class ContentSeries(Base):
-    __tablename__ = "content_series"
-
-    id = uuid_pk()
-    content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="CASCADE"), nullable=False, index=True)
-    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(Text, nullable=False)
-    description = Column(Text, nullable=True)
-    series_type = Column(String(60), nullable=False, default="NARRATIVE")
-    total_parts = Column(Integer, default=0, nullable=False)
-    current_part = Column(Integer, default=0, nullable=False)
-    status = Column(String(40), default="DRAFT", nullable=False, index=True)
-    context_version = Column(Integer, default=1, nullable=False)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    content_plan = relationship("ContentPlan", back_populates="series")
-    parts = relationship("SeriesPart", back_populates="series", cascade="all, delete-orphan", order_by="SeriesPart.part_number")
-    contexts = relationship("ContentContext", back_populates="series", cascade="all, delete-orphan")
-
-
-class SeriesPart(Base):
-    __tablename__ = "series_parts"
-    __table_args__ = (UniqueConstraint("series_id", "part_number", name="uq_series_part_number"),)
-
-    id = uuid_pk()
-    series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="CASCADE"), nullable=False, index=True)
-    part_number = Column(Integer, nullable=False)
-    part_type = Column(String(40), nullable=False, default="MIDDLE")
-    title = Column(Text, nullable=False)
-    goal = Column(Text, nullable=True)
-    hook_direction = Column(Text, nullable=True)
-    ending_direction = Column(Text, nullable=True)
-    previous_part_recap = Column(Text, nullable=True)
-    next_part_tease = Column(Text, nullable=True)
-    target_duration_seconds = Column(Integer, nullable=True)
-    status = Column(String(40), default="DRAFT", nullable=False, index=True)
-    source_refs = Column(JSON, nullable=False, default=list)
-    main_beats = Column(JSON, nullable=False, default=list)
-    production_notes = Column(JSON, nullable=False, default=dict)
-    risk_notes = Column(JSON, nullable=False, default=list)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    series = relationship("ContentSeries", back_populates="parts")
-    feedback = relationship("PlanningFeedback", back_populates="series_part", cascade="all, delete-orphan")
-
-
-class ContentContext(Base):
-    __tablename__ = "content_contexts"
-
-    id = uuid_pk()
-    series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="CASCADE"), nullable=False, index=True)
-    context_type = Column(String(60), nullable=False)
-    version = Column(Integer, default=1, nullable=False)
-    mongo_document_id = Column(String(64), nullable=True)
-    checksum = Column(String(128), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = now_col()
-
-    series = relationship("ContentSeries", back_populates="contexts")
 
 
 class PlanningFeedback(Base):
@@ -690,21 +503,19 @@ class PlanningFeedback(Base):
 
     id = uuid_pk()
     content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="CASCADE"), nullable=False, index=True)
-    series_part_id = Column(UUID(as_uuid=True), ForeignKey("series_parts.id", ondelete="SET NULL"), nullable=True, index=True)
     feedback_type = Column(String(60), nullable=False)
     feedback_text = Column(Text, nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = now_col()
 
     content_plan = relationship("ContentPlan", back_populates="feedback")
-    series_part = relationship("SeriesPart", back_populates="feedback")
 
 
 class PromptRun(Base):
     __tablename__ = "prompt_runs"
 
     id = uuid_pk()
-    planning_job_id = Column(UUID(as_uuid=True), ForeignKey("planning_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_run_id = Column(UUID(as_uuid=True), ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     step_name = Column(String(80), nullable=False)
     model_provider = Column(String(80), nullable=True)
     model_name = Column(String(120), nullable=True)
@@ -718,75 +529,261 @@ class PromptRun(Base):
     error_message = Column(Text, nullable=True)
     created_at = now_col()
 
-    planning_job = relationship("PlanningJob", back_populates="prompt_runs")
+    project_run = relationship("ProjectRun", foreign_keys=[project_run_id], back_populates="prompt_runs")
 
 
-class Module3Handoff(Base):
-    __tablename__ = "module3_handoffs"
+class VideoDraft(Base):
+    __tablename__ = "video_drafts"
+
+    id = uuid_pk()
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    draft_json = Column(JSON, nullable=False, default=dict)
+    updated_at = updated_col()
+
+
+class ProjectSeries(Base):
+    __tablename__ = "project_series"
 
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="CASCADE"), nullable=False, index=True)
-    context_id = Column(UUID(as_uuid=True), ForeignKey("content_contexts.id", ondelete="SET NULL"), nullable=True, index=True)
-    status = Column(String(40), default="READY", nullable=False, index=True)
-    handoff_note = Column(Text, nullable=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    series_type = Column(String(60), default="NARRATIVE", nullable=False, index=True)
+    status = Column(String(40), default="ACTIVE", nullable=False, index=True)
+    current_part = Column(Integer, default=0, nullable=False)
+    total_parts = Column(Integer, default=0, nullable=False)
+    context_json = Column(JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    projects = relationship("ContentProject", back_populates="series")
+    parts = relationship("ProjectPart", back_populates="series")
+
+
+class ContentProject(Base):
+    __tablename__ = "content_projects"
+
+    id = uuid_pk()
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    series_id = Column(UUID(as_uuid=True), ForeignKey("project_series.id", ondelete="SET NULL"), nullable=True, index=True)
+    title = Column(Text, nullable=False)
+    status = Column(String(40), default="DRAFT", nullable=False, index=True)
+    planning_mode = Column(String(40), nullable=True, index=True)
+    primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
+    content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+    video_draft_id = Column(UUID(as_uuid=True), ForeignKey("video_drafts.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+    current_stage = Column(String(80), nullable=True)
+    progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    sources = relationship("ProjectSource", back_populates="project", cascade="all, delete-orphan")
+    candidates = relationship("ProjectCandidate", back_populates="project", cascade="all, delete-orphan")
+    parts = relationship("ProjectPart", back_populates="project", cascade="all, delete-orphan")
+    runs = relationship("ProjectRun", back_populates="project", cascade="all, delete-orphan")
+    artifacts = relationship("ProjectArtifact", back_populates="project", cascade="all, delete-orphan")
+    series = relationship("ProjectSeries", back_populates="projects")
+
+
+class ProjectSource(Base):
+    __tablename__ = "project_sources"
+    __table_args__ = (UniqueConstraint("project_id", "source_type", "source_id", name="uq_project_source_ref"),)
+
+    id = uuid_pk()
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type = Column(String(40), nullable=False, index=True)
+    source_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
+    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
+    role = Column(String(60), default="PRIMARY", nullable=False, index=True)
+    status = Column(String(40), default="ACTIVE", nullable=False, index=True)
+    score = Column(Numeric(5, 2), default=0, nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = now_col()
+
+    project = relationship("ContentProject", back_populates="sources")
+
+
+class ProjectCandidate(Base):
+    __tablename__ = "project_candidates"
+
+    id = uuid_pk()
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
+    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
+    rank_order = Column(Integer, nullable=True)
+    score = Column(Numeric(5, 2), default=0, nullable=False)
+    eligible = Column(Boolean, default=True, nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = now_col()
+
+    project = relationship("ContentProject", back_populates="candidates")
+    content = relationship("ContentItem")
+    story = relationship("Story")
+    episode = relationship("Episode")
+
+    @property
+    def candidate_score(self) -> float:
+        return float(self.score or 0)
+
+    @candidate_score.setter
+    def candidate_score(self, value) -> None:
+        self.score = value or 0
+
+    @property
+    def score_breakdown(self) -> dict:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("score_breakdown") or {}
+
+    @score_breakdown.setter
+    def score_breakdown(self, value) -> None:
+        metadata = dict(self.metadata_json or {})
+        metadata["score_breakdown"] = value or {}
+        self.metadata_json = metadata
+
+    @property
+    def selection_reasons(self) -> list:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("selection_reasons") or []
+
+    @selection_reasons.setter
+    def selection_reasons(self, value) -> None:
+        metadata = dict(self.metadata_json or {})
+        metadata["selection_reasons"] = value or []
+        self.metadata_json = metadata
+
+    @property
+    def rejection_reasons(self) -> list:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("rejection_reasons") or []
+
+    @rejection_reasons.setter
+    def rejection_reasons(self, value) -> None:
+        metadata = dict(self.metadata_json or {})
+        metadata["rejection_reasons"] = value or []
+        self.metadata_json = metadata
+
+    @property
+    def content_title(self) -> str | None:
+        return self.content.canonical_title if getattr(self, "content", None) else None
+
+    @property
+    def content_url(self) -> str | None:
+        return self.content.canonical_url if getattr(self, "content", None) else None
+
+
+class ProjectPart(Base):
+    __tablename__ = "project_parts"
+
+    id = uuid_pk()
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    series_id = Column(UUID(as_uuid=True), ForeignKey("project_series.id", ondelete="SET NULL"), nullable=True, index=True)
+    part_number = Column(Integer, nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    target_duration_seconds = Column(Integer, nullable=True)
+    status = Column(String(40), default="DRAFT", nullable=False, index=True)
     payload = Column(JSON, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
-    profile = relationship("SocialProfile", back_populates="module3_handoffs")
-    parts = relationship("Module3HandoffPart", back_populates="handoff", cascade="all, delete-orphan")
-    story_versions = relationship("Module3StoryVersion", back_populates="handoff", cascade="all, delete-orphan")
-    render_jobs = relationship("Module3RenderJob", back_populates="handoff", cascade="all, delete-orphan")
+    project = relationship("ContentProject", back_populates="parts")
+    series = relationship("ProjectSeries", back_populates="parts")
 
 
-class Module3HandoffPart(Base):
-    __tablename__ = "module3_handoff_parts"
+class ProjectRun(Base):
+    __tablename__ = "project_runs"
 
     id = uuid_pk()
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module3_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
-    series_part_id = Column(UUID(as_uuid=True), ForeignKey("series_parts.id", ondelete="CASCADE"), nullable=False, index=True)
-    part_number = Column(Integer, nullable=False)
-    status = Column(String(40), default="READY", nullable=False, index=True)
-    payload = Column(JSON, nullable=False, default=dict)
-    created_at = now_col()
-
-    handoff = relationship("Module3Handoff", back_populates="parts")
-
-
-class Module3StoryVersion(Base):
-    __tablename__ = "module3_story_versions"
-    __table_args__ = (UniqueConstraint("handoff_id", "version_number", name="uq_module3_story_versions_handoff_version"),)
-
-    id = uuid_pk()
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module3_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    version_number = Column(Integer, nullable=False)
-    reason = Column(String(60), default="RENDER", nullable=False, index=True)
-    story = Column(JSON, nullable=False, default=dict)
-    created_at = now_col()
-
-    handoff = relationship("Module3Handoff", back_populates="story_versions")
-    render_jobs = relationship("Module3RenderJob", back_populates="story_version")
-
-
-class Module3RenderJob(Base):
-    __tablename__ = "module3_render_jobs"
-
-    id = uuid_pk()
-    handoff_id = Column(UUID(as_uuid=True), ForeignKey("module3_handoffs.id", ondelete="CASCADE"), nullable=False, index=True)
-    story_version_id = Column(UUID(as_uuid=True), ForeignKey("module3_story_versions.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    status = Column(String(40), default="QUEUED", nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_type = Column(String(60), nullable=False, index=True)
+    status = Column(String(40), default="PENDING", nullable=False, index=True)
+    current_stage = Column(String(80), nullable=True)
     progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
-    output_path = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = now_col()
     updated_at = updated_col()
 
-    handoff = relationship("Module3Handoff", back_populates="render_jobs")
-    story_version = relationship("Module3StoryVersion", back_populates="render_jobs")
+    project = relationship("ContentProject", back_populates="runs")
+    plans = relationship("ContentPlan", foreign_keys="ContentPlan.project_run_id", back_populates="project_run")
+    prompt_runs = relationship("PromptRun", foreign_keys="PromptRun.project_run_id", back_populates="project_run")
+
+    @property
+    def user_id(self):
+        return self.project.user_id if self.project else None
+
+    @property
+    def profile_id(self):
+        return self.project.profile_id if self.project else None
+
+    @property
+    def planning_mode(self) -> str:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("planning_mode") or (self.project.planning_mode if self.project else None) or "SERIES"
+
+    @property
+    def target_duration_seconds(self) -> int | None:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("target_duration_seconds")
+
+    @property
+    def preferred_part_count(self) -> int | None:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("preferred_part_count")
+
+    @property
+    def language(self) -> str:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("language") or "vi"
+
+    @property
+    def instructions(self) -> str | None:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("instructions")
+
+    @property
+    def attempt_count(self) -> int:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return int(metadata.get("attempt_count") or 1)
+
+    @attempt_count.setter
+    def attempt_count(self, value: int) -> None:
+        metadata = dict(self.metadata_json or {})
+        metadata["attempt_count"] = int(value or 1)
+        self.metadata_json = metadata
+
+    @property
+    def error_code(self) -> str | None:
+        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
+        return metadata.get("error_code")
+
+    @error_code.setter
+    def error_code(self, value: str | None) -> None:
+        metadata = dict(self.metadata_json or {})
+        metadata["error_code"] = value
+        self.metadata_json = metadata
+
+
+class ProjectArtifact(Base):
+    __tablename__ = "project_artifacts"
+
+    id = uuid_pk()
+    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact_type = Column(String(60), nullable=False, index=True)
+    uri = Column(Text, nullable=True)
+    status = Column(String(40), default="READY", nullable=False, index=True)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    project = relationship("ContentProject", back_populates="artifacts")

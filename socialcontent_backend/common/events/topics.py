@@ -22,12 +22,15 @@ DEAD_LETTER_CONTENT = "dead-letter.content"
 
 
 
-MODULE2_HANDOFF_CREATED = "module2.handoff.created"
+PROJECT_RUN_CREATED = "project.run.created"
+PROJECT_RUN_PROGRESS = "project.run.progress"
+PROJECT_RUN_COMPLETED = "project.run.completed"
+PROJECT_RUN_FAILED = "project.run.failed"
 
-PLANNING_JOB_CREATED = "planning.job.created"
-PLANNING_JOB_PROGRESS = "planning.job.progress"
-PLANNING_JOB_COMPLETED = "planning.job.completed"
-PLANNING_JOB_FAILED = "planning.job.failed"
+GENERATE_VIDEO_SCRIPT_REQUESTED = "generate-video.script.requested"
+GENERATE_VIDEO_RENDER_REQUESTED = "generate-video.render.requested"
+GENERATE_VIDEO_COMPLETED = "generate-video.completed"
+GENERATE_VIDEO_FAILED = "generate-video.failed"
 
 PLANNING_CANDIDATES_REQUESTED = "planning.candidates.requested"
 PLANNING_CANDIDATES_SELECTED = "planning.candidates.selected"
@@ -52,5 +55,4 @@ PLANNING_VALIDATION_FAILED = "planning.validation.failed"
 PLANNING_PLAN_APPROVED = "planning.plan.approved"
 PLANNING_PLAN_REJECTED = "planning.plan.rejected"
 
-MODULE3_HANDOFF_CREATED = "module3.handoff.created"
 DEAD_LETTER_PLANNING = "dead-letter.planning"

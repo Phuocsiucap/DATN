@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 
 class SocialProfileService:
     def list_profiles(self, db: Session, user: User, platform: str | None = None) -> list[SocialProfile]:
-        query = db.query(SocialProfile).filter(SocialProfile.user_id == user.id)
+        query = db.query(SocialProfile)
+        if not self.is_system_user(user):
+            query = query.filter(SocialProfile.user_id == user.id)
         if platform:
             query = query.filter(SocialProfile.platform == platform)
         return query.order_by(SocialProfile.created_at.desc()).all()
@@ -51,7 +53,10 @@ class SocialProfileService:
         return profile
 
     def get_owned_profile(self, db: Session, profile_id: uuid.UUID, user: User) -> SocialProfile:
-        profile = db.query(SocialProfile).filter(SocialProfile.id == profile_id, SocialProfile.user_id == user.id).first()
+        query = db.query(SocialProfile).filter(SocialProfile.id == profile_id)
+        if not self.is_system_user(user):
+            query = query.filter(SocialProfile.user_id == user.id)
+        profile = query.first()
         if not profile:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy social profile")
         return profile
@@ -233,6 +238,8 @@ class SocialProfileService:
                 value = value.strip() or "Asia/Bangkok"
             elif field == "approval_mode" and value not in {"manual", "auto"}:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="approval_mode phải là manual hoặc auto")
+            elif field == "video_render_mode" and value not in {"manual", "auto"}:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="video_render_mode phải là manual hoặc auto")
             elif field == "risk_level" and value not in {"low", "medium", "high"}:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="risk_level phải là low, medium hoặc high")
             setattr(strategy, field, value)
@@ -250,7 +257,9 @@ class SocialProfileService:
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
     def list_user_queue(self, db: Session, user: User, queue_status: str | None = None) -> list[PublishingQueueItem]:
-        query = db.query(PublishingQueueItem).join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id).filter(SocialProfile.user_id == user.id)
+        query = db.query(PublishingQueueItem).join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+        if not self.is_system_user(user):
+            query = query.filter(SocialProfile.user_id == user.id)
         if queue_status == "upcoming":
             query = query.filter(PublishingQueueItem.status.in_(["queued", "approved"]))
         elif queue_status:
@@ -263,9 +272,11 @@ class SocialProfileService:
         item = (
             db.query(PublishingQueueItem)
             .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
-            .filter(PublishingQueueItem.id == queue_item_id, SocialProfile.user_id == user.id)
+            .filter(PublishingQueueItem.id == queue_item_id)
             .first()
         )
+        if item and not self.is_system_user(user) and item.profile.user_id != user.id:
+            item = None
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
         item.status = next_status
@@ -275,6 +286,55 @@ class SocialProfileService:
 
     def list_posts(self, db: Session, profile: SocialProfile) -> list[SocialPost]:
         return db.query(SocialPost).filter(SocialPost.profile_id == profile.id).order_by(SocialPost.published_at.desc(), SocialPost.created_at.desc()).all()
+
+    def list_post_overview(self, db: Session, user: User) -> list[dict]:
+        query = db.query(SocialPost).join(SocialProfile, SocialProfile.id == SocialPost.profile_id)
+        if not self.is_system_user(user):
+            query = query.filter(SocialProfile.user_id == user.id)
+        posts = query.order_by(SocialPost.published_at.desc(), SocialPost.created_at.desc()).all()
+        groups: dict[str, dict] = {}
+        for post in posts:
+            title = post.title.strip() or "Untitled post"
+            key = title.lower()
+            group = groups.setdefault(
+                key,
+                {
+                    "key": key,
+                    "title": title,
+                    "posts": [],
+                    "chart_data": [],
+                    "total_views": 0,
+                    "account_count": 0,
+                    "_profile_ids": set(),
+                },
+            )
+            serialized = self.serialize_post(post)
+            serialized["profile"] = self.serialize_profile(post.profile)
+            latest_metric = serialized.get("latest_metric") or {}
+            views = int(latest_metric.get("views") or 0)
+            likes = int(latest_metric.get("likes") or 0)
+            comments = int(latest_metric.get("comments") or 0)
+            shares = int(latest_metric.get("shares") or 0)
+            group["posts"].append(serialized)
+            group["chart_data"].append(
+                {
+                    "account": post.profile.profile_name,
+                    "profile_id": str(post.profile_id),
+                    "post_id": str(post.id),
+                    "views": views,
+                    "likes": likes,
+                    "comments": comments,
+                    "shares": shares,
+                }
+            )
+            group["total_views"] += views
+            group["_profile_ids"].add(str(post.profile_id))
+
+        result = []
+        for group in groups.values():
+            group["account_count"] = len(group.pop("_profile_ids"))
+            result.append(group)
+        return sorted(result, key=lambda item: item["total_views"], reverse=True)
 
     def create_post(self, db: Session, profile: SocialProfile, payload: schemas.SocialPostCreateRequest) -> SocialPost:
         title = payload.title.strip()
@@ -294,13 +354,29 @@ class SocialProfileService:
         db.refresh(post)
         return post
 
+    def delete_post(self, db: Session, post_id: uuid.UUID, user: User) -> None:
+        post = (
+            db.query(SocialPost)
+            .join(SocialProfile, SocialProfile.id == SocialPost.profile_id)
+            .filter(SocialPost.id == post_id)
+            .first()
+        )
+        if post and not self.is_system_user(user) and post.profile.user_id != user.id:
+            post = None
+        if not post:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy bài đăng")
+        db.delete(post)
+        db.commit()
+
     def create_metric(self, db: Session, post_id: uuid.UUID, user: User, payload: schemas.SocialPostMetricCreateRequest) -> SocialPostMetric:
         post = (
             db.query(SocialPost)
             .join(SocialProfile, SocialProfile.id == SocialPost.profile_id)
-            .filter(SocialPost.id == post_id, SocialProfile.user_id == user.id)
+            .filter(SocialPost.id == post_id)
             .first()
         )
+        if post and not self.is_system_user(user) and post.profile.user_id != user.id:
+            post = None
         if not post:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy bài đăng")
         metric = SocialPostMetric(
@@ -348,8 +424,9 @@ class SocialProfileService:
             "min_score": strategy.min_score,
             "require_video": strategy.require_video,
             "receive_system_content": getattr(strategy, "receive_system_content", True),
-            "auto_handoff_enabled": getattr(strategy, "auto_handoff_enabled", False),
+            "auto_project_queue_enabled": getattr(strategy, "auto_project_queue_enabled", False),
             "auto_planning_enabled": getattr(strategy, "auto_planning_enabled", False),
+            "video_render_mode": getattr(strategy, "video_render_mode", "manual"),
             "max_system_recommendations": getattr(strategy, "max_system_recommendations", 20),
             "auto_queue_enabled": strategy.auto_queue_enabled,
             "auto_publish_enabled": strategy.auto_publish_enabled,
@@ -360,6 +437,8 @@ class SocialProfileService:
     def serialize_queue_item(self, item: PublishingQueueItem) -> dict:
         return {
             "id": item.id,
+            "profile_id": item.profile_id,
+            "profile_name": item.profile.profile_name if item.profile else None,
             "article_link": item.article_link,
             "article_title": item.article_title,
             "platform": item.platform,
@@ -390,6 +469,7 @@ class SocialProfileService:
 
         return {
             "id": post.id,
+            "profile_id": post.profile_id,
             "title": post.title,
             "post_url": post.post_url,
             "platform_post_id": post.platform_post_id,
@@ -487,3 +567,7 @@ class SocialProfileService:
         if not times:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_times không được để trống")
         return ",".join(times)
+
+    def is_system_user(self, user: User) -> bool:
+        role_names = {role.name for role in user.roles}
+        return bool(user.is_system_admin or "SYSTEM_ADMIN" in role_names or "ADMIN" in role_names)

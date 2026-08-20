@@ -20,7 +20,7 @@ class CrawlJobCreateRequest(BaseModel):
     content_scope: str = "GLOBAL"
     created_by_type: str = "SYSTEM"
     priority: int = 5
-    sources: list[CrawlJobSourceInput]
+    sources: list[CrawlJobSourceInput] = Field(min_length=1)
 
 
 class CrawlJobResponse(BaseModel):
@@ -48,6 +48,8 @@ class CrawlLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    job_id: uuid.UUID
+    task_id: uuid.UUID | None = None
     source_type: str | None
     stage: str
     level: str

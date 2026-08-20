@@ -180,18 +180,13 @@ def final_content_view(
 
 
 @router.get("/{content_id}", response_model=schemas.ContentResponse)
-def get_content(content_id: uuid.UUID, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    content = db.get(ContentItem, content_id)
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-    return content
+def get_content(content_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _get_visible_content(db, content_id, user)
 
 
 @router.get("/{content_id}/detail", response_model=schemas.ContentDetailResponse)
-def get_content_detail(content_id: uuid.UUID, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    content = db.get(ContentItem, content_id)
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
+def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    content = _get_visible_content(db, content_id, user)
     media = db.query(ContentMedia).filter(ContentMedia.content_id == content_id).order_by(ContentMedia.created_at.desc()).all()
     runs = db.query(ProcessingRun).filter(ProcessingRun.content_id == content_id).order_by(ProcessingRun.created_at.desc()).limit(20).all()
     sources = db.query(ContentSource).filter(ContentSource.content_id == content_id).order_by(ContentSource.first_seen_at.desc()).all()
@@ -250,6 +245,19 @@ def get_content_detail(content_id: uuid.UUID, _: User = Depends(get_current_user
         "media": media,
         "processing_runs": runs,
     }
+
+
+def _get_visible_content(db: Session, content_id: uuid.UUID, user: User) -> ContentItem:
+    content = db.get(ContentItem, content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    if user.is_system_admin:
+        return content
+    if content.content_scope == "GLOBAL":
+        return content
+    if content.content_scope == "PRIVATE" and content.owner_user_id == user.id:
+        return content
+    raise HTTPException(status_code=404, detail="Content not found")
 
 
 @router.patch("/{content_id}", response_model=schemas.ContentResponse)

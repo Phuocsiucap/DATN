@@ -14,12 +14,17 @@ type CurrentUser = {
   is_system_admin?: boolean
 }
 
+const hasSystemRole = (roles: string[]) => roles.some((role) => {
+  const normalized = role.toUpperCase()
+  return normalized === 'SYSTEM' || normalized === 'SYSTEM_ADMIN' || normalized === 'ADMIN'
+})
+
 export default function DashboardPage({ currentUser }: { currentUser: CurrentUser }) {
   const dispatch = useAppDispatch()
   const { data: stats, loading } = useAppSelector(s => s.stats)
   const [schedulerStatus, setSchedulerStatus] = useState<string>('stopped')
   const [crawling, setCrawling] = useState(false)
-  const isSystemUser = currentUser.roles.includes('system')
+  const isSystemUser = Boolean(currentUser.is_system_admin || hasSystemRole(currentUser.roles))
 
   const loadSchedulerStatus = async () => {
     try {

@@ -41,8 +41,11 @@ def create_source(payload: schemas.CrawlSourceCreateRequest, user: User = Depend
 
 
 @router.get("/crawl-sources")
-def list_sources(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(CrawlJobSource).order_by(CrawlJobSource.created_at.desc()).limit(100).all()
+def list_sources(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(CrawlJobSource)
+    if not user.is_system_admin:
+        query = query.join(CrawlJob, CrawlJob.id == CrawlJobSource.job_id).filter(CrawlJob.requested_by == user.id)
+    return query.order_by(CrawlJobSource.created_at.desc()).limit(100).all()
 
 
 @router.patch("/crawl-sources/{source_id}")

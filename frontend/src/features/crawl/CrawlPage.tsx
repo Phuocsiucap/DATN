@@ -76,6 +76,8 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       await createCrawlJobApi({
         name: jobName,
         crawl_mode: 'ONE_TIME',
+        content_scope: isSystemUser ? 'GLOBAL' : 'PRIVATE',
+        created_by_type: isSystemUser ? 'SYSTEM' : 'USER',
         priority: 5,
         sources: [{
           source_type: sourceType,

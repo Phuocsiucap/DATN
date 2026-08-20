@@ -4,13 +4,13 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.db.models import AuditLog, ContentItem, ContentPlan, Module2Handoff, Module2HandoffItem, PlanningFeedback, PlanningJob, SocialProfile, User
+from common.db.models import AuditLog, ContentPlan, ContentProject, PlanningFeedback, ProjectPart, SocialProfile, User
+from common.db.content_projects import sync_project_from_plan
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
-from common.events.topics import PLANNING_JOB_CREATED, PLANNING_PLAN_APPROVED, PLANNING_PLAN_REJECTED
+from common.events.topics import PLANNING_PLAN_APPROVED, PLANNING_PLAN_REJECTED
 from app.api.deps import get_current_user
-from app.api.routes.module3_handoffs import create_module3_handoff_for_series, publish_module3_handoff_created
 from app.schemas import api as schemas
 
 router = APIRouter()
@@ -44,6 +44,7 @@ def update_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanUpdateRe
         plan.approved_by = None
         plan.approved_at = None
     db.add(AuditLog(actor_id=user.id, action="content_plan.updated", target_type="content_plan", target_id=str(plan.id)))
+    sync_project_from_plan(db, plan)
     db.commit()
     db.refresh(plan)
     return plan
@@ -56,46 +57,45 @@ def approve_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewR
     plan.approved_by = user.id
     plan.approved_at = datetime.utcnow()
 
-    # Duyệt Cả Cụm (Approve Plan + Series)
-    from common.db.models import ContentSeries, SeriesPart
-    series_list = db.query(ContentSeries).filter(ContentSeries.content_plan_id == plan.id).all()
-    module3_handoffs = []
-    for series in series_list:
-        series.status = "APPROVED"
-        parts = db.query(SeriesPart).filter(SeriesPart.series_id == series.id).all()
+    content_projects = []
+    if plan.project_id:
+        project = db.get(ContentProject, plan.project_id)
+        parts = db.query(ProjectPart).filter(ProjectPart.project_id == plan.project_id).all()
         for part in parts:
             part.status = "READY_FOR_PRODUCTION"
-        module3_handoffs.append(
-            create_module3_handoff_for_series(
-                db,
-                user=user,
-                series=series,
-                plan=plan,
-                handoff_note="Auto-created when Module 2 approved the content plan",
-            )
-        )
+        if project:
+            project.status = "APPROVED"
+            content_projects.append(project)
 
     if payload and payload.feedback_text:
         db.add(PlanningFeedback(content_plan_id=plan.id, feedback_type="APPROVAL", feedback_text=payload.feedback_text, created_by=user.id))
     db.add(AuditLog(actor_id=user.id, action="content_plan.approved", target_type="content_plan", target_id=str(plan.id)))
+    project = sync_project_from_plan(db, plan)
+    if project not in content_projects:
+        content_projects.append(project)
     db.commit()
     db.refresh(plan)
-    publish(PLANNING_PLAN_APPROVED, build_event(event_type=PLANNING_PLAN_APPROVED, source="api-service", job_id=plan.planning_job_id, payload={"plan_id": str(plan.id)}))
-    for handoff in module3_handoffs:
-        handoff_series = db.get(ContentSeries, handoff.content_series_id)
-        if handoff_series:
-            publish_module3_handoff_created(handoff, handoff_series, plan)
+    event_job_id = plan.project_run_id or plan.project_id or plan.id
+    publish(PLANNING_PLAN_APPROVED, build_event(event_type=PLANNING_PLAN_APPROVED, source="api-service", job_id=event_job_id, payload={"plan_id": str(plan.id), "project_id": str(plan.project_id) if plan.project_id else None, "project_run_id": str(plan.project_run_id) if plan.project_run_id else None}))
     return {
         "plan": plan,
-        "module3_handoffs": [
+        "content_projects": [
             {
-                "id": handoff.id,
-                "status": handoff.status,
-                "content_series_id": handoff.content_series_id,
-                "content_plan_id": handoff.content_plan_id,
-                "title": (handoff.payload or {}).get("series_title") or (handoff.payload or {}).get("plan_title"),
+                "project_id": project.id,
+                "id": project.id,
+                "user_id": project.user_id,
+                "profile_id": project.profile_id,
+                "status": project.status,
+                "series_id": project.series_id,
+                "content_plan_id": project.content_plan_id,
+                "title": project.title,
+                "timeline_duration": (project.metadata_json or {}).get("timeline_duration"),
+                "rendered_video": next((artifact.uri for artifact in project.artifacts if artifact.artifact_type == "FINAL_VIDEO" and artifact.uri), None),
+                "payload": {"project_id": str(project.id), "source": "content_projects"},
+                "created_at": project.created_at,
+                "updated_at": project.updated_at,
             }
-            for handoff in module3_handoffs
+            for project in content_projects
         ],
     }
 
@@ -107,73 +107,23 @@ def reject_content_plan(plan_id: uuid.UUID, payload: schemas.ContentPlanReviewRe
     if payload.feedback_text:
         db.add(PlanningFeedback(content_plan_id=plan.id, feedback_type="REJECTION", feedback_text=payload.feedback_text, created_by=user.id))
     db.add(AuditLog(actor_id=user.id, action="content_plan.rejected", target_type="content_plan", target_id=str(plan.id)))
+    sync_project_from_plan(db, plan)
     db.commit()
     db.refresh(plan)
-    publish(PLANNING_PLAN_REJECTED, build_event(event_type=PLANNING_PLAN_REJECTED, source="api-service", job_id=plan.planning_job_id, payload={"plan_id": str(plan.id)}))
+    event_job_id = plan.project_run_id or plan.project_id or plan.id
+    publish(PLANNING_PLAN_REJECTED, build_event(event_type=PLANNING_PLAN_REJECTED, source="api-service", job_id=event_job_id, payload={"plan_id": str(plan.id), "project_id": str(plan.project_id) if plan.project_id else None, "project_run_id": str(plan.project_run_id) if plan.project_run_id else None}))
     return plan
 
 
-@router.post("/{plan_id}/regenerate", response_model=schemas.PlanningJobResponse)
+@router.post("/{plan_id}/regenerate", response_model=schemas.ProjectRunResponse)
 def regenerate_content_plan(
     plan_id: uuid.UUID,
     payload: schemas.ContentPlanRegenerateRequest | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    plan = _get_owned_plan(db, plan_id, user)
-    original_job = db.get(PlanningJob, plan.planning_job_id)
-    if not original_job:
-        raise HTTPException(status_code=404, detail="Planning job not found")
-    if not plan.primary_content_id and not plan.primary_story_id:
-        raise HTTPException(status_code=400, detail="Content plan has no source to regenerate")
-
-    content = db.get(ContentItem, plan.primary_content_id) if plan.primary_content_id else None
-    is_article = bool(content and (content.content_type or "").upper() == "ARTICLE")
-
-    plan.status = "SUPERSEDED"
-    handoff = Module2Handoff(
-        user_id=user.id,
-        profile_id=plan.profile_id,
-        selection_mode="MANUAL",
-        status="READY",
-        handoff_note=f"Regenerate bài: {plan.title}",
-        eligible_count=1,
-        rejected_count=0,
-        filters={"regenerated_from_plan_id": str(plan.id)},
-        strategy_snapshot={},
-    )
-    handoff.items.append(
-        Module2HandoffItem(
-            content_id=plan.primary_content_id,
-            story_id=plan.primary_story_id,
-            item_role="MANUAL_INCLUDED",
-            relation_reason="regenerate_plan",
-            candidate_score=100,
-            status="ELIGIBLE",
-            metadata_json={"regenerated_from_plan_id": str(plan.id)},
-        )
-    )
-    db.add(handoff)
-    db.flush()
-
-    next_job = PlanningJob(
-        user_id=user.id,
-        profile_id=plan.profile_id,
-        handoff_id=handoff.id,
-        planning_mode=plan.planning_mode,
-        status="PENDING",
-        current_stage="VALIDATING_INPUT",
-        target_duration_seconds=plan.target_duration_seconds or original_job.target_duration_seconds,
-        preferred_part_count=None if is_article else original_job.preferred_part_count,
-        language=original_job.language,
-        instructions=payload.instructions if payload and payload.instructions else original_job.instructions,
-    )
-    db.add(next_job)
-    db.add(AuditLog(actor_id=user.id, action="content_plan.regenerate_requested", target_type="content_plan", target_id=str(plan.id)))
-    db.commit()
-    db.refresh(next_job)
-    publish(PLANNING_JOB_CREATED, build_event(event_type=PLANNING_JOB_CREATED, source="api-service", job_id=next_job.id, payload={"job_id": str(next_job.id), "regenerated_from_plan_id": str(plan.id)}))
-    return next_job
+    _get_owned_plan(db, plan_id, user)
+    raise HTTPException(status_code=410, detail="Legacy plan regeneration was removed. Create a new content project run from project_sources.")
 
 
 def _get_owned_plan(db: Session, plan_id: uuid.UUID, user: User) -> ContentPlan:

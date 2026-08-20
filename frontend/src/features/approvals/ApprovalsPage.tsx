@@ -3,8 +3,8 @@ import { CalendarClock, CheckCircle2, RefreshCw, SkipForward, Wand2 } from 'luci
 import { fetchPublishingQueueApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 
 type PublishingQueueItem = {
-  id: number
-  profile_id: number
+  id: string
+  profile_id: string
   profile_name?: string | null
   article_link: string
   article_title: string
@@ -59,7 +59,7 @@ export default function ApprovalsPage() {
     void loadQueue()
   }, [statusFilter])
 
-  const handleStatus = async (queueItemId: number, nextStatus: string) => {
+  const handleStatus = async (queueItemId: string, nextStatus: string) => {
     setLoading(true)
     setMessage('')
     try {

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     embedding_service_url: str = "http://localhost:8060"
     planning_orchestrator_url: str = "http://localhost:8050"
+    generate_video_service_url: str = "http://localhost:8070"
     embedding_model_name: str = "embedding-service"
     embedding_similarity_threshold: float = 0.62
     openai_api_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_API_KEY"))

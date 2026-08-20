@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-import requests
-
 from common.core.config import get_settings
+from common.core.llm import deepseek_chat_completion, openai_chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +114,6 @@ class ContextManagerService:
         Returns (context_doc, provider_name, model_name, latency_ms)
         """
         settings = get_settings()
-        start_time = time.time()
 
         version = (existing_context_doc.get("version", 1) + 1) if (mode == "CONTINUE" and existing_context_doc) else 1
 
@@ -133,10 +130,8 @@ class ContextManagerService:
             for p in parts
         ]
 
-        if settings.openai_api_key:
-            try:
-                system_prompt = SYSTEM_PROMPT_CONTINUE_CONTEXT if mode == "CONTINUE" else SYSTEM_PROMPT_NEW_CONTEXT
-                user_prompt = f"""
+        system_prompt = SYSTEM_PROMPT_CONTINUE_CONTEXT if mode == "CONTINUE" else SYSTEM_PROMPT_NEW_CONTEXT
+        user_prompt = f"""
 Tiêu đề chuỗi: {title}
 Góc khai thác: {content_angle}
 Tông giọng: {tone}
@@ -149,54 +144,68 @@ Ngữ cảnh cũ (nếu có):
 
 Hướng dẫn: {instructions or 'Không'}
 """
-                res = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.openai_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.openai_model or "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.5,
-                    },
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        provider_errors: list[str] = []
+
+        if settings.openai_api_key:
+            try:
+                result = openai_chat_completion(
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model or "gpt-4o-mini",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.5,
                     timeout=30,
                 )
-                if res.status_code == 200:
-                    data = res.json()
-                    parsed = json.loads(data["choices"][0]["message"]["content"])
-                    context_doc = self._assemble_context_doc(
-                        parsed=parsed,
-                        mode=mode,
-                        series_id=series_id,
-                        version=version,
-                        parts=parts,
-                        content_angle=content_angle,
-                        tone=tone,
-                        existing_doc=existing_context_doc,
-                    )
-                    latency = int((time.time() - start_time) * 1000)
-                    return context_doc, "openai", settings.openai_model or "gpt-4o-mini", latency
+                parsed = result.parsed_json()
+                context_doc = self._assemble_context_doc(
+                    parsed=parsed,
+                    mode=mode,
+                    series_id=series_id,
+                    version=version,
+                    parts=parts,
+                    content_angle=content_angle,
+                    tone=tone,
+                    existing_doc=existing_context_doc,
+                )
+                return context_doc, result.provider, result.model, result.latency_ms
             except Exception as exc:
-                logger.warning("OpenAI Context Manager failed, falling back to rule-based merger: %s", exc)
+                provider_errors.append(f"openai: {exc}")
+                logger.warning("OpenAI Context Manager failed, trying DeepSeek: %s", exc)
 
-        # Fallback rule-based context generator/merger
-        latency = int((time.time() - start_time) * 1000)
-        context_doc = self._fallback_context_doc(
-            mode=mode,
-            series_id=series_id,
-            version=version,
-            title=title,
-            content_angle=content_angle,
-            tone=tone,
-            parts=parts,
-            existing_doc=existing_context_doc,
-        )
-        return context_doc, "local", "rule-based-context-manager-v1", latency
+        if settings.deepseek_api_key:
+            try:
+                result = deepseek_chat_completion(
+                    base_url=settings.deepseek_base_url,
+                    api_key=settings.deepseek_api_key,
+                    model="deepseek-v4-flash",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.5,
+                    timeout=30,
+                )
+                parsed = result.parsed_json()
+                context_doc = self._assemble_context_doc(
+                    parsed=parsed,
+                    mode=mode,
+                    series_id=series_id,
+                    version=version,
+                    parts=parts,
+                    content_angle=content_angle,
+                    tone=tone,
+                    existing_doc=existing_context_doc,
+                )
+                return context_doc, result.provider, result.model, result.latency_ms
+            except Exception as exc:
+                provider_errors.append(f"deepseek: {exc}")
+                logger.warning("DeepSeek Context Manager failed: %s", exc)
+
+        if provider_errors:
+            raise RuntimeError(f"Context generation failed; {'; '.join(provider_errors)}")
+        raise RuntimeError("Missing OPENAI_API_KEY or DEEPSEEK_API_KEY for context generation")
 
     def _assemble_context_doc(
         self,
@@ -290,96 +299,3 @@ Hướng dẫn: {instructions or 'Không'}
             "Đảm bảo continuity giữa các tập",
         ]
         return doc
-
-    def _fallback_context_doc(
-        self,
-        *,
-        mode: str,
-        series_id: str,
-        version: int,
-        title: str,
-        content_angle: str,
-        tone: str,
-        parts: list[dict[str, Any]],
-        existing_doc: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        if mode == "CONTINUE" and existing_doc:
-            existing_events = list(existing_doc.get("story_events", []))
-            start_event_idx = len(existing_events) + 1
-            new_events = [
-                {
-                    "event_order": start_event_idx + idx,
-                    "event_type": p.get("part_type", "MIDDLE"),
-                    "description": p.get("goal", f"Tập {p.get('part_number')} - Diễn biến nối tiếp"),
-                    "part_number": p.get("part_number"),
-                    "source_refs": p.get("source_refs", []),
-                    "importance": "MEDIUM",
-                }
-                for idx, p in enumerate(parts)
-            ]
-            new_coverage = [
-                {
-                    "part_number": p.get("part_number"),
-                    "covered_events": [p.get("part_number")],
-                    "open_questions": [p.get("next_part_tease")] if p.get("next_part_tease") else [],
-                    "resolved_questions": [p.get("previous_part_recap")] if p.get("previous_part_recap") else [],
-                }
-                for p in parts
-            ]
-            return {
-                "series_id": series_id,
-                "version": version,
-                "story_summary": existing_doc.get("story_summary", {
-                    "premise": content_angle,
-                    "beginning": "",
-                    "middle": f"Cập nhật thêm {len(parts)} phần mới.",
-                    "ending": "",
-                    "themes": [tone],
-                }),
-                "characters": existing_doc.get("characters", []),
-                "relationships": existing_doc.get("relationships", []),
-                "story_events": existing_events + new_events,
-                "narrative_coverage": list(existing_doc.get("narrative_coverage", [])) + new_coverage,
-                "open_questions": [p.get("next_part_tease") for p in parts if p.get("next_part_tease")],
-                "consistency_rules": existing_doc.get("consistency_rules", ["Duy trì tính nhất quán mạch truyện"]),
-                "created_at": datetime.now(timezone.utc),
-            }
-
-        story_events = [
-            {
-                "event_order": idx + 1,
-                "event_type": p.get("part_type", "MIDDLE"),
-                "description": p.get("goal", f"Phần {p.get('part_number')}"),
-                "part_number": p.get("part_number", idx + 1),
-                "source_refs": p.get("source_refs", []),
-                "importance": "HIGH" if p.get("part_type") in {"OPENING", "ENDING"} else "MEDIUM",
-            }
-            for idx, p in enumerate(parts)
-        ]
-        narrative_coverage = [
-            {
-                "part_number": p.get("part_number", idx + 1),
-                "covered_events": [p.get("part_number", idx + 1)],
-                "open_questions": [p.get("next_part_tease")] if p.get("next_part_tease") else [],
-                "resolved_questions": [],
-            }
-            for idx, p in enumerate(parts)
-        ]
-        return {
-            "series_id": series_id,
-            "version": version,
-            "story_summary": {
-                "premise": content_angle,
-                "beginning": parts[0].get("goal", "") if parts else "",
-                "middle": "Phát triển qua các diễn biến mấu chốt.",
-                "ending": parts[-1].get("goal", "") if parts else "",
-                "themes": [tone],
-            },
-            "characters": [],
-            "relationships": [],
-            "story_events": story_events,
-            "narrative_coverage": narrative_coverage,
-            "open_questions": [p.get("next_part_tease") for p in parts if p.get("next_part_tease")],
-            "consistency_rules": ["Giữ giọng văn đồng nhất", "Tránh lộ tình huống bất ngờ quá sớm"],
-            "created_at": datetime.now(timezone.utc),
-        }

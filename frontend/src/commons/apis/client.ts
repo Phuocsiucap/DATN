@@ -6,6 +6,14 @@ export const api = axios.create({
   withCredentials: true,
 })
 
+export const isSocialContentApiBase = () => String(api.defaults.baseURL || '').includes('/api/v1')
+
+export const assertLegacyGatewayApiBase = (featureName: string) => {
+  if (isSocialContentApiBase()) {
+    throw new Error(`${featureName} chưa được mount trong SocialContent API /api/v1.`)
+  }
+}
+
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean
 }

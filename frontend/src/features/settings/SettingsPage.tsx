@@ -84,8 +84,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     target_audience: '',
     min_score: 75,
     max_recommendations_per_day: 15,
-    auto_handoff_enabled: false,
+    auto_project_queue_enabled: false,
     auto_planning_enabled: false,
+    video_render_mode: 'manual',
     system_content_enabled: true,
     relevance_weight: 1.5,
     freshness_decay: 0.8,
@@ -697,14 +698,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Handoff</label>
+                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Project</label>
                             <span className="text-[11px] text-[#64748b]">Automatically draft posts from high-scoring content.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
                             <input 
                               type="checkbox" className="sr-only peer" 
-                              checked={strategyForm.auto_handoff_enabled || false}
-                              onChange={e => handleUpdateStrategyField('auto_handoff_enabled', e.target.checked)}
+                              checked={strategyForm.auto_project_queue_enabled || false}
+                              onChange={e => handleUpdateStrategyField('auto_project_queue_enabled', e.target.checked)}
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
@@ -715,7 +716,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
                             <label className="font-semibold text-sm text-[#0f172a] block">Auto Planning Job</label>
-                            <span className="text-[11px] text-[#64748b]">Schedule approved handoffs to queue automatically.</span>
+                            <span className="text-[11px] text-[#64748b]">Schedule approved projects to queue automatically.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
                             <input 
@@ -725,6 +726,21 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
+                        </div>
+
+                        <div className="h-px bg-[#eef2f7] w-full"></div>
+
+                        <div>
+                          <label className="font-semibold text-sm text-[#0f172a] block mb-1">Video Render Mode</label>
+                          <select
+                            className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
+                            value={strategyForm.video_render_mode || 'manual'}
+                            onChange={e => handleUpdateStrategyField('video_render_mode', e.target.value)}
+                          >
+                            <option value="manual">Manual render sau khi duyệt script</option>
+                            <option value="auto">Auto render ngay khi script sẵn sàng</option>
+                          </select>
+                          <span className="mt-1 block text-[11px] text-[#64748b]">Auto sẽ enqueue render job sau bước create/save/review/edit story hoặc tạo voice.</span>
                         </div>
                       </div>
                     </section>

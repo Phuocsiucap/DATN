@@ -1,21 +1,29 @@
 import { api } from './client'
 
+const normalizeUserList = (data: unknown) => ({
+  items: Array.isArray(data)
+    ? data
+    : Array.isArray((data as { items?: unknown })?.items)
+      ? (data as { items: unknown[] }).items
+      : [],
+})
+
 export const fetchAdminUsersApi = async () => {
-  const { data } = await api.get('/admin/users')
-  return data
+  const { data } = await api.get('/users')
+  return normalizeUserList(data)
 }
 
 export const createAdminUserApi = async (payload: any) => {
-  const { data } = await api.post('/admin/users', payload)
+  const { data } = await api.post('/users', payload)
   return data
 }
 
 export const updateAdminUserApi = async (userId: number | string, payload: any) => {
-  const { data } = await api.patch(`/admin/users/${userId}`, payload)
+  const { data } = await api.patch(`/users/${userId}`, payload)
   return data
 }
 
 export const deleteAdminUserApi = async (userId: number | string) => {
-  const { data } = await api.delete(`/admin/users/${userId}`)
+  const { data } = await api.delete(`/users/${userId}`)
   return data
 }

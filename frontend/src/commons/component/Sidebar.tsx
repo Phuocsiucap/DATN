@@ -9,6 +9,8 @@ import {
   FileCheck2,
   MonitorPlay,
   Clapperboard,
+  CalendarDays,
+  UsersRound,
 } from 'lucide-react'
 
 export type Tab =
@@ -18,7 +20,10 @@ export type Tab =
   | 'planning'
   | 'planningReview'
   | 'planningOutput'
-  | 'module3'
+  | 'generateVideo'
+  | 'approvals'
+  | 'schedule'
+  | 'users'
   | 'settings'
 
 interface SidebarProps {
@@ -34,7 +39,10 @@ export const TAB_PATHS: Record<Tab, string> = {
   planning: '/planning',
   planningReview: '/planning/review',
   planningOutput: '/planning/output',
-  module3: '/module3',
+  generateVideo: '/generate-video',
+  approvals: '/approvals',
+  schedule: '/schedule',
+  users: '/users',
   settings: '/settings',
 }
 
@@ -65,7 +73,20 @@ const SECTIONS: NavSection[] = [
       { key: 'planning', label: 'Module 2 Jobs', icon: <Sparkles size={15} /> },
       { key: 'planningReview', label: 'Duyệt Plans', icon: <FileCheck2 size={15} /> },
       { key: 'planningOutput', label: 'Output', icon: <MonitorPlay size={15} /> },
-      { key: 'module3', label: 'Module 3', icon: <Clapperboard size={15} /> },
+      { key: 'generateVideo', label: 'Generate Video', icon: <Clapperboard size={15} /> },
+    ],
+  },
+  {
+    title: 'QA & ĐĂNG BÀI',
+    items: [
+      { key: 'approvals', label: 'Duyệt Queue', icon: <FileCheck2 size={15} /> },
+      { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={15} /> },
+    ],
+  },
+  {
+    title: 'HỆ THỐNG',
+    items: [
+      { key: 'users', label: 'Users', icon: <UsersRound size={15} />, systemOnly: true },
     ],
   },
 ]

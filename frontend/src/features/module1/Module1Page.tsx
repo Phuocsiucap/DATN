@@ -175,6 +175,8 @@ export default function Module1Page({ workspaceMode = 'admin' }: { workspaceMode
       await createCrawlJobApi({
         name: jobName,
         crawl_mode: 'ONE_TIME',
+        content_scope: isUserMode ? 'PRIVATE' : 'GLOBAL',
+        created_by_type: isUserMode ? 'USER' : 'SYSTEM',
         priority: 5,
         sources: [{
           source_type: sourceType,

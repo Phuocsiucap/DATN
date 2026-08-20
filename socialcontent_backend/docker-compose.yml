@@ -58,6 +58,7 @@ services:
       - mongodb
       - kafka
       - embedding-service
+      - generate-video-service
     env_file:
       - .env
     environment:
@@ -66,10 +67,56 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       BROWSER_HEADLESS: "false"
       EMBEDDING_SERVICE_URL: http://embedding-service:8060
+      GENERATE_VIDEO_SERVICE_URL: http://generate-video-service:8070
     ports:
       - "8000:8000"
     volumes:
       - socialcontent_social_profile:/app/social_profile
+      - socialcontent_generate_video:/app/data_demo/video_gen_demo
+
+  generate-video-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/generate-video-service/Dockerfile
+    working_dir: /app/services/generate-video-service
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      BROWSER_HEADLESS: "true"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8070:8070"
+    volumes:
+      - socialcontent_generate_video:/app/data_demo/video_gen_demo
+
+  generate-video-worker:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/generate-video-service/Dockerfile
+    working_dir: /app/services/generate-video-service
+    command: python -m app.workers.generate_video_worker
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+      - generate-video-service
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      BROWSER_HEADLESS: "true"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - socialcontent_generate_video:/app/data_demo/video_gen_demo
 
   embedding-service:
     build:
@@ -194,3 +241,4 @@ volumes:
   socialcontent_postgres:
   socialcontent_mongo:
   socialcontent_social_profile:
+  socialcontent_generate_video:

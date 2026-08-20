@@ -1,6 +1,8 @@
+import hashlib
 import logging
 from datetime import datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log, finalize_job_if_ready
@@ -54,31 +56,66 @@ class CanonicalWriter:
             db.commit()
             return
 
-        content, story, is_duplicate, finalized, job_status = self._save_canonical(db, doc, processed_document_id, message.get("job_id"))
-        db.commit()
-        if story:
-            self.producer.story_grouped(job_id=message.get("job_id"), story_id=str(story.id), content_id=str(content.id))
-        self.producer.canonical_saved(job_id=message.get("job_id"), content_id=str(content.id), duplicate=is_duplicate)
-        if finalized:
-            self.producer.job_completed(job_id=message.get("job_id"), status=job_status or "SUCCEEDED")
+        try:
+            content, story, is_duplicate, finalized, job_status = self._save_canonical(db, doc, processed_document_id, message.get("job_id"))
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            job = db.get(CrawlJob, message.get("job_id")) if message.get("job_id") else None
+            if job:
+                job.total_failed += 1
+                db.add(
+                    ProcessingRun(
+                        job_id=job.id,
+                        processing_type="CANONICAL_SAVE",
+                        status="FAILED",
+                        processor_version="1.0.0",
+                        input_reference=processed_document_id,
+                        started_at=datetime.utcnow(),
+                        completed_at=datetime.utcnow(),
+                        error_message=str(exc)[-2000:],
+                    )
+                )
+                add_crawl_log(
+                    db,
+                    job_id=job.id,
+                    stage="CANONICAL",
+                    level="ERROR",
+                    message="Canonical content save failed",
+                    metadata={"processed_document_id": processed_document_id, "error": str(exc)},
+                )
+                finalized = finalize_job_if_ready(db, job)
+                db.commit()
+                if finalized:
+                    self.producer.job_completed(job_id=job.id, status=job.status)
+            return
+        else:
+            if story:
+                self.producer.story_grouped(job_id=message.get("job_id"), story_id=str(story.id), content_id=str(content.id))
+            self.producer.canonical_saved(job_id=message.get("job_id"), content_id=str(content.id), duplicate=is_duplicate)
+            if finalized:
+                self.producer.job_completed(job_id=message.get("job_id"), status=job_status or "SUCCEEDED")
 
     def _save_canonical(self, db: Session, doc: dict, processed_document_id: str, job_id: str | None):
         normalized = doc["normalized"]
         quality = doc["quality"]
         source_type = doc.get("source_type") or "BILIBILI"
         source_external_id = normalized.get("source_external_id") or normalized.get("source_url") or doc.get("raw_document_id") or processed_document_id
-        existing_source = (
+        self._lock_source_identity(db, source_type, str(source_external_id))
+        job = db.get(CrawlJob, job_id) if job_id else None
+        existing_sources = (
             db.query(ContentSource)
             .filter(
                 ContentSource.source_type == source_type,
                 ContentSource.source_external_id == str(source_external_id),
             )
-            .first()
+            .order_by(ContentSource.last_seen_at.desc())
+            .all()
         )
+        existing_source = self._find_reusable_source(db, existing_sources, job)
         if existing_source:
             return self._handle_source_duplicate(db, existing_source, normalized, quality, doc.get("raw_document_id"), processed_document_id, job_id)
 
-        job = db.get(CrawlJob, job_id) if job_id else None
         scope = job.content_scope if job and hasattr(job, "content_scope") else "GLOBAL"
         owner = job.requested_by if job and scope == "PRIVATE" else None
         created_by = job.created_by_type if job and hasattr(job, "created_by_type") else "SYSTEM"
@@ -163,6 +200,20 @@ class CanonicalWriter:
         finalized = finalize_job_if_ready(db, job)
         return content, story, is_duplicate, finalized, job.status if job else None
 
+    def _find_reusable_source(self, db: Session, sources: list[ContentSource], job: CrawlJob | None) -> ContentSource | None:
+        for source in sources:
+            content = db.get(ContentItem, source.content_id)
+            if content and self._content_visible_for_job(content, job):
+                return source
+        return None
+
+    def _content_visible_for_job(self, content: ContentItem, job: CrawlJob | None) -> bool:
+        if content.content_scope == "GLOBAL":
+            return True
+        if not job:
+            return False
+        return content.content_scope == "PRIVATE" and content.owner_user_id == job.requested_by
+
     def _handle_source_duplicate(
         self,
         db: Session,
@@ -230,6 +281,11 @@ class CanonicalWriter:
         db.flush()
         finalized = finalize_job_if_ready(db, job)
         return content, story, True, finalized, job.status if job else None
+
+    def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:
+        key_bytes = hashlib.sha256(f"{source_type}:{source_external_id}".encode("utf-8")).digest()[:8]
+        lock_key = int.from_bytes(key_bytes, byteorder="big", signed=True)
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
     def _should_group_as_story(self, source_type: str | None, normalized: dict) -> bool:
         if (source_type or "").upper() == "VNEXPRESS":

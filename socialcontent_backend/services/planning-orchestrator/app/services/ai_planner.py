@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import json
 import logging
-import time
+import re
 from typing import Any
 
-import requests
-
 from common.core.config import get_settings
+from common.core.llm import ChatCompletionResult, deepseek_chat_completion, openai_chat_completion
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """Bạn là Chuyên gia Lập Kế hoạch Nội dung (Content Planner) hàng đầu cho video ngắn (TikTok, Reels, Shorts).
+SYSTEM_PROMPT = """Bạn là Chuyên gia Lập Kế hoạch Nội dung (Content Planner) hàng đầu cho (TikTok, Reels, Facebook).
 Nhiệm vụ của bạn là phân tích tài khoản và nội dung đầu vào.
 BƯỚC 1 (QUAN TRỌNG NHẤT): Đánh giá xem Nội dung đầu vào có THỰC SỰ phù hợp với Chiến lược tài khoản hay không. Nếu không phù hợp hoặc vi phạm chủ đề né tránh, hãy từ chối.
 BƯỚC 2: Nếu phù hợp, hãy xây dựng một Content Plan độc đáo, kịch tính, thu hút khán giả.
+
+YÊU CẦU CHẤT LƯỢNG NỘI DUNG:
+- Không viết theo kiểu giới thiệu meta như "bài viết này nói về", "nội dung này đề cập", "hãy cùng tìm hiểu", "câu chuyện này".
+- Đi thẳng vào sự kiện/nhân vật/vấn đề cụ thể của nguồn; hook, goal và main_beats phải chứa chi tiết thật từ title, summary hoặc trích đoạn gốc.
+- Mỗi main_beats cần là một ý nội dung có thể chuyển thành lời dẫn/scene, không được là nhãn chung như "giới thiệu bối cảnh" hoặc "phát triển tình huống".
+- Nếu dữ liệu nguồn quá mỏng, vẫn phải bám vào chi tiết có sẵn và ghi rõ hạn chế trong risk_notes.
 
 Bạn BẮT BUỘC phải trả về kết quả dưới dạng cấu trúc JSON hợp lệ duy nhất, KHÔNG kèm thêm markdown fence hoặc bất kỳ giải thích nào bên ngoài.
 
@@ -25,19 +30,11 @@ Schema JSON đầu ra:
   "rejection_reason": "Nếu is_suitable=false, ghi rõ lý do từ chối (VD: Nội dung không liên quan đến thể thao). Nếu true thì để null",
   "plan_title": "Tiêu đề kế hoạch nội dung thu hút (chỉ có khi is_suitable=true)",
   "content_angle": "Góc nhìn/hướng khai thác câu chuyện độc đáo (chỉ có khi is_suitable=true)",
-  "target_audience": "Đối tượng khán giả mục tiêu",
-  "tone": "Phong cách/tông giọng",
-  "format": "NARRATED_STORY",
+  "tone": "Tông giọng đề xuất cho riêng nội dung này, vẫn phù hợp chiến lược tài khoản",
   "planning_mode": "SERIES hoặc SINGLE",
   "recommended_part_count": số_lượng_phần_nguyên,
   "target_duration_seconds": thời_lượng_mỗi_phần_giây,
   "target_series_id": "UUID chuỗi đang chạy nếu đây là bản cập nhật/tiếp nối của chuỗi đó, hoặc null nếu tạo chuỗi mới",
-  "production_requirements": {
-    "requires_voice": true,
-    "requires_subtitles": true,
-    "requires_background_media": true,
-    "requires_character_consistency": boolean
-  },
   "script_part": {
     "part_type": "OPENING/MIDDLE/ENDING",
     "title": "Tiêu đề part/kịch bản cho bài này",
@@ -69,6 +66,51 @@ Chỉ đề xuất SERIES/nhiều part khi nguồn là story/playlist dài thậ
 """
 
 
+DIRECT_SCRIPT_SYSTEM_PROMPT = """Bạn là Chuyên gia viết kịch bản video cho mạng xã hội.
+Nhiệm vụ của bạn là tạo ngay Content Plan và script_part từ đúng nội dung người dùng đã chọn.
+Không đánh giá độ phù hợp với chiến lược tài khoản, không chấm điểm candidate, không từ chối nội dung vì topic/tone/audience.
+Nếu có chủ đề né tránh hoặc rủi ro, chỉ ghi vào risk_flags/risk_notes để người dùng biết khi biên tập.
+
+YÊU CẦU CHẤT LƯỢNG NỘI DUNG:
+- Không viết theo kiểu giới thiệu meta như "bài viết này nói về", "nội dung này đề cập", "hãy cùng tìm hiểu", "câu chuyện này".
+- Đi thẳng vào sự kiện/nhân vật/vấn đề cụ thể của nguồn; hook, goal và main_beats phải chứa chi tiết thật từ title, summary hoặc trích đoạn gốc.
+- Mỗi main_beats cần là một ý nội dung có thể chuyển thành lời dẫn/scene, không được là nhãn chung như "giới thiệu bối cảnh" hoặc "phát triển tình huống".
+- Nếu dữ liệu nguồn quá mỏng, vẫn phải bám vào chi tiết có sẵn và ghi rõ hạn chế trong risk_notes.
+
+Bạn BẮT BUỘC phải trả về JSON hợp lệ duy nhất, KHÔNG kèm markdown fence hoặc giải thích ngoài JSON.
+
+Schema JSON đầu ra:
+{
+  "is_suitable": true,
+  "rejection_reason": null,
+  "plan_title": "Tiêu đề kế hoạch/kịch bản",
+  "content_angle": "Góc triển khai video",
+  "tone": "Tông giọng đề xuất cho riêng nội dung này",
+  "planning_mode": "SINGLE hoặc SERIES",
+  "recommended_part_count": số_lượng_phần_nguyên,
+  "target_duration_seconds": thời_lượng_mỗi_phần_giây,
+  "target_series_id": null,
+  "script_part": {
+    "part_type": "OPENING/MIDDLE/ENDING",
+    "title": "Tiêu đề part/kịch bản",
+    "goal": "Mục tiêu nội dung",
+    "hook_direction": "Cách mở đầu 3-5 giây đầu",
+    "ending_direction": "Cách kết bài/kêu gọi tương tác",
+    "previous_part_recap": null,
+    "next_part_tease": null,
+    "main_beats": ["Beat 1", "Beat 2", "Beat 3"],
+    "production_notes": {"visuals": "...", "voice": "...", "editing": "..."},
+    "risk_notes": ["Lưu ý rủi ro nếu có"]
+  },
+  "risk_flags": [{"type": "GENERAL", "severity": "LOW/MEDIUM/HIGH", "note": "Ghi chú rủi ro nếu có"}],
+  "reasoning": ["Đã tạo trực tiếp từ nội dung người dùng chọn"],
+  "confidence_score": số_nguyên_từ_0_đến_100
+}
+
+Với nội dung dạng ARTICLE hoặc yêu cầu SINGLE, hãy coi script_part là kịch bản hoàn chỉnh cho 1 video.
+"""
+
+
 class AIPlannerService:
     def generate_plan(
         self,
@@ -91,16 +133,16 @@ class AIPlannerService:
         target_duration: int | None,
         active_series: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
+        skip_ai_evaluation: bool = False,
     ) -> tuple[dict[str, Any], str, str, int, int]:
         """
         Generates structured plan payload.
         Returns (payload, provider_name, model_name, latency_ms, confidence_score)
         """
         settings = get_settings()
-        start_time = time.time()
 
         active_series_str = ""
-        if active_series:
+        if active_series and not skip_ai_evaluation:
             active_series_str = f"\nCác chuỗi nội dung đang chạy của kênh (Active Series), kèm tối đa 5 bài mới nhất của từng chuỗi:\n{json.dumps(active_series, ensure_ascii=False, indent=2)}\nChỉ điền 'target_series_id' khi nội dung đầu vào THỰC SỰ tiếp nối cùng mạch với một chuỗi đang chạy, dựa trên các bài gần nhất. Nếu chỉ cùng chủ đề rộng nhưng không cùng mạch nội dung, hãy để 'target_series_id': null để tạo chuỗi mới.\n"
 
         user_prompt = f"""
@@ -131,115 +173,109 @@ Yêu cầu cụ thể:
 Nguyên tắc:
 - Plan tổng quan có thể dùng title, summary, metadata và excerpt.
 - Nếu trả về script_part cho ARTICLE/SINGLE, script_part phải bám vào trích đoạn nội dung gốc ở trên, không chỉ dựa vào summary.
+- Không mở đầu bằng việc giới thiệu "bài viết/nội dung/câu chuyện"; hãy bắt đầu bằng chi tiết nổi bật nhất trong nguồn.
+- main_beats phải đi sâu vào diễn biến/luận điểm/kết quả cụ thể, ưu tiên tên riêng, mốc thời gian, nguyên nhân, hệ quả, số liệu nếu nguồn có.
+- Không dùng beat chung chung như "Mở bằng bối cảnh", "Tóm tắt diễn biến", "Chốt lại ý nghĩa" nếu không kèm chi tiết nguồn.
+{"- Đây là yêu cầu tạo kịch bản trực tiếp: bỏ qua chấm điểm, bỏ qua đánh giá phù hợp, không reject nội dung." if skip_ai_evaluation else ""}
 """
+        system_prompt = DIRECT_SCRIPT_SYSTEM_PROMPT if skip_ai_evaluation else SYSTEM_PROMPT
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        source_text = source_excerpt or summary
+        provider_errors: list[str] = []
 
-        # Try OpenAI API first if key exists
         if settings.openai_api_key:
             try:
-                res = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.openai_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.openai_model or "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.7,
-                    },
+                result = openai_chat_completion(
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model or "gpt-4o-mini",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
                     timeout=30,
                 )
-                if res.status_code == 200:
-                    data = res.json()
-                    content_str = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(content_str)
-                    latency = int((time.time() - start_time) * 1000)
-
-                    if not parsed.get("is_suitable", True):
-                        return (
-                            parsed,
-                            "openai",
-                            settings.openai_model or "gpt-4o-mini",
-                            latency,
-                            0,
-                        )
-
-                    validated = self._validate_and_sanitize(parsed, title, episode_count, target_duration)
-                    return (
-                        validated,
-                        "openai",
-                        settings.openai_model or "gpt-4o-mini",
-                        latency,
-                        int(validated.get("confidence_score", 85)),
-                    )
+                return self._provider_result_to_payload(
+                    result,
+                    skip_ai_evaluation=skip_ai_evaluation,
+                    title=title,
+                    episode_count=episode_count,
+                    target_duration=target_duration,
+                    source_text=source_text,
+                    default_tone=tone,
+                    default_target_audience=target_audience,
+                )
             except Exception as exc:
-                logger.warning("OpenAI API planning call failed, falling back: %s", exc)
+                provider_errors.append(f"openai: {exc}")
+                logger.warning("OpenAI planning call failed, trying DeepSeek: %s", exc)
 
-        # Fallback rule-based structured payload
-        latency = int((time.time() - start_time) * 1000)
-        mode = planning_mode if planning_mode != "AUTO" else ("SERIES" if episode_count > 1 else "SINGLE")
-        part_count = preferred_part_count or min(max(episode_count, 1), 8)
-        if mode == "SINGLE":
-            part_count = 1
-        source_basis = (source_excerpt[:240] if source_excerpt else "") or summary
+        if settings.deepseek_api_key:
+            try:
+                result = deepseek_chat_completion(
+                    base_url=settings.deepseek_base_url,
+                    api_key=settings.deepseek_api_key,
+                    model="deepseek-v4-flash",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
+                    timeout=30,
+                )
+                return self._provider_result_to_payload(
+                    result,
+                    skip_ai_evaluation=skip_ai_evaluation,
+                    title=title,
+                    episode_count=episode_count,
+                    target_duration=target_duration,
+                    source_text=source_text,
+                    default_tone=tone,
+                    default_target_audience=target_audience,
+                )
+            except Exception as exc:
+                provider_errors.append(f"deepseek: {exc}")
+                logger.warning("DeepSeek planning call failed: %s", exc)
 
-        fallback_payload = {
-            "is_suitable": True,
-            "rejection_reason": None,
-            "plan_title": f"{title} - {'Chuỗi' if mode == 'SERIES' else 'Video'} {part_count} phần",
-            "content_angle": (source_basis[:240] if source_basis else f"Kể lại nội dung {title} theo góc nhìn kịch tính, tạo sự tò mò trong 3s đầu."),
-            "target_audience": target_audience or "Khán giả thích câu chuyện ngắn hấp dẫn trên TikTok",
-            "tone": tone or "kịch tính, lôi cuốn",
-            "format": "NARRATED_STORY",
-            "planning_mode": mode,
-            "recommended_part_count": part_count,
-            "target_duration_seconds": target_duration or 60,
-            "target_series_id": None,
-            "production_requirements": {
-                "requires_voice": True,
-                "requires_subtitles": True,
-                "requires_background_media": True,
-                "requires_character_consistency": mode == "SERIES",
-            },
-            "script_part": {
-                "part_type": "OPENING" if part_count == 1 else "MIDDLE",
-                "title": f"{title} - Kịch bản chính",
-                "goal": (source_basis[:220] if source_basis else f"Kể lại nội dung {title} thành một video ngắn dễ theo dõi."),
-                "hook_direction": f"Mở bằng chi tiết gây tò mò nhất trong câu chuyện: {title}.",
-                "ending_direction": "Kết bằng câu hỏi hoặc nhận định mở để kéo bình luận.",
-                "previous_part_recap": None,
-                "next_part_tease": None,
-                "main_beats": [
-                    "Mở bằng bối cảnh và chi tiết gây tò mò nhất",
-                    "Tóm tắt các diễn biến chính theo trình tự rõ ràng",
-                    "Chốt lại ý nghĩa hoặc điểm gây tranh luận của câu chuyện",
-                ],
-                "production_notes": {
-                    "visuals": "Dùng hình ảnh/footage liên quan trực tiếp tới nội dung nguồn.",
-                    "voice": tone or "kịch tính, lôi cuốn",
-                    "editing": "Nhịp dựng nhanh, phụ đề rõ, nhấn mạnh các mốc quan trọng.",
-                },
-                "risk_notes": ["Kiểm chứng chi tiết nhạy cảm trước khi sản xuất."],
-            },
-            "risk_flags": [
-                {
-                    "type": "GENERAL",
-                    "severity": (risk_level or "MEDIUM").upper(),
-                    "note": "Tuân thủ bộ lọc rủi ro của chiến lược tài khoản",
-                }
-            ],
-            "reasoning": [
-                "Nội dung đạt chuẩn chất lượng dữ liệu",
-                "Phù hợp với chủ đề và tông giọng chiến lược",
-                f"Đã tối ưu cho cấu trúc {'chuỗi video' if mode == 'SERIES' else 'video đơn'}",
-            ],
-            "confidence_score": min(95, max(65, int(quality))),
-        }
-        return fallback_payload, "local", "rule-based-planner-v1", latency, int(fallback_payload["confidence_score"])
+        if provider_errors:
+            raise RuntimeError(f"AI planning failed; {'; '.join(provider_errors)}")
+        raise RuntimeError("Missing OPENAI_API_KEY or DEEPSEEK_API_KEY for AI planning")
+
+    def _provider_result_to_payload(
+        self,
+        result: ChatCompletionResult,
+        *,
+        skip_ai_evaluation: bool,
+        title: str,
+        episode_count: int,
+        target_duration: int | None,
+        source_text: str | None,
+        default_tone: str | None,
+        default_target_audience: str | None,
+    ) -> tuple[dict[str, Any], str, str, int, int]:
+        parsed = result.parsed_json()
+
+        if skip_ai_evaluation:
+            parsed["is_suitable"] = True
+            parsed["rejection_reason"] = None
+
+        if not parsed.get("is_suitable", True):
+            return parsed, result.provider, result.model, result.latency_ms, 0
+
+        validated = self._validate_and_sanitize(
+            parsed,
+            title,
+            episode_count,
+            target_duration,
+            source_text,
+            default_tone=default_tone,
+            default_target_audience=default_target_audience,
+        )
+        return (
+            validated,
+            result.provider,
+            result.model,
+            result.latency_ms,
+            int(validated.get("confidence_score", 85)),
+        )
 
     def _validate_and_sanitize(
         self,
@@ -247,13 +283,17 @@ Nguyên tắc:
         fallback_title: str,
         episode_count: int,
         target_duration: int | None,
+        source_text: str | None = None,
+        default_tone: str | None = None,
+        default_target_audience: str | None = None,
     ) -> dict[str, Any]:
         if not payload.get("plan_title"):
             payload["plan_title"] = f"{fallback_title} - Kế hoạch video"
         if not payload.get("content_angle"):
             payload["content_angle"] = f"Khai thác góc nhìn hấp dẫn từ {fallback_title}"
-        if not payload.get("format"):
-            payload["format"] = "NARRATED_STORY"
+        payload["target_audience"] = default_target_audience or payload.get("target_audience") or "Khán giả thích video ngắn"
+        payload["tone"] = payload.get("tone") or default_tone or "kịch tính, hấp dẫn"
+        payload["format"] = "NARRATED_STORY"
         if not payload.get("planning_mode"):
             payload["planning_mode"] = "SERIES" if episode_count > 1 else "SINGLE"
         parts = payload.get("recommended_part_count")
@@ -266,13 +306,7 @@ Nguyên tắc:
             payload["target_series_id"] = None
         else:
             payload["target_series_id"] = target_series
-        if not payload.get("production_requirements"):
-            payload["production_requirements"] = {
-                "requires_voice": True,
-                "requires_subtitles": True,
-                "requires_background_media": True,
-                "requires_character_consistency": payload["planning_mode"] == "SERIES",
-            }
+        payload["production_requirements"] = self._production_requirements(payload.get("planning_mode"))
         if not payload.get("risk_flags"):
             payload["risk_flags"] = [{"type": "GENERAL", "severity": "LOW", "note": "Ghi nhận từ AI Analysis"}]
         if not payload.get("reasoning"):
@@ -282,8 +316,17 @@ Nguyên tắc:
             fallback_title,
             payload.get("content_angle") or "",
             int(payload.get("target_duration_seconds") or target_duration or 60),
+            source_text,
         )
         return payload
+
+    def _production_requirements(self, planning_mode: str | None) -> dict[str, bool]:
+        return {
+            "requires_voice": True,
+            "requires_subtitles": True,
+            "requires_background_media": True,
+            "requires_character_consistency": planning_mode == "SERIES",
+        }
 
     def _sanitize_script_part(
         self,
@@ -291,6 +334,7 @@ Nguyên tắc:
         fallback_title: str,
         fallback_angle: str,
         target_duration: int,
+        source_text: str | None = None,
     ) -> dict[str, Any]:
         part = raw if isinstance(raw, dict) else {}
         part_type = part.get("part_type")
@@ -299,12 +343,10 @@ Nguyên tắc:
 
         main_beats = part.get("main_beats")
         if not isinstance(main_beats, list) or not main_beats:
-            main_beats = [
-                "Mở bằng chi tiết gây tò mò nhất của bài",
-                "Triển khai các ý chính theo mạch nguồn",
-                "Kết lại bằng góc nhìn hoặc câu hỏi tạo tương tác",
-            ]
+            main_beats = self._fallback_beats_from_source(source_text or fallback_angle, fallback_title)
         main_beats = [str(item) for item in main_beats if str(item).strip()]
+        if self._beats_are_too_generic(main_beats):
+            main_beats = self._fallback_beats_from_source(source_text or fallback_angle, fallback_title)
 
         risk_notes = part.get("risk_notes")
         if not isinstance(risk_notes, list):
@@ -328,3 +370,75 @@ Nguyên tắc:
             "production_notes": production_notes,
             "risk_notes": risk_notes,
         }
+
+    def _fallback_beats_from_source(self, source_text: str | None, title: str) -> list[str]:
+        sentences = self._source_sentences(source_text)
+        if not sentences:
+            return [
+                f"{title}: nêu chi tiết cụ thể nhất đang có trong dữ liệu nguồn.",
+                "Làm rõ nguyên nhân, diễn biến hoặc luận điểm chính dựa trên phần tóm tắt hiện có.",
+                "Kết bằng hệ quả trực tiếp hoặc điểm còn bỏ ngỏ từ nội dung nguồn.",
+            ]
+        if len(sentences) <= 3:
+            return sentences
+        middle_index = len(sentences) // 2
+        picked = [sentences[0], sentences[middle_index], sentences[-1]]
+        unique: list[str] = []
+        for item in picked:
+            if item not in unique:
+                unique.append(item)
+        return unique
+
+    def _source_sentences(self, text: str | None) -> list[str]:
+        if not text:
+            return []
+        cleaned = re.sub(r"\s+", " ", str(text)).strip()
+        if not cleaned:
+            return []
+        parts = re.split(r"(?<=[.!?。！？])\s+|\n+", cleaned)
+        sentences = []
+        for part in parts:
+            compact = self._compact_text(part, 220)
+            if len(compact) >= 24 and not self._is_meta_intro(compact):
+                sentences.append(compact)
+            if len(sentences) >= 6:
+                break
+        if not sentences and cleaned:
+            sentences.append(self._compact_text(cleaned, 220))
+        return sentences
+
+    def _compact_text(self, value: str | None, limit: int) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "..."
+
+    def _beats_are_too_generic(self, beats: list[str]) -> bool:
+        if not beats:
+            return True
+        generic_count = sum(1 for beat in beats if self._is_meta_intro(beat) or len(beat.strip()) < 18)
+        return generic_count >= max(1, len(beats) // 2)
+
+    def _is_meta_intro(self, value: str) -> bool:
+        text = value.lower()
+        patterns = [
+            "bài viết này",
+            "bai viet nay",
+            "nội dung này",
+            "noi dung nay",
+            "câu chuyện này",
+            "cau chuyen nay",
+            "hãy cùng tìm hiểu",
+            "hay cung tim hieu",
+            "giới thiệu",
+            "gioi thieu",
+            "mở bằng bối cảnh",
+            "mo bang boi canh",
+            "tóm tắt các diễn biến",
+            "tom tat cac dien bien",
+            "phát triển tình huống",
+            "phat trien tinh huong",
+            "hook mở đầu",
+            "hook 3s",
+        ]
+        return any(pattern in text for pattern in patterns)

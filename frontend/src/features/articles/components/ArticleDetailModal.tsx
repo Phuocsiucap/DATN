@@ -5,7 +5,7 @@ import {
   Loader2, FileText, Sparkles, ArrowRight, CheckCircle, AlertCircle, ChevronDown
 } from 'lucide-react';
 import type { Article } from '@/commons/store/slices/articlesSlice';
-import { fetchArticleDetailApi, createModule2HandoffApi, createPlanningJobApi, type PlanningProfile } from '@/commons/apis/api';
+import { fetchArticleDetailApi, createContentProjectFromSourcesApi, createProjectRunApi, type PlanningProfile } from '@/commons/apis/api';
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles';
 
 interface ArticleDetailModalProps {
@@ -46,12 +46,13 @@ export default function ArticleDetailModal({ article: initialArticle, onClose }:
     setSendingToModule2(true);
     setModule2Result(null);
     try {
-      const handoff = await createModule2HandoffApi({
+      const project = await createContentProjectFromSourcesApi({
         profile_id: selectedProfileId,
         content_ids: [article.id],
         selection_mode: 'MANUAL',
         candidate_limit: 1,
-        handoff_note: `Chuyển thủ công từ Global Content Store: "${article.title}"`,
+        title: article.title || 'Content project',
+        note: `Chuyển thủ công từ Global Content Store: "${article.title}"`,
         filters: {
           manual_direct_script: true,
           bypass_scoring: true,
@@ -59,13 +60,14 @@ export default function ArticleDetailModal({ article: initialArticle, onClose }:
           content_ids: [article.id],
         },
       });
-      await createPlanningJobApi({
+      await createProjectRunApi({
         profile_id: selectedProfileId,
-        handoff_id: handoff.id,
+        project_id: project.id,
         planning_mode: 'SINGLE',
         target_duration_seconds: 60,
         preferred_part_count: 1,
         language: 'vi',
+        skip_ai_evaluation: true,
         instructions: 'manual_direct_script: true. Bỏ qua chấm điểm và tạo luôn kịch bản video đơn lẻ từ đúng bài người dùng đã chọn.',
       })
       setModule2Result({ success: true, message: 'Đã tạo job kịch bản trực tiếp trong Module 2.' });

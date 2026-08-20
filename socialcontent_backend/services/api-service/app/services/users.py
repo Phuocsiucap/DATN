@@ -70,7 +70,7 @@ class UserService:
         if payload.is_active is not None:
             user.is_active = payload.is_active
         if payload.roles is not None:
-            roles = db.query(Role).filter(Role.name.in_(payload.roles)).all()
+            roles = self.get_roles(db, self.normalized_roles(payload.roles))
             user.roles = roles
             user.is_system_admin = any(role.name == "SYSTEM_ADMIN" for role in roles)
         db.commit()

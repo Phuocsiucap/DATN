@@ -29,6 +29,31 @@ class CrawlOrchestrator:
         if not job or job.status == "CANCELLED":
             logger.info(f"[CrawlOrchestrator] Job {job_id} not found or cancelled.")
             return
+        if not job.sources:
+            job.status = "FAILED"
+            job.current_stage = "COMPLETED"
+            job.completed_at = datetime.utcnow()
+            job.progress_percent = 100
+            add_crawl_log(
+                db,
+                job_id=job.id,
+                stage="DISCOVERING",
+                level="ERROR",
+                message="Crawl job has no sources",
+            )
+            db.commit()
+            return
+        if job.tasks:
+            add_crawl_log(
+                db,
+                job_id=job.id,
+                stage="DISCOVERING",
+                level="INFO",
+                message="Crawl job already has tasks; duplicate creation event ignored",
+                metadata={"task_count": len(job.tasks)},
+            )
+            db.commit()
+            return
         logger.info(f"[CrawlOrchestrator] Starting crawl job {job_id} with {len(job.sources)} sources")
 
         job.status = "QUEUED"

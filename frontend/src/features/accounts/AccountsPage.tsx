@@ -23,6 +23,7 @@ type CurrentUser = {
   id: string | number
   email: string
   roles: string[]
+  is_system_admin?: boolean
 }
 
 type SocialProfile = {
@@ -51,8 +52,9 @@ type SocialProfileStrategy = {
   min_score: number
   require_video: boolean
   receive_system_content: boolean
-  auto_handoff_enabled: boolean
+  auto_project_queue_enabled: boolean
   auto_planning_enabled: boolean
+  video_render_mode: string
   max_system_recommendations: number
   auto_queue_enabled: boolean
   auto_publish_enabled: boolean
@@ -120,8 +122,9 @@ const emptyStrategyForm: SocialProfileStrategy = {
   min_score: 70,
   require_video: true,
   receive_system_content: true,
-  auto_handoff_enabled: false,
+  auto_project_queue_enabled: false,
   auto_planning_enabled: false,
+  video_render_mode: 'manual',
   max_system_recommendations: 20,
   auto_queue_enabled: true,
   auto_publish_enabled: false,
@@ -137,6 +140,11 @@ const weekDays = [
   { value: '5', label: 'T7' },
   { value: '6', label: 'CN' },
 ]
+
+const hasSystemRole = (roles: string[]) => roles.some((role) => {
+  const normalized = role.toUpperCase()
+  return normalized === 'SYSTEM' || normalized === 'SYSTEM_ADMIN' || normalized === 'ADMIN'
+})
 
 export default function AccountsPage({ currentUser }: { currentUser: CurrentUser }) {
   const [profiles, setProfiles] = useState<SocialProfile[]>([])
@@ -157,7 +165,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
   const [showPlatformForm, setShowPlatformForm] = useState(false)
   const [configProfileId, setConfigProfileId] = useState<string | null>(null)
 
-  const isSystemUser = useMemo(() => currentUser?.roles.includes('system') ?? false, [currentUser])
+  const isSystemUser = useMemo(() => Boolean(currentUser?.is_system_admin || hasSystemRole(currentUser?.roles || [])), [currentUser])
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
@@ -876,6 +884,18 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
                     </select>
                   </label>
                   <label className="space-y-1 text-sm">
+                    <span>Chế độ render video</span>
+                    <select
+                      className="w-full px-3 py-2 rounded-lg border outline-none"
+                      style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-lowest)' }}
+                      value={strategyForm.video_render_mode}
+                      onChange={(event) => setStrategyForm((prev) => ({ ...prev, video_render_mode: event.target.value }))}
+                    >
+                      <option value="manual">Manual render sau khi duyệt script</option>
+                      <option value="auto">Auto render khi script sẵn sàng</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-sm">
                     <span>Điểm tối thiểu</span>
                     <input
                       type="number"
@@ -892,7 +912,7 @@ export default function AccountsPage({ currentUser }: { currentUser: CurrentUser
                 <div className="flex flex-wrap gap-4 text-sm">
                   {[
                     ['receive_system_content', 'Nhận dữ liệu Crawl hệ thống'],
-                    ['auto_handoff_enabled', 'Tự động Handoff bài viết'],
+                    ['auto_project_queue_enabled', 'Tự động tạo project bài viết'],
                     ['auto_planning_enabled', 'Tự động AI Planning'],
                     ['auto_queue_enabled', 'AI tự đưa vào queue'],
                     ['require_video', 'Yêu cầu video'],

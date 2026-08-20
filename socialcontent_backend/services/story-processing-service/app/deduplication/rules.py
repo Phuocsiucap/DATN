@@ -8,15 +8,15 @@ def find_or_mark_duplicate(db: Session, content: ContentItem) -> bool:
     match_type = None
     reason = None
     if content.canonical_url:
-        existing = db.query(ContentItem).filter(ContentItem.canonical_url == content.canonical_url, ContentItem.id != content.id).first()
+        existing = _visible_duplicate_query(db, content).filter(ContentItem.canonical_url == content.canonical_url).first()
         match_type = "EXACT_URL"
         reason = "Same canonical URL"
     if not existing and content.content_hash:
-        existing = db.query(ContentItem).filter(ContentItem.content_hash == content.content_hash, ContentItem.id != content.id).first()
+        existing = _visible_duplicate_query(db, content).filter(ContentItem.content_hash == content.content_hash).first()
         match_type = "CONTENT_HASH"
         reason = "Same content hash"
     if not existing and content.transcript_hash:
-        existing = db.query(ContentItem).filter(ContentItem.transcript_hash == content.transcript_hash, ContentItem.id != content.id).first()
+        existing = _visible_duplicate_query(db, content).filter(ContentItem.transcript_hash == content.transcript_hash).first()
         match_type = "TRANSCRIPT_SIMILARITY"
         reason = "Same transcript hash"
     if not existing:
@@ -34,3 +34,13 @@ def find_or_mark_duplicate(db: Session, content: ContentItem) -> bool:
     )
     content.status = "DUPLICATE"
     return True
+
+
+def _visible_duplicate_query(db: Session, content: ContentItem):
+    query = db.query(ContentItem).filter(ContentItem.id != content.id)
+    if content.content_scope == "GLOBAL":
+        return query.filter(ContentItem.content_scope == "GLOBAL")
+    return query.filter(
+        (ContentItem.content_scope == "GLOBAL")
+        | ((ContentItem.content_scope == "PRIVATE") & (ContentItem.owner_user_id == content.owner_user_id))
+    )

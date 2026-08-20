@@ -33,6 +33,11 @@ const emptyCreateForm = {
   is_active: true,
 }
 
+const hasSystemRole = (roles: string[]) => roles.some((role) => {
+  const normalized = role.toUpperCase()
+  return normalized === 'SYSTEM' || normalized === 'SYSTEM_ADMIN' || normalized === 'ADMIN'
+})
+
 export default function UsersPage({ currentUser }: UsersPageProps) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [createForm, setCreateForm] = useState(emptyCreateForm)
@@ -40,7 +45,7 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
   const [loading, setLoading] = useState(false)
 
   const totalActive = useMemo(() => users.filter((user) => user.is_active).length, [users])
-  const totalSystem = useMemo(() => users.filter((user) => user.roles.includes('system')).length, [users])
+  const totalSystem = useMemo(() => users.filter((user) => hasSystemRole(user.roles)).length, [users])
 
   const loadUsers = async () => {
     setLoading(true)
@@ -59,7 +64,7 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
     void loadUsers()
   }, [])
 
-  const rolePayload = (role: string) => (role === 'system' ? ['system', 'user'] : ['user'])
+  const rolePayload = (role: string) => (role === 'system' ? ['SYSTEM_ADMIN', 'USER'] : ['USER'])
 
   const handleCreateUser = async () => {
     setLoading(true)
@@ -254,7 +259,7 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
             <tbody>
               {users.map((user) => {
                 const isSelf = user.id === currentUser.id
-                const primaryRole = user.roles.includes('system') ? 'system' : 'user'
+                const primaryRole = hasSystemRole(user.roles) ? 'system' : 'user'
                 return (
                   <tr key={user.id} className="border-t" style={{ borderColor: 'var(--outline-variant)' }}>
                     <td className="px-5 py-4">

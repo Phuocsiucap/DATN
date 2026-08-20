@@ -11,8 +11,11 @@ import DashboardPage from '@/features/dashboard/DashboardPage'
 import CrawlPage from '@/features/crawl/CrawlPage'
 import ContentPage from '@/features/content/ContentPage'
 import PlanningPage from '@/features/planning/PlanningPage'
-import Module3ProjectsPage from '@/features/module3/Module3ProjectsPage'
-import VideoProductionWorkspace from '@/features/module3/VideoProductionWorkspace'
+import GenerateVideoProjectsPage from '@/features/generate-video/GenerateVideoProjectsPage'
+import VideoProductionWorkspace from '@/features/generate-video/VideoProductionWorkspace'
+import ApprovalsPage from '@/features/approvals/ApprovalsPage'
+import SchedulePage from '@/features/schedule/SchedulePage'
+import UsersPage from '@/features/users/UsersPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 
 import AuthPage from '@/features/auth/AuthPage'
@@ -32,20 +35,20 @@ const PATH_TABS = Object.fromEntries(
 
 const getTabFromPath = (): Tab => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
-  if (normalizedPath.startsWith('/module3')) return 'module3'
+  if (normalizedPath.startsWith('/generate-video')) return 'generateVideo'
   return PATH_TABS[normalizedPath] ?? 'dashboard'
 }
 
-const getModule3HandoffIdFromPath = () => {
+const getGenerateVideoProjectIdFromPath = () => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '')
-  const match = normalizedPath.match(/^\/module3\/([^/?#]+)/)
+  const match = normalizedPath.match(/^\/generate-video\/([^/?#]+)/)
   if (match?.[1]) return decodeURIComponent(match[1])
-  return new URLSearchParams(window.location.search).get('handoff_id') || ''
+  return ''
 }
 
 function AppContent() {
   const [tab, setTab] = useState<Tab>(getTabFromPath)
-  const [module3HandoffId, setModule3HandoffId] = useState(getModule3HandoffIdFromPath)
+  const [generateVideoProjectId, setGenerateVideoProjectId] = useState(getGenerateVideoProjectIdFromPath)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -59,7 +62,7 @@ function AppContent() {
 
   const handleTabChange = useCallback((nextTab: Tab, replace = false) => {
     setTab(nextTab)
-    setModule3HandoffId('')
+    setGenerateVideoProjectId('')
     const nextPath = TAB_PATHS[nextTab]
     if (window.location.pathname === nextPath) return
     const method = replace ? 'replaceState' : 'pushState'
@@ -71,11 +74,11 @@ function AppContent() {
     window.history.pushState({ openProfileId: profileId, openTab: 'strategy' }, '', TAB_PATHS.settings)
   }, [])
 
-  const handleOpenModule3 = useCallback((handoffId?: string) => {
-    setTab('module3')
-    setModule3HandoffId(handoffId || '')
-    const suffix = handoffId ? `/${encodeURIComponent(handoffId)}` : ''
-    window.history.pushState({ handoffId }, '', `${TAB_PATHS.module3}${suffix}`)
+  const handleOpenGenerateVideo = useCallback((projectId?: string) => {
+    setTab('generateVideo')
+    setGenerateVideoProjectId(projectId || '')
+    const suffix = projectId ? `/${encodeURIComponent(projectId)}` : ''
+    window.history.pushState({ projectId }, '', `${TAB_PATHS.generateVideo}${suffix}`)
   }, [])
 
   const handleOpenModule2 = useCallback((jobId?: string) => {
@@ -113,7 +116,7 @@ function AppContent() {
   useEffect(() => {
     const handlePopState = () => {
       setTab(getTabFromPath())
-      setModule3HandoffId(getModule3HandoffIdFromPath())
+      setGenerateVideoProjectId(getGenerateVideoProjectIdFromPath())
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -164,14 +167,17 @@ function AppContent() {
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
           {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
           {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
-          {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
-          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
-          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenModule3={handleOpenModule3} />}
-          {tab === 'module3' && (module3HandoffId ? (
-            <VideoProductionWorkspace handoffId={module3HandoffId} onBackToList={() => handleOpenModule3()} />
+          {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
+          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
+          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
+          {tab === 'generateVideo' && (generateVideoProjectId ? (
+            <VideoProductionWorkspace projectId={generateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
           ) : (
-            <Module3ProjectsPage onOpenProject={(handoffId) => handleOpenModule3(handoffId)} />
+            <GenerateVideoProjectsPage onOpenProject={(projectId) => handleOpenGenerateVideo(projectId)} />
           ))}
+          {tab === 'approvals' && <ApprovalsPage />}
+          {tab === 'schedule' && <SchedulePage />}
+          {tab === 'users' && (isSystemUser ? <UsersPage currentUser={currentUser} /> : <DashboardPage currentUser={currentUser} />)}
           {tab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

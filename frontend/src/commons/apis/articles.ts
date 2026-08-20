@@ -149,6 +149,18 @@ export const fetchArticleDetailApi = async (identifier: string) => {
 }
 
 export const publishArticleApi = async (link: string, platforms: string[], profileIds: (number | string)[] = []) => {
-  const { data } = await api.post('/module3/handoffs', { link, platforms, profile_ids: profileIds })
+  const profileId = profileIds.find((value) => isUuid(String(value)))
+  if (!profileId || !isUuid(link)) {
+    throw new Error('Publish article cần content_id và profile_id UUID để tạo content project.')
+  }
+  const { data } = await api.post('/content-projects/from-sources', {
+    profile_id: profileId,
+    content_ids: [link],
+    selection_mode: 'MANUAL',
+    title: 'Article production project',
+    note: `Publish to ${platforms.join(', ')}`,
+  })
   return data
 }
+
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)

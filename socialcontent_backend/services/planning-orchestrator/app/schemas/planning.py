@@ -7,84 +7,24 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Module2HandoffCreateRequest(BaseModel):
+class ProjectRunCreateRequest(BaseModel):
     profile_id: uuid.UUID
-    crawl_job_id: uuid.UUID | None = None
-    story_ids: list[uuid.UUID] = Field(default_factory=list)
-    content_ids: list[uuid.UUID] = Field(default_factory=list)
-    episode_ids: list[uuid.UUID] = Field(default_factory=list)
-    handoff_note: str | None = None
-    selection_mode: str = "MANUAL"
-    candidate_limit: int | None = None
-    filters: dict[str, Any] = Field(default_factory=dict)
-
-
-class Module2AutoHandoffRequest(BaseModel):
-    profile_id: uuid.UUID
-    crawl_job_id: uuid.UUID
-    candidate_limit: int = 20
-    min_quality_score: float | None = None
-    max_related_items_per_primary: int = 5
-    create_planning_job: bool = True
-    planning_mode: str = "SERIES"
-    target_duration_seconds: int = 60
-    preferred_part_count: int | None = None
-    language: str = "vi"
-    instructions: str | None = None
-
-
-class Module2AutoHandoffResponse(BaseModel):
-    handoff: Module2HandoffResponse
-    planning_job: PlanningJobResponse | None = None
-
-
-class Module2HandoffItemResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    handoff_id: uuid.UUID
-    content_id: uuid.UUID | None
-    story_id: uuid.UUID | None
-    episode_id: uuid.UUID | None
-    status: str
-    rejection_reason: str | None
-    created_at: datetime
-
-
-class Module2HandoffResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    user_id: uuid.UUID
-    profile_id: uuid.UUID
-    selection_mode: str
-    status: str
-    handoff_note: str | None
-    eligible_count: int
-    rejected_count: int
-    filters: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-    items: list[Module2HandoffItemResponse] = Field(default_factory=list)
-
-
-class PlanningJobCreateRequest(BaseModel):
-    profile_id: uuid.UUID
-    handoff_id: uuid.UUID
+    project_id: uuid.UUID
     planning_mode: str = "SERIES"
     target_duration_seconds: int | None = 60
     preferred_part_count: int | None = None
     language: str = "vi"
     instructions: str | None = None
+    skip_ai_evaluation: bool = False
 
 
-class PlanningJobResponse(BaseModel):
+class ProjectRunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     user_id: uuid.UUID
     profile_id: uuid.UUID
-    handoff_id: uuid.UUID
+    project_id: uuid.UUID
     planning_mode: str
     status: str
     current_stage: str
@@ -100,11 +40,11 @@ class PlanningJobResponse(BaseModel):
     updated_at: datetime
 
 
-class PlanningCandidateResponse(BaseModel):
+class ProjectCandidateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    planning_job_id: uuid.UUID
+    project_run_id: uuid.UUID | None = None
     content_id: uuid.UUID | None
     story_id: uuid.UUID | None
     episode_id: uuid.UUID | None
@@ -117,14 +57,14 @@ class PlanningCandidateResponse(BaseModel):
     created_at: datetime
 
 
-class PlanningCandidateUpdateRequest(BaseModel):
+class ProjectCandidateUpdateRequest(BaseModel):
     eligible: bool | None = None
     rank_order: int | None = None
     selection_reasons: list[Any] | None = None
     rejection_reasons: list[Any] | None = None
 
 
-class PlanningCandidateReselectRequest(BaseModel):
+class ProjectCandidateReselectRequest(BaseModel):
     candidate_limit: int = 10
     min_score: float | None = None
 
@@ -154,7 +94,8 @@ class ContentPlanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    planning_job_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    project_run_id: uuid.UUID | None = None
     profile_id: uuid.UUID
     primary_content_id: uuid.UUID | None
     primary_story_id: uuid.UUID | None
@@ -178,7 +119,7 @@ class ContentPlanResponse(BaseModel):
     updated_at: datetime
 
 
-class SeriesPartResponse(BaseModel):
+class ProjectPartResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -201,18 +142,18 @@ class SeriesPartResponse(BaseModel):
     updated_at: datetime
 
 
-class SeriesUpdateRequest(BaseModel):
+class ProjectSeriesUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     series_type: str | None = None
     status: str | None = None
 
 
-class SeriesRegenerateRequest(BaseModel):
+class ProjectSeriesRegenerateRequest(BaseModel):
     instructions: str | None = None
 
 
-class SeriesPartCreateRequest(BaseModel):
+class ProjectPartCreateRequest(BaseModel):
     part_number: int | None = None
     part_type: str = "MIDDLE"
     title: str
@@ -228,7 +169,7 @@ class SeriesPartCreateRequest(BaseModel):
     risk_notes: list[Any] = Field(default_factory=list)
 
 
-class SeriesPartUpdateRequest(BaseModel):
+class ProjectPartUpdateRequest(BaseModel):
     part_number: int | None = None
     part_type: str | None = None
     title: str | None = None
@@ -245,11 +186,11 @@ class SeriesPartUpdateRequest(BaseModel):
     risk_notes: list[Any] | None = None
 
 
-class SeriesPartReorderRequest(BaseModel):
+class ProjectPartReorderRequest(BaseModel):
     part_ids: list[uuid.UUID]
 
 
-class ContentSeriesResponse(BaseModel):
+class ProjectSeriesResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -264,39 +205,3 @@ class ContentSeriesResponse(BaseModel):
     context_version: int
     created_at: datetime
     updated_at: datetime
-
-
-class Module3HandoffCreateRequest(BaseModel):
-    content_series_id: uuid.UUID
-    part_ids: list[uuid.UUID] = Field(default_factory=list)
-    priority: int = 5
-    handoff_note: str | None = None
-
-
-class Module3HandoffPartResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    handoff_id: uuid.UUID
-    series_part_id: uuid.UUID
-    part_number: int
-    status: str
-    payload: dict[str, Any]
-    created_at: datetime
-
-
-class Module3HandoffResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    user_id: uuid.UUID
-    profile_id: uuid.UUID
-    content_plan_id: uuid.UUID
-    content_series_id: uuid.UUID
-    context_id: uuid.UUID | None
-    status: str
-    handoff_note: str | None
-    payload: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
-    parts: list[Module3HandoffPartResponse] = Field(default_factory=list)

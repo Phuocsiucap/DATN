@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import json
 import logging
-import time
+import re
 from typing import Any
 
-import requests
-
 from common.core.config import get_settings
+from common.core.llm import deepseek_chat_completion, openai_chat_completion
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_NEW = """Bạn là Chuyên gia Xây dựng Kịch bản Chuỗi Video (Series Planner) hàng đầu.
 Nhiệm vụ của bạn là lập kế hoạch chi tiết từng phần (Series Parts) cho một chuỗi video ngắn từ nội dung đầu vào.
+
+YÊU CẦU CHẤT LƯỢNG NỘI DUNG:
+- Không viết part theo kiểu giới thiệu meta như "bài viết này nói về", "nội dung này đề cập", "hãy cùng tìm hiểu".
+- Mỗi part phải đi vào chi tiết cụ thể của nguồn: nhân vật/sự kiện/luận điểm/nguyên nhân/hệ quả/số liệu nếu có.
+- main_beats phải là nội dung có thể chuyển thành lời dẫn hoặc cảnh cụ thể, không được là nhãn chung như "Hook mở đầu", "Phát triển tình huống".
+- Nếu nguồn ngắn, hãy chia theo các chi tiết thật đang có thay vì tự tạo drama ngoài nguồn.
 
 Bạn BẮT BUỘC phải trả về kết quả dưới dạng cấu trúc JSON hợp lệ duy nhất, KHÔNG kèm thêm markdown fence.
 
@@ -48,6 +53,8 @@ YÊU CẦU QUAN TRỌNG:
 2. Đánh số tập bắt đầu chính xác từ phần số {continuation_from_part}.
 3. Vì mỗi bài báo chỉ sinh 1 part/script, hãy dùng `previous_part_recap` để nối mạch với bài gần nhất trong series.
 4. Giữ vững mạch logic và giọng văn của các bài cũ, nhưng nội dung chính phải bám vào bài mới.
+5. Không viết kiểu giới thiệu meta như "bài viết này nói về"; bài mới phải đi thẳng vào chi tiết cụ thể của nguồn.
+6. main_beats phải chứa thông tin thật từ bài mới, không dùng nhãn chung như "Hook mở đầu" hoặc "Phát triển tình huống".
 
 Schema JSON đầu ra:
 {
@@ -96,7 +103,6 @@ class SeriesPlannerService:
         Returns (parts_list, provider_name, model_name, latency_ms)
         """
         settings = get_settings()
-        start_time = time.time()
 
         system_prompt = (
             SYSTEM_PROMPT_CONTINUE.replace("{continuation_from_part}", str(continuation_from_part))
@@ -136,51 +142,58 @@ Thông tin nội dung:
 Hướng dẫn bổ sung: {instructions or 'Không'}
 
 Nguyên tắc: Khi có trích đoạn nội dung gốc, hãy dùng nó làm nguồn chính để xây dựng main_beats, hook và ending. Summary chỉ là lớp định hướng.
+Không mở đầu bằng việc giới thiệu bài viết/nội dung. Hãy bắt đầu bằng chi tiết nổi bật nhất, rồi đào sâu vào diễn biến, nguyên nhân, hệ quả hoặc điểm gây tranh luận có trong nguồn.
 """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        provider_errors: list[str] = []
 
         if settings.openai_api_key:
             try:
-                res = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.openai_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": settings.openai_model or "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "response_format": {"type": "json_object"},
-                        "temperature": 0.7,
-                    },
+                result = openai_chat_completion(
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model or "gpt-4o-mini",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
                     timeout=30,
                 )
-                if res.status_code == 200:
-                    data = res.json()
-                    content_str = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(content_str)
-                    raw_parts = parsed.get("parts", [])
-                    validated_parts = self._sanitize_parts(
-                        raw_parts, continuation_from_part, part_count, title, target_duration
-                    )
-                    latency = int((time.time() - start_time) * 1000)
-                    return validated_parts, "openai", settings.openai_model or "gpt-4o-mini", latency
+                parsed = result.parsed_json()
+                raw_parts = parsed.get("parts", [])
+                validated_parts = self._sanitize_parts(
+                    raw_parts, continuation_from_part, part_count, title, target_duration, source_excerpt or summary
+                )
+                return validated_parts, result.provider, result.model, result.latency_ms
             except Exception as exc:
-                logger.warning("OpenAI Series Planner failed, fallback to rule-based: %s", exc)
+                provider_errors.append(f"openai: {exc}")
+                logger.warning("OpenAI Series Planner failed, trying DeepSeek: %s", exc)
 
-        # Fallback rule-based generation
-        latency = int((time.time() - start_time) * 1000)
-        fallback_parts = self._fallback_parts(
-            title=title,
-            mode=mode,
-            continuation_from_part=continuation_from_part,
-            part_count=part_count,
-            target_duration=target_duration,
-            existing_parts=existing_parts,
-        )
-        return fallback_parts, "local", "rule-based-series-planner-v1", latency
+        if settings.deepseek_api_key:
+            try:
+                result = deepseek_chat_completion(
+                    base_url=settings.deepseek_base_url,
+                    api_key=settings.deepseek_api_key,
+                    model="deepseek-v4-flash",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.7,
+                    timeout=30,
+                )
+                parsed = result.parsed_json()
+                raw_parts = parsed.get("parts", [])
+                validated_parts = self._sanitize_parts(
+                    raw_parts, continuation_from_part, part_count, title, target_duration, source_excerpt or summary
+                )
+                return validated_parts, result.provider, result.model, result.latency_ms
+            except Exception as exc:
+                provider_errors.append(f"deepseek: {exc}")
+                logger.warning("DeepSeek Series Planner failed: %s", exc)
+
+        if provider_errors:
+            raise RuntimeError(f"Series planning failed; {'; '.join(provider_errors)}")
+        raise RuntimeError("Missing OPENAI_API_KEY or DEEPSEEK_API_KEY for series planning")
 
     def _sanitize_parts(
         self,
@@ -189,7 +202,9 @@ Nguyên tắc: Khi có trích đoạn nội dung gốc, hãy dùng nó làm ngu�
         part_count: int,
         title: str,
         target_duration: int,
+        source_text: str | None = None,
     ) -> list[dict[str, Any]]:
+        fallback_beats = self._fallback_beats_from_source(source_text, title)
         sanitized = []
         for i in range(part_count):
             part_num = start_part_num + i
@@ -200,9 +215,10 @@ Nguyên tắc: Khi có trích đoạn nội dung gốc, hãy dùng nó làm ngu�
                 p_type = "OPENING" if part_num == 1 else "MIDDLE"
 
             part_title = item.get("title") or f"Phần {part_num}: Cập nhật mới từ {title}"
-            goal = item.get("goal") or f"Diễn biến tiếp theo của phần {part_num}"
-            hook = item.get("hook_direction") or "Mở đầu kịch tính trong 3s đầu tiên."
-            ending = item.get("ending_direction") or "Kết bằng câu hỏi tò mò cho phần tiếp."
+            source_detail = fallback_beats[min(i, len(fallback_beats) - 1)] if fallback_beats else title
+            goal = item.get("goal") or source_detail
+            hook = item.get("hook_direction") or source_detail
+            ending = item.get("ending_direction") or "Kết bằng hệ quả hoặc câu hỏi còn bỏ ngỏ từ chính nội dung nguồn."
 
             recap = item.get("previous_part_recap")
             if part_num == 1:
@@ -216,7 +232,10 @@ Nguyên tắc: Khi có trích đoạn nội dung gốc, hãy dùng nó làm ngu�
 
             beats = item.get("main_beats")
             if not isinstance(beats, list) or not beats:
-                beats = ["Hook mở đầu", "Phát triển tình huống", "Cao trào ngắn & Kết"]
+                beats = self._beats_for_part(fallback_beats, i, part_count, title)
+            beats = [str(beat) for beat in beats if str(beat).strip()]
+            if self._beats_are_too_generic(beats):
+                beats = self._beats_for_part(fallback_beats, i, part_count, title)
 
             sanitized.append(
                 {
@@ -236,49 +255,80 @@ Nguyên tắc: Khi có trích đoạn nội dung gốc, hãy dùng nó làm ngu�
             )
         return sanitized
 
-    def _fallback_parts(
-        self,
-        *,
-        title: str,
-        mode: str,
-        continuation_from_part: int,
-        part_count: int,
-        target_duration: int,
-        existing_parts: list[dict[str, Any]] | None = None,
-    ) -> list[dict[str, Any]]:
-        parts = []
-        last_existing_title = existing_parts[-1].get("title") if existing_parts else None
+    def _beats_for_part(self, source_beats: list[str], index: int, part_count: int, title: str) -> list[str]:
+        if not source_beats:
+            return [
+                f"{title}: nêu chi tiết cụ thể nhất đang có trong dữ liệu nguồn.",
+                "Làm rõ nguyên nhân, diễn biến hoặc luận điểm chính dựa trên phần tóm tắt hiện có.",
+                "Kết bằng hệ quả trực tiếp hoặc điểm còn bỏ ngỏ từ nội dung nguồn.",
+            ]
+        if part_count <= 1 or len(source_beats) <= 3:
+            return source_beats
+        chunk_size = max(1, (len(source_beats) + part_count - 1) // part_count)
+        start = min(len(source_beats) - 1, index * chunk_size)
+        chunk = source_beats[start:start + chunk_size]
+        return chunk or [source_beats[-1]]
 
-        for i in range(part_count):
-            part_num = continuation_from_part + i
-            is_first = (part_num == 1)
-            is_last = (i == part_count - 1)
+    def _fallback_beats_from_source(self, source_text: str | None, title: str) -> list[str]:
+        sentences = self._source_sentences(source_text)
+        if sentences:
+            return sentences
+        return [
+            f"{title}: nêu chi tiết cụ thể nhất đang có trong dữ liệu nguồn.",
+            "Làm rõ nguyên nhân, diễn biến hoặc luận điểm chính dựa trên phần tóm tắt hiện có.",
+            "Kết bằng hệ quả trực tiếp hoặc điểm còn bỏ ngỏ từ nội dung nguồn.",
+        ]
 
-            part_type = "OPENING" if is_first else ("ENDING" if is_last and mode == "NEW" else "MIDDLE")
-            
-            p_title = f"Phần {part_num}: Diễn biến mới của {title}"
-            goal = f"Phát triển tình huống phần {part_num} đẩy cao sự tò mò của người xem."
-            recap = None
-            if not is_first:
-                prev_name = last_existing_title if (i == 0 and last_existing_title) else f"Phần {part_num - 1}"
-                recap = f"Tóm tắt điểm nhấn của {prev_name}."
+    def _source_sentences(self, text: str | None) -> list[str]:
+        if not text:
+            return []
+        cleaned = re.sub(r"\s+", " ", str(text)).strip()
+        if not cleaned:
+            return []
+        parts = re.split(r"(?<=[.!?。！？])\s+|\n+", cleaned)
+        sentences = []
+        for part in parts:
+            compact = self._compact_text(part, 220)
+            if len(compact) >= 24 and not self._is_meta_intro(compact):
+                sentences.append(compact)
+            if len(sentences) >= 10:
+                break
+        if not sentences:
+            sentences.append(self._compact_text(cleaned, 220))
+        return sentences
 
-            tease = f"Hé lộ manh mối cho Phần {part_num + 1}." if not is_last else "Tổng kết trọn vẹn thông điệp chính."
+    def _compact_text(self, value: str | None, limit: int) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "..."
 
-            parts.append(
-                {
-                    "part_number": part_num,
-                    "part_type": part_type,
-                    "title": p_title,
-                    "goal": goal,
-                    "hook_direction": "Mở bằng một chi tiết gây bất ngờ trong 3s đầu.",
-                    "ending_direction": "Giữ suspense cho các diễn biến tiếp theo.",
-                    "previous_part_recap": recap,
-                    "next_part_tease": tease,
-                    "target_duration_seconds": target_duration,
-                    "main_beats": ["Hook 3s", "Tình huống trung tâm", "Câu hỏi lửng cuối phần"],
-                    "production_notes": {"voice": "narration", "subtitle": "required", "pace": "fast"},
-                    "risk_notes": [],
-                }
-            )
-        return parts
+    def _beats_are_too_generic(self, beats: list[str]) -> bool:
+        if not beats:
+            return True
+        generic_count = sum(1 for beat in beats if self._is_meta_intro(beat) or len(beat.strip()) < 18)
+        return generic_count >= max(1, len(beats) // 2)
+
+    def _is_meta_intro(self, value: str) -> bool:
+        text = value.lower()
+        patterns = [
+            "bài viết này",
+            "bai viet nay",
+            "nội dung này",
+            "noi dung nay",
+            "câu chuyện này",
+            "cau chuyen nay",
+            "hãy cùng tìm hiểu",
+            "hay cung tim hieu",
+            "giới thiệu",
+            "gioi thieu",
+            "hook mở đầu",
+            "hook 3s",
+            "phát triển tình huống",
+            "phat trien tinh huong",
+            "tình huống trung tâm",
+            "tinh huong trung tam",
+            "câu hỏi lửng",
+            "cau hoi lung",
+        ]
+        return any(pattern in text for pattern in patterns)

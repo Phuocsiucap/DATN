@@ -10,5 +10,6 @@ python-dotenv
 PyJWT
 bcrypt
 httpx
+edge-tts
 playwright
 alembic

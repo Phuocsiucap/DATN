@@ -3,24 +3,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from common.db.bootstrap import ensure_roles
+from common.db.bootstrap import ensure_roles, ensure_schema_compatibility
 from common.db.models import Base
 from common.db.session import SessionLocal, engine
-from app.services.module3_video_production import enqueue_unfinished_render_jobs
 from app.api.routes import (
     admin,
     auth,
     content_plans,
-    content_series,
+    content_projects,
+    project_series,
     contents,
     crawl_jobs,
     data_quality,
-    embeddings,
-    handoffs,
     media_proxy,
-    module3_handoffs,
-    module3_video_production,
-    planning_jobs,
+    generate_video,
+    project_runs,
     profile_planning,
     social_profiles,
     sources,
@@ -36,11 +33,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[api-service] Base.metadata.create_all warning: {e}")
     with SessionLocal() as db:
+        ensure_schema_compatibility(db)
         ensure_roles(db)
-    try:
-        enqueue_unfinished_render_jobs()
-    except Exception as e:
-        print(f"[api-service] module3 render queue resume warning: {e}")
     yield
 
 
@@ -63,14 +57,12 @@ app.include_router(contents.router, prefix="/api/v1/contents", tags=["contents"]
 app.include_router(media_proxy.router, prefix="/api/v1/media-proxy", tags=["media-proxy"])
 app.include_router(stories.router, prefix="/api/v1", tags=["stories"])
 app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["data-quality"])
-app.include_router(embeddings.router, prefix="/api/v1/embeddings", tags=["embeddings"])
-app.include_router(handoffs.router, prefix="/api/v1/module2/handoffs", tags=["module2-handoffs"])
-app.include_router(planning_jobs.router, prefix="/api/v1/planning-jobs", tags=["planning-jobs"])
+app.include_router(project_runs.router, prefix="/api/v1/project-runs", tags=["project-runs"])
 app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["profile-planning"])
 app.include_router(content_plans.router, prefix="/api/v1/content-plans", tags=["content-plans"])
-app.include_router(content_series.router, prefix="/api/v1/content-series", tags=["content-series"])
-app.include_router(module3_handoffs.router, prefix="/api/v1/module3/handoffs", tags=["module3-handoffs"])
-app.include_router(module3_video_production.router, prefix="/api/v1/module3/video-production", tags=["module3-video-production"])
+app.include_router(content_projects.router, prefix="/api/v1/content-projects", tags=["content-projects"])
+app.include_router(project_series.router, prefix="/api/v1/project-series", tags=["project-series"])
+app.include_router(generate_video.router, prefix="/api/v1/generate-video", tags=["generate-video"])
 
 
 @app.get("/health")

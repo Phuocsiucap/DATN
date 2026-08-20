@@ -83,6 +83,19 @@ def create_social_post_metric(
     return service.serialize_metric(metric)
 
 
+@router.get("/posts/overview")
+def social_post_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    service = SocialProfileService()
+    return {"items": service.list_post_overview(db, current_user)}
+
+
+@router.delete("/post-items/{post_id}")
+def delete_social_post(post_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    service = SocialProfileService()
+    service.delete_post(db, post_id, current_user)
+    return {"message": "Đã xóa bài đăng"}
+
+
 @router.delete("/{profile_id}")
 def delete_social_profile(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()

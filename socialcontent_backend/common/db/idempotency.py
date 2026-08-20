@@ -10,7 +10,7 @@ def claim_event(db: Session, event_id: str | uuid.UUID, consumer_name: str) -> b
     row = ProcessedEvent(event_id=uuid.UUID(str(event_id)), consumer_name=consumer_name)
     db.add(row)
     try:
-        db.commit()
+        db.flush()
         return True
     except IntegrityError:
         db.rollback()

@@ -14,27 +14,27 @@ import {
 } from 'lucide-react'
 import {
   approveContentPlanApi,
-  createAutoModule2HandoffFromCrawlApi,
-  createModule3HandoffApi,
-  createModule2HandoffApi,
-  createPlanningJobApi,
+  createContentProjectFromProjectSeriesApi,
+  createContentProjectFromCrawlApi,
+  createContentProjectFromSourcesApi,
+  createProjectRunApi,
   fetchAllContentPlansApi,
-  fetchAllContentSeriesApi,
-  fetchModule2HandoffsApi,
-  fetchPlanningJobsApi,
+  fetchAllProjectSeriesApi,
+  fetchContentProjectsApi,
+  fetchProjectRunsApi,
   fetchSeriesConsistencyApi,
   fetchSeriesContextApi,
-  fetchSeriesPartsApi,
+  fetchProjectPartsApi,
   rebuildSeriesContextApi,
   regenerateContentPlanApi,
-  regenerateContentSeriesApi,
+  regenerateProjectSeriesApi,
   rejectContentPlanApi,
   type ConsistencyCheck,
   type ContentPlan,
-  type ContentSeries,
-  type Module2Handoff,
-  type PlanningJob,
-  type SeriesPart,
+  type ProjectSeries,
+  type ContentProject,
+  type ProjectRun,
+  type ProjectPart,
   type SeriesContextResponse,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi, fetchSocialProfileStrategyApi } from '@/commons/apis/socialProfiles'
@@ -57,14 +57,14 @@ type Strategy = {
   min_score?: number
 }
 
-type Module2Tab = 'jobs' | 'plans' | 'series' | 'context' | 'module3'
+type Module2Tab = 'jobs' | 'plans' | 'series' | 'context' | 'generateVideo'
 
 const tabs: { id: Module2Tab; label: string; icon: React.ElementType }[] = [
-  { id: 'jobs', label: 'Planning Jobs', icon: Sparkles },
+  { id: 'jobs', label: 'Project Runs', icon: Sparkles },
   { id: 'plans', label: 'Plan Review', icon: FileText },
   { id: 'series', label: 'Series Builder', icon: GitBranch },
   { id: 'context', label: 'Context Manager', icon: Layers3 },
-  { id: 'module3', label: 'Module 3 (Video Prep)', icon: Sparkles },
+  { id: 'generateVideo', label: 'Generate Video Prep', icon: Sparkles },
 ]
 
 const tone: Record<string, string> = {
@@ -80,7 +80,7 @@ const tone: Record<string, string> = {
   FAILED: 'border-red-200 bg-red-50 text-red-700',
 }
 
-const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
+const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
 export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode?: 'admin' | 'user' }) {
@@ -89,11 +89,11 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [crawlJobs, setCrawlJobs] = useState<CrawlJob[]>([])
   const [stories, setStories] = useState<Story[]>([])
   const [finalContent, setFinalContent] = useState<FinalContentView>({ normal_items: [], series_items: [] })
-  const [handoffs, setHandoffs] = useState<Module2Handoff[]>([])
-  const [jobs, setJobs] = useState<PlanningJob[]>([])
+  const [projects, setProjects] = useState<ContentProject[]>([])
+  const [jobs, setJobs] = useState<ProjectRun[]>([])
   const [plans, setPlans] = useState<ContentPlan[]>([])
-  const [series, setSeries] = useState<ContentSeries[]>([])
-  const [parts, setParts] = useState<SeriesPart[]>([])
+  const [series, setSeries] = useState<ProjectSeries[]>([])
+  const [parts, setParts] = useState<ProjectPart[]>([])
   const [seriesContext, setSeriesContext] = useState<SeriesContextResponse | null>(null)
   const [consistency, setConsistency] = useState<ConsistencyCheck | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState('')
@@ -101,12 +101,12 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([])
   const [selectedContentIds, setSelectedContentIds] = useState<string[]>([])
   const [selectedPlan, setSelectedPlan] = useState<ContentPlan | null>(null)
-  const [selectedSeries, setSelectedSeries] = useState<ContentSeries | null>(null)
+  const [selectedSeries, setSelectedSeries] = useState<ProjectSeries | null>(null)
   const [strategy, setStrategy] = useState<Strategy | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [showWizard, setShowWizard] = useState(false)
-  const [planningMode, setPlanningMode] = useState<'AUTO' | 'SINGLE' | 'SERIES'>('SERIES')
+  const [planningMode, setPlanningMode] = useState<'AUTO' | 'SINGLE' | 'SERIES'>('SINGLE')
   const [duration, setDuration] = useState(60)
   const [partCount, setPartCount] = useState(1)
   const [instructions, setInstructions] = useState('Kể nhanh, giữ suspense, tránh nội dung quá bạo lực')
@@ -117,13 +117,13 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     setLoading(true)
     setMessage('')
     try {
-      const [nextHandoffs, nextJobs, nextPlans, nextSeries] = await Promise.all([
-        fetchModule2HandoffsApi(),
-        fetchPlanningJobsApi(),
+      const [nextProjects, nextJobs, nextPlans, nextSeries] = await Promise.all([
+        fetchContentProjectsApi(),
+        fetchProjectRunsApi(),
         fetchAllContentPlansApi(),
-        fetchAllContentSeriesApi(),
+        fetchAllProjectSeriesApi(),
       ])
-      setHandoffs(nextHandoffs)
+      setProjects(nextProjects)
       setJobs(nextJobs)
       setPlans(nextPlans)
       setSeries(nextSeries)
@@ -206,7 +206,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
       return
     }
     Promise.all([
-      fetchSeriesPartsApi(selectedSeries.id),
+      fetchProjectPartsApi(selectedSeries.id),
       fetchSeriesContextApi(selectedSeries.id),
       fetchSeriesConsistencyApi(selectedSeries.id),
     ]).then(([nextParts, nextContext, nextConsistency]) => {
@@ -238,7 +238,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     setMessage('')
     try {
       if (selectedStoryIds.length > 0 || selectedContentIds.length > 0) {
-        const handoff = await createModule2HandoffApi({
+        const project = await createContentProjectFromSourcesApi({
           profile_id: selectedProfileId,
           story_ids: selectedStoryIds,
           content_ids: selectedContentIds,
@@ -246,7 +246,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
           crawl_job_id: selectedCrawlJobId || null,
           selection_mode: 'MANUAL',
           candidate_limit: 20,
-          handoff_note: 'Manual dataset from Module 2 planning wizard',
+          note: 'Manual dataset from Module 2 planning wizard',
           filters: {
             source_crawl_job_id: selectedCrawlJobId || null,
             content_types: ['STORY', 'ARTICLE', 'PLAYLIST'],
@@ -254,23 +254,26 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
             languages: ['vi'],
           },
         })
-        await createPlanningJobApi({
+        await createProjectRunApi({
           profile_id: selectedProfileId,
-          handoff_id: handoff.id,
+          project_id: project.id,
           planning_mode: planningMode,
           target_duration_seconds: duration,
           preferred_part_count: planningMode === 'SERIES' ? partCount : null,
           language: 'vi',
-          instructions,
+          skip_ai_evaluation: planningMode === 'SINGLE',
+          instructions: planningMode === 'SINGLE'
+            ? ['manual_direct_script: true. Bỏ qua chấm điểm và tạo kịch bản đơn lẻ từ nội dung người dùng đã chọn.', instructions].filter(Boolean).join('\n')
+            : instructions,
         })
       } else if (selectedCrawlJobId) {
-        await createAutoModule2HandoffFromCrawlApi({
+        await createContentProjectFromCrawlApi({
           profile_id: selectedProfileId,
           crawl_job_id: selectedCrawlJobId,
           candidate_limit: 20,
           max_related_items_per_primary: 5,
           min_quality_score: strategy?.min_score ?? 70,
-          create_planning_job: true,
+          create_project_run: true,
           planning_mode: planningMode,
           target_duration_seconds: duration,
           preferred_part_count: planningMode === 'SERIES' ? partCount : null,
@@ -285,7 +288,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
       await loadAll()
       setActiveTab('jobs')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo planning job')
+      setMessage(error?.response?.data?.detail || 'Không thể tạo project run')
     } finally {
       setLoading(false)
     }
@@ -316,10 +319,10 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const regenerateSeries = async (item: ContentSeries) => {
+  const regenerateSeries = async (item: ProjectSeries) => {
     setLoading(true)
     try {
-      await regenerateContentSeriesApi(item.id, 'Regenerated from Module 2 series builder')
+      await regenerateProjectSeriesApi(item.id, 'Regenerated from Module 2 series builder')
       await loadAll()
       setActiveTab('jobs')
     } catch (error: any) {
@@ -329,7 +332,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const rebuildContext = async (item: ContentSeries) => {
+  const rebuildContext = async (item: ProjectSeries) => {
     setLoading(true)
     try {
       await rebuildSeriesContextApi(item.id)
@@ -347,19 +350,19 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const handoffToModule3 = async (item: ContentSeries) => {
+  const markProjectReadyForGenerateVideo = async (item: ProjectSeries) => {
     setLoading(true)
     try {
-      await createModule3HandoffApi({
-        content_series_id: item.id,
+      await createContentProjectFromProjectSeriesApi({
+        series_id: item.id,
         part_ids: parts.map((part) => part.id),
         priority: 5,
-        handoff_note: 'Created from Module 2 UI',
+        note: 'Created from Module 2 UI',
       })
       await loadAll()
-      setMessage('Đã đánh dấu sẵn sàng cho Module 3 (Mark Ready for Module 3).')
+      setMessage('Đã đánh dấu sẵn sàng cho Generate Video.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo handoff sang Module 3')
+      setMessage(error?.response?.data?.detail || 'Không thể tạo project sang Generate Video')
     } finally {
       setLoading(false)
     }
@@ -382,7 +385,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
             <p className="mt-1 text-sm text-[#64748b]">
               {isUserMode
                 ? 'Lập kế hoạch kịch bản AI, chia tập series và tạo dựng mạch truyện theo chiến lược kênh của bạn.'
-                : 'Giám sát tiến trình AI Planning toàn hệ thống, Handoff Datasets & Context Continuity Manager.'}
+                : 'Giám sát tiến trình AI Planning toàn hệ thống, Project Datasets & Context Continuity Manager.'}
             </p>
           </div>
 
@@ -431,11 +434,11 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
         ]} />
 
         <div className="mt-6">
-          {activeTab === 'jobs' && <JobsView jobs={jobs} handoffs={handoffs} />}
+          {activeTab === 'jobs' && <JobsView jobs={jobs} projects={projects} />}
           {activeTab === 'plans' && <PlansView plans={plans} selectedPlan={selectedPlan} onSelect={setSelectedPlan} onReview={reviewPlan} onRegenerate={regeneratePlan} />}
           {activeTab === 'series' && <SeriesView series={series} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onRegenerate={regenerateSeries} />}
           {activeTab === 'context' && <ContextView selectedSeries={selectedSeries} parts={parts} selectedPlan={selectedPlan} context={seriesContext} consistency={consistency} onRebuild={rebuildContext} />}
-          {activeTab === 'module3' && <Module3HandoffView series={series} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onHandoff={handoffToModule3} />}
+          {activeTab === 'generateVideo' && <ProductionProjectView series={series} projects={projects} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onMarkReady={markProjectReadyForGenerateVideo} />}
         </div>
       </section>
 
@@ -470,14 +473,14 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   )
 }
 
-function JobsView({ jobs, handoffs }: { jobs: PlanningJob[]; handoffs: Module2Handoff[] }) {
+function JobsView({ jobs, projects }: { jobs: ProjectRun[]; projects: ContentProject[] }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-      <Panel title="Planning jobs" subtitle="Pipeline progress from handoff to structured plan">
+      <Panel title="Project runs" subtitle="Pipeline progress from project to structured plan">
         <TableHeader columns={['Job', 'Mode', 'Status', 'Stage', 'Progress', 'Created']} />
-        {jobs.length === 0 ? <Empty label="No planning jobs yet" /> : jobs.map((job) => (
+        {jobs.length === 0 ? <Empty label="No project runs yet" /> : jobs.map((job) => (
           <div key={job.id} className="grid grid-cols-[1.2fr_0.7fr_0.9fr_1.4fr_0.7fr_1fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div className="font-medium">{shortId(job.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">handoff {shortId(job.handoff_id)}</div></div>
+            <div className="font-medium">{shortId(job.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">project {shortId(job.project_id)}</div></div>
             <div className="text-[#64748b]">{job.planning_mode}</div>
             <Badge value={job.status} />
             <div className="text-[#64748b]">{job.current_stage}</div>
@@ -486,13 +489,15 @@ function JobsView({ jobs, handoffs }: { jobs: PlanningJob[]; handoffs: Module2Ha
           </div>
         ))}
       </Panel>
-      <Panel title="Recent datasets" subtitle="Profile-scoped handoffs ready for planning">
+      <Panel title="Recent datasets" subtitle="Profile-scoped projects ready for planning">
         <TableHeader columns={['Dataset', 'Source', 'Items']} />
-        {handoffs.length === 0 ? <Empty label="No handoffs yet" /> : handoffs.slice(0, 8).map((handoff) => (
-          <div key={handoff.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div className="font-medium">{shortId(handoff.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(handoff.profile_id)}</div></div>
-            <Badge value={handoff.selection_mode} />
-            <div className="text-[#64748b]">{handoff.eligible_count}/{handoff.rejected_count}</div>
+        {projects.length === 0 ? <Empty label="No projects yet" /> : projects.slice(0, 8).map((project) => (
+          <div key={project.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
+            <div className="font-medium">{shortId(project.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(project.profile_id)}</div></div>
+            <Badge value={String(project.metadata?.selection_mode || 'MANUAL')} />
+            <div className="text-[#64748b]">
+              {project.sources?.filter((source) => source.status === 'ACTIVE').length || 0}/{project.sources?.filter((source) => source.status === 'REJECTED').length || 0}
+            </div>
           </div>
         ))}
       </Panel>
@@ -576,7 +581,7 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
   )
 }
 
-function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: { series: ContentSeries[]; selectedSeries: ContentSeries | null; parts: SeriesPart[]; onSelect: (series: ContentSeries) => void; onRegenerate: (series: ContentSeries) => void }) {
+function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: { series: ProjectSeries[]; selectedSeries: ProjectSeries | null; parts: ProjectPart[]; onSelect: (series: ProjectSeries) => void; onRegenerate: (series: ProjectSeries) => void }) {
   return (
     <div className="space-y-6">
       <Panel title="Danh Sách Series & Chuỗi Nội Dung" subtitle="Lựa chọn một series để xem kịch bản chi tiết từng tập">
@@ -693,7 +698,7 @@ function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: {
   )
 }
 
-function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ContentSeries | null; parts: SeriesPart[]; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ContentSeries) => void }) {
+function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ProjectSeries | null; parts: ProjectPart[]; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ProjectSeries) => void }) {
   const activeDoc = context?.contexts?.[0]
   const summary = activeDoc?.story_summary
   const characters = activeDoc?.characters || []
@@ -894,7 +899,7 @@ function PlanWizard(props: {
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4">
       <div className="max-h-[90vh] w-full max-w-[920px] overflow-y-auto rounded-lg border border-[#d9e0ea] bg-white p-6 shadow-xl">
         <h3 className="text-base font-bold">Create content plan</h3>
-        <p className="mt-1 text-xs text-[#64748b]">Create a profile-scoped dataset from Module 1, then start the planning job.</p>
+        <p className="mt-1 text-xs text-[#64748b]">Create a profile-scoped dataset from Module 1, then start the project run.</p>
         <div className="mt-5 grid gap-4 lg:grid-cols-[320px_1fr]">
           <div className="space-y-4">
             <label className="block text-xs font-semibold">Profile
@@ -1002,26 +1007,32 @@ function Empty({ label, compact = false }: { label: string; compact?: boolean })
   return <div className={`flex items-center justify-center gap-2 text-sm text-[#94a3b8] ${compact ? 'py-4' : 'py-12'}`}><Clock3 size={16} /> {label}</div>
 }
 
-function Module3HandoffView({
+function ProductionProjectView({
   series,
+  projects,
   selectedSeries,
   parts,
   onSelect,
-  onHandoff
+  onMarkReady
 }: {
-  series: ContentSeries[]
-  selectedSeries: ContentSeries | null
-  parts: SeriesPart[]
-  onSelect: (series: ContentSeries) => void
-  onHandoff: (series: ContentSeries) => void
+  series: ProjectSeries[]
+  projects: ContentProject[]
+  selectedSeries: ProjectSeries | null
+  parts: ProjectPart[]
+  onSelect: (series: ProjectSeries) => void
+  onMarkReady: (series: ProjectSeries) => void
 }) {
   const sourceMode = selectedSeries?.title?.toLowerCase().includes('bilibili') || selectedSeries?.title?.toLowerCase().includes('video') ? 'VIDEO_TRANSLATION' : 'AI_GENERATION'
 
-  const readySeries = series.filter(s => s.status === 'READY' || s.status === 'APPROVED')
+  const projectBySeriesId = new Map(projects.filter((project) => project.series_id).map((project) => [project.series_id, project]))
+  const readySeries = series.filter((item) => {
+    const project = projectBySeriesId.get(item.id)
+    return Boolean(project && ['APPROVED', 'PRODUCTION_READY', 'READY', 'EDITING', 'VOICE_READY', 'RENDERING', 'RENDERED'].includes(project.status))
+  })
 
   return (
     <div className="space-y-6">
-      <Panel title="Chuẩn bị Dữ liệu Video (Module 3)" subtitle="Danh sách các Series đã được phê duyệt và sẵn sàng cho quá trình sản xuất Video">
+      <Panel title="Chuẩn bị Dữ liệu Video" subtitle="Danh sách các Series đã được phê duyệt và sẵn sàng cho Generate Video">
         <div className="grid gap-3 rounded-t-lg bg-[#fbfcfd] px-3 py-3 text-[11px] font-semibold text-[#64748b]" style={{ gridTemplateColumns: `100px 1fr 80px 1.5fr 100px` }}>
           <div>Series ID</div>
           <div>Tên Kịch Bản</div>
@@ -1029,7 +1040,7 @@ function Module3HandoffView({
           <div>Format / Mode</div>
           <div>Trạng thái</div>
         </div>
-        {readySeries.length === 0 ? <div className="py-12 flex justify-center text-sm text-[#94a3b8]">Chưa có Series nào ở trạng thái READY hoặc APPROVED</div> : readySeries.map((item) => (
+        {readySeries.length === 0 ? <div className="py-12 flex justify-center text-sm text-[#94a3b8]">Chưa có series nào đã có content project sau khi duyệt plan</div> : readySeries.map((item) => (
           <div key={item.id} onClick={() => onSelect(item)} className={`grid cursor-pointer items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedSeries?.id === item.id ? 'bg-blue-50/60' : 'bg-white'}`} style={{ gridTemplateColumns: `100px 1fr 80px 1.5fr 100px` }}>
             <div className="font-mono text-[#64748b]">{shortId(item.id)}</div>
             <div className="font-bold text-[#0f172a] truncate">{item.title}</div>
@@ -1043,7 +1054,7 @@ function Module3HandoffView({
       {selectedSeries && (
         <div className="grid gap-5 xl:grid-cols-2">
           {/* Cấu hình & Pipeline dự kiến */}
-          <Panel title="Cấu Hình Sản Xuất Video" subtitle="Kiểm tra các thành phần sẽ được gọi qua API Module 3">
+          <Panel title="Cấu Hình Sản Xuất Video" subtitle="Kiểm tra các thành phần sẽ được gọi qua Generate Video API">
             <div className="p-6 space-y-6">
               {sourceMode === 'VIDEO_TRANSLATION' ? (
                 <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-5 space-y-4">
@@ -1052,7 +1063,7 @@ function Module3HandoffView({
                     <span className="rounded bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white">Bilibili Source</span>
                   </div>
                   <div className="text-sm text-indigo-800 leading-relaxed">
-                    Hệ thống phát hiện đây là nguồn Video (Bilibili/Douyin). Thay vì tạo sinh video từ đầu, API Module 3 sẽ thực hiện nhánh <strong>Biên Dịch & Lồng Tiếng (Dubbing)</strong>.
+                    Hệ thống phát hiện đây là nguồn Video (Bilibili/Douyin). Thay vì tạo sinh video từ đầu, Generate Video API sẽ thực hiện nhánh <strong>Biên Dịch & Lồng Tiếng (Dubbing)</strong>.
                   </div>
                   <div className="space-y-3 pt-3 border-t border-indigo-200/50">
                     <div className="flex items-center gap-3 text-sm text-indigo-900"><CheckCircle2 size={16} className="text-indigo-500" /> Tách Audio gốc & nhận diện giọng (Diarization)</div>
@@ -1068,7 +1079,7 @@ function Module3HandoffView({
                     <span className="rounded bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">Text Source</span>
                   </div>
                   <div className="text-sm text-emerald-800 leading-relaxed">
-                    Hệ thống phát hiện đây là nguồn Bài Viết (Báo chí/Text). API Module 3 sẽ thực hiện chuỗi <strong>Tạo Sinh Video (AI Generation)</strong> đầy đủ các bước.
+                    Hệ thống phát hiện đây là nguồn Bài Viết (Báo chí/Text). Generate Video API sẽ thực hiện chuỗi <strong>Tạo Sinh Video (AI Generation)</strong> đầy đủ các bước.
                   </div>
                   <div className="space-y-3 pt-3 border-t border-emerald-200/50">
                     <div className="flex items-center gap-3 text-sm text-emerald-900"><CheckCircle2 size={16} className="text-emerald-500" /> Chia Cảnh (Scene Breakdown) theo Timing</div>
@@ -1080,7 +1091,7 @@ function Module3HandoffView({
               )}
 
               <div className="flex justify-end pt-4">
-                <button onClick={() => onHandoff(selectedSeries)} className="inline-flex h-12 w-full justify-center items-center gap-2 rounded-lg bg-emerald-600 px-6 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 hover:shadow-emerald-500/20 transition-all">
+                <button onClick={() => onMarkReady(selectedSeries)} className="inline-flex h-12 w-full justify-center items-center gap-2 rounded-lg bg-emerald-600 px-6 text-sm font-bold text-white shadow-lg hover:bg-emerald-700 hover:shadow-emerald-500/20 transition-all">
                   <CheckCircle2 size={18} /> ĐÁNH DẤU SẴN SÀNG CHO MODULE 3 (MARK READY)
                 </button>
               </div>
