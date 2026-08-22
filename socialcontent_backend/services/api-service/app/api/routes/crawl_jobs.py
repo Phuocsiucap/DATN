@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from common.db.models import CrawlJob, CrawlLog, User
+from common.db.models import CrawlJob, User
 from common.db.session import SessionLocal, get_db
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
@@ -74,16 +74,12 @@ async def crawl_job_events(job_id: uuid.UUID, user: User = Depends(get_current_u
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@router.get("/{job_id}/logs", response_model=list[schemas.CrawlLogResponse])
+@router.get("/{job_id}/logs")
 def crawl_job_logs(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_job(db, job_id, user)
-    return (
-        db.query(CrawlLog)
-        .filter(CrawlLog.job_id == job_id)
-        .order_by(CrawlLog.created_at.asc())
-        .limit(500)
-        .all()
-    )
+    # Crawl logs have been migrated out of Postgres to prevent WAL bloat.
+    # Return empty list to prevent frontend from breaking until frontend switches to new Log API (e.g. Loki)
+    return []
 
 
 def _get_owned_job(db: Session, job_id: uuid.UUID, user: User) -> CrawlJob:

@@ -21,3 +21,13 @@ export const logoutApi = async () => {
   setAccessToken(null)
   return data
 }
+
+export const getMyAiUsageApi = async () => {
+  const { data } = await api.get('/users/me/ai-usage')
+  return data
+}
+
+export const getAllUsersAiUsageApi = async () => {
+  const { data } = await api.get('/users/ai-usage-summary')
+  return data
+}

@@ -5,9 +5,8 @@ from common.db.models import Role
 
 
 DEFAULT_ROLES = {
-    "SYSTEM_ADMIN": "Full system access, user management, settings, all crawl data.",
-    "ADMIN": "Operational admin access for crawl jobs, sources, content review.",
-    "USER": "Standard user access for owned crawl jobs and content views.",
+    "SYSTEM_ADMIN": "Quản trị viên / Vận hành hệ thống: Quản lý người dùng, giám sát service, hệ thống log và dữ liệu Global.",
+    "CREATOR": "Người dùng sáng tạo nội dung: Quản lý tài khoản kênh, chiến lược, tự crawl dữ liệu riêng, lập kế hoạch AI, sản xuất video và lên lịch đăng bài.",
 }
 
 

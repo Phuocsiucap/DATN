@@ -37,6 +37,7 @@ class ContentSourceDetailResponse(BaseModel):
     source_external_id: str
     source_url: str | None
     raw_document_id: str | None
+    processed_document_id: str | None = None
     source_title: str | None
     source_author: str | None
     source_published_at: datetime | None

@@ -14,27 +14,27 @@ import {
 } from 'lucide-react'
 import {
   approveContentPlanApi,
-  createContentProjectFromProjectSeriesApi,
-  createContentProjectFromCrawlApi,
-  createContentProjectFromSourcesApi,
-  createProjectRunApi,
+  createMediaWorkflowFromContentSeriesApi,
+  createMediaWorkflowFromCrawlApi,
+  createMediaWorkflowFromSourcesApi,
+  createWorkflowRunApi,
   fetchAllContentPlansApi,
-  fetchAllProjectSeriesApi,
-  fetchContentProjectsApi,
-  fetchProjectRunsApi,
+  fetchAllContentSeriesApi,
+  fetchMediaWorkflowsApi,
+  fetchWorkflowRunsApi,
   fetchSeriesConsistencyApi,
   fetchSeriesContextApi,
-  fetchProjectPartsApi,
+  fetchWorkflowPartsApi,
   rebuildSeriesContextApi,
   regenerateContentPlanApi,
-  regenerateProjectSeriesApi,
+  regenerateContentSeriesApi,
   rejectContentPlanApi,
   type ConsistencyCheck,
   type ContentPlan,
-  type ProjectSeries,
-  type ContentProject,
-  type ProjectRun,
-  type ProjectPart,
+  type ContentSeries,
+  type MediaWorkflow,
+  type WorkflowRun,
+  type WorkflowPart,
   type SeriesContextResponse,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi, fetchSocialProfileStrategyApi } from '@/commons/apis/socialProfiles'
@@ -89,11 +89,11 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [crawlJobs, setCrawlJobs] = useState<CrawlJob[]>([])
   const [stories, setStories] = useState<Story[]>([])
   const [finalContent, setFinalContent] = useState<FinalContentView>({ normal_items: [], series_items: [] })
-  const [projects, setProjects] = useState<ContentProject[]>([])
-  const [jobs, setJobs] = useState<ProjectRun[]>([])
+  const [workflows, setWorkflows] = useState<MediaWorkflow[]>([])
+  const [jobs, setJobs] = useState<WorkflowRun[]>([])
   const [plans, setPlans] = useState<ContentPlan[]>([])
-  const [series, setSeries] = useState<ProjectSeries[]>([])
-  const [parts, setParts] = useState<ProjectPart[]>([])
+  const [series, setSeries] = useState<ContentSeries[]>([])
+  const [parts, setParts] = useState<WorkflowPart[]>([])
   const [seriesContext, setSeriesContext] = useState<SeriesContextResponse | null>(null)
   const [consistency, setConsistency] = useState<ConsistencyCheck | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState('')
@@ -101,7 +101,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([])
   const [selectedContentIds, setSelectedContentIds] = useState<string[]>([])
   const [selectedPlan, setSelectedPlan] = useState<ContentPlan | null>(null)
-  const [selectedSeries, setSelectedSeries] = useState<ProjectSeries | null>(null)
+  const [selectedSeries, setSelectedSeries] = useState<ContentSeries | null>(null)
   const [strategy, setStrategy] = useState<Strategy | null>(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -117,13 +117,13 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     setLoading(true)
     setMessage('')
     try {
-      const [nextProjects, nextJobs, nextPlans, nextSeries] = await Promise.all([
-        fetchContentProjectsApi(),
-        fetchProjectRunsApi(),
+      const [nextWorkflows, nextJobs, nextPlans, nextSeries] = await Promise.all([
+        fetchMediaWorkflowsApi(),
+        fetchWorkflowRunsApi(),
         fetchAllContentPlansApi(),
-        fetchAllProjectSeriesApi(),
+        fetchAllContentSeriesApi(),
       ])
-      setProjects(nextProjects)
+      setWorkflows(nextWorkflows)
       setJobs(nextJobs)
       setPlans(nextPlans)
       setSeries(nextSeries)
@@ -206,7 +206,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
       return
     }
     Promise.all([
-      fetchProjectPartsApi(selectedSeries.id),
+      fetchWorkflowPartsApi(selectedSeries.id),
       fetchSeriesContextApi(selectedSeries.id),
       fetchSeriesConsistencyApi(selectedSeries.id),
     ]).then(([nextParts, nextContext, nextConsistency]) => {
@@ -238,7 +238,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     setMessage('')
     try {
       if (selectedStoryIds.length > 0 || selectedContentIds.length > 0) {
-        const project = await createContentProjectFromSourcesApi({
+        const project = await createMediaWorkflowFromSourcesApi({
           profile_id: selectedProfileId,
           story_ids: selectedStoryIds,
           content_ids: selectedContentIds,
@@ -254,9 +254,9 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
             languages: ['vi'],
           },
         })
-        await createProjectRunApi({
+        await createWorkflowRunApi({
           profile_id: selectedProfileId,
-          project_id: project.id,
+          workflow_id: project.id,
           planning_mode: planningMode,
           target_duration_seconds: duration,
           preferred_part_count: planningMode === 'SERIES' ? partCount : null,
@@ -267,13 +267,13 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
             : instructions,
         })
       } else if (selectedCrawlJobId) {
-        await createContentProjectFromCrawlApi({
+        await createMediaWorkflowFromCrawlApi({
           profile_id: selectedProfileId,
           crawl_job_id: selectedCrawlJobId,
           candidate_limit: 20,
           max_related_items_per_primary: 5,
           min_quality_score: strategy?.min_score ?? 70,
-          create_project_run: true,
+          create_workflow_run: true,
           planning_mode: planningMode,
           target_duration_seconds: duration,
           preferred_part_count: planningMode === 'SERIES' ? partCount : null,
@@ -319,10 +319,10 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const regenerateSeries = async (item: ProjectSeries) => {
+  const regenerateSeries = async (item: ContentSeries) => {
     setLoading(true)
     try {
-      await regenerateProjectSeriesApi(item.id, 'Regenerated from Module 2 series builder')
+      await regenerateContentSeriesApi(item.id, 'Regenerated from Module 2 series builder')
       await loadAll()
       setActiveTab('jobs')
     } catch (error: any) {
@@ -332,7 +332,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const rebuildContext = async (item: ProjectSeries) => {
+  const rebuildContext = async (item: ContentSeries) => {
     setLoading(true)
     try {
       await rebuildSeriesContextApi(item.id)
@@ -350,10 +350,10 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }
 
-  const markProjectReadyForGenerateVideo = async (item: ProjectSeries) => {
+  const markProjectReadyForGenerateVideo = async (item: ContentSeries) => {
     setLoading(true)
     try {
-      await createContentProjectFromProjectSeriesApi({
+      await createMediaWorkflowFromContentSeriesApi({
         series_id: item.id,
         part_ids: parts.map((part) => part.id),
         priority: 5,
@@ -434,11 +434,11 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
         ]} />
 
         <div className="mt-6">
-          {activeTab === 'jobs' && <JobsView jobs={jobs} projects={projects} />}
+          {activeTab === 'jobs' && <JobsView jobs={jobs} projects={workflows} />}
           {activeTab === 'plans' && <PlansView plans={plans} selectedPlan={selectedPlan} onSelect={setSelectedPlan} onReview={reviewPlan} onRegenerate={regeneratePlan} />}
           {activeTab === 'series' && <SeriesView series={series} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onRegenerate={regenerateSeries} />}
           {activeTab === 'context' && <ContextView selectedSeries={selectedSeries} parts={parts} selectedPlan={selectedPlan} context={seriesContext} consistency={consistency} onRebuild={rebuildContext} />}
-          {activeTab === 'generateVideo' && <ProductionProjectView series={series} projects={projects} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onMarkReady={markProjectReadyForGenerateVideo} />}
+          {activeTab === 'generateVideo' && <ProductionProjectView series={series} projects={workflows} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onMarkReady={markProjectReadyForGenerateVideo} />}
         </div>
       </section>
 
@@ -473,14 +473,14 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   )
 }
 
-function JobsView({ jobs, projects }: { jobs: ProjectRun[]; projects: ContentProject[] }) {
+function JobsView({ jobs, projects }: { jobs: WorkflowRun[]; projects: MediaWorkflow[] }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-      <Panel title="Project runs" subtitle="Pipeline progress from project to structured plan">
+      <Panel title="Luồng chạy Kịch bản" subtitle="Tiến trình chuyển từ nội dung gốc sang kịch bản chi tiết">
         <TableHeader columns={['Job', 'Mode', 'Status', 'Stage', 'Progress', 'Created']} />
-        {jobs.length === 0 ? <Empty label="No project runs yet" /> : jobs.map((job) => (
+        {jobs.length === 0 ? <Empty label="Chưa có luồng chạy kịch bản nào" /> : jobs.map((job) => (
           <div key={job.id} className="grid grid-cols-[1.2fr_0.7fr_0.9fr_1.4fr_0.7fr_1fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div className="font-medium">{shortId(job.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">project {shortId(job.project_id)}</div></div>
+            <div className="font-medium">{shortId(job.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">kịch bản {shortId(job.workflow_id)}</div></div>
             <div className="text-[#64748b]">{job.planning_mode}</div>
             <Badge value={job.status} />
             <div className="text-[#64748b]">{job.current_stage}</div>
@@ -489,9 +489,9 @@ function JobsView({ jobs, projects }: { jobs: ProjectRun[]; projects: ContentPro
           </div>
         ))}
       </Panel>
-      <Panel title="Recent datasets" subtitle="Profile-scoped projects ready for planning">
-        <TableHeader columns={['Dataset', 'Source', 'Items']} />
-        {projects.length === 0 ? <Empty label="No projects yet" /> : projects.slice(0, 8).map((project) => (
+      <Panel title="Kịch bản vừa tạo" subtitle="Danh sách các bộ kịch bản sẵn sàng lập kế hoạch">
+        <TableHeader columns={['Kịch bản', 'Source', 'Items']} />
+        {projects.length === 0 ? <Empty label="Chưa có kịch bản nào" /> : projects.slice(0, 8).map((project) => (
           <div key={project.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
             <div className="font-medium">{shortId(project.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(project.profile_id)}</div></div>
             <Badge value={String(project.metadata?.selection_mode || 'MANUAL')} />
@@ -506,6 +506,10 @@ function JobsView({ jobs, projects }: { jobs: ProjectRun[]; projects: ContentPro
 }
 
 function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { plans: ContentPlan[]; selectedPlan: ContentPlan | null; onSelect: (plan: ContentPlan) => void; onReview: (plan: ContentPlan, action: 'approve' | 'reject') => void; onRegenerate: (plan: ContentPlan) => void }) {
+  const selectedStatus = String(selectedPlan?.status || '').toUpperCase()
+  const isApproved = selectedStatus === 'APPROVED'
+  const isRejected = selectedStatus === 'REJECTED'
+
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_450px]">
       <Panel title="Content plans" subtitle="Structured AI output, ready for review">
@@ -570,8 +574,20 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
 
             {/* Actions */}
             <div className="flex gap-3 pt-4 border-t border-[#eef2f7]">
-              <button onClick={() => onReview(selectedPlan, 'approve')} className="flex-1 inline-flex h-10 justify-center items-center gap-2 rounded-lg bg-[#16a34a] px-3 text-xs font-bold text-white hover:bg-[#15803d] transition-colors"><CheckCircle2 size={15} /> Phê Duyệt</button>
-              <button onClick={() => onReview(selectedPlan, 'reject')} className="flex-1 inline-flex h-10 justify-center items-center gap-2 rounded-lg border border-[#f87171] bg-white px-3 text-xs font-bold text-[#dc2626] hover:bg-red-50 transition-colors"><XCircle size={15} /> Từ Chối</button>
+              <button
+                disabled={isApproved}
+                onClick={() => onReview(selectedPlan, 'approve')}
+                className="flex-1 inline-flex h-10 justify-center items-center gap-2 rounded-lg bg-[#16a34a] px-3 text-xs font-bold text-white transition-colors hover:bg-[#15803d] disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-800"
+              >
+                <CheckCircle2 size={15} /> {isApproved ? 'Đã phê duyệt' : 'Phê Duyệt'}
+              </button>
+              <button
+                disabled={isApproved || isRejected}
+                onClick={() => onReview(selectedPlan, 'reject')}
+                className="flex-1 inline-flex h-10 justify-center items-center gap-2 rounded-lg border border-[#f87171] bg-white px-3 text-xs font-bold text-[#dc2626] transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <XCircle size={15} /> {isRejected ? 'Đã từ chối' : 'Từ Chối'}
+              </button>
               <button onClick={() => onRegenerate(selectedPlan)} className="inline-flex h-10 justify-center items-center gap-2 rounded-lg border border-[#cbd5e1] bg-white px-3 text-xs font-bold text-[#475569] hover:bg-slate-50 transition-colors"><RefreshCcw size={15} /> Tạo lại</button>
             </div>
           </div>
@@ -581,7 +597,7 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
   )
 }
 
-function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: { series: ProjectSeries[]; selectedSeries: ProjectSeries | null; parts: ProjectPart[]; onSelect: (series: ProjectSeries) => void; onRegenerate: (series: ProjectSeries) => void }) {
+function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: { series: ContentSeries[]; selectedSeries: ContentSeries | null; parts: WorkflowPart[]; onSelect: (series: ContentSeries) => void; onRegenerate: (series: ContentSeries) => void }) {
   return (
     <div className="space-y-6">
       <Panel title="Danh Sách Series & Chuỗi Nội Dung" subtitle="Lựa chọn một series để xem kịch bản chi tiết từng tập">
@@ -698,7 +714,7 @@ function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: {
   )
 }
 
-function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ProjectSeries | null; parts: ProjectPart[]; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ProjectSeries) => void }) {
+function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ContentSeries | null; parts: WorkflowPart[]; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ContentSeries) => void }) {
   const activeDoc = context?.contexts?.[0]
   const summary = activeDoc?.story_summary
   const characters = activeDoc?.characters || []
@@ -1015,12 +1031,12 @@ function ProductionProjectView({
   onSelect,
   onMarkReady
 }: {
-  series: ProjectSeries[]
-  projects: ContentProject[]
-  selectedSeries: ProjectSeries | null
-  parts: ProjectPart[]
-  onSelect: (series: ProjectSeries) => void
-  onMarkReady: (series: ProjectSeries) => void
+  series: ContentSeries[]
+  projects: MediaWorkflow[]
+  selectedSeries: ContentSeries | null
+  parts: WorkflowPart[]
+  onSelect: (series: ContentSeries) => void
+  onMarkReady: (series: ContentSeries) => void
 }) {
   const sourceMode = selectedSeries?.title?.toLowerCase().includes('bilibili') || selectedSeries?.title?.toLowerCase().includes('video') ? 'VIDEO_TRANSLATION' : 'AI_GENERATION'
 
@@ -1040,7 +1056,7 @@ function ProductionProjectView({
           <div>Format / Mode</div>
           <div>Trạng thái</div>
         </div>
-        {readySeries.length === 0 ? <div className="py-12 flex justify-center text-sm text-[#94a3b8]">Chưa có series nào đã có content project sau khi duyệt plan</div> : readySeries.map((item) => (
+        {readySeries.length === 0 ? <div className="py-12 flex justify-center text-sm text-[#94a3b8]">Chưa có Series nào có kịch bản đã duyệt</div> : readySeries.map((item) => (
           <div key={item.id} onClick={() => onSelect(item)} className={`grid cursor-pointer items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedSeries?.id === item.id ? 'bg-blue-50/60' : 'bg-white'}`} style={{ gridTemplateColumns: `100px 1fr 80px 1.5fr 100px` }}>
             <div className="font-mono text-[#64748b]">{shortId(item.id)}</div>
             <div className="font-bold text-[#0f172a] truncate">{item.title}</div>

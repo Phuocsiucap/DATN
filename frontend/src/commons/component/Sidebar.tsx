@@ -48,45 +48,72 @@ export const TAB_PATHS: Record<Tab, string> = {
 
 interface NavSection {
   title: string
-  items: { key: Tab; label: string; icon: ReactNode; systemOnly?: boolean; badge?: string }[]
+  items: { key: Tab; label: string; icon: ReactNode; badge?: string }[]
 }
 
 type NavItem = NavSection['items'][number]
 
-const SECTIONS: NavSection[] = [
+const getAdminSections = (): NavSection[] => [
   {
-    title: 'TỔNG QUAN',
+    title: 'QUẢN TRỊ & TỔNG QUAN',
     items: [
-      { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} /> },
+      { key: 'dashboard', label: 'System Dashboard', icon: <LayoutDashboard size={15} /> },
+      { key: 'users', label: 'Quản lý Người dùng', icon: <UsersRound size={15} />, badge: 'Admin' },
     ],
   },
   {
-    title: 'DATA & NỘI DUNG',
+    title: 'DỮ LIỆU HỆ THỐNG (GLOBAL)',
     items: [
-      { key: 'crawl', label: 'Crawl', icon: <Workflow size={15} /> },
-      { key: 'content', label: 'Content Store', icon: <Newspaper size={15} /> },
+      { key: 'crawl', label: 'Global Crawl Jobs', icon: <Workflow size={15} /> },
+      { key: 'content', label: 'Kho Dữ liệu Global', icon: <Newspaper size={15} /> },
     ],
   },
   {
-    title: 'AI & SẢN XUẤT',
+    title: 'VẬN HÀNH & GIÁM SÁT',
     items: [
-      { key: 'planning', label: 'Module 2 Jobs', icon: <Sparkles size={15} /> },
-      { key: 'planningReview', label: 'Duyệt Plans', icon: <FileCheck2 size={15} /> },
-      { key: 'planningOutput', label: 'Output', icon: <MonitorPlay size={15} /> },
-      { key: 'generateVideo', label: 'Generate Video', icon: <Clapperboard size={15} /> },
+      { key: 'settings', label: 'Logs & System Config', icon: <Settings size={15} /> },
     ],
   },
   {
-    title: 'QA & ĐĂNG BÀI',
+    title: 'CÔNG CỤ CREATOR (XEM TRƯỚC)',
     items: [
-      { key: 'approvals', label: 'Duyệt Queue', icon: <FileCheck2 size={15} /> },
-      { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={15} /> },
+      { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
+      { key: 'planningReview', label: 'Kế hoạch Kịch bản', icon: <FileCheck2 size={15} /> },
+      { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
+      { key: 'approvals', label: 'Duyệt Đăng bài', icon: <FileCheck2 size={15} /> },
+      { key: 'schedule', label: 'Lịch Xuất bản', icon: <CalendarDays size={15} /> },
+    ],
+  },
+]
+
+const getCreatorSections = (): NavSection[] => [
+  {
+    title: 'TỔNG QUAN SÁNG TẠO',
+    items: [
+      { key: 'dashboard', label: 'Creator Dashboard', icon: <LayoutDashboard size={15} /> },
     ],
   },
   {
-    title: 'HỆ THỐNG',
+    title: 'DỮ LIỆU CÁ NHÂN (PRIVATE)',
     items: [
-      { key: 'users', label: 'Users', icon: <UsersRound size={15} />, systemOnly: true },
+      { key: 'crawl', label: 'Thu thập Dữ liệu Riêng', icon: <Workflow size={15} /> },
+      { key: 'content', label: 'Kho Dữ liệu Riêng', icon: <Newspaper size={15} /> },
+    ],
+  },
+  {
+    title: 'AI & SẢN XUẤT VIDEO',
+    items: [
+      { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
+      { key: 'planningReview', label: 'Kế hoạch Kịch bản', icon: <FileCheck2 size={15} /> },
+      { key: 'planningOutput', label: 'Kết quả Kế hoạch', icon: <MonitorPlay size={15} /> },
+      { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
+    ],
+  },
+  {
+    title: 'QA & XUẤT BẢN',
+    items: [
+      { key: 'approvals', label: 'Duyệt Đăng bài', icon: <FileCheck2 size={15} /> },
+      { key: 'schedule', label: 'Lịch Xuất bản', icon: <CalendarDays size={15} /> },
     ],
   },
 ]
@@ -96,11 +123,13 @@ export default function Sidebar({
   onTabChange,
   isSystemUser = false,
 }: SidebarProps) {
-  const settingsItem: NavItem = { key: 'settings', label: 'Cài đặt', icon: <Settings size={15} /> }
+  const sections = isSystemUser ? getAdminSections() : getCreatorSections()
+  const settingsItem: NavItem = { key: 'settings', label: isSystemUser ? 'Cài đặt System' : 'Kênh & Strategy', icon: <Settings size={15} /> }
+  
   const mobileItems: NavItem[] = [
-    ...SECTIONS.flatMap((section) => section.items),
+    ...sections.flatMap((section) => section.items),
     settingsItem,
-  ].filter((item) => !item.systemOnly || isSystemUser)
+  ]
 
   return (
     <>
@@ -108,62 +137,71 @@ export default function Sidebar({
         className="w-[var(--app-sidebar-width)] h-screen sticky left-0 top-0 flex-col py-3 hidden md:flex z-50 border-r select-none"
         style={{ backgroundColor: 'var(--primary)', borderColor: 'rgba(255,255,255,0.08)' }}
       >
-        <div className="px-3 pb-3 mb-2 flex items-center gap-2.5 border-b border-white/10">
-          <img src="/logo.png" alt="SocialContent Hub" className="w-8 h-8 object-contain rounded-md" />
-          <div>
-            <h1 className="text-xs font-bold leading-tight text-white">
-              SOCIALCONTENT
-            </h1>
-            <p className="text-[9px] font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              STUDIO
-            </p>
+        {/* Workspace Brand Header */}
+        <div className="px-3 pb-3 mb-2 flex flex-col gap-2 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.png" alt="SocialContent Hub" className="w-8 h-8 object-contain rounded-md" />
+            <div>
+              <h1 className="text-xs font-bold leading-tight text-white">
+                SOCIALCONTENT
+              </h1>
+              <p className="text-[9px] font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                STUDIO PLATFORM
+              </p>
+            </div>
+          </div>
+
+          {/* Role Status Tag */}
+          <div className={`px-2.5 py-1 rounded text-[10px] font-bold tracking-wider uppercase text-center border ${
+            isSystemUser 
+              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+              : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+          }`}>
+            {isSystemUser ? '⚡ System Admin Workspace' : '🎨 Content Creator Workspace'}
           </div>
         </div>
 
+        {/* Navigation Sections */}
         <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 custom-scrollbar">
-          {SECTIONS.map((section, idx) => {
-            const visibleItems = section.items.filter((item) => !item.systemOnly || isSystemUser)
-            if (visibleItems.length === 0) return null
-
-            return (
-              <div key={idx} className="space-y-1">
-                <div className="px-2.5 mb-1.5 text-[9px] font-bold uppercase" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                  {section.title}
-                </div>
-
-                {visibleItems.map((item) => {
-                  const isActive = activeTab === item.key
-                  return (
-                    <button
-                      key={item.key}
-                      onClick={() => onTabChange(item.key)}
-                      className="relative w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition-colors hover:bg-white/10"
-                      style={{
-                        color: isActive ? '#ffffff' : 'rgba(255,255,255,0.7)',
-                        backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
-                        borderLeft: isActive
-                          ? '3px solid #22c55e'
-                          : '3px solid transparent',
-                      }}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {item.icon}
-                        <span className="truncate">{item.label}</span>
-                      </div>
-
-                      {item.badge && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-amber-400 border border-amber-500/20">
-                          {item.badge}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
+          {sections.map((section, idx) => (
+            <div key={idx} className="space-y-1">
+              <div className="px-2.5 mb-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                {section.title}
               </div>
-            )
-          })}
+
+              {section.items.map((item) => {
+                const isActive = activeTab === item.key
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => onTabChange(item.key)}
+                    className="relative w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition-colors hover:bg-white/10"
+                    style={{
+                      color: isActive ? '#ffffff' : 'rgba(255,255,255,0.7)',
+                      backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      borderLeft: isActive
+                        ? isSystemUser ? '3px solid #f59e0b' : '3px solid #22c55e'
+                        : '3px solid transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {item.icon}
+                      <span className="truncate">{item.label}</span>
+                    </div>
+
+                    {item.badge && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-500/30">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
+        {/* Footer Actions */}
         <div className="px-2.5 pt-2.5 border-t border-white/10 space-y-1">
           <button
             onClick={() => onTabChange('settings')}
@@ -171,19 +209,20 @@ export default function Sidebar({
             style={{
               color: activeTab === 'settings' ? '#ffffff' : 'rgba(255,255,255,0.7)',
               backgroundColor: activeTab === 'settings' ? 'rgba(255,255,255,0.12)' : 'transparent',
-              borderLeft: activeTab === 'settings' ? '3px solid #22c55e' : '3px solid transparent',
+              borderLeft: activeTab === 'settings' ? (isSystemUser ? '3px solid #f59e0b' : '3px solid #22c55e') : '3px solid transparent',
             }}
           >
             <Settings size={15} />
-            <span>Cài đặt</span>
+            <span>{isSystemUser ? 'Cài đặt System & Logs' : 'Kênh & Strategy'}</span>
           </button>
           <button className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-xs transition-colors" style={{ color: 'rgba(255,255,255,0.7)', borderLeft: '3px solid transparent' }}>
             <HelpCircle size={15} />
-            <span>Hướng dẫn</span>
+            <span>Hướng dẫn Vận hành</span>
           </button>
         </div>
       </aside>
 
+      {/* Mobile Bottom Bar */}
       <nav
         className="fixed inset-x-0 bottom-0 z-50 flex h-16 items-stretch gap-1 overflow-x-auto border-t px-2 py-1.5 md:hidden"
         style={{ backgroundColor: 'var(--surface-container-lowest)', borderColor: 'var(--outline-variant)' }}

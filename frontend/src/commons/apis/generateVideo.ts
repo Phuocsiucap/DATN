@@ -32,7 +32,7 @@ export type GenerateVideoTimeline = {
 
 export type GenerateVideoStory = {
   meta?: {
-    project_id?: string | null
+    workflow_id?: string | null
     profile_id?: string | null
     series_id?: string | null
     plan_id?: string | null
@@ -82,7 +82,7 @@ export type GenerateVideoVoiceProvider = 'elevenlabs' | 'edge_tts_namminh' | 'ed
 
 export type GenerateVideoJob = {
   id: string
-  project_id: string
+  workflow_id: string
   run_type?: string
   status: 'QUEUED' | 'RUNNING' | 'RENDERED' | 'FAILED' | string
   progress_percent: number
@@ -179,55 +179,55 @@ export const createGenerateVideoStoryFromManualApi = async (source: any) => {
   return normalizeStoryResponse(data)
 }
 
-export const createGenerateVideoStoryFromProjectApi = async (projectId: string) => {
-  const { data } = await api.post(`${basePath}/projects/${projectId}/create-story`, undefined, { timeout: 90000 })
+export const createGenerateVideoStoryFromProjectApi = async (workflowId: string) => {
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/create-story`, undefined, { timeout: 90000 })
   return data as { job: GenerateVideoJob }
 }
 
 export const saveGenerateVideoStoryApi = async (story: GenerateVideoStory) => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/save-story`, { project_id: projectId, story })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/save-story`, { workflow_id: workflowId, story })
   return data as { story: GenerateVideoStory }
 }
 
-export const fetchGenerateVideoSavedStoryApi = async (projectId: string) => {
-  const { data } = await api.get(`${basePath}/projects/${projectId}/story`)
+export const fetchGenerateVideoSavedStoryApi = async (workflowId: string) => {
+  const { data } = await api.get(`${basePath}/projects/${workflowId}/story`)
   return normalizeStoryResponse(data)
 }
 
 export const editGenerateVideoStoryWithAiApi = async (story: GenerateVideoStory, prompt: string) => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/edit-story`, { project_id: projectId, story, prompt }, { timeout: 90000 })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/edit-story`, { workflow_id: workflowId, story, prompt }, { timeout: 90000 })
   return normalizeStoryResponse(data)
 }
 
 export const reviewGenerateVideoStoryWithAiApi = async (story: GenerateVideoStory, instructions?: string) => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/review-story`, { project_id: projectId, story, instructions }, { timeout: 90000 })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/review-story`, { workflow_id: workflowId, story, instructions }, { timeout: 90000 })
   return { story: normalizeStoryResponse(data.story), review: data.review as GenerateVideoStoryReview | undefined }
 }
 
 export const generateFinalVideoApi = async (story: GenerateVideoStory) => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/generate-video`, { project_id: projectId, story })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/generate-video`, { workflow_id: workflowId, story })
   return data as { job: GenerateVideoJob }
 }
 
-export const approveGenerateVideoProjectApi = async (projectId: string) => {
-  const { data } = await api.post(`${basePath}/projects/${projectId}/approve-video`)
-  return data as { project_id: string; status: string; rendered_video: string }
+export const approveGenerateVideoProjectApi = async (workflowId: string) => {
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/approve-video`)
+  return data as { workflow_id: string; status: string; rendered_video: string }
 }
 
 export const queueGenerateVideoProjectApi = async (
-  projectId: string,
+  workflowId: string,
   payload: { scheduled_at?: string | null; caption?: string | null; status?: 'queued' | 'needs_approval' | 'approved' } = {},
 ) => {
-  const { data } = await api.post(`${basePath}/projects/${projectId}/queue-post`, payload)
-  return data as { project_id: string; status: string; queue_item: Record<string, unknown> }
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/queue-post`, payload)
+  return data as { workflow_id: string; status: string; queue_item: Record<string, unknown> }
 }
 
 export const fetchGenerateVideoJobApi = async (jobId: string) => {
@@ -244,16 +244,16 @@ export const fetchGenerateVideoJobApi = async (jobId: string) => {
 }
 
 export const generateVideoVoiceApi = async (story: GenerateVideoStory, voiceId?: string, voiceSpeed = 1, voiceProvider: GenerateVideoVoiceProvider = 'elevenlabs') => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/emotion-voice`, { project_id: projectId, story, voice_id: voiceId, voice_speed: voiceSpeed, voice_provider: voiceProvider }, { timeout: 300000 })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/emotion-voice`, { workflow_id: workflowId, story, voice_id: voiceId, voice_speed: voiceSpeed, voice_provider: voiceProvider }, { timeout: 300000 })
   return data as { meta?: GenerateVideoStory['meta']; audio: GenerateVideoStory['audio']; timeline?: GenerateVideoStory['timeline']; voice_id: string; voice_provider?: GenerateVideoVoiceProvider; voice_speed: number; voice_text?: string; audio_url: string; debug?: any; fit_frame_error?: string | null }
 }
 
 export const fitGenerateVideoFramesApi = async (story: GenerateVideoStory) => {
-  const projectId = story.meta?.project_id
-  if (!projectId) throw new Error('Missing project_id')
-  const { data } = await api.post(`${basePath}/fit-frames`, { project_id: projectId, story }, { timeout: 180000 })
+  const workflowId = story.meta?.workflow_id
+  if (!workflowId) throw new Error('Missing workflow_id')
+  const { data } = await api.post(`${basePath}/fit-frames`, { workflow_id: workflowId, story }, { timeout: 180000 })
   return data as { meta?: GenerateVideoStory['meta']; audio?: GenerateVideoStory['audio']; timeline?: GenerateVideoStory['timeline']; debug: any }
 }
 

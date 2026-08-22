@@ -4,26 +4,26 @@ import { Loader2, RefreshCcw, Video, CheckCircle2, XCircle, ChevronRight, Filter
 
 import {
   approveContentPlanApi,
-  fetchProjectRunsApi,
+  fetchWorkflowRunsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
   rejectContentPlanApi,
   type ContentPlan,
   type PlanningProfile,
-  type ProjectRun,
+  type WorkflowRun,
   type ProfileSeriesReview,
   type ReviewSourceContent,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
-import { ProjectRunDetailDialog } from './ProjectRunDetailDialog'
+import { WorkflowRunDetailDialog } from './WorkflowRunDetailDialog'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
 type PipelineStep = 'jobs' | 'plans' | 'series' | 'output'
 
-const isTopicConfigError = (job: ProjectRun) =>
+const isTopicConfigError = (job: WorkflowRun) =>
   job.status === 'FAILED' &&
   !!job.error_message &&
   (job.error_message.includes('Content Topics') || job.error_message.includes('content_topics') || job.error_message.includes('chu de') || job.error_message.includes('Chua cau hinh'))
@@ -37,15 +37,15 @@ export default function PlanningPage({
   initialStep?: PipelineStep
   isSystemUser?: boolean
   onOpenProfileSettings?: (profileId: string) => void
-  onOpenGenerateVideo?: (projectId?: string) => void
+  onOpenGenerateVideo?: (workflowId?: string) => void
 }) {
   const activeStep = initialStep
-  const [jobs, setJobs] = useState<ProjectRun[]>([])
+  const [jobs, setJobs] = useState<WorkflowRun[]>([])
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
 
-  const [selectedJob, setSelectedJob] = useState<ProjectRun | null>(null)
+  const [selectedJob, setSelectedJob] = useState<WorkflowRun | null>(null)
   const [selectedReviewArticle, setSelectedReviewArticle] = useState<{
     article: ProfileSeriesReview['articles'][number]
     seriesTitle: string
@@ -83,7 +83,7 @@ export default function PlanningPage({
     setMessage('')
     try {
       if (activeStep === 'jobs') {
-        const nextJobs = await fetchProjectRunsApi()
+        const nextJobs = await fetchWorkflowRunsApi()
         setJobs(nextJobs)
         return
       }
@@ -402,9 +402,9 @@ export default function PlanningPage({
                                     try {
                                       const result = await approveContentPlanApi(article.plan!.id)
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
-                                      const projectId = result.content_projects?.[0]?.id
-                                      if (!projectId) throw new Error('Backend did not return project_id')
-                                      onOpenGenerateVideo?.(projectId)
+                                      const workflowId = result.media_workflows?.[0]?.id
+                                      if (!workflowId) throw new Error('Backend did not return workflow_id')
+                                      onOpenGenerateVideo?.(workflowId)
                                     } catch {
                                       alert('Lỗi phê duyệt!')
                                     }
@@ -456,7 +456,7 @@ export default function PlanningPage({
       )}
 
       {selectedJob && (
-        <ProjectRunDetailDialog
+        <WorkflowRunDetailDialog
           job={selectedJob}
           open={!!selectedJob}
           onOpenChange={(open) => !open && setSelectedJob(null)}

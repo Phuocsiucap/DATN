@@ -28,6 +28,8 @@ PROJECT_RUN_COMPLETED = "project.run.completed"
 PROJECT_RUN_FAILED = "project.run.failed"
 
 GENERATE_VIDEO_SCRIPT_REQUESTED = "generate-video.script.requested"
+GENERATE_VIDEO_EDIT_REQUESTED = "generate-video.edit.requested"
+GENERATE_VIDEO_REVIEW_REQUESTED = "generate-video.review.requested"
 GENERATE_VIDEO_RENDER_REQUESTED = "generate-video.render.requested"
 GENERATE_VIDEO_COMPLETED = "generate-video.completed"
 GENERATE_VIDEO_FAILED = "generate-video.failed"

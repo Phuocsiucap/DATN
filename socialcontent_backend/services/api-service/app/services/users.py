@@ -36,7 +36,7 @@ class UserService:
         return user
 
     def create_standard_user(self, db: Session, payload: schemas.RegisterRequest) -> User:
-        role = db.query(Role).filter(Role.name == "USER").first()
+        role = db.query(Role).filter(Role.name.in_(["CREATOR", "USER"])).first()
         user = User(email=payload.email, full_name=payload.full_name, hashed_password=hash_password(payload.password))
         if role:
             user.roles.append(role)
@@ -88,10 +88,14 @@ class UserService:
         return [role_map[role_name] for role_name in role_names]
 
     def normalized_roles(self, role_names: list[str] | None) -> list[str]:
-        names = role_names or ["USER"]
+        names = role_names or ["CREATOR"]
         normalized: list[str] = []
         for role_name in names:
             value = role_name.strip().upper()
+            if value == "USER":
+                value = "CREATOR"
+            elif value == "ADMIN":
+                value = "SYSTEM_ADMIN"
             if value and value not in normalized:
                 normalized.append(value)
-        return normalized or ["USER"]
+        return normalized or ["CREATOR"]

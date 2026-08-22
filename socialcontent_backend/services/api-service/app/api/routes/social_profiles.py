@@ -29,13 +29,13 @@ def create_social_profile(payload: schemas.SocialProfileCreateRequest, db: Sessi
 
 
 @router.post("/tiktok/qr/start")
-def start_pending_tiktok_qr_login(payload: schemas.TikTokQrStartRequest, current_user: User = Depends(get_current_user)):
+async def start_pending_tiktok_qr_login(payload: schemas.TikTokQrStartRequest, current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
-    return service.start_pending_tiktok_qr_login(current_user, payload)
+    return await service.start_pending_tiktok_qr_login(current_user, payload)
 
 
 @router.get("/tiktok/qr/{session_id}/status")
-def pending_tiktok_qr_status(
+async def pending_tiktok_qr_status(
     session_id: str,
     profile_name: str | None = None,
     username: str | None = None,
@@ -43,13 +43,13 @@ def pending_tiktok_qr_status(
     current_user: User = Depends(get_current_user),
 ):
     service = SocialProfileService()
-    return service.get_pending_tiktok_qr_status(db, current_user, session_id, profile_name, username)
+    return await service.get_pending_tiktok_qr_status(db, current_user, session_id, profile_name, username)
 
 
 @router.post("/tiktok/qr/{session_id}/stop")
-def stop_pending_tiktok_qr_login(session_id: str, current_user: User = Depends(get_current_user)):
+async def stop_pending_tiktok_qr_login(session_id: str, current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
-    return service.stop_pending_tiktok_qr_login(current_user, session_id)
+    return await service.stop_pending_tiktok_qr_login(current_user, session_id)
 
 
 @router.get("/queue/items")
@@ -97,10 +97,10 @@ def delete_social_post(post_id: uuid.UUID, db: Session = Depends(get_db), curren
 
 
 @router.delete("/{profile_id}")
-def delete_social_profile(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_social_profile(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
-    service.delete_profile(db, profile)
+    await service.delete_profile(db, profile)
     return {"message": "Đã xóa tài khoản mạng xã hội"}
 
 
@@ -154,21 +154,21 @@ def create_social_post(
 
 
 @router.post("/{profile_id}/tiktok/qr/start")
-def start_tiktok_qr_login(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def start_tiktok_qr_login(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
-    return service.start_tiktok_qr_login(db, profile)
+    return await service.start_tiktok_qr_login(db, profile)
 
 
 @router.get("/{profile_id}/tiktok/qr/status")
-def tiktok_qr_status(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def tiktok_qr_status(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
-    return service.get_tiktok_qr_status(db, profile)
+    return await service.get_tiktok_qr_status(db, profile)
 
 
 @router.post("/{profile_id}/tiktok/qr/stop")
-def stop_tiktok_qr_login(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def stop_tiktok_qr_login(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
-    return service.stop_tiktok_qr_login(db, profile)
+    return await service.stop_tiktok_qr_login(db, profile)

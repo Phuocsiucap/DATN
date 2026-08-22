@@ -9,15 +9,14 @@ from common.db.session import SessionLocal, engine
 from app.api.routes import (
     admin,
     auth,
-    content_plans,
-    content_projects,
-    project_series,
+    media_workflows,
+    content_series,
     contents,
     crawl_jobs,
     data_quality,
     media_proxy,
     generate_video,
-    project_runs,
+    workflow_runs,
     profile_planning,
     social_profiles,
     sources,
@@ -57,11 +56,10 @@ app.include_router(contents.router, prefix="/api/v1/contents", tags=["contents"]
 app.include_router(media_proxy.router, prefix="/api/v1/media-proxy", tags=["media-proxy"])
 app.include_router(stories.router, prefix="/api/v1", tags=["stories"])
 app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["data-quality"])
-app.include_router(project_runs.router, prefix="/api/v1/project-runs", tags=["project-runs"])
+app.include_router(workflow_runs.router, prefix="/api/v1/workflow-runs", tags=["workflow-runs"])
 app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["profile-planning"])
-app.include_router(content_plans.router, prefix="/api/v1/content-plans", tags=["content-plans"])
-app.include_router(content_projects.router, prefix="/api/v1/content-projects", tags=["content-projects"])
-app.include_router(project_series.router, prefix="/api/v1/project-series", tags=["project-series"])
+app.include_router(media_workflows.router, prefix="/api/v1/media-workflows", tags=["media-workflows"])
+app.include_router(content_series.router, prefix="/api/v1/content-series", tags=["content-series"])
 app.include_router(generate_video.router, prefix="/api/v1/generate-video", tags=["generate-video"])
 
 

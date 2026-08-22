@@ -582,7 +582,16 @@ function CrawledDataLibrary({
             <div>
               <div className="text-[11px] font-semibold uppercase text-[#94a3b8]">Nội dung Chuẩn hóa (Canonical)</div>
               <h4 className="mt-2 text-sm font-bold leading-5 text-[#0f172a]">{detail.canonical_title}</h4>
-              <p className="mt-2 leading-5 text-[#475569]">{detail.summary || 'Chưa có tóm tắt nội dung'}</p>
+              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                <div className="text-[10px] font-bold uppercase text-blue-800 mb-1">Tóm tắt (Summary)</div>
+                <p className="leading-5 text-[#334155]">{detail.summary || 'Chưa có tóm tắt nội dung'}</p>
+              </div>
+              {detail.full_text && detail.full_text !== detail.summary && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[10px] font-bold uppercase text-slate-600 mb-1">Văn bản đầy đủ (Full Text)</div>
+                  <p className="leading-5 text-[#475569] max-h-40 overflow-y-auto whitespace-pre-wrap">{detail.full_text}</p>
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap gap-2"><Badge value={detail.status} /><FilterPill>{detail.content_type}</FilterPill><FilterPill>Điểm chất lượng: {Number(detail.quality_score).toFixed(1)}/10</FilterPill></div>
             </div>
 

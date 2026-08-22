@@ -64,7 +64,7 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
     void loadUsers()
   }, [])
 
-  const rolePayload = (role: string) => (role === 'system' ? ['SYSTEM_ADMIN', 'USER'] : ['USER'])
+  const rolePayload = (role: string) => (role === 'system' ? ['SYSTEM_ADMIN'] : ['CREATOR'])
 
   const handleCreateUser = async () => {
     setLoading(true)
@@ -221,8 +221,8 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
             value={createForm.role}
             onChange={(event) => setCreateForm((prev) => ({ ...prev, role: event.target.value }))}
           >
-            <option value="user">User</option>
-            <option value="system">System</option>
+            <option value="creator">Content Creator (CREATOR)</option>
+            <option value="system">System Admin (SYSTEM_ADMIN)</option>
           </select>
           <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--outline-variant)' }}>
             <input
@@ -274,8 +274,8 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
                         onChange={(event) => void handleChangeRole(user, event.target.value)}
                         disabled={loading}
                       >
-                        <option value="user">User</option>
-                        <option value="system">System</option>
+                        <option value="creator">Content Creator (CREATOR)</option>
+                        <option value="system">System Admin (SYSTEM_ADMIN)</option>
                       </select>
                     </td>
                     <td className="px-5 py-4">

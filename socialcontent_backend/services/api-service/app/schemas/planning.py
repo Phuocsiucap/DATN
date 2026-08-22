@@ -7,9 +7,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ProjectRunCreateRequest(BaseModel):
+class WorkflowRunCreateRequest(BaseModel):
     profile_id: uuid.UUID
-    project_id: uuid.UUID
+    workflow_id: uuid.UUID
     planning_mode: str = "SERIES"
     target_duration_seconds: int | None = 60
     preferred_part_count: int | None = None
@@ -18,13 +18,13 @@ class ProjectRunCreateRequest(BaseModel):
     skip_ai_evaluation: bool = False
 
 
-class ProjectRunResponse(BaseModel):
+class WorkflowRunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     user_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
-    project_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID | None = None
     planning_mode: str
     status: str
     current_stage: str
@@ -41,11 +41,11 @@ class ProjectRunResponse(BaseModel):
     updated_at: datetime
 
 
-class ProjectCandidateResponse(BaseModel):
+class WorkflowCandidateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_run_id: uuid.UUID | None = None
+    workflow_run_id: uuid.UUID | None = None
     content_id: uuid.UUID | None
     story_id: uuid.UUID | None
     episode_id: uuid.UUID | None
@@ -60,19 +60,19 @@ class ProjectCandidateResponse(BaseModel):
     created_at: datetime
 
 
-class ProjectCandidateUpdateRequest(BaseModel):
+class WorkflowCandidateUpdateRequest(BaseModel):
     eligible: bool | None = None
     rank_order: int | None = None
     selection_reasons: list[Any] | None = None
     rejection_reasons: list[Any] | None = None
 
 
-class ProjectCandidateReselectRequest(BaseModel):
+class WorkflowCandidateReselectRequest(BaseModel):
     candidate_limit: int = 10
     min_score: float | None = None
 
 
-class ContentPlanUpdateRequest(BaseModel):
+class MediaWorkflowUpdateRequest(BaseModel):
     title: str | None = None
     content_angle: str | None = None
     target_audience: str | None = None
@@ -85,20 +85,20 @@ class ContentPlanUpdateRequest(BaseModel):
     production_requirements: dict[str, Any] | None = None
 
 
-class ContentPlanReviewRequest(BaseModel):
+class MediaWorkflowReviewRequest(BaseModel):
     feedback_text: str | None = None
 
 
-class ContentPlanRegenerateRequest(BaseModel):
+class MediaWorkflowRegenerateRequest(BaseModel):
     instructions: str | None = None
 
 
-class ContentPlanResponse(BaseModel):
+class MediaWorkflowResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID | None = None
-    project_run_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID | None = None
+    workflow_run_id: uuid.UUID | None = None
     profile_id: uuid.UUID | None = None
     primary_content_id: uuid.UUID | None
     primary_story_id: uuid.UUID | None
@@ -116,12 +116,13 @@ class ContentPlanResponse(BaseModel):
     version: int
     ai_reasoning: list[Any]
     production_requirements: dict[str, Any]
+    draft_json: dict[str, Any] = Field(default_factory=dict)
     approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
 
-class ProjectPartResponse(BaseModel):
+class WorkflowPartResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -165,18 +166,18 @@ class ProfileSeriesReviewSourceResponse(BaseModel):
     media: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ProjectSeriesUpdateRequest(BaseModel):
+class ContentSeriesUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     series_type: str | None = None
     status: str | None = None
 
 
-class ProjectSeriesRegenerateRequest(BaseModel):
+class ContentSeriesRegenerateRequest(BaseModel):
     instructions: str | None = None
 
 
-class ProjectPartCreateRequest(BaseModel):
+class WorkflowPartCreateRequest(BaseModel):
     part_number: int | None = None
     part_type: str = "MIDDLE"
     title: str
@@ -192,7 +193,7 @@ class ProjectPartCreateRequest(BaseModel):
     risk_notes: list[Any] = Field(default_factory=list)
 
 
-class ProjectPartUpdateRequest(BaseModel):
+class WorkflowPartUpdateRequest(BaseModel):
     part_number: int | None = None
     part_type: str | None = None
     title: str | None = None
@@ -209,11 +210,11 @@ class ProjectPartUpdateRequest(BaseModel):
     risk_notes: list[Any] | None = None
 
 
-class ProjectPartReorderRequest(BaseModel):
+class WorkflowPartReorderRequest(BaseModel):
     part_ids: list[uuid.UUID]
 
 
-class ProjectSeriesResponse(BaseModel):
+class ContentSeriesResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -229,17 +230,17 @@ class ProjectSeriesResponse(BaseModel):
 
 
 class ProfileSeriesReviewArticleResponse(BaseModel):
-    plan: ContentPlanResponse | None = None
+    plan: MediaWorkflowResponse | None = None
     source_content: ProfileSeriesReviewSourceResponse | None = None
-    parts: list[ProjectPartResponse] = Field(default_factory=list)
+    parts: list[WorkflowPartResponse] = Field(default_factory=list)
 
 
 class ProfileSeriesReviewResponse(BaseModel):
-    series: ProjectSeriesResponse
+    series: ContentSeriesResponse
     articles: list[ProfileSeriesReviewArticleResponse] = Field(default_factory=list)
 
 
-class VideoDraftSummaryResponse(BaseModel):
+class MediaWorkflowSummaryResponse(BaseModel):
     id: uuid.UUID | str
     title: str
     status: str | None = None

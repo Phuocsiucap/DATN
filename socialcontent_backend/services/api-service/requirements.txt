@@ -13,3 +13,4 @@ httpx
 edge-tts
 playwright
 alembic
+pgvector

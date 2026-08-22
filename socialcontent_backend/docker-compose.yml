@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -47,124 +47,39 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  api-service:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/api-service/Dockerfile
-    working_dir: /app/services/api-service
-    command: xvfb-run -a uvicorn app.main:app --host 0.0.0.0 --port 8000
-    depends_on:
-      - postgres
-      - mongodb
-      - kafka
-      - embedding-service
-      - generate-video-service
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      BROWSER_HEADLESS: "false"
-      EMBEDDING_SERVICE_URL: http://embedding-service:8060
-      GENERATE_VIDEO_SERVICE_URL: http://generate-video-service:8070
-    ports:
-      - "8000:8000"
-    volumes:
-      - socialcontent_social_profile:/app/social_profile
-      - socialcontent_generate_video:/app/data_demo/video_gen_demo
+  # api-service:
+  #   build:
+  #     context: ..
+  #     dockerfile: socialcontent_backend/services/api-service/Dockerfile
+  #   working_dir: /app/services/api-service
+  #   command: xvfb-run -a uvicorn app.main:app --host 0.0.0.0 --port 8000
+  #   depends_on:
+  #     - postgres
+  #     - mongodb
+  #     - kafka
+  #     - ai-media-planning-worker
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+  #     MONGO_URI: mongodb://mongodb:27017
+  #     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  #     BROWSER_HEADLESS: "false"
+  #     PLANNING_ORCHESTRATOR_URL: http://ai-media-planning-worker:8050
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - socialcontent_social_profile:/app/social_profile
+  #     - socialcontent_generate_video:/app/data_demo/video_gen_demo
 
-  generate-video-service:
+  data-ingestion-worker:
     build:
       context: ..
-      dockerfile: socialcontent_backend/services/generate-video-service/Dockerfile
-    working_dir: /app/services/generate-video-service
-    depends_on:
-      - postgres
-      - mongodb
-      - kafka
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      BROWSER_HEADLESS: "true"
-      PYTHONUNBUFFERED: "1"
-    ports:
-      - "8070:8070"
-    volumes:
-      - socialcontent_generate_video:/app/data_demo/video_gen_demo
-
-  generate-video-worker:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/generate-video-service/Dockerfile
-    working_dir: /app/services/generate-video-service
-    command: python -m app.workers.generate_video_worker
-    depends_on:
-      - postgres
-      - mongodb
-      - kafka
-      - generate-video-service
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      BROWSER_HEADLESS: "true"
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - socialcontent_generate_video:/app/data_demo/video_gen_demo
-
-  embedding-service:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/embedding-service/Dockerfile
-      args:
-        PRELOAD_FASTEMBED: ${PRELOAD_FASTEMBED:-true}
-        FASTEMBED_MODEL_NAME: ${FASTEMBED_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
-    working_dir: /app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8060
-    env_file:
-      - .env
-    environment:
-      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-fastembed}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-      OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-512}
-      FASTEMBED_MODEL_NAME: ${FASTEMBED_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
-      FASTEMBED_THREADS: ${FASTEMBED_THREADS:-2}
-    ports:
-      - "8060:8060"
-
-  crawl-orchestrator:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/crawl-orchestrator/Dockerfile
-    working_dir: /app/services/crawl-orchestrator
+      dockerfile: socialcontent_backend/services/data-ingestion-engine/Dockerfile
+    working_dir: /app/services/data-ingestion-engine
     command: uvicorn app.main:app --host 0.0.0.0 --port 8010
     depends_on:
-      - api-service
-      - kafka
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      PYTHONUNBUFFERED: "1"
-    ports:
-      - "8010:8010"
-
-  planning-orchestrator:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/planning-orchestrator/Dockerfile
-    working_dir: /app/services/planning-orchestrator
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8050
-    depends_on:
-      - api-service
+      - postgres
       - mongodb
       - kafka
     env_file:
@@ -174,15 +89,13 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PYTHONUNBUFFERED: "1"
-    ports:
-      - "8050:8050"
 
-  crawler-service:
+  ai-media-planning-worker:
     build:
       context: ..
-      dockerfile: socialcontent_backend/services/crawler-service/Dockerfile
-    working_dir: /app/services/crawler-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8020
+      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
+    working_dir: /app/services/ai-media-engine
+    command: uvicorn app.planning.main:app --host 0.0.0.0 --port 8050
     depends_on:
       - postgres
       - mongodb
@@ -194,15 +107,15 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PYTHONUNBUFFERED: "1"
-    ports:
-      - "8020:8020"
+      BROWSER_HEADLESS: "true"
+      ENABLE_WORKERS: "true"
 
-  normalization-service:
+  ai-media-worker:
     build:
       context: ..
-      dockerfile: socialcontent_backend/services/normalization-service/Dockerfile
-    working_dir: /app/services/normalization-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8030
+      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
+    working_dir: /app/services/ai-media-engine
+    command: python -m app.video.workers.generate_video_worker
     depends_on:
       - postgres
       - mongodb
@@ -213,29 +126,10 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      BROWSER_HEADLESS: "true"
       PYTHONUNBUFFERED: "1"
-    ports:
-      - "8030:8030"
-
-  story-processing-service:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/story-processing-service/Dockerfile
-    working_dir: /app/services/story-processing-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8040
-    depends_on:
-      - postgres
-      - mongodb
-      - kafka
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      PYTHONUNBUFFERED: "1"
-    ports:
-      - "8040:8040"
+    volumes:
+      - socialcontent_generate_video:/app/data_demo/video_gen_demo
 
 volumes:
   socialcontent_postgres:

@@ -24,6 +24,8 @@ def get_producer() -> KafkaProducer:
         bootstrap_servers=[s.strip() for s in settings.kafka_bootstrap_servers.split(",") if s.strip()],
         value_serializer=lambda value: json.dumps(value, ensure_ascii=False, default=json_default).encode("utf-8"),
         key_serializer=lambda value: str(value).encode("utf-8") if value is not None else None,
+        max_block_ms=1000,
+        request_timeout_ms=1000,
     )
 
 
@@ -32,9 +34,12 @@ def publish(topic: str, envelope: EventEnvelope) -> None:
     if settings.disable_kafka:
         print(f"Kafka disabled; skipped {topic}: {envelope.event_id}")
         return
-    producer = get_producer()
-    producer.send(topic, key=envelope.kafka_key(), value=envelope.to_message())
-    producer.flush()
+    try:
+        producer = get_producer()
+        producer.send(topic, key=envelope.kafka_key(), value=envelope.to_message())
+        producer.flush(timeout=1.0)
+    except Exception as exc:
+        print(f"[Kafka Warning] Failed to publish event {topic}: {exc}")
 
 
 def consumer(topics: Iterable[str], group_id: str) -> KafkaConsumer:

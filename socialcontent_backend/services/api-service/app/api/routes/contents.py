@@ -1,3 +1,4 @@
+import html
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +9,7 @@ from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
 from common.events.topics import CONTENT_DEDUPLICATION_REQUESTED, CONTENT_NORMALIZATION_REQUESTED
+from common.db.media_workflows import _load_content_full_text
 from app.api.deps import get_current_user, require_admin
 from app.schemas import api as schemas
 
@@ -191,46 +193,33 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
     runs = db.query(ProcessingRun).filter(ProcessingRun.content_id == content_id).order_by(ProcessingRun.created_at.desc()).limit(20).all()
     sources = db.query(ContentSource).filter(ContentSource.content_id == content_id).order_by(ContentSource.first_seen_at.desc()).all()
 
-    full_text = None
-    try:
-        from bson import ObjectId
-        from common.db.mongo import processed_documents, raw_documents
-
-        proc_coll = processed_documents()
-        raw_coll = raw_documents()
-
-        for source in sources:
-            metadata = dict(source.metadata_json or {})
-            proc_id_str = metadata.get("processed_document_id")
-            if proc_id_str:
-                try:
-                    proc_doc = proc_coll.find_one({"_id": ObjectId(proc_id_str)})
-                    if proc_doc and "normalized" in proc_doc:
-                        full_text = proc_doc["normalized"].get("content") or proc_doc["normalized"].get("description")
-                except Exception:
-                    pass
-
-            if not full_text and source.raw_document_id:
-                try:
-                    raw_doc = raw_coll.find_one({"_id": ObjectId(source.raw_document_id)})
-                    if raw_doc and "raw" in raw_doc:
-                        full_text = raw_doc["raw"].get("text") or raw_doc["raw"].get("raw_text")
-                except Exception:
-                    pass
-
-            if full_text:
-                metadata["full_text"] = full_text
-                source.metadata_json = metadata
-    except Exception as e:
-        print("Error fetching full document text from mongo:", e)
+    full_text = _load_content_full_text(sources) or content.summary
+    cleaned_sources = []
+    for s in sources:
+        meta = dict(s.metadata_json or {})
+        meta.pop("processed_document_id", None)
+        cleaned_sources.append({
+            "id": s.id,
+            "source_type": s.source_type,
+            "source_external_id": s.source_external_id,
+            "source_url": s.source_url,
+            "raw_document_id": s.raw_document_id,
+            "processed_document_id": s.processed_document_id,
+            "source_title": s.source_title,
+            "source_author": s.source_author,
+            "source_published_at": s.source_published_at,
+            "metadata_json": meta,
+            "first_seen_at": s.first_seen_at,
+            "last_seen_at": s.last_seen_at,
+        })
 
     return {
         "id": content.id,
         "content_type": content.content_type,
-        "canonical_title": content.canonical_title,
-        "normalized_title": content.normalized_title,
-        "summary": content.summary,
-        "full_text": full_text or content.summary,
+        "canonical_title": html.unescape(content.canonical_title) if content.canonical_title else content.canonical_title,
+        "normalized_title": html.unescape(content.normalized_title) if content.normalized_title else content.normalized_title,
+        "summary": html.unescape(content.summary) if content.summary else content.summary,
+        "full_text": html.unescape(full_text) if full_text else full_text,
         "language": content.language,
         "status": content.status,
         "published_at": content.published_at,
@@ -241,7 +230,7 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
         "quality_score": content.quality_score,
         "created_at": content.created_at,
         "updated_at": content.updated_at,
-        "sources": sources,
+        "sources": cleaned_sources,
         "media": media,
         "processing_runs": runs,
     }

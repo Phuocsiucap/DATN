@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import base64
-import concurrent.futures
 import logging
 import os
 import threading
@@ -33,11 +33,8 @@ class TikTokLoginSession:
     qr_image_b64: str | None = None
     last_error: str | None = None
 
-    def capture_qr(self) -> str:
-        return _run_on_browser_thread(self._capture_qr)
-
-    def _capture_qr(self) -> str:
-        self.page.wait_for_timeout(2000)
+    async def capture_qr(self) -> str:
+        await asyncio.sleep(2)
         qr_selectors = [
             "canvas",
             "img[alt*='QR' i]",
@@ -50,86 +47,68 @@ class TikTokLoginSession:
         for selector in qr_selectors:
             locator = self.page.locator(selector).first
             try:
-                if locator.count() > 0 and locator.is_visible(timeout=1500):
-                    screenshot = locator.screenshot()
+                if await locator.count() > 0 and await locator.is_visible(timeout=1500):
+                    screenshot = await locator.screenshot()
                     break
             except Exception:
                 continue
 
         if screenshot is None:
-            screenshot = self.page.screenshot(full_page=True)
+            try:
+                screenshot = await self.page.screenshot(full_page=True)
+            except Exception as e:
+                logger.warning("Screenshot failed for session_id=%s: %s", self.session_id, e)
+                return self.qr_image_b64 or ""
 
         self.qr_image_b64 = base64.b64encode(screenshot).decode("utf-8")
         return self.qr_image_b64
 
-    def is_authenticated(self) -> bool:
-        return _run_on_browser_thread(self._is_authenticated)
-
-    def _is_authenticated(self) -> bool:
+    async def is_authenticated(self) -> bool:
         try:
-            cookies = self.context.cookies(["https://www.tiktok.com"])
+            cookies = await self.context.cookies(["https://www.tiktok.com"])
         except Exception:
             return False
         cookie_names = {cookie["name"] for cookie in cookies}
         return bool(cookie_names.intersection(DEFAULT_AUTH_COOKIE_NAMES))
 
-    def cookie_names(self) -> list[str]:
-        return _run_on_browser_thread(self._cookie_names)
-
-    def _cookie_names(self) -> list[str]:
+    async def cookie_names(self) -> list[str]:
         try:
-            cookies = self.context.cookies(["https://www.tiktok.com"])
+            cookies = await self.context.cookies(["https://www.tiktok.com"])
         except Exception:
             return []
         return sorted({cookie["name"] for cookie in cookies})
 
     def page_url(self) -> str | None:
-        return _run_on_browser_thread(self._page_url)
-
-    def _page_url(self) -> str | None:
         try:
             return self.page.url
         except Exception:
             return None
 
-    def close(self) -> None:
-        return _run_on_browser_thread(self._close)
-
-    def _close(self) -> None:
+    async def close(self) -> None:
         try:
-            self.context.close()
+            await self.context.close()
+        except Exception as e:
+            logger.warning("Error closing context for session_id=%s: %s", self.session_id, e)
         finally:
-            self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            except Exception as e:
+                logger.warning("Error stopping playwright for session_id=%s: %s", self.session_id, e)
 
 
 _SESSION_LOCK = threading.Lock()
 _SESSIONS: dict[str, TikTokLoginSession] = {}
-_BROWSER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tiktok-qr-browser")
-_BROWSER_THREAD_ID: int | None = None
 
 
-def _run_on_browser_thread(fn, *args, **kwargs):
-    global _BROWSER_THREAD_ID
-    if threading.get_ident() == _BROWSER_THREAD_ID:
-        return fn(*args, **kwargs)
-
-    def runner():
-        global _BROWSER_THREAD_ID
-        _BROWSER_THREAD_ID = threading.get_ident()
-        return fn(*args, **kwargs)
-
-    return _BROWSER_EXECUTOR.submit(runner).result()
-
-
-def _load_sync_playwright():
+def _load_async_playwright():
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Playwright chưa được cài. Cài dependency rồi chạy: python -m playwright install chromium",
         ) from exc
-    return sync_playwright
+    return async_playwright
 
 
 def _resolve_profile_dir(folder_path: str) -> Path:
@@ -145,13 +124,23 @@ def _resolve_profile_dir(folder_path: str) -> Path:
     return profile_dir
 
 
-def _launch_persistent_context(profile_dir: Path):
+async def _launch_persistent_context(profile_dir: Path):
     settings = get_settings()
-    sync_playwright = _load_sync_playwright()
-    playwright = sync_playwright().start()
+    async_playwright = _load_async_playwright()
+    pw = await async_playwright().start()
     browser_headless = settings.browser_headless or (os.name != "nt" and not os.environ.get("DISPLAY"))
     if browser_headless and not settings.browser_headless:
         logger.warning("TikTok QR browser forced to headless because DISPLAY is not available")
+
+    # Clean up any stale Singleton lock files from interrupted sessions
+    for lock_name in ["SingletonLock", "SingletonCookie", "SingletonSocket"]:
+        lock_path = profile_dir / lock_name
+        if lock_path.exists():
+            try:
+                lock_path.unlink()
+            except Exception:
+                pass
+
     launch_kwargs = {
         "user_data_dir": str(profile_dir),
         "headless": browser_headless,
@@ -159,43 +148,52 @@ def _launch_persistent_context(profile_dir: Path):
         "args": ["--disable-blink-features=AutomationControlled"],
     }
 
-    try:
-        context = playwright.chromium.launch_persistent_context(channel=settings.browser_channel, **launch_kwargs)
-    except Exception:
+    channels_to_try = [settings.browser_channel, None] if settings.browser_channel else [None]
+    context = None
+    for ch in channels_to_try:
         try:
-            context = playwright.chromium.launch_persistent_context(**launch_kwargs)
+            kwargs = {**launch_kwargs}
+            if ch:
+                kwargs["channel"] = ch
+            context = await pw.chromium.launch_persistent_context(**kwargs)
+            break
         except Exception as exc:
-            playwright.stop()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Không mở được browser Playwright cho TikTok QR: {exc}",
-            ) from exc
+            logger.warning("Could not launch Playwright context with channel=%s: %s", ch, exc)
 
-    page = context.pages[0] if context.pages else context.new_page()
-    return playwright, context, page
+    if not context:
+        await pw.stop()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Không mở được browser Playwright cho TikTok QR",
+        )
+
+    page = context.pages[0] if context.pages else await context.new_page()
+    return pw, context, page
 
 
-def _start_tiktok_qr_session(session_id: str, folder_path: str, user_id: uuid.UUID) -> TikTokLoginSession:
+async def start_tiktok_qr_session(session_id: str, folder_path: str, user_id: uuid.UUID) -> TikTokLoginSession:
     profile_dir = _resolve_profile_dir(folder_path)
     with _SESSION_LOCK:
         existing = _SESSIONS.pop(session_id, None)
     if existing:
-        existing._close()
+        await existing.close()
 
     settings = get_settings()
-    playwright, context, page = _launch_persistent_context(profile_dir)
-    page.goto(settings.tiktok_qr_login_url, wait_until="domcontentloaded")
-    page.wait_for_timeout(5000)
+    pw, context, page = await _launch_persistent_context(profile_dir)
+    try:
+        await page.goto(settings.tiktok_qr_login_url, wait_until="domcontentloaded")
+    except Exception as e:
+        logger.warning("Page goto failed or timed out: %s", e)
 
     session = TikTokLoginSession(
-        playwright=playwright,
+        playwright=pw,
         context=context,
         page=page,
         session_id=session_id,
         user_id=user_id,
         profile_dir=profile_dir,
     )
-    session._capture_qr()
+    await session.capture_qr()
 
     with _SESSION_LOCK:
         _SESSIONS[session_id] = session
@@ -204,13 +202,9 @@ def _start_tiktok_qr_session(session_id: str, folder_path: str, user_id: uuid.UU
         session_id,
         user_id,
         profile_dir,
-        session._page_url(),
+        session.page_url(),
     )
     return session
-
-
-def start_tiktok_qr_session(session_id: str, folder_path: str, user_id: uuid.UUID) -> TikTokLoginSession:
-    return _run_on_browser_thread(_start_tiktok_qr_session, session_id, folder_path, user_id)
 
 
 def get_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> TikTokLoginSession | None:
@@ -221,22 +215,22 @@ def get_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> 
     return session
 
 
-def refresh_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> TikTokLoginSession:
+async def refresh_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> TikTokLoginSession:
     session = get_tiktok_qr_session(session_id, user_id)
     if not session:
         raise RuntimeError("Chưa khởi tạo phiên QR cho profile này")
-    session.capture_qr()
+    await session.capture_qr()
     return session
 
 
-def stop_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> None:
+async def stop_tiktok_qr_session(session_id: str, user_id: uuid.UUID | None = None) -> None:
     with _SESSION_LOCK:
         session = _SESSIONS.get(session_id)
         if session and user_id is not None and session.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phiên QR TikTok")
         session = _SESSIONS.pop(session_id, None)
     if session:
-        session.close()
+        await session.close()
 
 
 def qr_image_data_url(session: TikTokLoginSession) -> str | None:

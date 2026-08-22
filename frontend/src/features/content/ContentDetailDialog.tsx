@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, ArrowRight, CheckCircle, Loader2, Square } from 'lucide-react'
 import { fetchContentDetailApi } from '@/commons/apis/module1'
-import { createContentProjectFromSourcesApi, createProjectRunApi, type PlanningProfile } from '@/commons/apis/planning'
+import { createMediaWorkflowFromSourcesApi, createWorkflowRunApi, type PlanningProfile } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
@@ -34,6 +34,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
   }, [contentId])
 
   useEffect(() => {
+    if (!contentId) return
     fetchSocialProfilesApi()
       .then((res: any) => {
         const items = res?.items || res || []
@@ -41,14 +42,14 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
         setSelectedProfileId((current) => current || items[0]?.id || '')
       })
       .catch(() => setProfiles([]))
-  }, [])
+  }, [contentId])
 
   const createDirectScript = async () => {
     if (!contentDetail?.id || !selectedProfileId) return
     setCreatingScript(true)
     setScriptResult(null)
     try {
-      const project = await createContentProjectFromSourcesApi({
+      const project = await createMediaWorkflowFromSourcesApi({
         profile_id: selectedProfileId,
         content_ids: [contentDetail.id],
         story_ids: [],
@@ -64,9 +65,9 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
           content_ids: [contentDetail.id],
         },
       })
-      const job = await createProjectRunApi({
+      const job = await createWorkflowRunApi({
         profile_id: selectedProfileId,
-        project_id: project.id,
+        workflow_id: project.id,
         planning_mode: 'SINGLE',
         target_duration_seconds: 60,
         preferred_part_count: 1,
@@ -100,10 +101,17 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
           <>
             <h3 className="mb-4 pr-8 text-lg font-bold leading-snug text-[#0f172a]">{contentDetail.canonical_title}</h3>
             
-            <div className="grid lg:grid-cols-[1fr_300px] gap-6 flex-1 overflow-hidden">
-              <div className="overflow-y-auto space-y-4 pr-2">
+            <div className="grid lg:grid-cols-[1fr_320px] gap-6 flex-1 overflow-hidden">
+              <div className="overflow-y-auto space-y-5 pr-2">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-800 mb-2">Tóm tắt (Summary)</h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-bold text-sm text-slate-800">Tóm tắt (Summary)</h4>
+                    {contentDetail.quality_score !== undefined && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                        Điểm chất lượng: {Number(contentDetail.quality_score).toFixed(1)}/100
+                      </span>
+                    )}
+                  </div>
                   <div className="rounded-md border bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
                     {contentDetail.summary || 'Không có tóm tắt.'}
                   </div>
@@ -111,7 +119,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                 
                 <div>
                   <h4 className="font-bold text-sm text-slate-800 mb-2">Dữ liệu gốc (Full Text)</h4>
-                  <div className="rounded-md border border-[#e0e7ff] bg-[#f8f9ff] p-3 font-mono text-sm leading-relaxed text-[#091426] whitespace-pre-wrap break-all">
+                  <div className="rounded-md border border-[#e0e7ff] bg-[#f8f9ff] p-3 text-sm leading-relaxed text-[#091426] whitespace-pre-wrap break-words max-h-80 overflow-y-auto">
                     {contentDetail.full_text || 'Không lấy được text gốc.'}
                   </div>
                 </div>
@@ -136,7 +144,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                     <button
                       onClick={() => void createDirectScript()}
                       disabled={creatingScript || loading || !contentDetail?.id || !selectedProfileId}
-                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50"
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50 hover:opacity-90"
                     >
                       {creatingScript ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                       Tạo luôn kịch bản
@@ -160,14 +168,14 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                     <div><Badge value={contentDetail.status} /></div>
                   </div>
                   <div className="border rounded-lg p-3 col-span-2">
-                    <div className="text-[10px] uppercase text-slate-500 font-bold mb-1">Ngày crawl</div>
+                    <div className="text-[10px] uppercase text-slate-500 font-bold mb-1">Ngày thu thập</div>
                     <div className="text-xs font-semibold">{formatDate(contentDetail.created_at)}</div>
                   </div>
                 </div>
 
                 {contentDetail.canonical_url && (
                   <a href={contentDetail.canonical_url} target="_blank" rel="noreferrer" className="block w-full rounded-md border border-[var(--outline-variant)] py-2 text-center text-xs font-bold text-[var(--on-surface)] hover:bg-slate-50">
-                    Mở bài đăng gốc
+                    Mở bài đăng gốc ↗
                   </a>
                 )}
                 

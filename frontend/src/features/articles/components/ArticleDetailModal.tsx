@@ -5,7 +5,7 @@ import {
   Loader2, FileText, Sparkles, ArrowRight, CheckCircle, AlertCircle, ChevronDown
 } from 'lucide-react';
 import type { Article } from '@/commons/store/slices/articlesSlice';
-import { fetchArticleDetailApi, createContentProjectFromSourcesApi, createProjectRunApi, type PlanningProfile } from '@/commons/apis/api';
+import { fetchArticleDetailApi, createMediaWorkflowFromSourcesApi, createWorkflowRunApi, type PlanningProfile } from '@/commons/apis/api';
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles';
 
 interface ArticleDetailModalProps {
@@ -46,7 +46,7 @@ export default function ArticleDetailModal({ article: initialArticle, onClose }:
     setSendingToModule2(true);
     setModule2Result(null);
     try {
-      const project = await createContentProjectFromSourcesApi({
+      const project = await createMediaWorkflowFromSourcesApi({
         profile_id: selectedProfileId,
         content_ids: [article.id],
         selection_mode: 'MANUAL',
@@ -60,9 +60,9 @@ export default function ArticleDetailModal({ article: initialArticle, onClose }:
           content_ids: [article.id],
         },
       });
-      await createProjectRunApi({
+      await createWorkflowRunApi({
         profile_id: selectedProfileId,
-        project_id: project.id,
+        workflow_id: project.id,
         planning_mode: 'SINGLE',
         target_duration_seconds: 60,
         preferred_part_count: 1,
@@ -103,7 +103,7 @@ export default function ArticleDetailModal({ article: initialArticle, onClose }:
             )}
           </div>
 
-          {article.summary && article.summary !== article.content && (
+          {article.summary && (
             <div className="mb-5 p-4 rounded-xl bg-blue-50/70 border border-blue-200">
               <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-1 flex items-center gap-1.5">
                 <Sparkles size={14} /> AI Tóm Tắt (Canonical Summary)

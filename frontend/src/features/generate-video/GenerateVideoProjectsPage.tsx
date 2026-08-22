@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw, Wand2, X } from 'lucide-react'
-import { fetchContentProjectsApi, type ContentProject } from '@/commons/apis/planning'
+import { fetchMediaWorkflowsApi, type MediaWorkflow } from '@/commons/apis/planning'
 import { createGenerateVideoStoryFromManualApi, generateVideoMediaUrl, generateVideoOutputUrl, type GenerateVideoStory } from '@/commons/apis/generateVideo'
 
 type GenerateVideoProjectsPageProps = {
-  onOpenProject: (projectId: string) => void
+  onOpenProject: (workflowId: string) => void
 }
 
 export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVideoProjectsPageProps) {
-  const [projects, setProjects] = useState<ContentProject[]>([])
+  const [projects, setProjects] = useState<MediaWorkflow[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState('Sẵn sàng')
   const [showNewManual, setShowNewManual] = useState(false)
@@ -22,7 +22,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   const loadProjects = async () => {
     setBusy('load')
     try {
-      const nextProjects = await fetchContentProjectsApi()
+      const nextProjects = await fetchMediaWorkflowsApi({ videoWorkspaceOnly: true })
       setProjects(nextProjects)
       setStatus('Đã tải danh sách video project')
     } catch (error: any) {
@@ -91,7 +91,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         />
       )}
 
-      <ContentProjectList projects={sortedProjects} onOpenProject={onOpenProject} />
+      <MediaWorkflowList projects={sortedProjects} onOpenProject={onOpenProject} />
     </div>
   )
 }
@@ -179,29 +179,29 @@ function ManualStoryPreview({ story }: { story: GenerateVideoStory | null }) {
   )
 }
 
-function ContentProjectList({
+function MediaWorkflowList({
   projects,
   onOpenProject,
 }: {
-  projects: ContentProject[]
-  onOpenProject: (projectId: string) => void
+  projects: MediaWorkflow[]
+  onOpenProject: (workflowId: string) => void
 }) {
   if (!projects.length) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">
+      <div className="bento-card p-6 text-center text-sm font-semibold text-[var(--on-surface-variant)]">
         Chưa có content project nào trong Generate Video. Hãy duyệt một plan ở Module 2 để tạo project.
       </div>
     )
   }
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <div className="bento-card p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-black text-[#0f172a]">Content projects</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">{projects.length} project · nguồn chính từ content_projects</div>
+          <div className="text-base font-bold text-[var(--on-surface)]">Content Projects</div>
+          <div className="mt-1 text-xs font-semibold text-[var(--on-surface-variant)]">{projects.length} project · nguồn chính từ media_workflows</div>
         </div>
       </div>
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {projects.map((project) => {
           const renderedVideoUrl = getProjectRenderedVideoUrl(project)
           const status = project.status || 'READY'
@@ -214,24 +214,26 @@ function ContentProjectList({
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') onOpenProject(project.id)
               }}
-              className="grid min-h-[168px] cursor-pointer overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition hover:border-[var(--accent)] hover:shadow-sm sm:grid-cols-[132px_minmax(0,1fr)]"
+              className="bento-card grid min-h-[168px] cursor-pointer overflow-hidden text-left sm:grid-cols-[132px_minmax(0,1fr)]"
             >
               <ProjectPreview renderedVideoUrl={renderedVideoUrl} imageUrl="" title={renderedVideoUrl ? 'Video đã render' : 'Preview'} />
-              <div className="min-w-0 p-3">
-                <div className="mb-2 flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="line-clamp-2 text-sm font-black leading-5 text-[#0f172a]">{project.title || project.id}</div>
-                    <div className="mt-1 font-mono text-[11px] font-semibold text-slate-400">{project.id.slice(0, 8)}</div>
+              <div className="min-w-0 p-3 flex flex-col justify-between">
+                <div>
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="line-clamp-2 text-sm font-bold leading-5 text-[var(--on-surface)]">{project.title || project.id}</div>
+                      <div className="mt-1 font-mono text-[11px] font-semibold text-[var(--on-surface-variant)]">{project.id.slice(0, 8)}</div>
+                    </div>
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${projectStatusClass(status)}`}>{projectStatusLabel(status)}</span>
                   </div>
-                  <span className={`shrink-0 rounded px-2 py-1 text-[10px] font-black uppercase ${projectStatusClass(status)}`}>{projectStatusLabel(status)}</span>
-                </div>
-                <div className="grid gap-1 text-[11px] font-semibold text-slate-500">
-                  <span>Time: {formatDateTime(project.updated_at || project.created_at)}</span>
-                  <span>Duration: {formatDuration(project.timeline_duration)}</span>
-                  <span>{project.parts?.length || 0} part · {project.current_stage || status}</span>
+                  <div className="grid gap-1 text-[11px] font-semibold text-[var(--on-surface-variant)]">
+                    <span>Time: {formatDateTime(project.updated_at || project.created_at)}</span>
+                    <span>Duration: {formatDuration(project.timeline_duration)}</span>
+                    <span>{project.parts?.length || 0} part · {project.current_stage || status}</span>
+                  </div>
                 </div>
                 {renderedVideoUrl && (
-                  <a href={renderedVideoUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="mt-3 inline-flex text-xs font-black text-emerald-700 hover:underline">
+                  <a href={renderedVideoUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="mt-2 inline-flex text-xs font-bold text-emerald-700 hover:underline">
                     Mở video đã render
                   </a>
                 )}
@@ -278,7 +280,7 @@ function ProjectPreview({
   )
 }
 
-function sortProjectsNewestFirst(projects: ContentProject[]) {
+function sortProjectsNewestFirst(projects: MediaWorkflow[]) {
   return [...projects].sort((left, right) => {
     const leftTime = new Date(left.updated_at || left.created_at || 0).getTime()
     const rightTime = new Date(right.updated_at || right.created_at || 0).getTime()
@@ -286,7 +288,7 @@ function sortProjectsNewestFirst(projects: ContentProject[]) {
   })
 }
 
-function getProjectRenderedVideoUrl(project: ContentProject) {
+function getProjectRenderedVideoUrl(project: MediaWorkflow) {
   if (!project.rendered_video) return ''
   if (!isVersionedRenderPath(project.rendered_video)) return ''
   const url = generateVideoOutputUrl(project.rendered_video)

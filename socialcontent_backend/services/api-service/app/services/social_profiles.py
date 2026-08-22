@@ -61,32 +61,33 @@ class SocialProfileService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy social profile")
         return profile
 
-    def delete_profile(self, db: Session, profile: SocialProfile) -> None:
-        stop_tiktok_qr_session(str(profile.id), profile.user_id)
+    async def delete_profile(self, db: Session, profile: SocialProfile) -> None:
+        await stop_tiktok_qr_session(str(profile.id), profile.user_id)
         self.delete_profile_folder(profile.folder_path)
         db.delete(profile)
         db.commit()
 
-    def start_pending_tiktok_qr_login(self, user: User, payload: schemas.TikTokQrStartRequest) -> dict:
+    async def start_pending_tiktok_qr_login(self, user: User, payload: schemas.TikTokQrStartRequest) -> dict:
         session_id = uuid.uuid4().hex
         profile_name = (payload.profile_name or "TikTok account").strip() or "TikTok account"
         folder_path = self.build_profile_path(user.id, "tiktok", profile_name)
-        session = start_tiktok_qr_session(session_id, folder_path, user.id)
+        session = await start_tiktok_qr_session(session_id, folder_path, user.id)
+        is_auth = await session.is_authenticated()
         logger.info(
             "Started pending TikTok QR login session_id=%s user_id=%s folder_path=%s authenticated=%s",
             session_id,
             user.id,
             folder_path,
-            session.is_authenticated(),
+            is_auth,
         )
         return {
             "session_id": session_id,
-            "authenticated": session.is_authenticated(),
+            "authenticated": is_auth,
             "qr_image": qr_image_data_url(session),
             "page_url": session.page_url(),
         }
 
-    def get_pending_tiktok_qr_status(
+    async def get_pending_tiktok_qr_status(
         self,
         db: Session,
         user: User,
@@ -99,17 +100,18 @@ class SocialProfileService:
             logger.info("Pending TikTok QR status session missing session_id=%s user_id=%s", session_id, user.id)
             return {"session_active": False, "authenticated": False, "profile": None}
 
-        authenticated = session.is_authenticated()
+        authenticated = await session.is_authenticated()
+        cookie_names = await session.cookie_names()
         logger.info(
             "Pending TikTok QR status session_id=%s user_id=%s authenticated=%s page_url=%s cookies=%s",
             session_id,
             user.id,
             authenticated,
             session.page_url(),
-            session.cookie_names(),
+            cookie_names,
         )
         try:
-            refreshed_session = refresh_tiktok_qr_session(session_id, user.id)
+            refreshed_session = await refresh_tiktok_qr_session(session_id, user.id)
             qr_image = qr_image_data_url(refreshed_session)
         except RuntimeError:
             qr_image = None
@@ -143,7 +145,7 @@ class SocialProfileService:
             profile.id,
             profile.folder_path,
         )
-        stop_tiktok_qr_session(session_id, user.id)
+        await stop_tiktok_qr_session(session_id, user.id)
         return {
             "session_active": False,
             "authenticated": True,
@@ -152,37 +154,37 @@ class SocialProfileService:
             "qr_image": qr_image or qr_image_data_url(session),
         }
 
-    def stop_pending_tiktok_qr_login(self, user: User, session_id: str) -> dict:
-        stop_tiktok_qr_session(session_id, user.id)
+    async def stop_pending_tiktok_qr_login(self, user: User, session_id: str) -> dict:
+        await stop_tiktok_qr_session(session_id, user.id)
         return {"message": "Đã đóng phiên QR TikTok"}
 
-    def start_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
+    async def start_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
-        session = start_tiktok_qr_session(str(profile.id), profile.folder_path, profile.user_id)
+        session = await start_tiktok_qr_session(str(profile.id), profile.folder_path, profile.user_id)
         profile.status = "qr_pending"
         db.commit()
         db.refresh(profile)
         return {
             "profile": self.serialize_profile(profile),
-            "authenticated": session.is_authenticated(),
+            "authenticated": await session.is_authenticated(),
             "qr_image": qr_image_data_url(session),
             "page_url": session.page_url(),
         }
 
-    def get_tiktok_qr_status(self, db: Session, profile: SocialProfile) -> dict:
+    async def get_tiktok_qr_status(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
         session = get_tiktok_qr_session(str(profile.id), profile.user_id)
         if not session:
             return {"profile": self.serialize_profile(profile), "session_active": False, "authenticated": False}
 
-        authenticated = session.is_authenticated()
+        authenticated = await session.is_authenticated()
         if authenticated and profile.status != "active":
             profile.status = "active"
             db.commit()
             db.refresh(profile)
         if authenticated:
             page_url = session.page_url()
-            stop_tiktok_qr_session(str(profile.id), profile.user_id)
+            await stop_tiktok_qr_session(str(profile.id), profile.user_id)
             return {
                 "profile": self.serialize_profile(profile),
                 "session_active": False,
@@ -192,7 +194,7 @@ class SocialProfileService:
             }
 
         try:
-            refreshed_session = refresh_tiktok_qr_session(str(profile.id), profile.user_id)
+            refreshed_session = await refresh_tiktok_qr_session(str(profile.id), profile.user_id)
             qr_image = qr_image_data_url(refreshed_session)
         except RuntimeError:
             qr_image = None
@@ -205,9 +207,9 @@ class SocialProfileService:
             "qr_image": qr_image or qr_image_data_url(session),
         }
 
-    def stop_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
+    async def stop_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
-        stop_tiktok_qr_session(str(profile.id), profile.user_id)
+        await stop_tiktok_qr_session(str(profile.id), profile.user_id)
         if profile.status == "qr_pending":
             profile.status = "inactive"
             db.commit()

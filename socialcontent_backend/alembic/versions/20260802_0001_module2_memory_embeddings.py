@@ -17,21 +17,21 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE IF EXISTS project_source_selections ADD COLUMN IF NOT EXISTS strategy_snapshot JSON DEFAULT '{}'::json NOT NULL")
+    op.execute("ALTER TABLE IF EXISTS workflow_source_selections ADD COLUMN IF NOT EXISTS strategy_snapshot JSON DEFAULT '{}'::json NOT NULL")
     op.execute(
         """
         DO $$
         BEGIN
-            IF to_regclass('project_source_selection_items') IS NOT NULL THEN
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS source_crawl_job_id UUID;
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS item_role VARCHAR(60) DEFAULT 'MANUAL_INCLUDED' NOT NULL;
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS relation_reason VARCHAR(80);
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS similarity_score NUMERIC(6, 4);
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS candidate_score NUMERIC(5, 2);
-                ALTER TABLE project_source_selection_items ADD COLUMN IF NOT EXISTS metadata JSON DEFAULT '{}'::json NOT NULL;
-                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_source_crawl_job_id ON project_source_selection_items (source_crawl_job_id);
-                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_item_role ON project_source_selection_items (item_role);
-                CREATE INDEX IF NOT EXISTS ix_project_source_selection_items_relation_reason ON project_source_selection_items (relation_reason);
+            IF to_regclass('workflow_source_selection_items') IS NOT NULL THEN
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS source_crawl_job_id UUID;
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS item_role VARCHAR(60) DEFAULT 'MANUAL_INCLUDED' NOT NULL;
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS relation_reason VARCHAR(80);
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS similarity_score NUMERIC(6, 4);
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS candidate_score NUMERIC(5, 2);
+                ALTER TABLE workflow_source_selection_items ADD COLUMN IF NOT EXISTS metadata JSON DEFAULT '{}'::json NOT NULL;
+                CREATE INDEX IF NOT EXISTS ix_workflow_source_selection_items_source_crawl_job_id ON workflow_source_selection_items (source_crawl_job_id);
+                CREATE INDEX IF NOT EXISTS ix_workflow_source_selection_items_item_role ON workflow_source_selection_items (item_role);
+                CREATE INDEX IF NOT EXISTS ix_workflow_source_selection_items_relation_reason ON workflow_source_selection_items (relation_reason);
             END IF;
         END $$;
         """
@@ -94,7 +94,7 @@ def upgrade() -> None:
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("profile_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("story_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("project_series_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("content_series_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=40), nullable=False),
         sa.Column("current_part", sa.Integer(), nullable=False),
@@ -112,13 +112,13 @@ def upgrade() -> None:
     op.create_index("ix_profile_series_tracks_user_id", "profile_series_tracks", ["user_id"])
     op.create_index("ix_profile_series_tracks_profile_id", "profile_series_tracks", ["profile_id"])
     op.create_index("ix_profile_series_tracks_story_id", "profile_series_tracks", ["story_id"])
-    op.create_index("ix_profile_series_tracks_project_series_id", "profile_series_tracks", ["project_series_id"])
+    op.create_index("ix_profile_series_tracks_content_series_id", "profile_series_tracks", ["content_series_id"])
     op.create_index("ix_profile_series_tracks_status", "profile_series_tracks", ["status"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_profile_series_tracks_status", table_name="profile_series_tracks")
-    op.drop_index("ix_profile_series_tracks_project_series_id", table_name="profile_series_tracks")
+    op.drop_index("ix_profile_series_tracks_content_series_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_story_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_profile_id", table_name="profile_series_tracks")
     op.drop_index("ix_profile_series_tracks_user_id", table_name="profile_series_tracks")
@@ -142,19 +142,19 @@ def downgrade() -> None:
         """
         DO $$
         BEGIN
-            IF to_regclass('project_source_selection_items') IS NOT NULL THEN
-                DROP INDEX IF EXISTS ix_project_source_selection_items_relation_reason;
-                DROP INDEX IF EXISTS ix_project_source_selection_items_item_role;
-                DROP INDEX IF EXISTS ix_project_source_selection_items_source_crawl_job_id;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS metadata;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS candidate_score;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS similarity_score;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS relation_reason;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS item_role;
-                ALTER TABLE project_source_selection_items DROP COLUMN IF EXISTS source_crawl_job_id;
+            IF to_regclass('workflow_source_selection_items') IS NOT NULL THEN
+                DROP INDEX IF EXISTS ix_workflow_source_selection_items_relation_reason;
+                DROP INDEX IF EXISTS ix_workflow_source_selection_items_item_role;
+                DROP INDEX IF EXISTS ix_workflow_source_selection_items_source_crawl_job_id;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS metadata;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS candidate_score;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS similarity_score;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS relation_reason;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS item_role;
+                ALTER TABLE workflow_source_selection_items DROP COLUMN IF EXISTS source_crawl_job_id;
             END IF;
-            IF to_regclass('project_source_selections') IS NOT NULL THEN
-                ALTER TABLE project_source_selections DROP COLUMN IF EXISTS strategy_snapshot;
+            IF to_regclass('workflow_source_selections') IS NOT NULL THEN
+                ALTER TABLE workflow_source_selections DROP COLUMN IF EXISTS strategy_snapshot;
             END IF;
         END $$;
         """

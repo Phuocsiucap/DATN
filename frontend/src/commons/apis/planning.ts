@@ -8,7 +8,7 @@ export type PlanningProfile = {
   status: string
 }
 
-export type ProjectSource = {
+export type WorkflowSource = {
   id: string
   source_type: string
   source_id?: string | null
@@ -21,9 +21,9 @@ export type ProjectSource = {
   metadata: Record<string, unknown>
 }
 
-export type ProjectCandidate = {
+export type WorkflowCandidate = {
   id: string
-  project_run_id?: string | null
+  workflow_run_id?: string | null
   content_id?: string | null
   story_id?: string | null
   episode_id?: string | null
@@ -41,9 +41,9 @@ export type ProjectCandidate = {
   updated_at?: string | null
 }
 
-export type ProjectRun = {
+export type WorkflowRun = {
   id: string
-  project_id: string
+  workflow_id: string
   profile_id?: string | null
   run_type?: 'PLANNING' | 'RENDER' | string
   planning_mode?: string | null
@@ -64,7 +64,7 @@ export type ProjectRun = {
   updated_at?: string | null
 }
 
-export type ProjectArtifact = {
+export type WorkflowArtifact = {
   id: string
   artifact_type: string
   uri: string
@@ -74,7 +74,7 @@ export type ProjectArtifact = {
   updated_at?: string | null
 }
 
-export type ProjectPart = {
+export type WorkflowPart = {
   id: string
   series_id?: string | null
   part_number: number
@@ -96,7 +96,7 @@ export type ProjectPart = {
   updated_at?: string | null
 }
 
-export type ProjectSeries = {
+export type ContentSeries = {
   id: string
   content_plan_id?: string | null
   profile_id?: string | null
@@ -111,7 +111,7 @@ export type ProjectSeries = {
   updated_at?: string
 }
 
-export type ContentProject = {
+export type MediaWorkflow = {
   id: string
   user_id: string
   profile_id: string
@@ -131,20 +131,20 @@ export type ContentProject = {
   source_content?: ReviewSourceContent | null
   media?: NonNullable<ReviewSourceContent['media']>
   images?: string[]
-  series?: ProjectSeries | null
-  sources?: ProjectSource[]
-  candidates?: ProjectCandidate[]
-  parts?: ProjectPart[]
-  runs?: ProjectRun[]
-  artifacts?: ProjectArtifact[]
+  series?: ContentSeries | null
+  sources?: WorkflowSource[]
+  candidates?: WorkflowCandidate[]
+  parts?: WorkflowPart[]
+  runs?: WorkflowRun[]
+  artifacts?: WorkflowArtifact[]
   created_at: string
   updated_at?: string | null
 }
 
 export type ContentPlan = {
   id: string
-  project_id?: string | null
-  project_run_id?: string | null
+  workflow_id?: string | null
+  workflow_run_id?: string | null
   profile_id: string
   primary_content_id?: string | null
   primary_story_id?: string | null
@@ -211,11 +211,11 @@ export type ReviewSourceContent = {
 }
 
 export type ProfileSeriesReview = {
-  series: ProjectSeries
+  series: ContentSeries
   articles: Array<{
     plan?: ContentPlan | null
     source_content?: ReviewSourceContent | null
-    parts: ProjectPart[]
+    parts: WorkflowPart[]
   }>
 }
 
@@ -272,7 +272,7 @@ export type ConsistencyCheck = {
 
 export type PromptRun = {
   id: string
-  project_run_id: string
+  workflow_run_id: string
   step_name: string
   model_provider?: string | null
   model_name?: string | null
@@ -285,14 +285,21 @@ export type PromptRun = {
   created_at: string
 }
 
-export const fetchContentProjectsApi = async () => {
-  const { data } = await api.get('/content-projects')
-  return data as ContentProject[]
+export const fetchMediaWorkflowsApi = async (params: { videoWorkspaceOnly?: boolean } = {}) => {
+  const { data } = await api.get('/media-workflows', {
+    params: params.videoWorkspaceOnly ? { video_workspace_only: true } : undefined,
+  })
+  return data as MediaWorkflow[]
 }
 
-export const fetchContentProjectApi = async (projectId: string) => {
-  const { data } = await api.get(`/content-projects/${projectId}`)
-  return data as ContentProject
+export const fetchMediaWorkflowApi = async (workflowId: string) => {
+  const { data } = await api.get(`/media-workflows/${workflowId}`)
+  return data as MediaWorkflow
+}
+
+export const updateMediaWorkflowApi = async (workflowId: string, payload: Record<string, unknown>) => {
+  const { data } = await api.patch(`/media-workflows/${workflowId}`, payload)
+  return data as MediaWorkflow
 }
 
 export const fetchContentPlanApi = async (planId: string) => {
@@ -300,19 +307,19 @@ export const fetchContentPlanApi = async (planId: string) => {
   return data as ContentPlan
 }
 
-export const createContentProjectFromSourcesApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/content-projects/from-sources', payload)
-  return data as ContentProject
+export const createMediaWorkflowFromSourcesApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/media-workflows/from-sources', payload)
+  return data as MediaWorkflow
 }
 
-export const createContentProjectFromCrawlApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/content-projects/from-crawl', payload)
-  const project = data as ContentProject
-  let projectRun: ProjectRun | null = null
-  if (payload.create_project_run !== false) {
-    projectRun = await createProjectRunApi({
+export const createMediaWorkflowFromCrawlApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/media-workflows/from-crawl', payload)
+  const workflow = data as MediaWorkflow
+  let workflowRun: WorkflowRun | null = null
+  if (payload.create_workflow_run !== false) {
+    workflowRun = await createWorkflowRunApi({
       profile_id: payload.profile_id,
-      project_id: project.id,
+      workflow_id: workflow.id,
       planning_mode: payload.planning_mode || 'SERIES',
       target_duration_seconds: payload.target_duration_seconds || 60,
       preferred_part_count: payload.preferred_part_count || null,
@@ -320,77 +327,122 @@ export const createContentProjectFromCrawlApi = async (payload: Record<string, u
       instructions: payload.instructions || null,
     })
   }
-  return { project, project_run: projectRun }
+  return { project: workflow, media_workflow: workflow, workflow_run: workflowRun }
 }
 
-export const createContentProjectFromProjectSeriesApi = async (payload: { series_id: string; part_ids?: string[]; priority?: number; note?: string }) => {
-  const projects = await fetchContentProjectsApi()
-  const project = projects.find((item) => item.series_id === payload.series_id)
-  if (!project) {
-    throw new Error('Series này chưa có content project. Hãy duyệt plan trước khi mở Generate Video.')
+export const createMediaWorkflowFromContentSeriesApi = async (payload: { series_id: string; part_ids?: string[]; priority?: number; note?: string }) => {
+  const workflows = await fetchMediaWorkflowsApi()
+  const workflow = workflows.find((item) => item.series_id === payload.series_id)
+  if (!workflow) {
+    throw new Error('Series này chưa có kịch bản liên kết. Hãy duyệt plan trước khi mở Generate Video.')
   }
-  return project
+  return workflow
 }
 
-export const fetchProjectRunsApi = async () => {
-  const { data } = await api.get('/project-runs')
-  return data as ProjectRun[]
+export const fetchWorkflowRunsApi = async () => {
+  const { data } = await api.get('/workflow-runs')
+  return data as WorkflowRun[]
 }
 
-export const createProjectRunApi = async (payload: Record<string, unknown>) => {
-  const { data } = await api.post('/project-runs', payload)
-  return data as ProjectRun
+export const createWorkflowRunApi = async (payload: Record<string, unknown>) => {
+  const { data } = await api.post('/workflow-runs', payload)
+  return data as WorkflowRun
 }
 
-export const cancelProjectRunApi = async (runId: string) => {
-  const { data } = await api.post(`/project-runs/${runId}/cancel`)
-  return data as ProjectRun
+export const cancelWorkflowRunApi = async (runId: string) => {
+  const { data } = await api.post(`/workflow-runs/${runId}/cancel`)
+  return data as WorkflowRun
 }
 
-export const retryProjectRunApi = async (runId: string) => {
-  const { data } = await api.post(`/project-runs/${runId}/retry`)
-  return data as ProjectRun
+export const retryWorkflowRunApi = async (runId: string) => {
+  const { data } = await api.post(`/workflow-runs/${runId}/retry`)
+  return data as WorkflowRun
 }
 
-export const fetchProjectRunCandidatesApi = async (runId: string) => {
-  const { data } = await api.get(`/project-runs/${runId}/candidates`)
-  return data as ProjectCandidate[]
+export const fetchWorkflowRunCandidatesApi = async (runId: string) => {
+  const { data } = await api.get(`/workflow-runs/${runId}/candidates`)
+  return data as WorkflowCandidate[]
 }
 
-export const fetchProjectRunLogsApi = async (runId: string) => {
-  const { data } = await api.get(`/project-runs/${runId}/logs`)
+export const fetchWorkflowRunLogsApi = async (runId: string) => {
+  const { data } = await api.get(`/workflow-runs/${runId}/logs`)
   return data as PromptRun[]
 }
 
 export const fetchAllContentPlansApi = async () => {
-  const { data } = await api.get('/content-plans')
-  return data as ContentPlan[]
+  const workflows = await fetchMediaWorkflowsApi()
+  return workflows.map((wf) => ({
+    id: wf.id,
+    workflow_id: wf.id,
+    profile_id: wf.profile_id,
+    primary_content_id: wf.primary_content_id,
+    primary_story_id: wf.primary_story_id,
+    title: wf.title,
+    content_angle: (wf.metadata?.content_angle as string) || null,
+    target_audience: (wf.metadata?.target_audience as string) || null,
+    tone: (wf.metadata?.tone as string) || null,
+    format: (wf.metadata?.format as string) || null,
+    planning_mode: wf.planning_mode || 'SINGLE',
+    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || 60,
+    recommended_part_count: (wf.metadata?.recommended_part_count as number) || 1,
+    confidence_score: (wf.metadata?.confidence_score as number) || 0,
+    risk_level: (wf.metadata?.risk_level as string) || null,
+    status: wf.status,
+    version: 1,
+    ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
+    production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
+    created_at: wf.created_at,
+    updated_at: wf.updated_at || wf.created_at,
+  })) as ContentPlan[]
 }
 
 export const fetchContentPlansApi = async (profileId: string) => {
   const { data } = await api.get(`/profile/${profileId}/content-plans`)
-  return data as ContentPlan[]
+  const workflows = data as MediaWorkflow[]
+  return workflows.map((wf) => ({
+    id: wf.id,
+    workflow_id: wf.id,
+    profile_id: wf.profile_id,
+    primary_content_id: wf.primary_content_id,
+    primary_story_id: wf.primary_story_id,
+    title: wf.title,
+    content_angle: (wf.metadata?.content_angle as string) || null,
+    target_audience: (wf.metadata?.target_audience as string) || null,
+    tone: (wf.metadata?.tone as string) || null,
+    format: (wf.metadata?.format as string) || null,
+    planning_mode: wf.planning_mode || 'SINGLE',
+    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || 60,
+    recommended_part_count: (wf.metadata?.recommended_part_count as number) || 1,
+    confidence_score: (wf.metadata?.confidence_score as number) || 0,
+    risk_level: (wf.metadata?.risk_level as string) || null,
+    status: wf.status,
+    version: 1,
+    ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
+    production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
+    created_at: wf.created_at,
+    updated_at: wf.updated_at || wf.created_at,
+  })) as ContentPlan[]
 }
 
 export const approveContentPlanApi = async (planId: string, feedbackText?: string) => {
-  const { data } = await api.post(`/content-plans/${planId}/approve`, { feedback_text: feedbackText })
-  if (data?.plan) return data as { plan: ContentPlan; content_projects: ContentProject[] }
-  return { plan: data as ContentPlan, content_projects: [] }
+  const { data } = await api.post(`/media-workflows/${planId}/approve`, { feedback_text: feedbackText })
+  if (data?.plan) return data as { plan: ContentPlan; media_workflows: MediaWorkflow[] }
+  return { plan: data as ContentPlan, media_workflows: [] }
 }
 
 export const rejectContentPlanApi = async (planId: string, feedbackText?: string) => {
-  const { data } = await api.post(`/content-plans/${planId}/reject`, { feedback_text: feedbackText })
+  const { data } = await api.post(`/media-workflows/${planId}/reject`, { feedback_text: feedbackText })
   return data as ContentPlan
 }
 
 export const regenerateContentPlanApi = async (planId: string, instructions?: string) => {
   const plan = await fetchContentPlanApi(planId)
-  if (!plan.project_id) {
-    throw new Error('Plan này chưa gắn content project. Hãy tạo project run mới từ nguồn nội dung.')
+  if (!plan.workflow_id) {
+    throw new Error('Plan này chưa gắn kịch bản liên kết. Hãy tạo luồng kịch bản mới từ nguồn nội dung.')
   }
-  return createProjectRunApi({
+  return createWorkflowRunApi({
     profile_id: plan.profile_id,
-    project_id: plan.project_id,
+    workflow_id: plan.workflow_id,
     planning_mode: plan.planning_mode || 'SERIES',
     target_duration_seconds: plan.target_duration_seconds || 60,
     preferred_part_count: plan.recommended_part_count || null,
@@ -399,14 +451,14 @@ export const regenerateContentPlanApi = async (planId: string, instructions?: st
   })
 }
 
-export const fetchAllProjectSeriesApi = async () => {
-  const { data } = await api.get('/project-series')
-  return data as ProjectSeries[]
+export const fetchAllContentSeriesApi = async () => {
+  const { data } = await api.get('/content-series')
+  return data as ContentSeries[]
 }
 
-export const fetchProjectSeriesApi = async (profileId: string) => {
-  const { data } = await api.get(`/profile/${profileId}/project-series`)
-  return data as ProjectSeries[]
+export const fetchContentSeriesApi = async (profileId: string) => {
+  const { data } = await api.get(`/profile/${profileId}/content-series`)
+  return data as ContentSeries[]
 }
 
 export const fetchProfileSeriesReviewApi = async (profileId: string) => {
@@ -414,39 +466,39 @@ export const fetchProfileSeriesReviewApi = async (profileId: string) => {
   return data as ProfileSeriesReview[]
 }
 
-export const fetchProjectPartsApi = async (seriesId: string) => {
-  const { data } = await api.get(`/project-series/${seriesId}/parts`)
-  return data as ProjectPart[]
+export const fetchWorkflowPartsApi = async (seriesId: string) => {
+  const { data } = await api.get(`/content-series/${seriesId}/parts`)
+  return data as WorkflowPart[]
 }
 
-export const regenerateProjectSeriesApi = async (seriesId: string, instructions?: string) => {
-  const projects = await fetchContentProjectsApi()
-  const project = projects.find((item) => item.series_id === seriesId)
-  if (!project) {
-    throw new Error('Series này chưa có content project để tạo project run mới.')
+export const regenerateContentSeriesApi = async (seriesId: string, instructions?: string) => {
+  const workflows = await fetchMediaWorkflowsApi()
+  const workflow = workflows.find((item) => item.series_id === seriesId)
+  if (!workflow) {
+    throw new Error('Series này chưa có kịch bản liên kết để tạo luồng chạy mới.')
   }
-  return createProjectRunApi({
-    profile_id: project.profile_id,
-    project_id: project.id,
-    planning_mode: project.planning_mode || 'SERIES',
+  return createWorkflowRunApi({
+    profile_id: workflow.profile_id,
+    workflow_id: workflow.id,
+    planning_mode: workflow.planning_mode || 'SERIES',
     target_duration_seconds: 60,
-    preferred_part_count: project.parts?.length || null,
+    preferred_part_count: workflow.parts?.length || null,
     language: 'vi',
     instructions: instructions || null,
   })
 }
 
 export const fetchSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.get(`/project-series/${seriesId}/context`)
+  const { data } = await api.get(`/content-series/${seriesId}/context`)
   return data as SeriesContextResponse
 }
 
 export const rebuildSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.post(`/project-series/${seriesId}/context/rebuild`)
+  const { data } = await api.post(`/content-series/${seriesId}/context/rebuild`)
   return data as { series_id: string; context_id: string; context_version: number; mongo_document_id?: string | null }
 }
 
 export const fetchSeriesConsistencyApi = async (seriesId: string) => {
-  const { data } = await api.get(`/project-series/${seriesId}/consistency-check`)
+  const { data } = await api.get(`/content-series/${seriesId}/consistency-check`)
   return data as ConsistencyCheck
 }

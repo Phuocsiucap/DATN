@@ -153,7 +153,7 @@ export const publishArticleApi = async (link: string, platforms: string[], profi
   if (!profileId || !isUuid(link)) {
     throw new Error('Publish article cần content_id và profile_id UUID để tạo content project.')
   }
-  const { data } = await api.post('/content-projects/from-sources', {
+  const { data } = await api.post('/media-workflows/from-sources', {
     profile_id: profileId,
     content_ids: [link],
     selection_mode: 'MANUAL',

@@ -21,6 +21,7 @@
     --outline-variant: #d7dee8;
     --accent: #2563eb;
     --accent-strong: #1d4ed8;
+    --accent-light: #eff6ff;
     --success: #16a34a;
     --warning: #d97706;
     --tertiary: #16a34a;
@@ -30,7 +31,8 @@
     --radius-sm: 6px;
     --radius-md: 8px;
     --radius-lg: 12px;
-    --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
     --app-sidebar-width: 236px;
     --app-topbar-height: 52px;
   }
@@ -94,11 +96,24 @@
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
-  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .bento-card:hover {
   border-color: #b9c3d2;
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+@keyframes pulse-skeleton {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.skeleton-loader {
+  animation: pulse-skeleton 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  background-color: var(--outline-variant);
+  border-radius: var(--radius-sm);
 }
 
 .compact-ui {
@@ -330,19 +345,20 @@
 
 .dark-input {
   width: 100%;
-  height: 2rem;
-  border-radius: 0.375rem;
-  border: 1px solid #3c3c3c;
-  background: #1e1e1e;
+  height: 2.125rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-variant);
+  background: var(--surface-container-low);
   padding: 0 0.625rem;
-  color: #d4d4d4;
+  color: var(--on-surface);
   font-size: 13px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .dark-input:focus {
-  border-color: #0e639c;
-  box-shadow: 0 0 0 1px #0e639c;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
 .dark-input:disabled,
@@ -357,41 +373,45 @@
 .secondary-dark-button,
 .danger-dark-button {
   display: inline-flex;
-  min-height: 2rem;
+  min-height: 2.125rem;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.375rem;
-  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-sm);
+  padding: 0.375rem 0.875rem;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  transition: all 0.15s ease;
 }
 
 .primary-dark-button {
-  background: #0e639c;
+  background: var(--accent);
   color: #fff;
+  border: 1px solid transparent;
 }
 
 .primary-dark-button:hover:not(:disabled) {
-  background: #1177bb;
+  background: var(--accent-strong);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
 
 .secondary-dark-button {
-  border: 1px solid #3c3c3c;
-  background: #2d2d30;
-  color: #d4d4d4;
+  border: 1px solid var(--outline-variant);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
 }
 
 .secondary-dark-button:hover:not(:disabled) {
-  background: #37373d;
-  color: #fff;
+  background: var(--surface-container-low);
+  border-color: var(--outline);
 }
 
 .danger-dark-button {
-  background: #7f1d1d;
+  background: var(--error);
   color: #fff;
+  border: 1px solid transparent;
 }
 
 .danger-dark-button:hover:not(:disabled) {
-  background: #991b1b;
+  background: #b91c1c;
 }

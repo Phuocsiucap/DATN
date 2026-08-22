@@ -198,28 +198,42 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   )
 }
 
-function MetricGrid({ items }: { items: [string, number, string][] }) {
+function MetricGrid({ items, loading }: { items: [string, number, string][]; loading?: boolean }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {items.map(([label, value, marker]) => (
-        <div key={label} className="h-[70px] rounded-md border border-[#d9e0ea] bg-white p-3">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-[#64748b]"><span className={`h-2 w-2 rounded-full ${marker}`} />{label}</div>
-          <div className="mt-1.5 text-lg font-bold leading-6">{value.toLocaleString('vi-VN')}</div>
-        </div>
-      ))}
+      {loading ? (
+        <>
+          {[1, 2, 3, 4].map((n) => (
+            <div key={n} className="bento-card h-[70px] p-3 flex flex-col justify-between">
+              <div className="skeleton-loader h-3 w-20" />
+              <div className="skeleton-loader h-6 w-12" />
+            </div>
+          ))}
+        </>
+      ) : (
+        items.map(([label, value, marker]) => (
+          <div key={label} className="bento-card h-[70px] p-3 flex flex-col justify-between">
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--on-surface-variant)]">
+              <span className={`h-2 w-2 rounded-full ${marker}`} />
+              {label}
+            </div>
+            <div className="text-xl font-bold leading-6 text-[var(--on-surface)]">{value.toLocaleString('vi-VN')}</div>
+          </div>
+        ))
+      )}
     </div>
   )
 }
 
 function Flow() {
   return (
-    <div className="workspace-card p-3">
-      <h3 className="text-sm font-bold">Data Pipeline</h3>
-      <div className="mt-3 grid gap-2 md:grid-cols-7">
+    <div className="bento-card p-4">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--on-surface-variant)] mb-3">Data Pipeline Topology</h3>
+      <div className="grid gap-2 md:grid-cols-7">
         {stageSteps.map((step, index) => (
-          <div key={step} className="rounded-md border border-[#d9e0ea] bg-[#fbfcfd] p-2.5 text-center md:text-left">
-            <div className="text-[11px] font-bold text-[#091426]">{String(index + 1).padStart(2, '0')}</div>
-            <div className="mt-2 text-[10px] sm:text-[11px] font-semibold">{step}</div>
+          <div key={step} className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-2.5 text-center transition-all hover:border-[var(--accent)]">
+            <div className="text-[10px] font-bold font-mono text-[var(--accent)]">{String(index + 1).padStart(2, '0')}</div>
+            <div className="mt-1 text-[11px] font-bold text-[var(--on-surface)]">{step}</div>
           </div>
         ))}
       </div>
@@ -230,34 +244,51 @@ function Flow() {
 function JobsTable({
   jobs,
   selectedJob,
+  loading,
   onViewLogs,
   onAction,
 }: {
   jobs: CrawlJob[]
   selectedJob: CrawlJob | null
+  loading?: boolean
   onViewLogs: (job: CrawlJob) => void
   onAction: (action: 'cancel' | 'retry', job: CrawlJob) => void
 }) {
   return (
-    <div className="table-scroll rounded-lg border border-[#d9e0ea] bg-white">
+    <div className="bento-card table-scroll overflow-hidden">
       <div className="data-grid-lg">
         <TableHeader columns={['Job', 'Trạng thái', 'Stage', 'Tiến độ', 'Khám phá/Tải/Lỗi/Trùng', 'Hành động']} />
-        {jobs.length === 0 ? <EmptyState label="Chưa có crawl jobs nào" /> : jobs.map((job) => (
-          <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs ${selectedJob?.id === job.id ? 'bg-blue-50/60' : 'bg-white hover:bg-slate-50'}`}>
-            <div>
-              <div className="font-medium text-[#111827]">{job.name}</div>
-              <div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
-            </div>
-            <Badge value={job.status} />
-            <div className="text-[#64748b]">{job.current_stage}</div>
-            <div className="text-[#64748b] font-medium">{Number(job.progress_percent).toFixed(0)}%</div>
-            <div className="text-[#64748b]">{job.total_discovered}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
-            <div className="flex flex-wrap gap-1">
-              <button className="icon-button text-[var(--accent)] hover:bg-blue-50" title="Chạy lại" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>
-              <button className="icon-button text-red-600 hover:bg-red-50" title="Dừng job" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
-            </div>
+        {loading && jobs.length === 0 ? (
+          <div className="p-4 space-y-3">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="flex items-center gap-4">
+                <div className="skeleton-loader h-5 w-48" />
+                <div className="skeleton-loader h-5 w-24" />
+                <div className="skeleton-loader h-5 w-20" />
+                <div className="skeleton-loader h-5 w-16" />
+              </div>
+            ))}
           </div>
-        ))}
+        ) : jobs.length === 0 ? (
+          <EmptyState label="Chưa có crawl jobs nào" />
+        ) : (
+          jobs.map((job) => (
+            <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[var(--outline-variant)] px-4 py-3 text-xs transition-colors ${selectedJob?.id === job.id ? 'bg-[var(--secondary-container)]/30' : 'hover:bg-[var(--surface-container-low)]'}`}>
+              <div>
+                <div className="font-semibold text-[var(--on-surface)]">{job.name}</div>
+                <div className="mt-1 text-[11px] font-mono text-[var(--on-surface-variant)]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
+              </div>
+              <Badge value={job.status} />
+              <div className="text-[var(--on-surface-variant)] font-medium">{job.current_stage}</div>
+              <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
+              <div className="text-[var(--on-surface-variant)] font-mono">{job.total_discovered}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
+              <div className="flex flex-wrap gap-1">
+                <button className="icon-button text-[var(--accent)] hover:bg-[var(--surface-container-low)]" title="Chạy lại" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>
+                <button className="icon-button text-red-600 hover:bg-red-50" title="Dừng job" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   )

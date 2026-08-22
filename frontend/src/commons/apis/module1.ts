@@ -36,6 +36,7 @@ export type ContentSourceDetail = {
   source_external_id: string
   source_url?: string | null
   raw_document_id?: string | null
+  processed_document_id?: string | null
   source_title?: string | null
   source_author?: string | null
   source_published_at?: string | null
@@ -69,6 +70,7 @@ export type ProcessingRunDetail = {
 }
 
 export type ContentDetail = ContentItem & {
+  full_text?: string | null
   published_at?: string | null
   duration_seconds?: number | null
   content_hash?: string | null

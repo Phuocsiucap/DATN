@@ -107,45 +107,68 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label={isSystemUser ? 'Total Collected' : 'Matched Articles'}
-          value={stats?.total_articles.toLocaleString() ?? '—'}
-          icon={<Newspaper size={18} />}
-          trend={isSystemUser ? '+system' : `${stats?.feed_low_suggestions ?? 0} low`}
-          trendUp={true}
-          iconBg="var(--surface-container)"
-          iconColor="var(--secondary)"
-        />
-        <StatCard
-          label={isSystemUser ? 'Active Users' : 'Active Accounts'}
-          value={isSystemUser ? (stats?.users_active ?? '—') : (stats?.profiles_active ?? '—')}
-          icon={isSystemUser ? <UsersRound size={18} /> : <CircleUserRound size={18} />}
-          trend={isSystemUser ? `${stats?.users_total ?? 0} total` : `${stats?.profiles_total ?? 0} total`}
-          trendUp={true}
-          iconBg="#dcfce7"
-          iconColor="#16a34a"
-        />
-        <StatCard
-          label={isSystemUser ? 'Upcoming Queue' : 'Sắp đăng'}
-          value={stats?.queue_status?.upcoming ?? '—'}
-          icon={<Clock size={18} />}
-          badge={<span className="text-[11px]" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
-          iconBg="#dbeafe"
-          iconColor="#2563eb"
-        />
-        <StatCard
-          label={isSystemUser ? 'System Health' : 'Published'}
-          value={isSystemUser ? (isRunning ? 'Active' : 'Stopped') : (stats?.published_total ?? '—')}
-          icon={isSystemUser ? <TrendingUp size={18} /> : <CheckCircle size={18} />}
-          accentBorder
-          iconBg="rgba(0,164,114,0.1)"
-          iconColor="#00a472"
-          badge={
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">
-              {isSystemUser ? (isRunning ? 'LIVE' : 'OFF') : `${stats?.published_failed ?? 0} failed`}
-            </span>
-          }
-        />
+        {loading ? (
+          <>
+            <div className="bento-card p-4 h-24 flex flex-col justify-between">
+              <div className="skeleton-loader h-4 w-24" />
+              <div className="skeleton-loader h-7 w-16" />
+            </div>
+            <div className="bento-card p-4 h-24 flex flex-col justify-between">
+              <div className="skeleton-loader h-4 w-24" />
+              <div className="skeleton-loader h-7 w-16" />
+            </div>
+            <div className="bento-card p-4 h-24 flex flex-col justify-between">
+              <div className="skeleton-loader h-4 w-24" />
+              <div className="skeleton-loader h-7 w-16" />
+            </div>
+            <div className="bento-card p-4 h-24 flex flex-col justify-between">
+              <div className="skeleton-loader h-4 w-24" />
+              <div className="skeleton-loader h-7 w-16" />
+            </div>
+          </>
+        ) : (
+          <>
+            <StatCard
+              label={isSystemUser ? 'Total Collected' : 'Matched Articles'}
+              value={stats?.total_articles.toLocaleString() ?? '—'}
+              icon={<Newspaper size={18} />}
+              trend={isSystemUser ? '+system' : `${stats?.feed_low_suggestions ?? 0} low`}
+              trendUp={true}
+              iconBg="var(--surface-container)"
+              iconColor="var(--secondary)"
+            />
+            <StatCard
+              label={isSystemUser ? 'Active Users' : 'Active Accounts'}
+              value={isSystemUser ? (stats?.users_active ?? '—') : (stats?.profiles_active ?? '—')}
+              icon={isSystemUser ? <UsersRound size={18} /> : <CircleUserRound size={18} />}
+              trend={isSystemUser ? `${stats?.users_total ?? 0} total` : `${stats?.profiles_total ?? 0} total`}
+              trendUp={true}
+              iconBg="#dcfce7"
+              iconColor="#16a34a"
+            />
+            <StatCard
+              label={isSystemUser ? 'Upcoming Queue' : 'Sắp đăng'}
+              value={stats?.queue_status?.upcoming ?? '—'}
+              icon={<Clock size={18} />}
+              badge={<span className="text-[11px]" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
+              iconBg="#dbeafe"
+              iconColor="#2563eb"
+            />
+            <StatCard
+              label={isSystemUser ? 'System Health' : 'Published'}
+              value={isSystemUser ? (isRunning ? 'Active' : 'Stopped') : (stats?.published_total ?? '—')}
+              icon={isSystemUser ? <TrendingUp size={18} /> : <CheckCircle size={18} />}
+              accentBorder
+              iconBg="rgba(0,164,114,0.1)"
+              iconColor="#00a472"
+              badge={
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">
+                  {isSystemUser ? (isRunning ? 'LIVE' : 'OFF') : `${stats?.published_failed ?? 0} failed`}
+                </span>
+              }
+            />
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

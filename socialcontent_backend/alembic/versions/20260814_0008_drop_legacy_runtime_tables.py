@@ -18,7 +18,7 @@ depends_on = None
 
 def upgrade() -> None:
     for table in [
-        "production_project_parts",
+        "production_workflow_parts",
         "production_projects",
         "profile_series_tracks",
         "content_contexts",

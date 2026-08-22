@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Clapperboard, Download, Film, Image as ImageIcon, Mic2, Plus, Save, ShieldCheck, Trash2, Volume2, VolumeX, Wand2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Clapperboard, Download, FileText, Film, Image as ImageIcon, Mic2, Plus, Save, ShieldCheck, Trash2, Volume2, VolumeX, Wand2, X } from 'lucide-react'
 import {
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
@@ -19,9 +19,21 @@ import {
   type GenerateVideoStory,
   type GenerateVideoVoiceProvider,
 } from '@/commons/apis/generateVideo'
-import { fetchContentProjectApi, type ContentProject } from '@/commons/apis/planning'
+import { fetchMediaWorkflowApi, updateMediaWorkflowApi, type MediaWorkflow } from '@/commons/apis/planning'
 
-type StepId = 'story' | 'video' | 'preview'
+type StepId = 'plan' | 'story' | 'video' | 'preview'
+type PlanDraft = {
+  title: string
+  content_angle: string
+  target_audience: string
+  tone: string
+  format: string
+  risk_level: string
+  target_duration_seconds: string
+  recommended_part_count: string
+  ai_reasoning: string
+  production_requirements: string
+}
 
 const defaultVoiceId = 'pNInz6obpgDQGcFmaJgB'
 const voiceProviderOptions: Array<{ value: GenerateVideoVoiceProvider; label: string }> = [
@@ -57,19 +69,73 @@ const proCutFigmaAssets = {
 }
 
 const steps: Array<{ id: StepId; label: string; icon: React.ReactNode }> = [
+  { id: 'plan', label: 'Kế hoạch AI', icon: <FileText size={16} /> },
   { id: 'story', label: 'Kịch bản', icon: <ImageIcon size={16} /> },
   { id: 'video', label: 'Generate video', icon: <Clapperboard size={16} /> },
   { id: 'preview', label: 'Export MP4', icon: <Clapperboard size={16} /> },
 ]
 
+const emptyPlanDraft: PlanDraft = {
+  title: '',
+  content_angle: '',
+  target_audience: '',
+  tone: '',
+  format: '',
+  risk_level: '',
+  target_duration_seconds: '',
+  recommended_part_count: '',
+  ai_reasoning: '',
+  production_requirements: '{}',
+}
+
+function planDraftFromProject(project: MediaWorkflow | null): PlanDraft {
+  if (!project) return emptyPlanDraft
+  const metadata = project.metadata || {}
+  return {
+    title: project.title || '',
+    content_angle: String(metadata.content_angle || ''),
+    target_audience: String(metadata.target_audience || ''),
+    tone: String(metadata.tone || ''),
+    format: String(metadata.format || ''),
+    risk_level: String(metadata.risk_level || ''),
+    target_duration_seconds: metadata.target_duration_seconds ? String(metadata.target_duration_seconds) : '',
+    recommended_part_count: metadata.recommended_part_count ? String(metadata.recommended_part_count) : '',
+    ai_reasoning: Array.isArray(metadata.ai_reasoning) ? metadata.ai_reasoning.map(String).join('\n') : '',
+    production_requirements: JSON.stringify(metadata.production_requirements || {}, null, 2),
+  }
+}
+
+function planDraftToPayload(draft: PlanDraft) {
+  let productionRequirements: Record<string, unknown> = {}
+  try {
+    productionRequirements = draft.production_requirements.trim() ? JSON.parse(draft.production_requirements) : {}
+  } catch {
+    throw new Error('Production requirements phải là JSON hợp lệ')
+  }
+
+  return {
+    title: draft.title.trim(),
+    content_angle: draft.content_angle.trim() || null,
+    target_audience: draft.target_audience.trim() || null,
+    tone: draft.tone.trim() || null,
+    format: draft.format.trim() || null,
+    risk_level: draft.risk_level.trim() || null,
+    target_duration_seconds: draft.target_duration_seconds ? Number(draft.target_duration_seconds) : null,
+    recommended_part_count: draft.recommended_part_count ? Number(draft.recommended_part_count) : null,
+    ai_reasoning: draft.ai_reasoning.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+    production_requirements: productionRequirements,
+  }
+}
+
 type VideoProductionWorkspaceProps = {
-  projectId: string
+  workflowId: string
   onBackToList: () => void
 }
 
-export default function VideoProductionWorkspace({ projectId, onBackToList }: VideoProductionWorkspaceProps) {
+export default function VideoProductionWorkspace({ workflowId, onBackToList }: VideoProductionWorkspaceProps) {
   const [selectedId, setSelectedId] = useState('')
-  const [selectedProject, setSelectedProject] = useState<ContentProject | null>(null)
+  const [selectedProject, setSelectedProject] = useState<MediaWorkflow | null>(null)
+  const [planDraft, setPlanDraft] = useState<PlanDraft>(emptyPlanDraft)
   const [story, setStory] = useState<GenerateVideoStory | null>(null)
   const [previewStory, setPreviewStory] = useState<GenerateVideoStory | null>(null)
   const [storyText, setStoryText] = useState('')
@@ -105,6 +171,7 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
 
   useEffect(() => {
     setSelectedProject(null)
+    setPlanDraft(emptyPlanDraft)
     setStory(null)
     setPreviewStory(null)
     setStoryText('')
@@ -112,9 +179,9 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
     setLoadError('')
     setStoryLoadError('')
     setActiveStep('story')
-    setStatus('Đang tải video project...')
+    setStatus('Đang tải workflow kịch bản...')
     void loadInitial()
-  }, [projectId])
+  }, [workflowId])
 
   const totalDuration = useMemo(() => {
     if (!story) return 0
@@ -129,8 +196,8 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
   const loadInitial = async () => {
     setBusy('load')
     try {
-      setSelectedId(projectId)
-      await loadProjectById(projectId)
+      setSelectedId(workflowId)
+      await loadProjectById(workflowId)
     } finally {
       setBusy(null)
     }
@@ -154,24 +221,25 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
     return parsed
   }
 
-  const loadProjectById = async (projectId: string, options: { openSavedStory?: boolean } = {}) => {
+  const loadProjectById = async (workflowId: string, options: { openSavedStory?: boolean } = {}) => {
     setBusy('load-project')
     try {
       setLoadError('')
       setStoryLoadError('')
-      const project = await fetchContentProjectApi(projectId)
+      const project = await fetchMediaWorkflowApi(workflowId)
       setSelectedProject(project)
-      setSelectedId(projectId)
-      const artifacts = getProjectArtifacts(project)
+      setPlanDraft(planDraftFromProject(project))
+      setSelectedId(workflowId)
+      const artifacts = getWorkflowArtifacts(project)
       setExportedVideoUrl(artifacts?.final ? generateVideoOutputUrl(String(artifacts.final)) : '')
-      window.history.replaceState({ projectId }, '', `/generate-video/${encodeURIComponent(projectId)}`)
+      window.history.replaceState({ workflowId }, '', `/generate-video/${encodeURIComponent(workflowId)}`)
       if (!project.video_draft_id) {
         setStory(null)
         setPreviewStory(null)
         setStoryText('')
         setStoryLoadError('')
-        setActiveStep('story')
-        setStatus('Đã tải content project. Bấm Create story để tạo kịch bản video.')
+        setActiveStep('plan')
+        setStatus('Đã tải kế hoạch AI. Kiểm tra/sửa plan trước khi tạo story video.')
         return
       }
       try {
@@ -180,17 +248,17 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
         setPreviewStory(savedStory)
         setPreviewVersion(Date.now())
         setActiveStep(options.openSavedStory ? inferActiveStepFromProject(project, savedStory) : 'story')
-        setStatus('Đã tải content project, kịch bản và nội dung bài đã normalize')
+        setStatus('Đã tải kịch bản nguồn, kịch bản video và nội dung bài đã normalize')
       } catch (error: any) {
         setStory(null)
         setPreviewStory(null)
         setStoryText('')
-        setStoryLoadError(readApiError(error, 'Chưa có story đã lưu cho project này.'))
+        setStoryLoadError(readApiError(error, 'Chưa có kịch bản video đã lưu.'))
         setActiveStep('story')
-        setStatus('Đã tải content project. Bấm Create story để tạo kịch bản video.')
+        setStatus('Đã tải kịch bản nguồn. Bấm Create story để tạo kịch bản video.')
       }
     } catch (error: any) {
-      const message = readApiError(error, 'Không tải được video project')
+      const message = readApiError(error, 'Không tải được kịch bản video')
       setLoadError(message)
       setStatus(message)
     } finally {
@@ -212,15 +280,33 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
         throw new Error(completedJob.error_message || 'Script job failed')
       }
       const nextStory = completedJob.story || await fetchGenerateVideoSavedStoryApi(selectedId)
-      nextStory.meta = { ...(nextStory.meta || {}), project_id: selectedId }
+      nextStory.meta = { ...(nextStory.meta || {}), workflow_id: selectedId }
       updateStory(nextStory)
       setPreviewStory(nextStory)
       setActiveStep('story')
-      setStatus('Đã tạo kịch bản từ content project')
+      setStatus('Đã tạo kịch bản video từ kịch bản nguồn')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không tạo được story')
     } finally {
       createStoryBusyRef.current = false
+      setBusy(null)
+    }
+  }
+
+  const savePlan = async () => {
+    if (!selectedId) return
+    if (!beginAction('save-plan')) return
+    setBusy('save-plan')
+    try {
+      const payload = planDraftToPayload(planDraft)
+      const project = await updateMediaWorkflowApi(selectedId, payload)
+      setSelectedProject(project)
+      setPlanDraft(planDraftFromProject(project))
+      setStatus('Đã lưu kế hoạch AI. Nếu story đã tạo trước đó, hãy Create story hoặc AI review lại để đồng bộ.')
+    } catch (error: any) {
+      setStatus(error?.response?.data?.detail || error?.message || 'Không lưu được kế hoạch AI')
+    } finally {
+      endAction('save-plan')
       setBusy(null)
     }
   }
@@ -449,8 +535,24 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
       )}
 
       <div className="grid gap-4">
+        {activeStep === 'plan' && (
+          <Panel title="1. Kế hoạch AI từ Module 2">
+            <PlanEditor
+              project={selectedProject}
+              draft={planDraft}
+              saving={busy === 'save-plan'}
+              onChange={setPlanDraft}
+              onSave={() => void savePlan()}
+              onCreateStory={() => {
+                setActiveStep('story')
+                void createStory()
+              }}
+            />
+          </Panel>
+        )}
+
         {activeStep === 'story' && (
-          <Panel title="1. Kịch bản & nội dung bài">
+          <Panel title="2. Kịch bản & nội dung bài">
             <div className="flex flex-wrap gap-2">
               <button disabled={!selectedId || Boolean(busy)} onClick={() => void createStory()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                 Create story
@@ -462,7 +564,7 @@ export default function VideoProductionWorkspace({ projectId, onBackToList }: Vi
                 <ShieldCheck size={14} /> AI review story
               </button>
               <button disabled={!hasStoryInput || Boolean(busy)} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
-                <Save size={14} /> Save project
+                <Save size={14} /> Lưu kịch bản
               </button>
             </div>
             <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
@@ -622,12 +724,12 @@ function ProjectHealthSummary({
   storyLoadError,
   totalDuration,
 }: {
-  project: ContentProject | null
+  project: MediaWorkflow | null
   story: GenerateVideoStory | null
   storyLoadError: string
   totalDuration: number
 }) {
-  const artifacts = getProjectArtifacts(project)
+  const artifacts = getWorkflowArtifacts(project)
   const timeline = project?.metadata?.timeline as Record<string, any> | undefined
   const timelineDuration = Number(story?.timeline?.duration || timeline?.duration || totalDuration || 0)
   const savedStoryState = story
@@ -662,16 +764,152 @@ function HealthCard({ label, value, tone }: { label: string; value: string; tone
   )
 }
 
+function PlanEditor({
+  project,
+  draft,
+  saving,
+  onChange,
+  onSave,
+  onCreateStory,
+}: {
+  project: MediaWorkflow | null
+  draft: PlanDraft
+  saving: boolean
+  onChange: (draft: PlanDraft) => void
+  onSave: () => void
+  onCreateStory: () => void
+}) {
+  const parts = project?.parts || []
+  const update = (field: keyof PlanDraft, value: string) => onChange({ ...draft, [field]: value })
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-base font-black text-[#0f172a]">Bản kế hoạch AI</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">
+                Dữ liệu này là đầu vào cho bước Create story trong xưởng video.
+              </div>
+            </div>
+            <span className="rounded bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-800">
+              {project?.status || 'Đang tải'}
+            </span>
+          </div>
+
+          <div className="grid gap-3">
+            <Field label="Tiêu đề kế hoạch">
+              <input value={draft.title} onChange={(event) => update('title', event.target.value)} className={inputClass} />
+            </Field>
+            <Field label="Góc khai thác">
+              <textarea value={draft.content_angle} onChange={(event) => update('content_angle', event.target.value)} className={`${textareaClass} h-20`} />
+            </Field>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Đối tượng mục tiêu">
+                <input value={draft.target_audience} onChange={(event) => update('target_audience', event.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Giọng văn">
+                <input value={draft.tone} onChange={(event) => update('tone', event.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Format">
+                <input value={draft.format} onChange={(event) => update('format', event.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Risk level">
+                <input value={draft.risk_level} onChange={(event) => update('risk_level', event.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Thời lượng mục tiêu">
+                <input type="number" min="1" value={draft.target_duration_seconds} onChange={(event) => update('target_duration_seconds', event.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Số part đề xuất">
+                <input type="number" min="1" value={draft.recommended_part_count} onChange={(event) => update('recommended_part_count', event.target.value)} className={inputClass} />
+              </Field>
+            </div>
+            <Field label="AI reasoning">
+              <textarea
+                value={draft.ai_reasoning}
+                onChange={(event) => update('ai_reasoning', event.target.value)}
+                className={`${textareaClass} h-28`}
+                placeholder="Mỗi dòng là một lý do/nhận xét của AI planner"
+              />
+            </Field>
+            <Field label="Production requirements JSON">
+              <textarea value={draft.production_requirements} onChange={(event) => update('production_requirements', event.target.value)} className={`${textareaClass} h-36 font-mono text-xs`} />
+            </Field>
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+            <button disabled={saving || !project} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <Save size={14} /> {saving ? 'Đang lưu...' : 'Lưu kế hoạch'}
+            </button>
+            <button disabled={saving || !project} onClick={onCreateStory} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <Wand2 size={14} /> Tạo story từ plan này
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid content-start gap-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="text-sm font-black text-[#0f172a]">Script parts từ AI</div>
+          <div className="mt-1 text-xs font-semibold text-slate-500">{parts.length} part trong workflow</div>
+          <div className="mt-3 grid gap-2">
+            {parts.length === 0 ? (
+              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-400">
+                Chưa có part nào.
+              </div>
+            ) : parts.map((part) => {
+              const payload = part.payload || {}
+              const beats = Array.isArray(payload.main_beats) ? payload.main_beats : []
+              const hookDirection = payload.hook_direction ? String(payload.hook_direction) : ''
+              return (
+                <div key={part.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-bold text-[#0f172a]">{part.part_number}. {part.title}</div>
+                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">{part.status}</span>
+                  </div>
+                  {hookDirection ? <div className="mt-2 text-xs leading-5 text-slate-700"><b>Hook:</b> {hookDirection}</div> : null}
+                  {beats.length > 0 && (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">
+                      {beats.slice(0, 3).map((beat, index) => <li key={index}>{String(beat)}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <SourceContentPreview source={(project?.source_content || project?.metadata?.source_content || project?.metadata || {}) as Record<string, any>} />
+      </div>
+    </div>
+  )
+}
+
 function SourceContentPreview({ source }: { source: Record<string, any> }) {
-  const mediaItems = Array.isArray(source.media) ? source.media : []
-  const sourceUrl = source.source_url || source.canonical_url
-  const text = source.full_text || source.summary || ''
+  const mediaItems = Array.isArray(source.media)
+    ? source.media.filter((item): item is Record<string, any> => Boolean(item) && typeof item === 'object')
+    : []
+  const sourceUrl = typeof source.source_url === 'string'
+    ? source.source_url
+    : typeof source.canonical_url === 'string'
+      ? source.canonical_url
+      : ''
+  const sourceTitle = typeof source.canonical_title === 'string'
+    ? source.canonical_title
+    : typeof source.title === 'string'
+      ? source.title
+      : 'Chưa có tiêu đề'
+  const text = typeof source.full_text === 'string'
+    ? source.full_text
+    : typeof source.summary === 'string'
+      ? source.summary
+      : ''
 
   return (
     <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
       <div>
         <div className="text-xs font-black uppercase tracking-wider text-slate-500">Bài gốc</div>
-        <div className="mt-1 text-sm font-black leading-snug text-[#0f172a]">{source.canonical_title || source.title || 'Chưa có tiêu đề'}</div>
+        <div className="mt-1 text-sm font-black leading-snug text-[#0f172a]">{sourceTitle}</div>
         {sourceUrl && (
           <a href={sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-xs font-bold text-[#2563eb]">
             {sourceUrl}
@@ -689,7 +927,7 @@ function SourceContentPreview({ source }: { source: Record<string, any> }) {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {mediaItems.map((item: Record<string, any>, index: number) => (
+            {mediaItems.map((item, index) => (
               <SourceMediaItem key={item.id || index} item={item} index={index} />
             ))}
           </div>
@@ -749,6 +987,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputClass = 'h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 outline-none focus:border-[#2563eb]'
+const textareaClass = 'w-full resize-y rounded-lg border border-slate-200 p-3 text-sm font-medium text-slate-700 outline-none focus:border-[#2563eb]'
 const videoAspectPresets = [
   { label: '9:16', width: 1080, height: 1920 },
   { label: '3:4', width: 1080, height: 1440 },
@@ -827,7 +1066,7 @@ function StoryDataEditor({
             <div className="grid gap-3 md:grid-cols-3">
               <Field label="Series ID"><input value={meta.series_id || ''} onChange={(event) => updateMeta('series_id', event.target.value)} className={inputClass} /></Field>
               <Field label="Plan ID"><input value={meta.plan_id || ''} onChange={(event) => updateMeta('plan_id', event.target.value)} className={inputClass} /></Field>
-              <Field label="Project ID"><input value={meta.project_id || ''} onChange={(event) => updateMeta('project_id', event.target.value)} className={inputClass} /></Field>
+              <Field label="Project ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={inputClass} /></Field>
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_130px]">
               <Field label="Khung hình">
@@ -3517,17 +3756,17 @@ function readApiError(error: any, fallback: string) {
   return error?.message || fallback
 }
 
-function inferProjectStatus(project: ContentProject | null, story: GenerateVideoStory | null) {
+function inferProjectStatus(project: MediaWorkflow | null, story: GenerateVideoStory | null) {
   const projectStatus = project?.status || String(project?.metadata?.project_status || '')
   if (projectStatus) return projectStatus
-  if (getProjectArtifacts(project)?.final) return 'RENDERED'
+  if (getWorkflowArtifacts(project)?.final) return 'RENDERED'
   if (story?.audio?.voice) return 'VOICE_READY'
   if (story) return 'EDITING'
   return 'READY'
 }
 
-function inferActiveStepFromProject(project: ContentProject | null, story: GenerateVideoStory | null): StepId {
-  const artifacts = getProjectArtifacts(project)
+function inferActiveStepFromProject(project: MediaWorkflow | null, story: GenerateVideoStory | null): StepId {
+  const artifacts = getWorkflowArtifacts(project)
   if (artifacts?.final && story) return 'video'
   if (story) {
     return 'video'
@@ -3535,7 +3774,7 @@ function inferActiveStepFromProject(project: ContentProject | null, story: Gener
   return 'story'
 }
 
-function getProjectArtifacts(project: ContentProject | null) {
+function getWorkflowArtifacts(project: MediaWorkflow | null) {
   const finalArtifact = project?.artifacts?.find((artifact) => artifact.artifact_type === 'FINAL_VIDEO' && artifact.uri)
   if (finalArtifact?.uri) return { final: finalArtifact.uri }
   const rendered = project?.rendered_video || project?.metadata?.rendered_video

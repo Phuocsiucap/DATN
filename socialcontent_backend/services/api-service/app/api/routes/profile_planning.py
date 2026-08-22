@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
-from common.db.models import ContentItem, ContentMedia, ContentPlan, ContentSource, Episode, ProjectPart, ProjectSeries, SocialProfile, User
+from common.db.media_workflows import _load_content_full_text, serialize_workflow
+from common.db.models import ContentItem, ContentMedia, ContentSource, Episode, WorkflowPart, ContentSeries, SocialProfile, User, MediaWorkflow
 from common.db.session import get_db
 
 router = APIRouter()
@@ -18,25 +19,34 @@ def _get_owned_profile(db: Session, profile_id: uuid.UUID, user: User) -> Social
     return profile
 
 
-@router.get("/{profile_id}/content-plans", response_model=list[schemas.ContentPlanResponse])
+@router.get("/{profile_id}/content-plans", response_model=list[schemas.MediaWorkflowResponse])
 def list_profile_content_plans(profile_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_profile(db, profile_id, user)
-    return db.query(ContentPlan).filter(ContentPlan.profile_id == profile_id).order_by(ContentPlan.updated_at.desc()).limit(100).all()
+    return db.query(MediaWorkflow).filter(MediaWorkflow.profile_id == profile_id).order_by(MediaWorkflow.updated_at.desc()).limit(100).all()
 
 
-@router.get("/{profile_id}/project-series", response_model=list[schemas.ProjectSeriesResponse])
-def list_profile_project_series(profile_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/{profile_id}/content-series", response_model=list[schemas.ContentSeriesResponse])
+def list_profile_content_series(profile_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_profile(db, profile_id, user)
-    return [_serialize_series(row) for row in db.query(ProjectSeries).filter(ProjectSeries.profile_id == profile_id).order_by(ProjectSeries.updated_at.desc()).limit(100).all()]
+    return [_serialize_series(row) for row in db.query(ContentSeries).filter(ContentSeries.profile_id == profile_id).order_by(ContentSeries.updated_at.desc()).limit(100).all()]
 
 
 @router.get("/{profile_id}/series-review", response_model=list[schemas.ProfileSeriesReviewResponse])
 def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_profile(db, profile_id, user)
-    series_items = db.query(ProjectSeries).filter(ProjectSeries.profile_id == profile_id).order_by(ProjectSeries.updated_at.desc()).limit(100).all()
+    
+    series_items = db.query(ContentSeries).filter(ContentSeries.profile_id == profile_id).order_by(ContentSeries.updated_at.desc()).limit(100).all()
+    standalone_workflows = db.query(MediaWorkflow).filter(
+        MediaWorkflow.profile_id == profile_id,
+        MediaWorkflow.series_id == None,
+        MediaWorkflow.status != "READY",
+        MediaWorkflow.status != "FAILED"
+    ).order_by(MediaWorkflow.updated_at.desc()).limit(100).all()
+    
     result = []
+    
     for series in series_items:
-        parts = db.query(ProjectPart).filter(ProjectPart.series_id == series.id).order_by(ProjectPart.updated_at.desc(), ProjectPart.part_number.asc()).all()
+        parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.updated_at.desc(), WorkflowPart.part_number.asc()).all()
         plan = _series_plan(db, series)
         content = db.get(ContentItem, plan.primary_content_id) if plan and plan.primary_content_id else None
         source = (
@@ -54,27 +64,75 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
                 "series": _serialize_series(series),
                 "articles": [
                     {
-                        "plan": plan,
+                        "plan": serialize_workflow(plan, db) if plan else None,
                         "source_content": _serialize_source_content(content, source, sources, media) if content else None,
                         "parts": [_serialize_part(part) for part in parts],
                     }
                 ],
             }
         )
+        
+    for plan in standalone_workflows:
+        parts = db.query(WorkflowPart).filter(WorkflowPart.workflow_id == plan.id).order_by(WorkflowPart.updated_at.desc(), WorkflowPart.part_number.asc()).all()
+        if not parts:
+            continue
+            
+        content = db.get(ContentItem, plan.primary_content_id) if plan and plan.primary_content_id else None
+        source = (
+            db.query(ContentSource)
+            .filter(ContentSource.content_id == content.id)
+            .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
+            .first()
+            if content
+            else None
+        )
+        sources = db.query(ContentSource).filter(ContentSource.content_id == content.id).all() if content else []
+        media = db.query(ContentMedia).filter(ContentMedia.content_id == content.id).all() if content else []
+        
+        mock_series = {
+            "id": plan.id,
+            "content_plan_id": plan.id,
+            "profile_id": plan.profile_id,
+            "title": plan.title or "Standalone Video",
+            "description": (plan.metadata_json or {}).get("content_angle") or "Kịch bản độc lập",
+            "series_type": "SINGLE",
+            "total_parts": len(parts),
+            "current_part": 1,
+            "status": "ACTIVE",
+            "context_version": 1,
+            "created_at": plan.created_at,
+            "updated_at": plan.updated_at or plan.created_at,
+        }
+        
+        result.append(
+            {
+                "series": mock_series,
+                "articles": [
+                    {
+                        "plan": serialize_workflow(plan, db) if plan else None,
+                        "source_content": _serialize_source_content(content, source, sources, media) if content else None,
+                        "parts": [_serialize_part(part) for part in parts],
+                    }
+                ],
+            }
+        )
+        
+    # Sort result by series created_at descending
+    result.sort(key=lambda x: x["series"]["created_at"], reverse=True)
     return result
 
 
-def _series_plan(db: Session, series: ProjectSeries) -> ContentPlan | None:
+def _series_plan(db: Session, series: ContentSeries) -> MediaWorkflow | None:
     plan_id = (series.metadata_json or {}).get("content_plan_id")
     if not plan_id:
         return None
     try:
-        return db.get(ContentPlan, uuid.UUID(str(plan_id)))
+        return db.get(MediaWorkflow, uuid.UUID(str(plan_id)))
     except ValueError:
         return None
 
 
-def _serialize_series(series: ProjectSeries) -> dict:
+def _serialize_series(series: ContentSeries) -> dict:
     metadata = series.metadata_json or {}
     return {
         "id": series.id,
@@ -92,7 +150,7 @@ def _serialize_series(series: ProjectSeries) -> dict:
     }
 
 
-def _serialize_part(part: ProjectPart) -> dict:
+def _serialize_part(part: WorkflowPart) -> dict:
     payload = part.payload or {}
     return {
         "id": part.id,
@@ -122,7 +180,7 @@ def _serialize_source_content(content: ContentItem, source: ContentSource | None
         "content_type": content.content_type,
         "canonical_title": content.canonical_title,
         "summary": content.summary,
-        "full_text": None,
+        "full_text": _load_content_full_text(sources) or content.summary,
         "language": content.language,
         "status": content.status,
         "canonical_url": content.canonical_url,
@@ -140,6 +198,8 @@ def _serialize_source_content(content: ContentItem, source: ContentSource | None
 
 
 def _serialize_content_source(source: ContentSource) -> dict:
+    meta = dict(source.metadata_json or {})
+    meta.pop("processed_document_id", None)
     return {
         "id": source.id,
         "content_id": source.content_id,
@@ -147,13 +207,14 @@ def _serialize_content_source(source: ContentSource) -> dict:
         "source_external_id": source.source_external_id,
         "source_url": source.source_url,
         "raw_document_id": source.raw_document_id,
+        "processed_document_id": source.processed_document_id,
         "source_title": source.source_title,
         "source_author": source.source_author,
         "source_published_at": source.source_published_at,
         "first_seen_at": source.first_seen_at,
         "last_seen_at": source.last_seen_at,
         "is_primary": source.is_primary,
-        "metadata": source.metadata_json or {},
+        "metadata": meta,
         "created_at": source.created_at,
         "updated_at": source.updated_at,
     }

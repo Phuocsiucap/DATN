@@ -7,7 +7,10 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from common.db.models import CrawlJob, CrawlLog, CrawlTask, ProcessingRun
+from common.db.models import CrawlJob, CrawlTask, ProcessingRun
+import logging
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_TASK_STATUSES = {"PENDING", "QUEUED", "RUNNING", "RETRYING"}
 
@@ -22,18 +25,14 @@ def add_crawl_log(
     level: str = "INFO",
     message: str,
     metadata: dict[str, Any] | None = None,
-) -> CrawlLog:
-    log = CrawlLog(
-        job_id=uuid.UUID(str(job_id)),
-        task_id=uuid.UUID(str(task_id)) if task_id else None,
-        source_type=source_type,
-        stage=stage,
-        level=level.upper(),
-        message=message,
-        metadata_json=metadata or {},
-    )
-    db.add(log)
-    return log
+):
+    log_msg = f"[Job {job_id}] [Stage: {stage}] {message} | Meta: {metadata}"
+    if level.upper() == "ERROR":
+        logger.error(log_msg)
+    elif level.upper() == "DEBUG":
+        logger.debug(log_msg)
+    else:
+        logger.info(log_msg)
 
 
 def canonical_saved_count(db: Session, job_id: uuid.UUID) -> int:

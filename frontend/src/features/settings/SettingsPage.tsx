@@ -83,11 +83,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     tone: 'Professional & Authoritative',
     target_audience: '',
     min_score: 75,
-    max_recommendations_per_day: 15,
+    max_system_recommendations: 15,
     auto_project_queue_enabled: false,
     auto_planning_enabled: false,
     video_render_mode: 'manual',
-    system_content_enabled: true,
+    receive_system_content: true,
     relevance_weight: 1.5,
     freshness_decay: 0.8,
     authority_base: 85
@@ -660,8 +660,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input 
                               type="checkbox" className="sr-only peer" 
-                              checked={strategyForm.system_content_enabled || false}
-                              onChange={e => handleUpdateStrategyField('system_content_enabled', e.target.checked)}
+                              checked={strategyForm.receive_system_content ?? true}
+                              onChange={e => handleUpdateStrategyField('receive_system_content', e.target.checked)}
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
@@ -685,8 +685,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                           <input 
                             type="number" 
                             className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
-                            value={strategyForm.max_recommendations_per_day || 0}
-                            onChange={e => handleUpdateStrategyField('max_recommendations_per_day', parseInt(e.target.value))}
+                            value={strategyForm.max_system_recommendations ?? 0}
+                            onChange={e => handleUpdateStrategyField('max_system_recommendations', parseInt(e.target.value))}
                           />
                         </div>
                       </div>
@@ -698,8 +698,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                       <div className="space-y-4">
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Project</label>
-                            <span className="text-[11px] text-[#64748b]">Automatically draft posts from high-scoring content.</span>
+                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Workflow</label>
+                            <span className="text-[11px] text-[#64748b]">Tự động phác thảo bài viết & kịch bản từ nội dung điểm cao.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
                             <input 
@@ -716,13 +716,13 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
                             <label className="font-semibold text-sm text-[#0f172a] block">Auto Planning Job</label>
-                            <span className="text-[11px] text-[#64748b]">Schedule approved projects to queue automatically.</span>
+                            <span className="text-[11px] text-[#64748b]">Tự động đưa kịch bản đã duyệt vào hàng chờ sản xuất.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
                             <input 
                               type="checkbox" className="sr-only peer" 
-                              checked={strategyForm.auto_planning_enabled || false}
-                              onChange={e => handleUpdateStrategyField('auto_planning_enabled', e.target.checked)}
+                              checked={strategyForm.auto_planning_job_enabled || false}
+                              onChange={e => handleUpdateStrategyField('auto_planning_job_enabled', e.target.checked)}
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>

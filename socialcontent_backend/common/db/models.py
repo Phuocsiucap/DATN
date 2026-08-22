@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
+    
     Boolean,
     Column,
     DateTime,
@@ -18,7 +18,8 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from common.db.session import Base
@@ -76,7 +77,7 @@ class SystemSetting(Base):
     __tablename__ = "system_settings"
 
     key = Column(String(120), primary_key=True)
-    value = Column(JSON, nullable=False, default=dict)
+    value = Column(JSONB, nullable=False, default=dict)
     description = Column(String(255), nullable=True)
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at = updated_col()
@@ -90,7 +91,7 @@ class AuditLog(Base):
     action = Column(String(120), nullable=False, index=True)
     target_type = Column(String(120), nullable=True)
     target_id = Column(String(120), nullable=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
 
 
@@ -120,7 +121,6 @@ class CrawlJob(Base):
     requester = relationship("User", back_populates="crawl_jobs")
     sources = relationship("CrawlJobSource", back_populates="job", cascade="all, delete-orphan")
     tasks = relationship("CrawlTask", back_populates="job", cascade="all, delete-orphan")
-    logs = relationship("CrawlLog", back_populates="job", cascade="all, delete-orphan")
 
 
 class CrawlJobSource(Base):
@@ -130,8 +130,8 @@ class CrawlJobSource(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     source_type = Column(String(40), nullable=False, index=True)
     source_url = Column(Text, nullable=True)
-    keywords = Column(JSON, nullable=False, default=list)
-    configuration = Column(JSON, nullable=False, default=dict)
+    keywords = Column(JSONB, nullable=False, default=list)
+    configuration = Column(JSONB, nullable=False, default=dict)
     status = Column(String(40), nullable=False, default="ACTIVE")
     created_at = now_col()
     updated_at = updated_col()
@@ -160,22 +160,6 @@ class CrawlTask(Base):
 
     job = relationship("CrawlJob", back_populates="tasks")
     job_source = relationship("CrawlJobSource", back_populates="tasks")
-
-
-class CrawlLog(Base):
-    __tablename__ = "crawl_logs"
-
-    id = uuid_pk()
-    job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("crawl_tasks.id", ondelete="SET NULL"), nullable=True, index=True)
-    source_type = Column(String(40), nullable=True, index=True)
-    stage = Column(String(80), nullable=False, index=True)
-    level = Column(String(20), nullable=False, default="INFO", index=True)
-    message = Column(Text, nullable=False)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
-    created_at = now_col()
-
-    job = relationship("CrawlJob", back_populates="logs")
 
 
 class ContentItem(Base):
@@ -212,13 +196,14 @@ class ContentSource(Base):
     source_external_id = Column(String(255), nullable=False, index=True)
     source_url = Column(Text, nullable=True)
     raw_document_id = Column(String(64), nullable=True)
+    processed_document_id = Column(String(64), nullable=True)
     source_title = Column(Text, nullable=True)
     source_author = Column(String(255), nullable=True)
     source_published_at = Column(DateTime(timezone=True), nullable=True)
     first_seen_at = now_col()
     last_seen_at = updated_col()
     is_primary = Column(Boolean, default=True, nullable=False)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
@@ -298,7 +283,7 @@ class ContentEmbedding(Base):
 
     id = uuid_pk()
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    embedding = Column(JSON, nullable=False)
+    embedding = Column(JSONB, nullable=False)
     embedding_text = Column(Text, nullable=False)
     embedding_text_hash = Column(String(128), nullable=False, index=True)
     model_name = Column(String(120), nullable=False, index=True)
@@ -351,7 +336,7 @@ class SocialProfile(Base):
     strategy = relationship("SocialProfileStrategy", back_populates="profile", cascade="all, delete-orphan", uselist=False)
     queue_items = relationship("PublishingQueueItem", back_populates="profile", cascade="all, delete-orphan")
     posts = relationship("SocialPost", back_populates="profile", cascade="all, delete-orphan")
-    content_plans = relationship("ContentPlan", back_populates="profile", cascade="all, delete-orphan")
+    content_plans = relationship("MediaWorkflow", back_populates="profile", cascade="all, delete-orphan")
     content_links = relationship("ProfileContentLink", back_populates="profile", cascade="all, delete-orphan")
 
 
@@ -455,7 +440,7 @@ class ProfileContentLink(Base):
     recommendation_status = Column(String(60), default="RECOMMENDED", nullable=False, index=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)
     status = Column(String(40), default="ACTIVE", nullable=False, index=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     first_seen_at = now_col()
     last_seen_at = updated_col()
     created_at = now_col()
@@ -464,86 +449,46 @@ class ProfileContentLink(Base):
     profile = relationship("SocialProfile", back_populates="content_links")
 
 
-class ContentPlan(Base):
-    __tablename__ = "content_plans"
-
-    id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="SET NULL"), nullable=True, index=True)
-    project_run_id = Column(UUID(as_uuid=True), ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
-    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    title = Column(Text, nullable=False)
-    content_angle = Column(Text, nullable=True)
-    target_audience = Column(Text, nullable=True)
-    tone = Column(Text, nullable=True)
-    format = Column(String(60), nullable=True)
-    planning_mode = Column(String(40), nullable=False)
-    target_duration_seconds = Column(Integer, nullable=True)
-    recommended_part_count = Column(Integer, nullable=True)
-    confidence_score = Column(Numeric(5, 2), default=0, nullable=False)
-    risk_level = Column(String(40), nullable=True)
-    status = Column(String(40), default="DRAFT", nullable=False, index=True)
-    version = Column(Integer, default=1, nullable=False)
-    ai_reasoning = Column(JSON, nullable=False, default=list)
-    production_requirements = Column(JSON, nullable=False, default=dict)
-    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    approved_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    project = relationship("ContentProject", foreign_keys=[project_id])
-    project_run = relationship("ProjectRun", foreign_keys=[project_run_id], back_populates="plans")
-    profile = relationship("SocialProfile", back_populates="content_plans")
-    feedback = relationship("PlanningFeedback", back_populates="content_plan", cascade="all, delete-orphan")
-
-
 class PlanningFeedback(Base):
     __tablename__ = "planning_feedback"
 
     id = uuid_pk()
-    content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    media_workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
     feedback_type = Column(String(60), nullable=False)
     feedback_text = Column(Text, nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = now_col()
 
-    content_plan = relationship("ContentPlan", back_populates="feedback")
+    media_workflow = relationship("MediaWorkflow", back_populates="feedback")
 
 
 class PromptRun(Base):
     __tablename__ = "prompt_runs"
 
     id = uuid_pk()
-    project_run_id = Column(UUID(as_uuid=True), ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    workflow_run_id = Column(UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     step_name = Column(String(80), nullable=False)
     model_provider = Column(String(80), nullable=True)
     model_name = Column(String(120), nullable=True)
     prompt_version = Column(String(80), nullable=True)
     input_reference = Column(String(255), nullable=True)
     output_reference = Column(String(255), nullable=True)
-    input_tokens = Column(Integer, nullable=True)
-    output_tokens = Column(Integer, nullable=True)
+    input_tokens = Column(Integer, default=0, nullable=False)
+    output_tokens = Column(Integer, default=0, nullable=False)
+    total_tokens = Column(Integer, default=0, nullable=False)
+    cost_usd = Column(Float, default=0.0, nullable=False)
     latency_ms = Column(Integer, nullable=True)
     status = Column(String(40), default="PENDING", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
     created_at = now_col()
 
-    project_run = relationship("ProjectRun", foreign_keys=[project_run_id], back_populates="prompt_runs")
+    user = relationship("User", foreign_keys=[user_id])
+    workflow_run = relationship("WorkflowRun", foreign_keys=[workflow_run_id], back_populates="prompt_runs")
 
 
-class VideoDraft(Base):
-    __tablename__ = "video_drafts"
-
-    id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(Text, nullable=False)
-    draft_json = Column(JSON, nullable=False, default=dict)
-    updated_at = updated_col()
-
-
-class ProjectSeries(Base):
-    __tablename__ = "project_series"
+class ContentSeries(Base):
+    __tablename__ = "content_series"
 
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -554,49 +499,50 @@ class ProjectSeries(Base):
     status = Column(String(40), default="ACTIVE", nullable=False, index=True)
     current_part = Column(Integer, default=0, nullable=False)
     total_parts = Column(Integer, default=0, nullable=False)
-    context_json = Column(JSON, nullable=False, default=dict)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    context_json = Column(JSONB, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
-    projects = relationship("ContentProject", back_populates="series")
-    parts = relationship("ProjectPart", back_populates="series")
+    projects = relationship("MediaWorkflow", back_populates="series")
+    parts = relationship("WorkflowPart", back_populates="series")
 
 
-class ContentProject(Base):
-    __tablename__ = "content_projects"
+class MediaWorkflow(Base):
+    __tablename__ = "media_workflows"
 
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    series_id = Column(UUID(as_uuid=True), ForeignKey("project_series.id", ondelete="SET NULL"), nullable=True, index=True)
+    series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(Text, nullable=False)
     status = Column(String(40), default="DRAFT", nullable=False, index=True)
     planning_mode = Column(String(40), nullable=True, index=True)
     primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    content_plan_id = Column(UUID(as_uuid=True), ForeignKey("content_plans.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
-    video_draft_id = Column(UUID(as_uuid=True), ForeignKey("video_drafts.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     current_stage = Column(String(80), nullable=True)
     progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
-    sources = relationship("ProjectSource", back_populates="project", cascade="all, delete-orphan")
-    candidates = relationship("ProjectCandidate", back_populates="project", cascade="all, delete-orphan")
-    parts = relationship("ProjectPart", back_populates="project", cascade="all, delete-orphan")
-    runs = relationship("ProjectRun", back_populates="project", cascade="all, delete-orphan")
-    artifacts = relationship("ProjectArtifact", back_populates="project", cascade="all, delete-orphan")
-    series = relationship("ProjectSeries", back_populates="projects")
+    profile = relationship("SocialProfile", back_populates="content_plans")
+    user = relationship("User")
+    feedback = relationship("PlanningFeedback", back_populates="media_workflow", cascade="all, delete-orphan")
+    sources = relationship("WorkflowSource", back_populates="project", cascade="all, delete-orphan")
+    candidates = relationship("WorkflowCandidate", back_populates="project", cascade="all, delete-orphan")
+    parts = relationship("WorkflowPart", back_populates="project", cascade="all, delete-orphan")
+    runs = relationship("WorkflowRun", back_populates="project", cascade="all, delete-orphan")
+    artifacts = relationship("WorkflowArtifact", back_populates="project", cascade="all, delete-orphan")
+    series = relationship("ContentSeries", back_populates="projects")
 
 
-class ProjectSource(Base):
-    __tablename__ = "project_sources"
-    __table_args__ = (UniqueConstraint("project_id", "source_type", "source_id", name="uq_project_source_ref"),)
+class WorkflowSource(Base):
+    __tablename__ = "workflow_sources"
+    __table_args__ = (UniqueConstraint("workflow_id", "source_type", "source_id", name="uq_workflow_source_ref"),)
 
     id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
     source_type = Column(String(40), nullable=False, index=True)
     source_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -605,27 +551,27 @@ class ProjectSource(Base):
     role = Column(String(60), default="PRIMARY", nullable=False, index=True)
     status = Column(String(40), default="ACTIVE", nullable=False, index=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
 
-    project = relationship("ContentProject", back_populates="sources")
+    project = relationship("MediaWorkflow", back_populates="sources")
 
 
-class ProjectCandidate(Base):
-    __tablename__ = "project_candidates"
+class WorkflowCandidate(Base):
+    __tablename__ = "workflow_candidates"
 
     id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
     episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
     rank_order = Column(Integer, nullable=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)
     eligible = Column(Boolean, default=True, nullable=False)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
 
-    project = relationship("ContentProject", back_populates="candidates")
+    project = relationship("MediaWorkflow", back_populates="candidates")
     content = relationship("ContentItem")
     story = relationship("Story")
     episode = relationship("Episode")
@@ -680,43 +626,42 @@ class ProjectCandidate(Base):
         return self.content.canonical_url if getattr(self, "content", None) else None
 
 
-class ProjectPart(Base):
-    __tablename__ = "project_parts"
+class WorkflowPart(Base):
+    __tablename__ = "workflow_parts"
 
     id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    series_id = Column(UUID(as_uuid=True), ForeignKey("project_series.id", ondelete="SET NULL"), nullable=True, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
+    series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="SET NULL"), nullable=True, index=True)
     part_number = Column(Integer, nullable=False, index=True)
     title = Column(Text, nullable=False)
     target_duration_seconds = Column(Integer, nullable=True)
     status = Column(String(40), default="DRAFT", nullable=False, index=True)
-    payload = Column(JSON, nullable=False, default=dict)
+    payload = Column(JSONB, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
-    project = relationship("ContentProject", back_populates="parts")
-    series = relationship("ProjectSeries", back_populates="parts")
+    project = relationship("MediaWorkflow", back_populates="parts")
+    series = relationship("ContentSeries", back_populates="parts")
 
 
-class ProjectRun(Base):
-    __tablename__ = "project_runs"
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
 
     id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
     run_type = Column(String(60), nullable=False, index=True)
     status = Column(String(40), default="PENDING", nullable=False, index=True)
     current_stage = Column(String(80), nullable=True)
     progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
     error_message = Column(Text, nullable=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = now_col()
     updated_at = updated_col()
 
-    project = relationship("ContentProject", back_populates="runs")
-    plans = relationship("ContentPlan", foreign_keys="ContentPlan.project_run_id", back_populates="project_run")
-    prompt_runs = relationship("PromptRun", foreign_keys="PromptRun.project_run_id", back_populates="project_run")
+    project = relationship("MediaWorkflow", back_populates="runs")
+    prompt_runs = relationship("PromptRun", foreign_keys="PromptRun.workflow_run_id", back_populates="workflow_run")
 
     @property
     def user_id(self):
@@ -774,16 +719,16 @@ class ProjectRun(Base):
         self.metadata_json = metadata
 
 
-class ProjectArtifact(Base):
-    __tablename__ = "project_artifacts"
+class WorkflowArtifact(Base):
+    __tablename__ = "workflow_artifacts"
 
     id = uuid_pk()
-    project_id = Column(UUID(as_uuid=True), ForeignKey("content_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
     artifact_type = Column(String(60), nullable=False, index=True)
     uri = Column(Text, nullable=True)
     status = Column(String(40), default="READY", nullable=False, index=True)
-    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
     updated_at = updated_col()
 
-    project = relationship("ContentProject", back_populates="artifacts")
+    project = relationship("MediaWorkflow", back_populates="artifacts")

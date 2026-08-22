@@ -74,11 +74,11 @@ function AppContent() {
     window.history.pushState({ openProfileId: profileId, openTab: 'strategy' }, '', TAB_PATHS.settings)
   }, [])
 
-  const handleOpenGenerateVideo = useCallback((projectId?: string) => {
+  const handleOpenGenerateVideo = useCallback((workflowId?: string) => {
     setTab('generateVideo')
-    setGenerateVideoProjectId(projectId || '')
-    const suffix = projectId ? `/${encodeURIComponent(projectId)}` : ''
-    window.history.pushState({ projectId }, '', `${TAB_PATHS.generateVideo}${suffix}`)
+    setGenerateVideoProjectId(workflowId || '')
+    const suffix = workflowId ? `/${encodeURIComponent(workflowId)}` : ''
+    window.history.pushState({ workflowId }, '', `${TAB_PATHS.generateVideo}${suffix}`)
   }, [])
 
   const handleOpenModule2 = useCallback((jobId?: string) => {
@@ -171,9 +171,9 @@ function AppContent() {
           {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
           {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
           {tab === 'generateVideo' && (generateVideoProjectId ? (
-            <VideoProductionWorkspace projectId={generateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
+            <VideoProductionWorkspace workflowId={generateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
           ) : (
-            <GenerateVideoProjectsPage onOpenProject={(projectId) => handleOpenGenerateVideo(projectId)} />
+            <GenerateVideoProjectsPage onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
           ))}
           {tab === 'approvals' && <ApprovalsPage />}
           {tab === 'schedule' && <SchedulePage />}

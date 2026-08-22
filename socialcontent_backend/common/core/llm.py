@@ -16,6 +16,21 @@ class ChatCompletionResult:
     raw_response: dict[str, Any]
     latency_ms: int
 
+    @property
+    def input_tokens(self) -> int:
+        usage = self.raw_response.get("usage", {})
+        return usage.get("prompt_tokens", 0) or 0
+
+    @property
+    def output_tokens(self) -> int:
+        usage = self.raw_response.get("usage", {})
+        return usage.get("completion_tokens", 0) or 0
+
+    @property
+    def total_tokens(self) -> int:
+        usage = self.raw_response.get("usage", {})
+        return usage.get("total_tokens", 0) or (self.input_tokens + self.output_tokens)
+
     def parsed_json(self) -> Any:
         return json.loads(strip_json_fence(self.content))
 
