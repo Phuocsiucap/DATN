@@ -33,12 +33,12 @@
     --radius-lg: 12px;
     --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
     --shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
-    --app-sidebar-width: 236px;
-    --app-topbar-height: 52px;
+    --app-sidebar-width: 216px;
+    --app-topbar-height: 44px;
   }
 
   html {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   * {
@@ -49,8 +49,8 @@
     background-color: var(--surface);
     color: var(--on-surface);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 12px;
+    line-height: 1.4;
     letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
   }
@@ -118,7 +118,7 @@
 
 .compact-ui {
   color: var(--on-surface);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .compact-ui :where(.tracking-tight, .tracking-wide, .tracking-wider, .tracking-widest) {
@@ -137,69 +137,181 @@
   box-shadow: var(--shadow-card);
 }
 
-.compact-ui :where(.text-2xl) {
-  font-size: 1.2rem;
+.compact-ui :where(.text-\[10px\]) {
+  font-size: 9px;
+}
+
+.compact-ui :where(.text-\[11px\]) {
+  font-size: 10px;
+}
+
+.compact-ui :where(.text-xs) {
+  font-size: 0.72rem;
   line-height: 1.35;
+}
+
+.compact-ui :where(.text-sm) {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.compact-ui :where(.text-2xl) {
+  font-size: 1.05rem;
+  line-height: 1.3;
 }
 
 .compact-ui :where(.text-xl) {
-  font-size: 1rem;
-  line-height: 1.35;
+  font-size: 0.95rem;
+  line-height: 1.3;
 }
 
 .compact-ui :where(.text-lg) {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   line-height: 1.4;
 }
 
 .compact-ui :where(.text-base) {
-  font-size: 0.9rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .compact-ui :where(.p-8) {
-  padding: 1.25rem;
+  padding: 1rem;
 }
 
 .compact-ui :where(.p-6) {
-  padding: 1.125rem;
-}
-
-.compact-ui :where(.p-5) {
   padding: 0.875rem;
 }
 
-.compact-ui :where(.p-4) {
+.compact-ui :where(.p-5) {
   padding: 0.75rem;
 }
 
+.compact-ui :where(.p-4) {
+  padding: 0.625rem;
+}
+
+.compact-ui :where(.p-3) {
+  padding: 0.5rem;
+}
+
 .compact-ui :where(.px-6) {
-  padding-left: 1rem;
-  padding-right: 1rem;
+  padding-left: 0.875rem;
+  padding-right: 0.875rem;
+}
+
+.compact-ui :where(.px-5) {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.compact-ui :where(.px-4) {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+.compact-ui :where(.px-3) {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
 }
 
 .compact-ui :where(.py-4) {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
+
+.compact-ui :where(.py-3) {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.compact-ui :where(.py-2) {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.compact-ui :where(.h-12) {
+  height: 2.5rem;
+}
+
+.compact-ui :where(.h-11) {
+  height: 2.375rem;
+}
+
+.compact-ui :where(.h-10) {
+  height: 2.125rem;
+}
+
+.compact-ui :where(.h-9) {
+  height: 1.875rem;
+}
+
+.compact-ui :where(.h-8) {
+  height: 1.75rem;
 }
 
 .compact-ui :where(.gap-6) {
-  gap: 1.125rem;
+  gap: 0.875rem;
 }
 
 .compact-ui :where(.gap-5) {
-  gap: 0.875rem;
+  gap: 0.75rem;
+}
+
+.compact-ui :where(.gap-4) {
+  gap: 0.625rem;
+}
+
+.compact-ui :where(.gap-3) {
+  gap: 0.5rem;
+}
+
+.compact-ui :where(.mb-6) {
+  margin-bottom: 0.875rem;
+}
+
+.compact-ui :where(.mb-5) {
+  margin-bottom: 0.75rem;
+}
+
+.compact-ui :where(.mb-4) {
+  margin-bottom: 0.625rem;
+}
+
+.compact-ui :where(.mt-6) {
+  margin-top: 0.875rem;
+}
+
+.compact-ui :where(.mt-5) {
+  margin-top: 0.75rem;
+}
+
+.compact-ui :where(.mt-4) {
+  margin-top: 0.625rem;
 }
 
 .compact-ui .space-y-6 > :not([hidden]) ~ :not([hidden]) {
   --tw-space-y-reverse: 0;
-  margin-top: calc(1rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-top: calc(0.75rem * calc(1 - var(--tw-space-y-reverse)));
   margin-bottom: calc(1rem * var(--tw-space-y-reverse));
 }
 
 .compact-ui .space-y-5 > :not([hidden]) ~ :not([hidden]) {
   --tw-space-y-reverse: 0;
-  margin-top: calc(0.875rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-top: calc(0.625rem * calc(1 - var(--tw-space-y-reverse)));
   margin-bottom: calc(0.875rem * var(--tw-space-y-reverse));
+}
+
+.compact-ui .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.5rem * var(--tw-space-y-reverse));
+}
+
+.compact-ui .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.375rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.375rem * var(--tw-space-y-reverse));
 }
 
 .compact-ui :where(.border-\[\#d9e0ea\], .border-\[\#eef2f7\], .border-slate-200) {
@@ -221,7 +333,7 @@
 .workspace-page {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 
@@ -237,11 +349,11 @@
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 1rem;
+  gap: 0.75rem;
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-md);
   background: var(--surface-container-lowest);
-  padding: 1rem;
+  padding: 0.75rem;
   box-shadow: var(--shadow-card);
 }
 
@@ -250,7 +362,7 @@
 }
 
 .workspace-title {
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 800;
   line-height: 1.35;
   color: var(--on-surface);
@@ -291,26 +403,26 @@
 .detail-header {
   border-bottom: 1px solid var(--outline-variant);
   background: var(--surface-container-low);
-  padding: 1rem 3.5rem 1rem 1.25rem;
+  padding: 0.75rem 3rem 0.75rem 0.875rem;
 }
 
 .detail-body {
   flex: 1;
   overflow-y: auto;
   background: var(--surface);
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .detail-section {
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-md);
   background: var(--surface-container-lowest);
-  padding: 1rem;
+  padding: 0.75rem;
   box-shadow: var(--shadow-card);
 }
 
 .detail-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
   color: var(--on-surface-variant);
@@ -325,9 +437,9 @@
   border: 1px dashed var(--outline-variant);
   border-radius: var(--radius-md);
   background: var(--surface-container-low);
-  padding: 1.5rem;
+  padding: 1rem;
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--on-surface-variant);
 }
 
@@ -339,19 +451,19 @@
 
 .workspace-subtitle {
   margin-top: 0.125rem;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   color: var(--on-surface-variant);
 }
 
 .dark-input {
   width: 100%;
-  height: 2.125rem;
+  height: 1.875rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--outline-variant);
   background: var(--surface-container-low);
   padding: 0 0.625rem;
   color: var(--on-surface);
-  font-size: 13px;
+  font-size: 12px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -373,13 +485,13 @@
 .secondary-dark-button,
 .danger-dark-button {
   display: inline-flex;
-  min-height: 2.125rem;
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
   border-radius: var(--radius-sm);
-  padding: 0.375rem 0.875rem;
-  font-size: 12px;
+  min-height: 1.875rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 11px;
   font-weight: 600;
   transition: all 0.15s ease;
 }

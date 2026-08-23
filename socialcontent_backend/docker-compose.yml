@@ -129,10 +129,9 @@ services:
       BROWSER_HEADLESS: "true"
       PYTHONUNBUFFERED: "1"
     volumes:
-      - socialcontent_generate_video:/app/data_demo/video_gen_demo
+      - ./data_demo/video_gen_demo:/app/data_demo/video_gen_demo
 
 volumes:
   socialcontent_postgres:
   socialcontent_mongo:
   socialcontent_social_profile:
-  socialcontent_generate_video:

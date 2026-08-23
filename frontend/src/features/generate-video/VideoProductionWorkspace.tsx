@@ -1,5 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Clapperboard, Download, FileText, Film, Image as ImageIcon, Mic2, Plus, Save, ShieldCheck, Trash2, Volume2, VolumeX, Wand2, X } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  ArrowUpRight,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Clapperboard,
+  Download,
+  Eye,
+  FastForward,
+  FileText,
+  Film,
+  Clock,
+  Image as ImageIcon,
+  Lock,
+  Maximize2,
+  Mic2,
+  Music,
+  Pause,
+  Play,
+  Plus,
+  Rewind,
+  Save,
+  Settings,
+  ShieldCheck,
+  SkipBack,
+  SkipForward,
+  SlidersHorizontal,
+  Trash2,
+  Type,
+  UploadCloud,
+  Volume2,
+  VolumeX,
+  Wand2,
+  X,
+} from 'lucide-react'
 import {
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
@@ -15,11 +52,12 @@ import {
   reviewGenerateVideoStoryWithAiApi,
   saveGenerateVideoStoryApi,
   uploadGenerateVideoAudioApi,
+  normalizeStoryResponse,
   type GenerateVideoScene,
   type GenerateVideoStory,
   type GenerateVideoVoiceProvider,
 } from '@/commons/apis/generateVideo'
-import { fetchMediaWorkflowApi, updateMediaWorkflowApi, type MediaWorkflow } from '@/commons/apis/planning'
+import { fetchVideoScriptApi, updateMediaWorkflowApi, type MediaWorkflow } from '@/commons/apis/planning'
 
 type StepId = 'plan' | 'story' | 'video' | 'preview'
 type PlanDraft = {
@@ -33,6 +71,7 @@ type PlanDraft = {
   recommended_part_count: string
   ai_reasoning: string
   production_requirements: string
+  story_data: string
 }
 
 const defaultVoiceId = 'pNInz6obpgDQGcFmaJgB'
@@ -69,8 +108,8 @@ const proCutFigmaAssets = {
 }
 
 const steps: Array<{ id: StepId; label: string; icon: React.ReactNode }> = [
-  { id: 'plan', label: 'Kế hoạch AI', icon: <FileText size={16} /> },
-  { id: 'story', label: 'Kịch bản', icon: <ImageIcon size={16} /> },
+  { id: 'plan', label: 'Story data', icon: <FileText size={16} /> },
+  { id: 'story', label: 'Video draft', icon: <ImageIcon size={16} /> },
   { id: 'video', label: 'Generate video', icon: <Clapperboard size={16} /> },
   { id: 'preview', label: 'Export MP4', icon: <Clapperboard size={16} /> },
 ]
@@ -86,13 +125,14 @@ const emptyPlanDraft: PlanDraft = {
   recommended_part_count: '',
   ai_reasoning: '',
   production_requirements: '{}',
+  story_data: '[]',
 }
 
-function planDraftFromProject(project: MediaWorkflow | null): PlanDraft {
-  if (!project) return emptyPlanDraft
-  const metadata = project.metadata || {}
+function planDraftFromProject(workflow: MediaWorkflow | null): PlanDraft {
+  if (!workflow) return emptyPlanDraft
+  const metadata = workflow.metadata || {}
   return {
-    title: project.title || '',
+    title: workflow.title || '',
     content_angle: String(metadata.content_angle || ''),
     target_audience: String(metadata.target_audience || ''),
     tone: String(metadata.tone || ''),
@@ -102,15 +142,24 @@ function planDraftFromProject(project: MediaWorkflow | null): PlanDraft {
     recommended_part_count: metadata.recommended_part_count ? String(metadata.recommended_part_count) : '',
     ai_reasoning: Array.isArray(metadata.ai_reasoning) ? metadata.ai_reasoning.map(String).join('\n') : '',
     production_requirements: JSON.stringify(metadata.production_requirements || {}, null, 2),
+    story_data: JSON.stringify(workflow.story_data || workflow.draft_json?.story_data || [], null, 2),
   }
 }
 
 function planDraftToPayload(draft: PlanDraft) {
   let productionRequirements: Record<string, unknown> = {}
+  let storyData: unknown[] = []
   try {
     productionRequirements = draft.production_requirements.trim() ? JSON.parse(draft.production_requirements) : {}
   } catch {
     throw new Error('Production requirements phải là JSON hợp lệ')
+  }
+  try {
+    const parsed = draft.story_data.trim() ? JSON.parse(draft.story_data) : []
+    if (!Array.isArray(parsed)) throw new Error()
+    storyData = parsed
+  } catch {
+    throw new Error('Story data phải là JSON array hợp lệ')
   }
 
   return {
@@ -124,6 +173,7 @@ function planDraftToPayload(draft: PlanDraft) {
     recommended_part_count: draft.recommended_part_count ? Number(draft.recommended_part_count) : null,
     ai_reasoning: draft.ai_reasoning.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
     production_requirements: productionRequirements,
+    story_data: storyData,
   }
 }
 
@@ -192,7 +242,11 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const audioSrc = previewStory?.audio?.voice
     ? `${generateVideoMediaUrl(previewStory.audio.voice)}?v=${audioVersion}`
     : ''
-  const editSourceContent = (selectedProject?.source_content || (selectedProject?.metadata?.source_content as Record<string, any> | undefined) || selectedProject?.metadata || {}) as Record<string, any>
+  const editSourceContent = {
+    ...((selectedProject?.source_content || selectedProject?.metadata?.source_content || selectedProject?.metadata || {}) as Record<string, any>),
+    title: selectedProject?.source_content?.title || selectedProject?.metadata?.source_content?.title || selectedProject?.title,
+    full_text: selectedProject?.source_content?.full_text || selectedProject?.metadata?.source_content?.full_text || selectedProject?.metadata?.content_angle || selectedProject?.metadata?.note || '',
+  }
   const loadInitial = async () => {
     setBusy('load')
     try {
@@ -226,36 +280,32 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     try {
       setLoadError('')
       setStoryLoadError('')
-      const project = await fetchMediaWorkflowApi(workflowId)
-      setSelectedProject(project)
-      setPlanDraft(planDraftFromProject(project))
+      const workflow = await fetchVideoScriptApi(workflowId)
+      setSelectedProject(workflow)
+      setPlanDraft(planDraftFromProject(workflow))
       setSelectedId(workflowId)
-      const artifacts = getWorkflowArtifacts(project)
+      const artifacts = getWorkflowArtifacts(workflow)
       setExportedVideoUrl(artifacts?.final ? generateVideoOutputUrl(String(artifacts.final)) : '')
       window.history.replaceState({ workflowId }, '', `/generate-video/${encodeURIComponent(workflowId)}`)
-      if (!project.video_draft_id) {
+
+      if ((workflow.story_data && workflow.story_data.length > 0) || (workflow as any).story) {
+        const directStory = normalizeStoryResponse({
+          ...((workflow as any).story || (workflow.metadata?.story as Record<string, any>) || {}),
+          story_data: workflow.story_data && workflow.story_data.length > 0 ? workflow.story_data : ((workflow as any).story?.story_data || []),
+          meta: { workflow_id: workflow.id, ...(((workflow as any).story?.meta) || {}) }
+        })
+        updateStory(directStory)
+        setPreviewStory(directStory)
+        setPreviewVersion(Date.now())
+        setActiveStep(options.openSavedStory ? inferActiveStepFromProject(workflow, directStory) : 'story')
+        setStatus('')
+      } else {
         setStory(null)
         setPreviewStory(null)
         setStoryText('')
         setStoryLoadError('')
         setActiveStep('plan')
-        setStatus('Đã tải kế hoạch AI. Kiểm tra/sửa plan trước khi tạo story video.')
-        return
-      }
-      try {
-        const savedStory = await fetchGenerateVideoSavedStoryApi(project.id)
-        updateStory(savedStory)
-        setPreviewStory(savedStory)
-        setPreviewVersion(Date.now())
-        setActiveStep(options.openSavedStory ? inferActiveStepFromProject(project, savedStory) : 'story')
-        setStatus('Đã tải kịch bản nguồn, kịch bản video và nội dung bài đã normalize')
-      } catch (error: any) {
-        setStory(null)
-        setPreviewStory(null)
-        setStoryText('')
-        setStoryLoadError(readApiError(error, 'Chưa có kịch bản video đã lưu.'))
-        setActiveStep('story')
-        setStatus('Đã tải kịch bản nguồn. Bấm Create story để tạo kịch bản video.')
+        setStatus('')
       }
     } catch (error: any) {
       const message = readApiError(error, 'Không tải được kịch bản video')
@@ -279,12 +329,23 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       if (completedJob.status === 'FAILED') {
         throw new Error(completedJob.error_message || 'Script job failed')
       }
-      const nextStory = completedJob.story || await fetchGenerateVideoSavedStoryApi(selectedId)
-      nextStory.meta = { ...(nextStory.meta || {}), workflow_id: selectedId }
-      updateStory(nextStory)
-      setPreviewStory(nextStory)
-      setActiveStep('story')
-      setStatus('Đã tạo kịch bản video từ kịch bản nguồn')
+      let nextStory = completedJob.story
+      if (!nextStory) {
+        const updatedProject = await fetchVideoScriptApi(selectedId)
+        if (updatedProject.story_data && updatedProject.story_data.length > 0) {
+          nextStory = normalizeStoryResponse({
+            story_data: updatedProject.story_data,
+            meta: { workflow_id: selectedId }
+          })
+        }
+      }
+      if (nextStory) {
+        nextStory.meta = { ...(nextStory.meta || {}), workflow_id: selectedId }
+        updateStory(nextStory)
+        setPreviewStory(nextStory)
+        setActiveStep('story')
+        setStatus('')
+      }
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không tạo được story')
     } finally {
@@ -299,10 +360,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('save-plan')
     try {
       const payload = planDraftToPayload(planDraft)
-      const project = await updateMediaWorkflowApi(selectedId, payload)
-      setSelectedProject(project)
-      setPlanDraft(planDraftFromProject(project))
-      setStatus('Đã lưu kế hoạch AI. Nếu story đã tạo trước đó, hãy Create story hoặc AI review lại để đồng bộ.')
+      const workflow = await updateMediaWorkflowApi(selectedId, payload)
+      setSelectedProject(workflow)
+      setPlanDraft(planDraftFromProject(workflow))
+      setStatus('Đã lưu story_data. Nếu video draft đã tạo trước đó, hãy tạo lại để đồng bộ.')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không lưu được kế hoạch AI')
     } finally {
@@ -376,16 +437,21 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       const parsed = currentStoryForAction()
       const saved = await saveGenerateVideoStoryApi(parsed)
       const result = await generateVideoVoiceApi(saved.story, voiceId, voiceSpeed, voiceProvider)
-      const nextStory = { ...saved.story, meta: result.meta || saved.story.meta, audio: result.audio || saved.story.audio, timeline: result.timeline || saved.story.timeline }
+      setStatus(`Đang chờ hàng đợi tạo voice (${result.job.id.slice(0, 8)})...`)
+      const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
+        setStatus(`Đang khởi tạo voice & căn chỉnh timeline: ${Math.round(Number(job.progress_percent || 0))}%`)
+      }, 5 * 60 * 1000)
+      if (completedJob.status === 'FAILED') {
+        throw new Error(completedJob.error_message || 'Tạo voice thất bại')
+      }
+      const nextStory = completedJob.story || saved.story
       updateStory(nextStory)
       setPreviewStory(nextStory)
       setAudioVersion(Date.now())
       setPreviewVersion(Date.now())
       setActiveStep('video')
-      const voiceLabel = voiceProviderOptions.find((option) => option.value === (result.voice_provider || voiceProvider))?.label || result.voice_id
-      setStatus(result.fit_frame_error
-        ? `Đã tạo voice (${voiceLabel}, ${result.voice_speed}x) nhưng fit frame lỗi: ${result.fit_frame_error}`
-        : `Đã tạo voice và fit frame bằng Whisper-1 (${voiceLabel}, ${result.voice_speed}x)`)
+      const voiceLabel = voiceProviderOptions.find((option) => option.value === voiceProvider)?.label || voiceId
+      setStatus(`Đã tạo voice và fit frame bằng Whisper-1 (${voiceLabel}, ${voiceSpeed}x)`)
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không tạo được voice')
     } finally {
@@ -482,63 +548,96 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
 
   return (
     <div className="workspace-page">
-      <div className="workspace-header">
-        <div>
-          <h1 className="workspace-title">{selectedProject?.title || 'Generate Video · Video Detail'}</h1>
-          <p className="workspace-subtitle">
-            {selectedProject
-              ? `Project ${selectedProject.id.slice(0, 8)} · ${selectedProject.status || inferProjectStatus(selectedProject, story)}`
-              : 'Xử lý pipeline cho một video project từ Module 2 đến MP4 hoàn chỉnh.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={onBackToList} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700">
-            <ArrowLeft size={14} /> Danh sách
-          </button>
-          <button onClick={() => void loadInitial()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700">
-            Reload
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {steps.map((step, index) => {
-          const active = activeStep === step.id
-          return (
-            <button
-              key={step.id}
-              onClick={() => setActiveStep(step.id)}
-              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs font-bold transition ${active ? 'border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]' : 'border-slate-200 bg-white text-slate-600'}`}
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded bg-slate-100">{step.icon}</span>
-              <span>{index + 1}. {step.label}</span>
+            <div className="mb-4 flex flex-col gap-4">
+        <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-start md:justify-between">
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={onBackToList} className="icon-button shrink-0 border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+                <ArrowLeft size={16} />
+              </button>
+              <h1 className="truncate text-xl font-black text-slate-900">
+                {selectedProject?.title || 'Video Script Editor'}
+              </h1>
+              {selectedProject && (
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-800">
+                  {inferProjectStatus(selectedProject, story)}
+                </span>
+              )}
+            </div>
+            
+            {selectedProject && (
+              <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-slate-600 md:pl-12">
+                <div className="flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1">
+                  <Film size={13} className="text-slate-400" />
+                  {String(selectedProject.metadata?.format || 'NARRATED_STORY').replace('_', ' ')}
+                </div>
+                <div className="flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1">
+                  <Mic2 size={13} className="text-slate-400" />
+                  {String(selectedProject.metadata?.tone || 'Tự nhiên')}
+                </div>
+                {selectedProject.metadata?.target_duration_seconds && (
+                  <div className="flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1">
+                    <Clock size={13} className="text-slate-400" />
+                    {selectedProject.metadata.target_duration_seconds}s
+                  </div>
+                )}
+                {selectedProject.metadata?.confidence_score && (
+                   <div className="flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">
+                     <CheckCircle2 size={13} />
+                     Confidence: {selectedProject.metadata.confidence_score}%
+                   </div>
+                )}
+                <div className="ml-1 text-[11px] text-slate-400">
+                  ID: {selectedProject.id.slice(0, 8)}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={() => void loadInitial()} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 shadow-sm transition-all hover:bg-slate-50">
+               Reload
             </button>
-          )
-        })}
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-        {busy ? 'Đang xử lý...' : status}
-      </div>
-
-      {loadError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-          {loadError}
+          </div>
         </div>
-      ) : (
-        <ProjectHealthSummary
-          project={selectedProject}
-          story={story}
-          storyLoadError={storyLoadError}
-          totalDuration={totalDuration}
-        />
-      )}
+
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div className="flex flex-wrap items-center gap-2">
+            {steps.map((step, index) => {
+              const active = activeStep === step.id
+              return (
+                <button
+                  key={step.id}
+                  onClick={() => setActiveStep(step.id)}
+                  className={`flex h-9 items-center gap-2 rounded-md border px-3 text-xs font-bold transition-all ${active ? 'border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8] shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <span className={`flex h-5 w-5 items-center justify-center rounded ${active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`}>
+                    {step.icon}
+                  </span>
+                  <span>{index + 1}. {step.label}</span>
+                </button>
+              )
+            })}
+          </div>
+          {(busy || status) ? (
+            <div className="flex items-center rounded-md border border-slate-200 bg-white px-4 py-2 text-[12px] font-bold text-slate-700 shadow-sm">
+              {busy ? <span className="flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-blue-500"></span> Đang xử lý...</span> : status}
+            </div>
+          ) : null}
+        </div>
+
+        {loadError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            {loadError}
+          </div>
+        )}
+      </div>
 
       <div className="grid gap-4">
         {activeStep === 'plan' && (
-          <Panel title="1. Kế hoạch AI từ Module 2">
+          <Panel title="1. Story data từ AI">
             <PlanEditor
-              project={selectedProject}
+              workflow={selectedProject}
               draft={planDraft}
               saving={busy === 'save-plan'}
               onChange={setPlanDraft}
@@ -719,30 +818,30 @@ async function waitForGenerateVideoJob(
 }
 
 function ProjectHealthSummary({
-  project,
+  workflow,
   story,
   storyLoadError,
   totalDuration,
 }: {
-  project: MediaWorkflow | null
+  workflow: MediaWorkflow | null
   story: GenerateVideoStory | null
   storyLoadError: string
   totalDuration: number
 }) {
-  const artifacts = getWorkflowArtifacts(project)
-  const timeline = project?.metadata?.timeline as Record<string, any> | undefined
+  const artifacts = getWorkflowArtifacts(workflow)
+  const timeline = workflow?.metadata?.timeline as Record<string, any> | undefined
   const timelineDuration = Number(story?.timeline?.duration || timeline?.duration || totalDuration || 0)
   const savedStoryState = story
     ? 'Đã có story/timeline'
     : storyLoadError
       ? 'Chưa có story đã lưu'
       : 'Đang kiểm tra story'
-  const projectStatus = inferProjectStatus(project, story)
+  const projectStatus = inferProjectStatus(workflow, story)
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <HealthCard label="Project" value={project ? projectStatus : 'Đang tải'} tone={project ? 'blue' : 'muted'} />
-      <HealthCard label="Project sources" value={project?.sources?.length ? `${project.sources.length} source` : 'Chưa có source'} tone={project?.sources?.length ? 'green' : 'muted'} />
+      <HealthCard label="Workflow" value={workflow ? projectStatus : 'Đang tải'} tone={workflow ? 'blue' : 'muted'} />
+      <HealthCard label="Workflow sources" value={workflow?.sources?.length ? `${workflow.sources.length} source` : 'Chưa có source'} tone={workflow?.sources?.length ? 'green' : 'muted'} />
       <HealthCard label="Story data" value={savedStoryState} tone={story ? 'green' : storyLoadError ? 'amber' : 'muted'} />
       <HealthCard label="Duration / Output" value={`${timelineDuration.toFixed(2)}s · ${artifacts?.final ? 'Có MP4' : 'Chưa render'}`} tone={artifacts?.final ? 'green' : 'muted'} />
     </div>
@@ -765,21 +864,21 @@ function HealthCard({ label, value, tone }: { label: string; value: string; tone
 }
 
 function PlanEditor({
-  project,
+  workflow,
   draft,
   saving,
   onChange,
   onSave,
   onCreateStory,
 }: {
-  project: MediaWorkflow | null
+  workflow: MediaWorkflow | null
   draft: PlanDraft
   saving: boolean
   onChange: (draft: PlanDraft) => void
   onSave: () => void
   onCreateStory: () => void
 }) {
-  const parts = project?.parts || []
+  const scenes = workflow?.story_data || workflow?.draft_json?.story_data || []
   const update = (field: keyof PlanDraft, value: string) => onChange({ ...draft, [field]: value })
 
   return (
@@ -788,62 +887,106 @@ function PlanEditor({
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-base font-black text-[#0f172a]">Bản kế hoạch AI</div>
+              <div className="text-base font-black text-[#0f172a]">Story data</div>
               <div className="mt-1 text-xs font-semibold text-slate-500">
-                Dữ liệu này là đầu vào cho bước Create story trong xưởng video.
+                Đây là scene-level input để tạo video draft, voice và timeline.
               </div>
             </div>
             <span className="rounded bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-800">
-              {project?.status || 'Đang tải'}
+              {workflow?.status || 'Đang tải'}
             </span>
           </div>
 
-          <div className="grid gap-3">
-            <Field label="Tiêu đề kế hoạch">
-              <input value={draft.title} onChange={(event) => update('title', event.target.value)} className={inputClass} />
-            </Field>
-            <Field label="Góc khai thác">
-              <textarea value={draft.content_angle} onChange={(event) => update('content_angle', event.target.value)} className={`${textareaClass} h-20`} />
-            </Field>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Đối tượng mục tiêu">
-                <input value={draft.target_audience} onChange={(event) => update('target_audience', event.target.value)} className={inputClass} />
+                    <div className="grid gap-5 md:grid-cols-2">
+            {/* Left Column */}
+            <div className="flex flex-col gap-4">
+              <Field label="Tiêu đề kế hoạch">
+                <input value={draft.title} onChange={(event) => update('title', event.target.value)} className={inputClass} />
               </Field>
-              <Field label="Giọng văn">
-                <input value={draft.tone} onChange={(event) => update('tone', event.target.value)} className={inputClass} />
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Đối tượng mục tiêu">
+                  <input value={draft.target_audience} onChange={(event) => update('target_audience', event.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Giọng văn">
+                  <input value={draft.tone} onChange={(event) => update('tone', event.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Format">
+                  <input value={draft.format} onChange={(event) => update('format', event.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Risk level">
+                  <input value={draft.risk_level} onChange={(event) => update('risk_level', event.target.value)} className={inputClass} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Thời lượng mục tiêu">
+                  <input type="number" min="1" value={draft.target_duration_seconds} onChange={(event) => update('target_duration_seconds', event.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Số part đề xuất">
+                  <input type="number" min="1" value={draft.recommended_part_count} onChange={(event) => update('recommended_part_count', event.target.value)} className={inputClass} />
+                </Field>
+              </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="flex flex-col gap-4">
+              <Field label="Góc khai thác">
+                <textarea value={draft.content_angle} onChange={(event) => update('content_angle', event.target.value)} className={`${textareaClass} h-[100px]`} />
               </Field>
-              <Field label="Format">
-                <input value={draft.format} onChange={(event) => update('format', event.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Risk level">
-                <input value={draft.risk_level} onChange={(event) => update('risk_level', event.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Thời lượng mục tiêu">
-                <input type="number" min="1" value={draft.target_duration_seconds} onChange={(event) => update('target_duration_seconds', event.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Số part đề xuất">
-                <input type="number" min="1" value={draft.recommended_part_count} onChange={(event) => update('recommended_part_count', event.target.value)} className={inputClass} />
+              <Field label="AI reasoning">
+                <textarea
+                  value={draft.ai_reasoning}
+                  onChange={(event) => update('ai_reasoning', event.target.value)}
+                  className={`${textareaClass} h-[132px]`}
+                  placeholder="Mỗi dòng là một lý do/nhận xét của AI planner"
+                />
               </Field>
             </div>
-            <Field label="AI reasoning">
-              <textarea
-                value={draft.ai_reasoning}
-                onChange={(event) => update('ai_reasoning', event.target.value)}
-                className={`${textareaClass} h-28`}
-                placeholder="Mỗi dòng là một lý do/nhận xét của AI planner"
-              />
-            </Field>
-            <Field label="Production requirements JSON">
-              <textarea value={draft.production_requirements} onChange={(event) => update('production_requirements', event.target.value)} className={`${textareaClass} h-36 font-mono text-xs`} />
-            </Field>
+            
+            {/* Full Width Bottom */}
+            <div className="col-span-1 md:col-span-2 rounded-lg border border-slate-200 bg-white p-4">
+              <div className="mb-3 text-[11px] font-black uppercase text-slate-500">Production Requirements</div>
+              <div className="flex flex-wrap gap-4">
+                {(() => {
+                  try {
+                    const reqs = typeof draft.production_requirements === 'string' 
+                      ? JSON.parse(draft.production_requirements || '{}')
+                      : draft.production_requirements || {};
+                      
+                    return [
+                      { key: 'requires_voice', label: 'Cần Voice AI' },
+                      { key: 'requires_subtitles', label: 'Cần Subtitles' },
+                      { key: 'requires_background_media', label: 'Cần Background Media' },
+                      { key: 'requires_character_consistency', label: 'Nhất quán nhân vật' }
+                    ].map(item => (
+                      <label key={item.key} className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={!!reqs[item.key]} 
+                          onChange={(e) => {
+                            const updated = { ...reqs, [item.key]: e.target.checked }
+                            update('production_requirements', JSON.stringify(updated, null, 2))
+                          }}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        {item.label}
+                      </label>
+                    ))
+                  } catch (e) {
+                    return <span className="text-sm text-red-500">Lỗi JSON: {(e).message}</span>
+                  }
+                })()}
+              </div>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
-            <button disabled={saving || !project} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+            <button disabled={saving || !workflow} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
               <Save size={14} /> {saving ? 'Đang lưu...' : 'Lưu kế hoạch'}
             </button>
-            <button disabled={saving || !project} onClick={onCreateStory} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-              <Wand2 size={14} /> Tạo story từ plan này
+            <button disabled={saving || !workflow} onClick={onCreateStory} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <Wand2 size={14} /> Tạo video draft từ story_data
             </button>
           </div>
         </div>
@@ -851,35 +994,35 @@ function PlanEditor({
 
       <div className="grid content-start gap-4">
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-sm font-black text-[#0f172a]">Script parts từ AI</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">{parts.length} part trong workflow</div>
+          <div className="text-sm font-black text-[#0f172a]">Scenes</div>
+          <div className="mt-1 text-xs font-semibold text-slate-500">{scenes.length} scene trong workflow</div>
           <div className="mt-3 grid gap-2">
-            {parts.length === 0 ? (
+            {scenes.length === 0 ? (
               <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-400">
-                Chưa có part nào.
+                Chưa có scene nào.
               </div>
-            ) : parts.map((part) => {
-              const payload = part.payload || {}
-              const beats = Array.isArray(payload.main_beats) ? payload.main_beats : []
-              const hookDirection = payload.hook_direction ? String(payload.hook_direction) : ''
+            ) : scenes.map((scene, index) => {
+              const voiceText = scene.voice_text || scene.subtitle || ''
               return (
-                <div key={part.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div key={`${scene.image || 'scene'}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="font-bold text-[#0f172a]">{part.part_number}. {part.title}</div>
-                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">{part.status}</span>
+                    <div className="font-bold text-[#0f172a]">Scene {index + 1}</div>
+                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">{scene.duration}s</span>
                   </div>
-                  {hookDirection ? <div className="mt-2 text-xs leading-5 text-slate-700"><b>Hook:</b> {hookDirection}</div> : null}
-                  {beats.length > 0 && (
-                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">
-                      {beats.slice(0, 3).map((beat, index) => <li key={index}>{String(beat)}</li>)}
-                    </ul>
-                  )}
+                  {scene.subtitle ? <div className="mt-2 text-xs leading-5 text-slate-700"><b>Sub:</b> {scene.subtitle}</div> : null}
+                  {voiceText ? <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700"><b>Voice:</b> {voiceText}</div> : null}
+                  {scene.image ? <div className="mt-2 truncate text-xs leading-5 text-emerald-700"><b>Image:</b> {scene.image}</div> : null}
+                  <div className="mt-2 text-xs leading-5 text-slate-500"><b>Effect:</b> {scene.effect || 'slow-zoom'} · {scene.fit || 'cover'}</div>
                 </div>
               )
             })}
           </div>
         </div>
-        <SourceContentPreview source={(project?.source_content || project?.metadata?.source_content || project?.metadata || {}) as Record<string, any>} />
+        <SourceContentPreview source={{
+          ...((workflow?.source_content || workflow?.metadata?.source_content || workflow?.metadata || {}) as Record<string, any>),
+          title: workflow?.source_content?.title || workflow?.metadata?.source_content?.title || workflow?.title,
+          full_text: workflow?.source_content?.full_text || workflow?.metadata?.source_content?.full_text || workflow?.metadata?.content_angle || workflow?.metadata?.note || '',
+        }} />
       </div>
     </div>
   )
@@ -1066,7 +1209,7 @@ function StoryDataEditor({
             <div className="grid gap-3 md:grid-cols-3">
               <Field label="Series ID"><input value={meta.series_id || ''} onChange={(event) => updateMeta('series_id', event.target.value)} className={inputClass} /></Field>
               <Field label="Plan ID"><input value={meta.plan_id || ''} onChange={(event) => updateMeta('plan_id', event.target.value)} className={inputClass} /></Field>
-              <Field label="Project ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={inputClass} /></Field>
+              <Field label="Workflow ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={inputClass} /></Field>
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_130px]">
               <Field label="Khung hình">
@@ -1186,7 +1329,7 @@ function StoryVisualPreview({
   useEffect(() => {
     setSceneIndex(0)
     setCurrentTime(0)
-    setPlaying(Boolean(scenes.length))
+    setPlaying(false)
   }, [version, scenes.length])
 
   useEffect(() => {
@@ -1220,7 +1363,9 @@ function StoryVisualPreview({
     if (!audio) return
     if (playing) {
       audio.currentTime = Math.max(0, (currentTime >= videoDuration ? 0 : currentTime) - mainVoiceStart)
-      void audio.play().catch(() => setPlaying(false))
+      void audio.play().catch((err) => {
+        console.warn('Voice play deferred/failed:', err)
+      })
     } else {
       audio.pause()
     }
@@ -1314,10 +1459,25 @@ function StoryVisualPreview({
   }
 
   const togglePlayback = () => {
-    if (!playing && audioRef.current) {
-      audioRef.current.currentTime = Math.max(0, (currentTime >= videoDuration ? 0 : currentTime) - mainVoiceStart)
+    const nextPlaying = !playing
+    if (nextPlaying) {
+      const startPos = currentTime >= videoDuration ? 0 : currentTime
+      if (currentTime >= videoDuration) {
+        setCurrentTime(0)
+        setSceneIndex(0)
+      }
+      if (audioRef.current && audioSrc) {
+        audioRef.current.currentTime = Math.max(0, startPos - mainVoiceStart)
+        void audioRef.current.play().catch((err) => {
+          console.warn('Direct audio play failed/blocked by browser:', err)
+        })
+      }
+    } else {
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
     }
-    setPlaying((value) => !value)
+    setPlaying(nextPlaying)
   }
   const toggleTrackMute = (trackId: string) => {
     setMutedTracks((current) => ({ ...current, [trackId]: !current[trackId] }))
@@ -1821,12 +1981,53 @@ function RemotionLikeEditor({
   )
 }
 
-function FigmaIcon({ alt = '', className = '', name, size = 14 }: { alt?: string; className?: string; name: keyof typeof proCutFigmaAssets; size?: number }) {
-  return (
-    <span className={`relative inline-flex shrink-0 items-center justify-center ${className}`} style={{ width: size, height: size }}>
-      <img alt={alt} src={proCutFigmaAssets[name]} className="absolute inset-0 block h-full w-full max-w-none" />
-    </span>
-  )
+function FigmaIcon({ className = '', name, size = 14 }: { className?: string; name: keyof typeof proCutFigmaAssets; size?: number }) {
+  switch (name) {
+    case 'arrowLeft':
+      return <ArrowLeft size={size} className={className} />
+    case 'arrowUpRight':
+      return <ArrowUpRight size={size} className={className} />
+    case 'download':
+      return <Save size={size} className={className} />
+    case 'uploadCloud':
+      return <UploadCloud size={size} className={className} />
+    case 'settings':
+      return <Settings size={size} className={className} />
+    case 'settingsPanel':
+      return <SlidersHorizontal size={size} className={className} />
+    case 'monitor':
+      return <Maximize2 size={size} className={className} />
+    case 'chevronDown':
+      return <ChevronDown size={size} className={className} />
+    case 'ellipse':
+      return <Circle size={size} className={className} fill="currentColor" />
+    case 'skipBack':
+      return <SkipBack size={size} className={className} />
+    case 'rewind':
+      return <Rewind size={size} className={className} />
+    case 'play':
+      return <Play size={size} className={className} fill="currentColor" />
+    case 'fastForward':
+      return <FastForward size={size} className={className} />
+    case 'skipForward':
+      return <SkipForward size={size} className={className} />
+    case 'eye':
+      return <Eye size={size} className={className} />
+    case 'film':
+      return <Film size={size} className={className} />
+    case 'volume2':
+      return <Volume2 size={size} className={className} />
+    case 'lock':
+      return <Lock size={size} className={className} />
+    case 'type':
+      return <Type size={size} className={className} />
+    case 'music':
+      return <Music size={size} className={className} />
+    case 'plus':
+      return <Plus size={size} className={className} />
+    default:
+      return <Film size={size} className={className} />
+  }
 }
 
 function ProCutTopToolbar({
@@ -2097,8 +2298,8 @@ function ProCutMainSplit({
             <div className="flex items-center gap-4 text-[#9e9eae]">
               <button aria-label="Skip back" onClick={() => onSeek(0)}><FigmaIcon name="skipBack" size={16} /></button>
               <button aria-label="Rewind" onClick={() => onSeek(Math.max(0, currentTime - 1))}><FigmaIcon name="rewind" size={16} /></button>
-              <button aria-label={playing ? 'Pause' : 'Play'} onClick={onPlayToggle} className="flex size-9 items-center justify-center rounded-full bg-[#ff6200] text-white">
-                {playing ? <span className="text-xs font-black">II</span> : <FigmaIcon name="play" size={18} />}
+              <button aria-label={playing ? 'Pause' : 'Play'} onClick={onPlayToggle} className="flex size-9 items-center justify-center rounded-full bg-[#ff6200] text-white hover:bg-[#ea580c] transition-colors shadow">
+                {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
               </button>
               <button aria-label="Forward" onClick={() => onSeek(Math.min(videoDuration, currentTime + 1))}><FigmaIcon name="fastForward" size={16} /></button>
               <button aria-label="Skip forward" onClick={() => onSeek(videoDuration)}><FigmaIcon name="skipForward" size={16} /></button>
@@ -2247,7 +2448,8 @@ function ProCutInspector({
             >
               <option value="slow-zoom">slow-zoom</option>
               <option value="pan-right">pan-right</option>
-              <option value="shake-reveal">shake-reveal</option>
+              <option value="pan-left">pan-left</option>
+              <option value="push-in">push-in</option>
             </select>
           </label>
           <div className="flex h-[30px] items-center gap-2 rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] font-semibold text-[#f1f1f6]">
@@ -3265,10 +3467,12 @@ function sceneEffectStyle(effect: string | undefined, progress: number): React.C
     const x = -4 + value * 8
     return { transform: `scale(1.1) translateX(${x}%)`, transformOrigin: 'center center' }
   }
-  if (effect === 'shake-reveal') {
-    const shake = Math.sin(value * Math.PI * 10) * (1 - value) * 1.5
-    const rotation = -1 + value * 2 + shake
-    return { transform: `scale(1.05) rotate(${rotation}deg)`, transformOrigin: 'center center' }
+  if (effect === 'pan-left') {
+    const x = 4 - value * 8
+    return { transform: `scale(1.1) translateX(${x}%)`, transformOrigin: 'center center' }
+  }
+  if (effect === 'push-in') {
+    return { transform: `scale(${1.04 + value * 0.08})`, transformOrigin: 'center center' }
   }
   return { transform: `scale(${1 + value * 0.1})`, transformOrigin: 'center center' }
 }
@@ -3466,7 +3670,8 @@ function SceneEditor({
                 <select value={scene.effect} onChange={(event) => updateScene(index, { effect: event.target.value })} className="h-8 rounded border border-slate-200 px-2 text-xs">
                   <option value="slow-zoom">slow-zoom</option>
                   <option value="pan-right">pan-right</option>
-                  <option value="shake-reveal">shake-reveal</option>
+                  <option value="pan-left">pan-left</option>
+                  <option value="push-in">push-in</option>
                 </select>
                 <div className="grid grid-cols-[1fr_48px] gap-2">
                   <select value={getSceneMediaFit(scene)} onChange={(event) => updateScene(index, { fit: event.target.value })} className="h-8 rounded border border-slate-200 px-2 text-xs">
@@ -3750,23 +3955,23 @@ function readApiError(error: any, fallback: string) {
   const detail = error?.response?.data?.detail
   if (typeof detail === 'string' && detail.trim()) return detail
   if (Array.isArray(detail) && detail.length) return detail.map((item) => item?.msg || String(item)).join(', ')
-  if (error?.response?.status === 401) return 'Bạn cần đăng nhập lại để xem project này.'
-  if (error?.response?.status === 403) return 'Tài khoản hiện tại không có quyền xem project này.'
-  if (error?.response?.status === 404) return 'Không tìm thấy video project này hoặc project thuộc user khác.'
+  if (error?.response?.status === 401) return 'Bạn cần đăng nhập lại để xem workflow này.'
+  if (error?.response?.status === 403) return 'Tài khoản hiện tại không có quyền xem workflow này.'
+  if (error?.response?.status === 404) return 'Không tìm thấy video workflow này hoặc workflow thuộc user khác.'
   return error?.message || fallback
 }
 
-function inferProjectStatus(project: MediaWorkflow | null, story: GenerateVideoStory | null) {
-  const projectStatus = project?.status || String(project?.metadata?.project_status || '')
+function inferProjectStatus(workflow: MediaWorkflow | null, story: GenerateVideoStory | null) {
+  const projectStatus = workflow?.status || String(workflow?.metadata?.project_status || '')
   if (projectStatus) return projectStatus
-  if (getWorkflowArtifacts(project)?.final) return 'RENDERED'
+  if (getWorkflowArtifacts(workflow)?.final) return 'RENDERED'
   if (story?.audio?.voice) return 'VOICE_READY'
   if (story) return 'EDITING'
   return 'READY'
 }
 
-function inferActiveStepFromProject(project: MediaWorkflow | null, story: GenerateVideoStory | null): StepId {
-  const artifacts = getWorkflowArtifacts(project)
+function inferActiveStepFromProject(workflow: MediaWorkflow | null, story: GenerateVideoStory | null): StepId {
+  const artifacts = getWorkflowArtifacts(workflow)
   if (artifacts?.final && story) return 'video'
   if (story) {
     return 'video'
@@ -3774,10 +3979,10 @@ function inferActiveStepFromProject(project: MediaWorkflow | null, story: Genera
   return 'story'
 }
 
-function getWorkflowArtifacts(project: MediaWorkflow | null) {
-  const finalArtifact = project?.artifacts?.find((artifact) => artifact.artifact_type === 'FINAL_VIDEO' && artifact.uri)
+function getWorkflowArtifacts(workflow: MediaWorkflow | null) {
+  const finalArtifact = workflow?.artifacts?.find((artifact) => artifact.artifact_type === 'FINAL_VIDEO' && artifact.uri)
   if (finalArtifact?.uri) return { final: finalArtifact.uri }
-  const rendered = project?.rendered_video || project?.metadata?.rendered_video
+  const rendered = workflow?.rendered_video || workflow?.metadata?.rendered_video
   return rendered ? { final: String(rendered) } : null
 }
 

@@ -15,7 +15,7 @@ DEFAULT_IMAGES = [
     "assets/images/002-alien-tower.png",
     "assets/images/003-final-light.png",
 ]
-DEFAULT_EFFECTS = ["slow-zoom", "pan-right", "shake-reveal"]
+DEFAULT_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
 DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 DEFAULT_VOICE_PROVIDER = "elevenlabs"
 EDGE_TTS_NAMMINH_PROVIDER = "edge_tts_namminh"

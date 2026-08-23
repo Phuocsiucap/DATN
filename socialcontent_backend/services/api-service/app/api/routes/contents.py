@@ -3,8 +3,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import JSONB
 
-from common.db.models import ContentDuplicate, ContentItem, ContentMedia, ContentSource, Episode, ProcessingRun, Story, User
+from common.db.models import ContentItem, Story, User, KafkaTask
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
@@ -43,27 +44,14 @@ def list_contents(
     elif content_scope:
         query = query.filter(ContentItem.content_scope == content_scope.upper())
 
-    if crawl_job_id:
-        subq = (
-            db.query(ProcessingRun.content_id)
-            .filter(ProcessingRun.job_id == crawl_job_id, ProcessingRun.content_id.isnot(None))
-            .scalar_subquery()
-        )
-        query = query.filter(ContentItem.id.in_(subq))
-
     if content_type:
         query = query.filter(ContentItem.content_type == content_type.upper())
     if status:
         query = query.filter(ContentItem.status == status.upper())
     if language:
         query = query.filter(ContentItem.language == language)
-    if source_type:
-        subq_src = (
-            db.query(ContentSource.content_id)
-            .filter(ContentSource.source_type == source_type.upper())
-            .scalar_subquery()
-        )
-        query = query.filter(ContentItem.id.in_(subq_src))
+        
+    # We ignore crawl_job_id and source_type for now as they require jsonb queries that might be slow
     return query.order_by(ContentItem.created_at.desc()).limit(100).all()
 
 
@@ -90,62 +78,19 @@ def final_content_view(
     elif content_scope:
         query = query.filter(ContentItem.content_scope == content_scope.upper())
 
-    if crawl_job_id:
-        subq = (
-            db.query(ProcessingRun.content_id)
-            .filter(ProcessingRun.job_id == crawl_job_id, ProcessingRun.content_id.isnot(None))
-            .scalar_subquery()
-        )
-        query = query.filter(ContentItem.id.in_(subq))
     contents = query.order_by(ContentItem.created_at.desc()).limit(200).all()
-    content_ids = [content.id for content in contents]
-    sources = []
-    episodes = []
-    media = []
-    if content_ids:
-        sources = (
-            db.query(ContentSource)
-            .filter(ContentSource.content_id.in_(content_ids))
-            .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
-            .all()
-        )
-        episodes = (
-            db.query(Episode)
-            .filter(Episode.content_id.in_(content_ids))
-            .order_by(Episode.sequence_order.asc().nullslast(), Episode.episode_number.asc().nullslast())
-            .all()
-        )
-        media = (
-            db.query(ContentMedia)
-            .filter(ContentMedia.content_id.in_(content_ids))
-            .order_by(ContentMedia.created_at.desc())
-            .all()
-        )
-
-    source_by_content = {}
-    for source in sources:
-        source_by_content.setdefault(source.content_id, source)
-
-    media_by_content = {}
-    for item in media:
-        media_by_content.setdefault(item.content_id, [])
-        if len(media_by_content[item.content_id]) < 4:
-            media_by_content[item.content_id].append(item)
-
-    episode_by_content = {}
-    story_ids = set()
-    for episode in episodes:
-        episode_by_content.setdefault(episode.content_id, episode)
-        story_ids.add(episode.story_id)
+    
+    story_ids = {content.story_id for content in contents if content.story_id}
     stories = db.query(Story).filter(Story.id.in_(story_ids)).all() if story_ids else []
     story_by_id = {story.id: story for story in stories}
 
     normal_items = []
     series_items = []
     for content in contents:
-        source = source_by_content.get(content.id)
-        episode = episode_by_content.get(content.id)
-        story = story_by_id.get(episode.story_id) if episode else None
+        story = story_by_id.get(content.story_id) if content.story_id else None
+        sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+        primary_source = sources[0] if sources else {}
+        
         row = {
             "id": content.id,
             "content_type": content.content_type,
@@ -158,13 +103,13 @@ def final_content_view(
             "quality_score": content.quality_score,
             "created_at": content.created_at,
             "published_at": content.published_at,
-            "source_type": source.source_type if source else None,
-            "source_url": source.source_url if source else content.canonical_url,
-            "media": media_by_content.get(content.id, []),
-            "episode_id": episode.id if episode else None,
-            "episode_number": episode.episode_number if episode else None,
-            "sequence_order": episode.sequence_order if episode else None,
-            "episode_title": episode.episode_title if episode else None,
+            "source_type": primary_source.get("source_type"),
+            "source_url": primary_source.get("source_url") or content.canonical_url,
+            "media": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
+            "episode_id": None,
+            "episode_number": content.episode_order,
+            "sequence_order": content.episode_order,
+            "episode_title": None,
             "series": {
                 "id": story.id,
                 "canonical_name": story.canonical_name,
@@ -189,30 +134,10 @@ def get_content(content_id: uuid.UUID, user: User = Depends(get_current_user), d
 @router.get("/{content_id}/detail", response_model=schemas.ContentDetailResponse)
 def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     content = _get_visible_content(db, content_id, user)
-    media = db.query(ContentMedia).filter(ContentMedia.content_id == content_id).order_by(ContentMedia.created_at.desc()).all()
-    runs = db.query(ProcessingRun).filter(ProcessingRun.content_id == content_id).order_by(ProcessingRun.created_at.desc()).limit(20).all()
-    sources = db.query(ContentSource).filter(ContentSource.content_id == content_id).order_by(ContentSource.first_seen_at.desc()).all()
-
-    full_text = _load_content_full_text(sources) or content.summary
-    cleaned_sources = []
-    for s in sources:
-        meta = dict(s.metadata_json or {})
-        meta.pop("processed_document_id", None)
-        cleaned_sources.append({
-            "id": s.id,
-            "source_type": s.source_type,
-            "source_external_id": s.source_external_id,
-            "source_url": s.source_url,
-            "raw_document_id": s.raw_document_id,
-            "processed_document_id": s.processed_document_id,
-            "source_title": s.source_title,
-            "source_author": s.source_author,
-            "source_published_at": s.source_published_at,
-            "metadata_json": meta,
-            "first_seen_at": s.first_seen_at,
-            "last_seen_at": s.last_seen_at,
-        })
-
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    
+    full_text = _load_content_full_text(content.mongo_raw_id, content.mongo_normalized_id) or content.summary
+    
     return {
         "id": content.id,
         "content_type": content.content_type,
@@ -230,9 +155,9 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
         "quality_score": content.quality_score,
         "created_at": content.created_at,
         "updated_at": content.updated_at,
-        "sources": cleaned_sources,
-        "media": media,
-        "processing_runs": runs,
+        "sources": sources,
+        "media": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
+        "processing_runs": [],
     }
 
 
@@ -266,18 +191,25 @@ def reprocess_content(content_id: uuid.UUID, _: User = Depends(require_admin), d
     content = db.get(ContentItem, content_id)
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
-    run = ProcessingRun(content_id=content.id, processing_type="NORMALIZATION", status="REQUESTED", input_reference=str(content.id))
-    db.add(run)
+    
+    task = KafkaTask(
+        reference_id=str(content.id),
+        task_type="AI_NORMALIZATION",
+        status="PENDING",
+        payload_json={"content_id": str(content.id)}
+    )
+    db.add(task)
     db.commit()
+    
     publish(
         CONTENT_NORMALIZATION_REQUESTED,
         build_event(
             event_type=CONTENT_NORMALIZATION_REQUESTED,
             source="api-service",
-            payload={"content_id": str(content.id), "processing_run_id": str(run.id)},
+            payload={"content_id": str(content.id), "task_id": str(task.id)},
         ),
     )
-    return {"requested": True, "processing_run_id": run.id}
+    return {"requested": True, "processing_run_id": task.id}
 
 
 @router.post("/{content_id}/mark-duplicate")
@@ -286,16 +218,11 @@ def mark_duplicate(content_id: uuid.UUID, duplicate_content_id: uuid.UUID, _: Us
     duplicate = db.get(ContentItem, duplicate_content_id)
     if not primary or not duplicate:
         raise HTTPException(status_code=404, detail="Content not found")
-    row = ContentDuplicate(
-        primary_content_id=primary.id,
-        duplicate_content_id=duplicate.id,
-        match_type="MANUAL",
-        similarity_score=100,
-        decision="DUPLICATE",
-        decision_reason="Marked by admin",
-    )
-    db.add(row)
+        
+    duplicate.duplicate_count += 1
+    db.add(duplicate)
     db.commit()
+    
     publish(
         CONTENT_DEDUPLICATION_REQUESTED,
         build_event(
@@ -304,4 +231,4 @@ def mark_duplicate(content_id: uuid.UUID, duplicate_content_id: uuid.UUID, _: Us
             payload={"primary_content_id": str(primary.id), "duplicate_content_id": str(duplicate.id)},
         ),
     )
-    return {"marked": True, "duplicate_id": row.id}
+    return {"marked": True, "duplicate_id": duplicate.id}

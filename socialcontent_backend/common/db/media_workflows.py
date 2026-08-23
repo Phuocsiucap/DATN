@@ -13,29 +13,37 @@ from common.db.models import (
     Episode,
     WorkflowArtifact,
     WorkflowCandidate,
-    WorkflowPart,
     WorkflowRun,
     ContentSeries,
     WorkflowSource,
     SocialProfile,
     Story,
+    VideoDraft,
 )
 
 
-def sync_project_from_plan(db: Session, plan: MediaWorkflow) -> MediaWorkflow:
-    project = db.get(MediaWorkflow, plan.workflow_id) if plan.workflow_id else None
-    if not project:
-        project = _find_project(db, content_plan_id=plan.id, user_id=_profile_user_id(db, plan.profile_id), profile_id=plan.profile_id)
-    plan.workflow_id = project.id
-    project.content_plan_id = plan.id
-    project.profile_id = plan.profile_id
-    project.planning_mode = plan.planning_mode
-    project.primary_content_id = plan.primary_content_id
-    project.primary_story_id = plan.primary_story_id
-    project.title = plan.title or project.title
-    project.status = _status_from_plan(plan.status)
-    project.metadata_json = {
-        **(project.metadata_json or {}),
+DEFAULT_STORY_IMAGES = [
+    "assets/images/001-signal-room.png",
+    "assets/images/002-alien-tower.png",
+    "assets/images/003-final-light.png",
+]
+DEFAULT_STORY_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
+
+
+def sync_workflow_from_plan(db: Session, plan: MediaWorkflow) -> MediaWorkflow:
+    workflow = db.get(MediaWorkflow, plan.workflow_id) if plan.workflow_id else None
+    if not workflow:
+        workflow = _find_workflow(db, content_plan_id=plan.id, user_id=_profile_user_id(db, plan.profile_id), profile_id=plan.profile_id)
+    plan.workflow_id = workflow.id
+    workflow.content_plan_id = plan.id
+    workflow.profile_id = plan.profile_id
+    workflow.planning_mode = plan.planning_mode
+    workflow.primary_content_id = plan.primary_content_id
+    workflow.primary_story_id = plan.primary_story_id
+    workflow.title = plan.title or workflow.title
+    workflow.status = _status_from_plan(plan.status)
+    workflow.metadata_json = {
+        **(workflow.metadata_json or {}),
         "content_angle": plan.content_angle,
         "target_audience": plan.target_audience,
         "tone": plan.tone,
@@ -44,27 +52,25 @@ def sync_project_from_plan(db: Session, plan: MediaWorkflow) -> MediaWorkflow:
         "confidence_score": float(plan.confidence_score or 0),
         "production_requirements": plan.production_requirements or {},
     }
-    db.add(project)
+    db.add(workflow)
     db.flush()
-    return project
+    return workflow
 
 
 def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> dict[str, Any]:
     final_artifact = next((item for item in workflow.artifacts if item.artifact_type == "FINAL_VIDEO" and item.uri), None)
     source_context = _workflow_source_context(workflow, db) if db else {"source_content": None, "media": [], "images": []}
-    metadata = {
-        **(workflow.metadata_json or {}),
-        **(
-            {
-                "source_content": source_context["source_content"],
-                "media": source_context["media"],
-                "images": source_context["images"],
-            }
-            if source_context["source_content"] or source_context["media"] or source_context["images"]
-            else {}
-        ),
-    }
+    draft_json = _normalized_workflow_draft_json(workflow)
+    metadata = workflow.metadata_json or {}
     raw_meta = workflow.metadata_json or {}
+    story_data = _serialize_story_data(draft_json, workflow)
+    draft_json["story_data"] = story_data
+    story = None
+    if db and getattr(workflow, "video_draft_id", None):
+        draft_obj = db.get(VideoDraft, workflow.video_draft_id)
+        if draft_obj and isinstance(draft_obj.draft_json, dict):
+            story = draft_obj.draft_json
+
     return {
         "id": str(workflow.id),
         "user_id": str(workflow.user_id),
@@ -86,10 +92,7 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         "media": source_context["media"],
         "images": source_context["images"],
         "series": serialize_content_series(workflow.series) if getattr(workflow, "series", None) else None,
-        "sources": [_serialize_source(item) for item in getattr(workflow, "sources", [])],
-        "candidates": [_serialize_candidate(item) for item in getattr(workflow, "candidates", [])],
-        "parts": [_serialize_part(item) for item in sorted(getattr(workflow, "parts", []), key=lambda part: part.part_number)],
-        "runs": [_serialize_run(item) for item in getattr(workflow, "runs", [])],
+        "story_data": story_data,
         "artifacts": [_serialize_artifact(item) for item in getattr(workflow, "artifacts", [])],
         "created_at": workflow.created_at,
         "updated_at": workflow.updated_at or workflow.created_at,
@@ -105,12 +108,13 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         "version": 1,
         "ai_reasoning": raw_meta.get("ai_reasoning") or [],
         "production_requirements": raw_meta.get("production_requirements") or {},
-        "draft_json": raw_meta.get("draft_json") or {},
+        "draft_json": draft_json,
+        "story": story,
         "approved_at": raw_meta.get("approved_at") or (workflow.updated_at if workflow.status == "APPROVED" else None),
     }
 
 # Backward compatibility alias
-serialize_project = serialize_workflow
+
 
 
 def _workflow_source_context(workflow: MediaWorkflow, db: Session) -> dict[str, Any]:
@@ -178,9 +182,11 @@ def _workflow_content_ids(workflow: MediaWorkflow, db: Session) -> list[Any]:
         add_story(candidate.story_id)
         add_episode(candidate.episode_id)
 
-    for part in workflow.parts:
-        payload = part.payload or {}
-        for ref in _source_refs_from_payload(payload):
+    draft = _workflow_draft_json(workflow)
+    for scene in (draft.get("story_data") or draft.get("scenes") or []):
+        if not isinstance(scene, dict):
+            continue
+        for ref in _source_refs_from_payload(scene):
             if not isinstance(ref, dict):
                 continue
             add(ref.get("content_id"))
@@ -212,7 +218,7 @@ def _source_refs_from_payload(payload: dict[str, Any]) -> list[Any]:
     return []
 
 
-_primary_project_content = _primary_workflow_content
+_primary_workflow_content = _primary_workflow_content
 
 
 def _serialize_source_content(content: ContentItem | None, sources: list[ContentSource], media: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -238,8 +244,6 @@ def _serialize_source_content(content: ContentItem | None, sources: list[Content
         "published_at": content.published_at.isoformat() if content.published_at else None,
         "created_at": content.created_at.isoformat() if content.created_at else None,
         "updated_at": content.updated_at.isoformat() if content.updated_at else None,
-        "sources": [_serialize_content_source(source) for source in content_sources],
-        "media": [item for item in media if item.get("content_id") == str(content.id)],
     }
 
 
@@ -274,7 +278,7 @@ def _load_content_full_text(sources: list[ContentSource]) -> str | None:
                 except Exception:
                     pass
     except Exception as exc:
-        print("Error fetching full text for content project:", exc)
+        print("Error fetching full text for content workflow:", exc)
     return None
 
 
@@ -348,22 +352,22 @@ def serialize_content_series(series: ContentSeries) -> dict[str, Any]:
     }
 
 
-def _find_project(db: Session, *, user_id, profile_id, **refs) -> MediaWorkflow:
+def _find_workflow(db: Session, *, user_id, profile_id, **refs) -> MediaWorkflow:
     for field, value in refs.items():
         if value is None:
             continue
-        project = db.query(MediaWorkflow).filter(getattr(MediaWorkflow, field) == value).first()
-        if project:
-            return project
-    project = MediaWorkflow(
+        workflow = db.query(MediaWorkflow).filter(getattr(MediaWorkflow, field) == value).first()
+        if workflow:
+            return workflow
+    workflow = MediaWorkflow(
         user_id=user_id,
         profile_id=profile_id,
-        title="Untitled project",
+        title="Untitled workflow",
         status="DRAFT",
     )
-    db.add(project)
+    db.add(workflow)
     db.flush()
-    return project
+    return workflow
 
 
 def _profile_user_id(db: Session, profile_id):
@@ -371,10 +375,10 @@ def _profile_user_id(db: Session, profile_id):
     return profile.user_id if profile else None
 
 
-def _upsert_artifact(db: Session, project: MediaWorkflow, *, artifact_type: str, uri: str, status: str) -> WorkflowArtifact:
-    artifact = db.query(WorkflowArtifact).filter(WorkflowArtifact.workflow_id == project.id, WorkflowArtifact.artifact_type == artifact_type, WorkflowArtifact.uri == uri).first()
+def _upsert_artifact(db: Session, workflow: MediaWorkflow, *, artifact_type: str, uri: str, status: str) -> WorkflowArtifact:
+    artifact = db.query(WorkflowArtifact).filter(WorkflowArtifact.workflow_id == workflow.id, WorkflowArtifact.artifact_type == artifact_type, WorkflowArtifact.uri == uri).first()
     if not artifact:
-        artifact = WorkflowArtifact(workflow_id=project.id, artifact_type=artifact_type, uri=uri)
+        artifact = WorkflowArtifact(workflow_id=workflow.id, artifact_type=artifact_type, uri=uri)
         db.add(artifact)
     artifact.status = status
     return artifact
@@ -425,26 +429,125 @@ def _serialize_candidate(candidate: WorkflowCandidate) -> dict[str, Any]:
     }
 
 
-def _serialize_part(part: WorkflowPart) -> dict[str, Any]:
-    payload = part.payload or {}
-    status = part.status
-    if status == "DRAFT" and getattr(getattr(part, "project", None), "status", None) == "APPROVED":
-        status = "APPROVED"
-    return {
-        "id": str(part.id),
-        "series_id": str(part.series_id) if part.series_id else None,
-        "part_number": part.part_number,
-        "title": part.title,
-        "status": status,
-        "target_duration_seconds": part.target_duration_seconds if part.target_duration_seconds is not None else payload.get("target_duration_seconds"),
-        "payload": payload,
+def _workflow_draft_json(workflow: MediaWorkflow) -> dict[str, Any]:
+    draft = getattr(workflow, "draft_json", None)
+    if isinstance(draft, dict):
+        return draft
+    metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
+    draft = metadata.get("draft_json")
+    return draft if isinstance(draft, dict) else {}
+
+
+def _normalized_workflow_draft_json(workflow: MediaWorkflow) -> dict[str, Any]:
+    draft = dict(_workflow_draft_json(workflow))
+    raw_scenes = draft.get("story_data")
+    if not isinstance(raw_scenes, list):
+        raw_scenes = draft.get("scenes") if isinstance(draft.get("scenes"), list) else []
+    if not raw_scenes and isinstance(draft.get("script_parts"), list):
+        raw_scenes = _legacy_script_parts_to_story_data(draft["script_parts"])
+    if not isinstance(raw_scenes, list):
+        return draft
+    normalized_scenes = []
+    for index, raw in enumerate(raw_scenes, start=1):
+        if not isinstance(raw, dict):
+            continue
+        normalized_scenes.append(_normalize_story_scene(raw, index))
+    draft["story_data"] = normalized_scenes
+    draft.pop("script_parts", None)
+    draft.pop("script_part", None)
+    draft.pop("scenes", None)
+    return draft
+
+
+def _legacy_script_parts_to_story_data(script_parts: list[Any]) -> list[dict[str, Any]]:
+    scenes: list[dict[str, Any]] = []
+    for part in script_parts:
+        if not isinstance(part, dict):
+            continue
+        voiceover = str(part.get("voiceover") or "").strip()
+        if not voiceover:
+            lines = [
+                str(part.get("hook_direction") or "").strip(),
+                *[str(item).strip() for item in part.get("main_beats") or [] if str(item).strip()],
+                str(part.get("ending_direction") or "").strip(),
+            ]
+            voiceover = " ".join(line for line in lines if line)
+        for segment in _split_scene_text(voiceover):
+            scenes.append(
+                {
+                    "duration": round(max(3.0, min(8.0, len(segment.split()) / 2.5 + 0.8)), 2),
+                    "image": DEFAULT_STORY_IMAGES[len(scenes) % len(DEFAULT_STORY_IMAGES)],
+                    "effect": DEFAULT_STORY_EFFECTS[len(scenes) % len(DEFAULT_STORY_EFFECTS)],
+                    "fit": "cover",
+                    "subtitle": _compact_scene_text(segment, 140),
+                    "voice_text": segment,
+                }
+            )
+    return scenes
+
+
+def _split_scene_text(text: str) -> list[str]:
+    import re
+
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?。！？])\s+", text) if item.strip()]
+    return sentences or ([text.strip()] if text.strip() else [])
+
+
+def _compact_scene_text(text: str, limit: int) -> str:
+    value = " ".join(str(text or "").split())
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _serialize_story_data(draft_json: dict[str, Any], workflow: MediaWorkflow) -> list[dict[str, Any]]:
+    raw_scenes = draft_json.get("story_data")
+    if not isinstance(raw_scenes, list):
+        raw_scenes = draft_json.get("scenes") if isinstance(draft_json.get("scenes"), list) else []
+
+    result: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_scenes, start=1):
+        if not isinstance(raw, dict):
+            continue
+        result.append(_normalize_story_scene(raw, index))
+    return result
+
+
+def _normalize_story_scene(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    subtitle = str(raw.get("subtitle") or raw.get("text") or raw.get("voice_text") or raw.get("voiceover") or "").strip()
+    voice_text = str(raw.get("voice_text") or raw.get("voiceover") or "").strip()
+    try:
+        duration = float(raw.get("duration") if raw.get("duration") is not None else raw.get("duration_seconds") or 4)
+    except (TypeError, ValueError):
+        duration = 4.0
+    image = str(raw.get("image") or raw.get("src") or "").strip()
+    if not image or (image.startswith("assets/images/") and image not in DEFAULT_STORY_IMAGES):
+        image = DEFAULT_STORY_IMAGES[(index - 1) % len(DEFAULT_STORY_IMAGES)]
+    scene: dict[str, Any] = {
+        "duration": round(max(3.0, min(8.0, duration)), 2),
+        "image": image,
+        "effect": DEFAULT_STORY_EFFECTS[(index - 1) % len(DEFAULT_STORY_EFFECTS)],
+        "fit": "cover" if str(raw.get("fit") or "cover").lower() == "cover" else "contain",
+        "subtitle": _compact_scene_text(subtitle, 140),
     }
+    if voice_text and voice_text != scene["subtitle"]:
+        scene["voice_text"] = voice_text
+    for key in ("media_type", "scale", "opacity", "position_x", "position_y", "rotation", "subtitle_start", "subtitle_duration"):
+        if raw.get(key) is not None:
+            scene[key] = raw[key]
+    if isinstance(raw.get("text_style"), dict):
+        scene["text_style"] = raw["text_style"]
+    if raw.get("voice_subtitle"):
+        scene["voice_subtitle"] = str(raw["voice_subtitle"])
+    if isinstance(raw.get("timing"), dict):
+        scene["timing"] = raw["timing"]
+    return scene
 
 
 def _serialize_run(run: WorkflowRun) -> dict[str, Any]:
     status = run.status
     current_stage = run.current_stage
-    if run.run_type == "PLANNING" and status == "WAITING_REVIEW" and getattr(getattr(run, "project", None), "status", None) == "APPROVED":
+    if run.run_type == "PLANNING" and status == "WAITING_REVIEW" and getattr(getattr(run, "workflow", None), "status", None) == "APPROVED":
         status = "SUCCEEDED"
         current_stage = "APPROVED"
     return {

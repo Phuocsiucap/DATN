@@ -7,7 +7,6 @@ import {
   Workflow,
   Sparkles,
   FileCheck2,
-  MonitorPlay,
   Clapperboard,
   CalendarDays,
   UsersRound,
@@ -18,8 +17,6 @@ export type Tab =
   | 'crawl'
   | 'content'
   | 'planning'
-  | 'planningReview'
-  | 'planningOutput'
   | 'generateVideo'
   | 'approvals'
   | 'schedule'
@@ -37,8 +34,6 @@ export const TAB_PATHS: Record<Tab, string> = {
   crawl: '/crawl',
   content: '/content',
   planning: '/planning',
-  planningReview: '/planning/review',
-  planningOutput: '/planning/output',
   generateVideo: '/generate-video',
   approvals: '/approvals',
   schedule: '/schedule',
@@ -78,7 +73,6 @@ const getAdminSections = (): NavSection[] => [
     title: 'CÔNG CỤ CREATOR (XEM TRƯỚC)',
     items: [
       { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
-      { key: 'planningReview', label: 'Kế hoạch Kịch bản', icon: <FileCheck2 size={15} /> },
       { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
       { key: 'approvals', label: 'Duyệt Đăng bài', icon: <FileCheck2 size={15} /> },
       { key: 'schedule', label: 'Lịch Xuất bản', icon: <CalendarDays size={15} /> },
@@ -104,8 +98,6 @@ const getCreatorSections = (): NavSection[] => [
     title: 'AI & SẢN XUẤT VIDEO',
     items: [
       { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
-      { key: 'planningReview', label: 'Kế hoạch Kịch bản', icon: <FileCheck2 size={15} /> },
-      { key: 'planningOutput', label: 'Kết quả Kế hoạch', icon: <MonitorPlay size={15} /> },
       { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
     ],
   },

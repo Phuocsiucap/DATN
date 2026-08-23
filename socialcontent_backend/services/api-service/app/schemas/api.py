@@ -15,12 +15,9 @@ from app.schemas.planning import (
     WorkflowCandidateResponse,
     WorkflowRunCreateRequest,
     WorkflowRunResponse,
-    WorkflowPartCreateRequest,
-    WorkflowPartReorderRequest,
-    WorkflowPartResponse,
-    WorkflowPartUpdateRequest,
     ContentSeriesRegenerateRequest,
     ContentSeriesUpdateRequest,
+    ContentSeriesCreateRequest,
 )
 from app.schemas.sources import CrawlSourceCreateRequest, CrawlSourceUpdateRequest
 from app.schemas.stories import EpisodeUpdateRequest, StoryResponse
@@ -64,12 +61,9 @@ __all__ = [
     "WorkflowRunCreateRequest",
     "WorkflowRunResponse",
     "RegisterRequest",
-    "WorkflowPartCreateRequest",
-    "WorkflowPartReorderRequest",
-    "WorkflowPartResponse",
-    "WorkflowPartUpdateRequest",
     "ContentSeriesRegenerateRequest",
     "ContentSeriesUpdateRequest",
+    "ContentSeriesCreateRequest",
     "QueueStatusRequest",
     "SocialPostCreateRequest",
     "SocialPostMetricCreateRequest",

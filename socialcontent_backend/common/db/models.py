@@ -505,7 +505,18 @@ class ContentSeries(Base):
     updated_at = updated_col()
 
     projects = relationship("MediaWorkflow", back_populates="series")
-    parts = relationship("WorkflowPart", back_populates="series")
+
+
+class VideoDraft(Base):
+    __tablename__ = "video_drafts"
+
+    id = uuid_pk()
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    draft_json = Column(JSONB, nullable=False, default=dict)
+    updated_at = updated_col()
+
+    user = relationship("User")
 
 
 class MediaWorkflow(Base):
@@ -520,6 +531,7 @@ class MediaWorkflow(Base):
     planning_mode = Column(String(40), nullable=True, index=True)
     primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
+    video_draft_id = Column(UUID(as_uuid=True), ForeignKey("video_drafts.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     current_stage = Column(String(80), nullable=True)
     progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
@@ -531,10 +543,11 @@ class MediaWorkflow(Base):
     feedback = relationship("PlanningFeedback", back_populates="media_workflow", cascade="all, delete-orphan")
     sources = relationship("WorkflowSource", back_populates="project", cascade="all, delete-orphan")
     candidates = relationship("WorkflowCandidate", back_populates="project", cascade="all, delete-orphan")
-    parts = relationship("WorkflowPart", back_populates="project", cascade="all, delete-orphan")
     runs = relationship("WorkflowRun", back_populates="project", cascade="all, delete-orphan")
     artifacts = relationship("WorkflowArtifact", back_populates="project", cascade="all, delete-orphan")
     series = relationship("ContentSeries", back_populates="projects")
+    video_draft = relationship("VideoDraft")
+    draft_json = Column(JSONB, nullable=False, default=dict)
 
 
 class WorkflowSource(Base):
@@ -624,24 +637,6 @@ class WorkflowCandidate(Base):
     @property
     def content_url(self) -> str | None:
         return self.content.canonical_url if getattr(self, "content", None) else None
-
-
-class WorkflowPart(Base):
-    __tablename__ = "workflow_parts"
-
-    id = uuid_pk()
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="SET NULL"), nullable=True, index=True)
-    part_number = Column(Integer, nullable=False, index=True)
-    title = Column(Text, nullable=False)
-    target_duration_seconds = Column(Integer, nullable=True)
-    status = Column(String(40), default="DRAFT", nullable=False, index=True)
-    payload = Column(JSONB, nullable=False, default=dict)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    project = relationship("MediaWorkflow", back_populates="parts")
-    series = relationship("ContentSeries", back_populates="parts")
 
 
 class WorkflowRun(Base):

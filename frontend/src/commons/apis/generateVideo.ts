@@ -162,7 +162,7 @@ const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTime
   return { version: 1, duration: cursor, video, text, audio: [] }
 }
 
-const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): GenerateVideoStory => {
+export const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): GenerateVideoStory => {
   const storyData = data.story_data || data.scenes || []
   const timeline = data.timeline || storyDataToTimeline(storyData)
   return {
@@ -171,6 +171,7 @@ const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): GenerateVide
     audio: data.audio || defaultAudio,
     timeline,
     source: data.source,
+    story_data: storyData,
   }
 }
 
@@ -247,7 +248,7 @@ export const generateVideoVoiceApi = async (story: GenerateVideoStory, voiceId?:
   const workflowId = story.meta?.workflow_id
   if (!workflowId) throw new Error('Missing workflow_id')
   const { data } = await api.post(`${basePath}/emotion-voice`, { workflow_id: workflowId, story, voice_id: voiceId, voice_speed: voiceSpeed, voice_provider: voiceProvider }, { timeout: 300000 })
-  return data as { meta?: GenerateVideoStory['meta']; audio: GenerateVideoStory['audio']; timeline?: GenerateVideoStory['timeline']; voice_id: string; voice_provider?: GenerateVideoVoiceProvider; voice_speed: number; voice_text?: string; audio_url: string; debug?: any; fit_frame_error?: string | null }
+  return data as { job: GenerateVideoJob }
 }
 
 export const fitGenerateVideoFramesApi = async (story: GenerateVideoStory) => {

@@ -123,6 +123,9 @@ function AppContent() {
   }, [])
 
   useWebSocket(Boolean(currentUser))
+  const effectiveGenerateVideoProjectId = tab === 'generateVideo'
+    ? generateVideoProjectId || getGenerateVideoProjectIdFromPath()
+    : ''
 
   const handleAuthenticated = async () => {
     setAuthLoading(true)
@@ -163,15 +166,16 @@ function AppContent() {
           onLogout={() => void handleLogout()}
           isSystemUser={isSystemUser}
         />
-        <div className="w-full max-w-[1680px] mx-auto px-4 py-4 pb-20 md:px-5 md:pb-4">
+        <div className={tab === 'generateVideo'
+          ? 'flex-1 min-h-0 w-full overflow-y-auto p-2 pb-16'
+          : 'w-full max-w-[1680px] mx-auto px-4 py-4 pb-20 md:px-5 md:pb-4'
+        }>
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
           {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
           {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
           {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
-          {tab === 'planningReview' && <PlanningPage initialStep="plans" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
-          {tab === 'planningOutput' && <PlanningPage initialStep="output" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
-          {tab === 'generateVideo' && (generateVideoProjectId ? (
-            <VideoProductionWorkspace workflowId={generateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
+          {tab === 'generateVideo' && (effectiveGenerateVideoProjectId ? (
+            <VideoProductionWorkspace workflowId={effectiveGenerateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
           ) : (
             <GenerateVideoProjectsPage onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
           ))}

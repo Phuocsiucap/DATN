@@ -127,18 +127,21 @@ def normalize_video_clips(value: Any, fps: int) -> list[dict[str, Any]]:
             continue
         start = round_to_frame(max(0.0, float(item.get("start") or 0.0)), fps)
         end = round_to_frame(max(start + 1 / max(1, fps), float(item.get("end") or start + float(item.get("duration") or 4))), fps)
-        clips.append(
-            {
-                "id": str(item.get("id") or f"video-{index + 1}"),
-                "type": str(item.get("type") or "image"),
-                "start": start,
-                "end": end,
-                "duration": round_to_frame(end - start, fps),
-                "src": item.get("src") or item.get("image") or DEFAULT_IMAGES[index % len(DEFAULT_IMAGES)],
-                "effect": item.get("effect") or DEFAULT_EFFECTS[0],
-                "fit": normalize_media_fit(item.get("fit")),
-            }
-        )
+        clip = {
+            "id": str(item.get("id") or f"video-{index + 1}"),
+            "type": str(item.get("type") or "image"),
+            "start": start,
+            "end": end,
+            "duration": round_to_frame(end - start, fps),
+            "src": item.get("src") or item.get("image") or DEFAULT_IMAGES[index % len(DEFAULT_IMAGES)],
+            "effect": item.get("effect") or DEFAULT_EFFECTS[0],
+            "fit": normalize_media_fit(item.get("fit")),
+        }
+        if item.get("scene_number") is not None:
+            clip["scene_number"] = item.get("scene_number")
+        if item.get("visual_direction"):
+            clip["visual_direction"] = str(item.get("visual_direction"))
+        clips.append(clip)
     return sorted(clips, key=lambda clip: (clip["start"], clip["end"]))
 
 
@@ -171,6 +174,8 @@ def normalize_text_clips(value: Any, fps: int) -> list[dict[str, Any]]:
         }
         if item.get("voice_text"):
             clip["voice_text"] = str(item.get("voice_text"))
+        if item.get("scene_number") is not None:
+            clip["scene_number"] = item.get("scene_number")
         if isinstance(item.get("timing"), dict):
             clip["timing"] = item["timing"]
         clips.append(clip)

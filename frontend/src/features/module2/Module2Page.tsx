@@ -3,42 +3,53 @@ import {
   BookOpen,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   FileText,
   GitBranch,
   Layers3,
   Loader2,
+  MoreVertical,
+  Pencil,
   Plus,
   RefreshCcw,
   Sparkles,
+  Trash2,
+  X,
   XCircle,
 } from 'lucide-react'
 import {
   approveContentPlanApi,
+  createContentSeriesApi,
   createMediaWorkflowFromContentSeriesApi,
   createMediaWorkflowFromCrawlApi,
   createMediaWorkflowFromSourcesApi,
   createWorkflowRunApi,
+  deleteContentSeriesApi,
   fetchAllContentPlansApi,
   fetchAllContentSeriesApi,
   fetchMediaWorkflowsApi,
   fetchWorkflowRunsApi,
   fetchSeriesConsistencyApi,
   fetchSeriesContextApi,
-  fetchWorkflowPartsApi,
   rebuildSeriesContextApi,
   regenerateContentPlanApi,
   regenerateContentSeriesApi,
   rejectContentPlanApi,
+  updateContentSeriesApi,
   type ConsistencyCheck,
   type ContentPlan,
   type ContentSeries,
   type MediaWorkflow,
   type WorkflowRun,
-  type WorkflowPart,
+  type StoryScene,
   type SeriesContextResponse,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi, fetchSocialProfileStrategyApi } from '@/commons/apis/socialProfiles'
 import { fetchCrawlJobsApi, fetchFinalContentViewApi, fetchStoriesApi, type CrawlJob, type FinalContentView, type Story } from '@/commons/apis/module1'
+import { SeriesView } from './components/SeriesView'
+import { SeriesModal } from './components/SeriesModal'
+import { ReassignSeriesModal } from './components/ReassignSeriesModal'
+import { PlanActionMenu } from './components/PlanActionMenu'
 
 type Profile = {
   id: string
@@ -60,8 +71,8 @@ type Strategy = {
 type Module2Tab = 'jobs' | 'plans' | 'series' | 'context' | 'generateVideo'
 
 const tabs: { id: Module2Tab; label: string; icon: React.ElementType }[] = [
-  { id: 'jobs', label: 'Project Runs', icon: Sparkles },
-  { id: 'plans', label: 'Plan Review', icon: FileText },
+  { id: 'jobs', label: 'Workflow Runs', icon: Sparkles },
+  { id: 'plans', label: 'Script Review', icon: FileText },
   { id: 'series', label: 'Series Builder', icon: GitBranch },
   { id: 'context', label: 'Context Manager', icon: Layers3 },
   { id: 'generateVideo', label: 'Generate Video Prep', icon: Sparkles },
@@ -93,7 +104,6 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [jobs, setJobs] = useState<WorkflowRun[]>([])
   const [plans, setPlans] = useState<ContentPlan[]>([])
   const [series, setSeries] = useState<ContentSeries[]>([])
-  const [parts, setParts] = useState<WorkflowPart[]>([])
   const [seriesContext, setSeriesContext] = useState<SeriesContextResponse | null>(null)
   const [consistency, setConsistency] = useState<ConsistencyCheck | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState('')
@@ -106,6 +116,9 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [showWizard, setShowWizard] = useState(false)
+  const [showSeriesModal, setShowSeriesModal] = useState(false)
+  const [editingSeries, setEditingSeries] = useState<ContentSeries | null>(null)
+  const [reassigningPlan, setReassigningPlan] = useState<ContentPlan | null>(null)
   const [planningMode, setPlanningMode] = useState<'AUTO' | 'SINGLE' | 'SERIES'>('SINGLE')
   const [duration, setDuration] = useState(60)
   const [partCount, setPartCount] = useState(1)
@@ -200,21 +213,17 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
 
   useEffect(() => {
     if (!selectedSeries) {
-      setParts([])
       setSeriesContext(null)
       setConsistency(null)
       return
     }
     Promise.all([
-      fetchWorkflowPartsApi(selectedSeries.id),
       fetchSeriesContextApi(selectedSeries.id),
       fetchSeriesConsistencyApi(selectedSeries.id),
-    ]).then(([nextParts, nextContext, nextConsistency]) => {
-      setParts(nextParts)
+    ]).then(([nextContext, nextConsistency]) => {
       setSeriesContext(nextContext)
       setConsistency(nextConsistency)
     }).catch(() => {
-      setParts([])
       setSeriesContext(null)
       setConsistency(null)
     })
@@ -229,6 +238,13 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     }
   }, [jobs, plans])
 
+  const selectedStoryData = useMemo(() => {
+    if (!selectedSeries) return [] as StoryScene[]
+    return workflows
+      .filter((workflow) => workflow.series_id === selectedSeries.id)
+      .flatMap((workflow) => workflow.story_data || workflow.draft_json?.story_data || [])
+  }, [selectedSeries, workflows])
+
   const createPlan = async () => {
     if (!selectedProfileId) {
       setMessage('Hãy chọn một social profile trước.')
@@ -238,7 +254,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     setMessage('')
     try {
       if (selectedStoryIds.length > 0 || selectedContentIds.length > 0) {
-        const project = await createMediaWorkflowFromSourcesApi({
+        const workflow = await createMediaWorkflowFromSourcesApi({
           profile_id: selectedProfileId,
           story_ids: selectedStoryIds,
           content_ids: selectedContentIds,
@@ -256,14 +272,14 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
         })
         await createWorkflowRunApi({
           profile_id: selectedProfileId,
-          workflow_id: project.id,
+          workflow_id: workflow.id,
           planning_mode: planningMode,
           target_duration_seconds: duration,
           preferred_part_count: planningMode === 'SERIES' ? partCount : null,
           language: 'vi',
           skip_ai_evaluation: planningMode === 'SINGLE',
           instructions: planningMode === 'SINGLE'
-            ? ['manual_direct_script: true. Bỏ qua chấm điểm và tạo kịch bản đơn lẻ từ nội dung người dùng đã chọn.', instructions].filter(Boolean).join('\n')
+            ? ['manual_direct_story_data: true. Bỏ qua chấm điểm và tạo story_data từng scene từ nội dung người dùng đã chọn.', instructions].filter(Boolean).join('\n')
             : instructions,
         })
       } else if (selectedCrawlJobId) {
@@ -288,7 +304,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
       await loadAll()
       setActiveTab('jobs')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo project run')
+      setMessage(error?.response?.data?.detail || 'Không thể tạo workflow run')
     } finally {
       setLoading(false)
     }
@@ -355,14 +371,28 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
     try {
       await createMediaWorkflowFromContentSeriesApi({
         series_id: item.id,
-        part_ids: parts.map((part) => part.id),
+        part_ids: [],
         priority: 5,
         note: 'Created from Module 2 UI',
       })
       await loadAll()
       setMessage('Đã đánh dấu sẵn sàng cho Generate Video.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo project sang Generate Video')
+      setMessage(error?.response?.data?.detail || 'Không thể tạo workflow sang Generate Video')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUpdateSeriesMapping = async (plan: ContentPlan, seriesId: string | null) => {
+    setLoading(true)
+    try {
+      const targetWorkflowId = plan.workflow_id || plan.id
+      await updateMediaWorkflowApi(targetWorkflowId, { series_id: seriesId })
+      await loadAll()
+      setMessage('Đã cập nhật Series liên kết thành công!')
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || error.message || 'Không thể cập nhật Series liên kết')
     } finally {
       setLoading(false)
     }
@@ -385,7 +415,7 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
             <p className="mt-1 text-sm text-[#64748b]">
               {isUserMode
                 ? 'Lập kế hoạch kịch bản AI, chia tập series và tạo dựng mạch truyện theo chiến lược kênh của bạn.'
-                : 'Giám sát tiến trình AI Planning toàn hệ thống, Project Datasets & Context Continuity Manager.'}
+                : 'Giám sát tiến trình AI Planning toàn hệ thống, Workflow Datasets & Context Continuity Manager.'}
             </p>
           </div>
 
@@ -434,11 +464,31 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
         ]} />
 
         <div className="mt-6">
-          {activeTab === 'jobs' && <JobsView jobs={jobs} projects={workflows} />}
-          {activeTab === 'plans' && <PlansView plans={plans} selectedPlan={selectedPlan} onSelect={setSelectedPlan} onReview={reviewPlan} onRegenerate={regeneratePlan} />}
-          {activeTab === 'series' && <SeriesView series={series} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onRegenerate={regenerateSeries} />}
-          {activeTab === 'context' && <ContextView selectedSeries={selectedSeries} parts={parts} selectedPlan={selectedPlan} context={seriesContext} consistency={consistency} onRebuild={rebuildContext} />}
-          {activeTab === 'generateVideo' && <ProductionProjectView series={series} projects={workflows} selectedSeries={selectedSeries} parts={parts} onSelect={setSelectedSeries} onMarkReady={markProjectReadyForGenerateVideo} />}
+          {activeTab === 'jobs' && <JobsView jobs={jobs} workflows={workflows} />}
+          {activeTab === 'plans' && <PlansView plans={plans} selectedPlan={selectedPlan} series={series} onSelect={setSelectedPlan} onReview={reviewPlan} onRegenerate={regeneratePlan} onUpdateSeriesMapping={handleUpdateSeriesMapping} onOpenReassignModal={(plan) => setReassigningPlan(plan)} />}
+          {activeTab === 'series' && (
+            <SeriesView
+              series={series}
+              selectedSeries={selectedSeries}
+              plans={plans}
+              parts={selectedStoryData}
+              onSelect={setSelectedSeries}
+              onRegenerate={regenerateSeries}
+              onCreateSeries={() => {
+                setEditingSeries(null)
+                setShowSeriesModal(true)
+              }}
+              onEditSeries={(item) => {
+                setEditingSeries(item)
+                setShowSeriesModal(true)
+              }}
+              onDeleteSeries={handleDeleteSeries}
+              onOpenReassignModal={(plan) => setReassigningPlan(plan)}
+              onRegeneratePlan={regeneratePlan}
+            />
+          )}
+          {activeTab === 'context' && <ContextView selectedSeries={selectedSeries} selectedPlan={selectedPlan} context={seriesContext} consistency={consistency} onRebuild={rebuildContext} />}
+          {activeTab === 'generateVideo' && <ProductionProjectView series={series} workflows={workflows} selectedSeries={selectedSeries} parts={selectedStoryData} onSelect={setSelectedSeries} onMarkReady={markProjectReadyForGenerateVideo} />}
         </div>
       </section>
 
@@ -469,11 +519,62 @@ export default function Module2Page({ workspaceMode = 'admin' }: { workspaceMode
           onSubmit={() => void createPlan()}
         />
       )}
+
+      {showSeriesModal && (
+        <SeriesModal
+          isOpen={showSeriesModal}
+          seriesToEdit={editingSeries}
+          profiles={profiles}
+          onClose={() => {
+            setShowSeriesModal(false)
+            setEditingSeries(null)
+          }}
+          onSubmit={(data) => {
+            if (editingSeries) {
+              void handleUpdateSeries(editingSeries.id, data)
+            } else {
+              void handleCreateSeries(data)
+            }
+          }}
+        />
+      )}
+
+      {reassigningPlan && (
+        <ReassignSeriesModal
+          isOpen={Boolean(reassigningPlan)}
+          plan={reassigningPlan}
+          seriesList={series}
+          onClose={() => setReassigningPlan(null)}
+          onConfirm={async (plan, seriesId) => {
+            await handleUpdateSeriesMapping(plan, seriesId)
+            setReassigningPlan(null)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function JobsView({ jobs, projects }: { jobs: WorkflowRun[]; projects: MediaWorkflow[] }) {
+function JobsView({ jobs, workflows }: { jobs: WorkflowRun[]; workflows: MediaWorkflow[] }) {
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      <Panel title="Luồng chạy Kịch bản" subtitle="Tiến trình chuyển từ nội dung gốc sang kịch bản chi tiết">
+        <TableHeader columns={['Job', 'Mode', 'Status', 'Stage', 'Progress', 'Created']} />
+        {jobs.length === 0 ? <Empty label="Chưa có luồng chạy kịch bản nào" /> : jobs.map((job) => (
+          <div key={job.id} className="grid grid-cols-[1.2fr_0.7fr_0.9fr_1.4fr_0.7fr_1fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
+            <div className="font-medium">{shortId(job.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">kịch bản {shortId(job.workflow_id)}</div></div>
+            <div className="text-[#64748b]">{job.planning_mode}</div>
+            <Badge value={job.status} />
+            <div className="text-[#64748b]">{job.current_stage}</div>
+            <div className="text-[#64748b]">{Number(job.progress_percent).toFixed(0)}%</div>
+            <div className="text-[#64748b]">{formatDate(job.created_at)}</div>
+          </div>
+        ))}
+      </Panel>
+      <Panel title="Kịch bản vừa tạo" subtitle="Danh sách các bộ kịch bản sẵn sàng lập kế hoạch">
+}
+
+function JobsView({ jobs, workflows }: { jobs: WorkflowRun[]; workflows: MediaWorkflow[] }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
       <Panel title="Luồng chạy Kịch bản" subtitle="Tiến trình chuyển từ nội dung gốc sang kịch bản chi tiết">
@@ -491,12 +592,12 @@ function JobsView({ jobs, projects }: { jobs: WorkflowRun[]; projects: MediaWork
       </Panel>
       <Panel title="Kịch bản vừa tạo" subtitle="Danh sách các bộ kịch bản sẵn sàng lập kế hoạch">
         <TableHeader columns={['Kịch bản', 'Source', 'Items']} />
-        {projects.length === 0 ? <Empty label="Chưa có kịch bản nào" /> : projects.slice(0, 8).map((project) => (
-          <div key={project.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
-            <div className="font-medium">{shortId(project.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(project.profile_id)}</div></div>
-            <Badge value={String(project.metadata?.selection_mode || 'MANUAL')} />
+        {workflows.length === 0 ? <Empty label="Chưa có kịch bản nào" /> : workflows.slice(0, 8).map((workflow) => (
+          <div key={workflow.id} className="grid grid-cols-[1fr_0.8fr_0.6fr] gap-3 border-t border-[#eef2f7] px-3 py-3 text-xs">
+            <div className="font-medium">{shortId(workflow.id)}<div className="mt-1 text-[11px] text-[#94a3b8]">{shortId(workflow.profile_id)}</div></div>
+            <Badge value={String(workflow.metadata?.selection_mode || 'MANUAL')} />
             <div className="text-[#64748b]">
-              {project.sources?.filter((source) => source.status === 'ACTIVE').length || 0}/{project.sources?.filter((source) => source.status === 'REJECTED').length || 0}
+              {workflow.sources?.filter((source) => source.status === 'ACTIVE').length || 0}/{workflow.sources?.filter((source) => source.status === 'REJECTED').length || 0}
             </div>
           </div>
         ))}
@@ -505,7 +606,25 @@ function JobsView({ jobs, projects }: { jobs: WorkflowRun[]; projects: MediaWork
   )
 }
 
-function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { plans: ContentPlan[]; selectedPlan: ContentPlan | null; onSelect: (plan: ContentPlan) => void; onReview: (plan: ContentPlan, action: 'approve' | 'reject') => void; onRegenerate: (plan: ContentPlan) => void }) {
+function PlansView({
+  plans,
+  selectedPlan,
+  series,
+  onSelect,
+  onReview,
+  onRegenerate,
+  onUpdateSeriesMapping,
+  onOpenReassignModal,
+}: {
+  plans: ContentPlan[]
+  selectedPlan: ContentPlan | null
+  series: ContentSeries[]
+  onSelect: (plan: ContentPlan) => void
+  onReview: (plan: ContentPlan, action: 'approve' | 'reject') => void
+  onRegenerate: (plan: ContentPlan) => void
+  onUpdateSeriesMapping: (plan: ContentPlan, seriesId: string | null) => void
+  onOpenReassignModal: (plan: ContentPlan) => void
+}) {
   const selectedStatus = String(selectedPlan?.status || '').toUpperCase()
   const isApproved = selectedStatus === 'APPROVED'
   const isRejected = selectedStatus === 'REJECTED'
@@ -513,21 +632,49 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_450px]">
       <Panel title="Content plans" subtitle="Structured AI output, ready for review">
-        <TableHeader columns={['Plan', 'Mode', 'Confidence', 'Status', 'Version']} />
-        {plans.length === 0 ? <Empty label="No generated plans yet" /> : plans.map((plan) => (
-          <div key={plan.id} onClick={() => onSelect(plan)} className={`grid cursor-pointer grid-cols-[2fr_0.8fr_0.8fr_0.9fr_0.6fr] gap-3 border-t border-[#eef2f7] px-4 py-4 text-xs transition-colors hover:bg-slate-50 ${selectedPlan?.id === plan.id ? 'bg-blue-50/70 border-l-2 border-l-[#2563eb]' : 'border-l-2 border-l-transparent'}`}>
-            <div className="font-bold text-[#0f172a]">{plan.title}<div className="mt-1 truncate text-[11px] font-normal text-[#64748b]">{plan.content_angle || shortId(plan.id)}</div></div>
-            <div className="text-[#64748b]">{plan.planning_mode}</div>
-            <div className="text-[#64748b]">{Number(plan.confidence_score).toFixed(0)}</div>
-            <Badge value={plan.status} />
-            <div className="text-[#64748b]">v{plan.version}</div>
-          </div>
-        ))}
+        <TableHeader columns={['Script', 'Mode', 'Confidence', 'Status', '']} />
+        {plans.length === 0 ? (
+          <Empty label="No generated plans yet" />
+        ) : (
+          plans.map((plan) => (
+            <div
+              key={plan.id}
+              onClick={() => onSelect(plan)}
+              className={`grid cursor-pointer grid-cols-[2fr_0.8fr_0.8fr_0.9fr_0.4fr] items-center gap-3 border-t border-[#eef2f7] px-4 py-3.5 text-xs transition-colors hover:bg-slate-50 ${
+                selectedPlan?.id === plan.id ? 'bg-blue-50/70 border-l-2 border-l-[#2563eb]' : 'border-l-2 border-l-transparent'
+              }`}
+            >
+              <div className="font-bold text-[#0f172a]">
+                {plan.title}
+                <div className="mt-1 truncate text-[11px] font-normal text-[#64748b]">
+                  {plan.content_angle || shortId(plan.id)}
+                </div>
+              </div>
+              <div className="text-[#64748b]">{plan.planning_mode}</div>
+              <div className="text-[#64748b]">{Number(plan.confidence_score).toFixed(0)}</div>
+              <Badge value={plan.status} />
+              <div className="flex justify-end">
+                <PlanActionMenu plan={plan} onOpenReassignModal={onOpenReassignModal} onRegenerate={onRegenerate} />
+              </div>
+            </div>
+          ))
+        )}
       </Panel>
-      
+
       <div className="rounded-xl border border-[#d9e0ea] bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-bold text-[#0f172a]">Chi tiết Kế hoạch (Plan Review)</h3>
-        {!selectedPlan ? <Empty label="Hãy chọn một bản kế hoạch để kiểm duyệt" compact /> : (
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-[#0f172a]">Chi tiết Kịch bản (Script Review)</h3>
+          {selectedPlan && (
+            <PlanActionMenu
+              plan={selectedPlan}
+              onOpenReassignModal={onOpenReassignModal}
+              onRegenerate={onRegenerate}
+            />
+          )}
+        </div>
+        {!selectedPlan ? (
+          <Empty label="Hãy chọn một kịch bản để kiểm duyệt" compact />
+        ) : (
           <div className="mt-5 space-y-6 text-sm">
             {/* Header Block */}
             <div className="rounded-lg bg-[#f8fafc] p-4 border border-[#e2e8f0]">
@@ -535,6 +682,30 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
               <div className="text-base font-bold text-[#1e293b]">{selectedPlan.title}</div>
               <div className="mt-3 text-xs font-semibold uppercase text-[#64748b] tracking-wider mb-1">Góc Độ Khai Thác (Angle)</div>
               <div className="text-sm text-[#475569] italic">"{selectedPlan.content_angle || 'Không có'}"</div>
+            </div>
+
+            {/* Series Mapping Selector */}
+            <div className="rounded-lg bg-blue-50/60 p-3.5 border border-blue-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-blue-900 tracking-wider">Series liên kết</span>
+                <span className="text-xs text-blue-700 font-semibold truncate max-w-[200px]">
+                  {series.find((s) => s.id === selectedPlan.series_id)?.title || 'Chưa thuộc Series nào'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedPlan.series_id || ''}
+                  onChange={(e) => onUpdateSeriesMapping(selectedPlan, e.target.value || null)}
+                  className="w-full rounded-md border border-[#cbd5e1] bg-white px-3 py-2 text-xs font-medium text-[#1e293b] focus:border-blue-500 focus:outline-none shadow-sm"
+                >
+                  <option value="">-- Độc lập (Không gán vào Series nào) --</option>
+                  {series.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      📌 {s.title} ({s.series_type})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Grid Stats */}
@@ -590,131 +761,13 @@ function PlansView({ plans, selectedPlan, onSelect, onReview, onRegenerate }: { 
               </button>
               <button onClick={() => onRegenerate(selectedPlan)} className="inline-flex h-10 justify-center items-center gap-2 rounded-lg border border-[#cbd5e1] bg-white px-3 text-xs font-bold text-[#475569] hover:bg-slate-50 transition-colors"><RefreshCcw size={15} /> Tạo lại</button>
             </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SeriesView({ series, selectedSeries, parts, onSelect, onRegenerate }: { series: ContentSeries[]; selectedSeries: ContentSeries | null; parts: WorkflowPart[]; onSelect: (series: ContentSeries) => void; onRegenerate: (series: ContentSeries) => void }) {
-  return (
-    <div className="space-y-6">
-      <Panel title="Danh Sách Series & Chuỗi Nội Dung" subtitle="Lựa chọn một series để xem kịch bản chi tiết từng tập">
-        <TableHeader columns={['Series Title', 'Type', 'Tập', 'Current', 'Version', 'Status']} />
-        {series.length === 0 ? <Empty label="Chưa có series nào được tạo" /> : series.map((item) => (
-          <div key={item.id} onClick={() => onSelect(item)} className={`grid cursor-pointer grid-cols-[2.5fr_0.8fr_0.6fr_0.6fr_0.9fr_0.8fr] gap-3 border-t border-[#eef2f7] px-4 py-4 text-xs transition-colors hover:bg-slate-50 ${selectedSeries?.id === item.id ? 'bg-blue-50/70 border-l-2 border-l-[#2563eb]' : 'border-l-2 border-l-transparent'}`}>
-            <div className="font-bold text-[#0f172a]">{item.title}<div className="mt-1 truncate text-[11px] font-normal text-[#64748b]">{item.description || shortId(item.id)}</div></div>
-            <div className="text-[#64748b] font-medium">{item.series_type}</div>
-            <div className="text-[#64748b] font-bold">{item.total_parts}</div>
-            <div className="text-[#64748b]">{item.current_part}</div>
-            <div className="text-[#2563eb] font-semibold">v{item.context_version}</div>
-            <Badge value={item.status} />
-          </div>
-        ))}
-      </Panel>
-
-      <Panel title="Dòng Thời Gian Các Tập (Timeline)" subtitle="Chi tiết kịch bản từng tập (Recap, Hook, Main Beats, Ending)">
-        {selectedSeries && (
-          <div className="flex flex-wrap justify-end gap-3 px-6 pb-4 border-b border-[#eef2f7]">
-            <button onClick={() => onRegenerate(selectedSeries)} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#cbd5e1] bg-white px-4 text-xs font-bold text-[#475569] hover:bg-slate-50 transition-colors"><RefreshCcw size={14} /> Làm lại Series</button>
-          </div>
-        )}
-        
-        <div className="p-6">
-          {parts.length === 0 ? (
-            <Empty label="Series hiện chưa có tập nào được phân chia" compact />
-          ) : (
-            <div className="flex flex-col gap-6 relative">
-              {/* Trục dọc nối timeline */}
-              <div className="absolute left-8 top-4 bottom-4 w-0.5 bg-[#e2e8f0] z-0"></div>
-
-              {parts.map((part) => (
-                <div key={part.id} className="relative z-10 flex gap-5">
-                  {/* Cột chỉ số tập */}
-                  <div className="flex flex-col items-center shrink-0 w-16">
-                    <div className="h-10 w-10 flex items-center justify-center rounded-full bg-[#eff6ff] border-2 border-[#2563eb] shadow-sm font-black text-[#1e40af] text-sm">
-                      T{part.part_number}
-                    </div>
-                  </div>
-
-                  {/* Cột Nội dung kịch bản */}
-                  <div className="flex-1 rounded-xl border border-[#cbd5e1] bg-white shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                    {/* Card Header */}
-                    <div className="bg-[#f8fafc] px-5 py-3 border-b border-[#cbd5e1] flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold text-[#0f172a]">{part.title}</span>
-                        <span className="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">{part.part_type}</span>
-                      </div>
-                      <Badge value={part.status} />
-                    </div>
-                    
-                    {/* Card Body */}
-                    <div className="p-5 space-y-4">
-                      {part.goal && (
-                        <p className="text-xs font-medium text-[#475569] bg-slate-50 p-2.5 rounded-lg">🎯 Mục tiêu: {part.goal}</p>
-                      )}
-
-                      {part.previous_part_recap && (
-                        <div className="border-l-4 border-amber-400 bg-amber-50/70 p-3 rounded-r-lg">
-                          <span className="font-bold text-amber-900 text-[11px] uppercase tracking-wider block mb-1">⏮ Tóm tắt tập trước (Recap)</span>
-                          <span className="text-xs text-amber-800 leading-relaxed">{part.previous_part_recap}</span>
-                        </div>
-                      )}
-
-                      <div className="grid md:grid-cols-2 gap-4">
-                        {part.hook_direction && (
-                          <div className="border-l-4 border-blue-500 bg-blue-50/70 p-3 rounded-r-lg">
-                            <span className="font-bold text-blue-900 text-[11px] uppercase tracking-wider block mb-1">🪝 Hook (3-5 giây đầu)</span>
-                            <span className="text-xs text-blue-800 leading-relaxed">{part.hook_direction}</span>
-                          </div>
-                        )}
-                        {part.ending_direction && (
-                          <div className="border-l-4 border-red-500 bg-red-50/70 p-3 rounded-r-lg">
-                            <span className="font-bold text-red-900 text-[11px] uppercase tracking-wider block mb-1">🎬 Kết tập / Lật mở (Ending)</span>
-                            <span className="text-xs text-red-800 leading-relaxed">{part.ending_direction}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {part.main_beats && part.main_beats.length > 0 && (
-                        <div className="pt-2 border-t border-slate-100">
-                          <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider block mb-2">📋 Diễn biến chính (Main Beats)</span>
-                          <ul className="grid gap-2 pl-2">
-                            {part.main_beats.map((beat, idx) => (
-                              <li key={idx} className="flex gap-2 text-xs text-slate-700">
-                                <span className="text-blue-500 font-bold shrink-0">·</span>
-                                <span className="leading-relaxed">{beat}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {part.next_part_tease && (
-                        <div className="border-l-4 border-purple-500 bg-purple-50/70 p-3 rounded-r-lg mt-2">
-                          <span className="font-bold text-purple-900 text-[11px] uppercase tracking-wider block mb-1">🔮 Gợi mở tập sau (Teaser)</span>
-                          <span className="text-xs text-purple-800 leading-relaxed">{part.next_part_tease}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Card Footer */}
-                    <div className="bg-slate-50 px-5 py-2.5 border-t border-slate-200 text-right">
-                      <span className="text-[11px] font-bold text-slate-500">⏳ Thời lượng ước tính: {part.target_duration_seconds || 60}s</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </Panel>
     </div>
   )
 }
 
-function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ContentSeries | null; parts: WorkflowPart[]; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ContentSeries) => void }) {
+function ContextView({ selectedSeries, selectedPlan, context, consistency, onRebuild }: { selectedSeries: ContentSeries | null; selectedPlan: ContentPlan | null; context: SeriesContextResponse | null; consistency: ConsistencyCheck | null; onRebuild: (series: ContentSeries) => void }) {
   const activeDoc = context?.contexts?.[0]
   const summary = activeDoc?.story_summary
   const characters = activeDoc?.characters || []
@@ -915,7 +968,7 @@ function PlanWizard(props: {
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4">
       <div className="max-h-[90vh] w-full max-w-[920px] overflow-y-auto rounded-lg border border-[#d9e0ea] bg-white p-6 shadow-xl">
         <h3 className="text-base font-bold">Create content plan</h3>
-        <p className="mt-1 text-xs text-[#64748b]">Create a profile-scoped dataset from Module 1, then start the project run.</p>
+        <p className="mt-1 text-xs text-[#64748b]">Create a profile-scoped dataset from Module 1, then start the workflow run.</p>
         <div className="mt-5 grid gap-4 lg:grid-cols-[320px_1fr]">
           <div className="space-y-4">
             <label className="block text-xs font-semibold">Profile
@@ -992,25 +1045,6 @@ function PlanWizard(props: {
             <label className="block text-xs font-semibold">Instructions
               <textarea value={props.instructions} onChange={(event) => props.setInstructions(event.target.value)} className="mt-1 min-h-[110px] w-full rounded-md border border-[#d9e0ea] px-3 py-2 text-sm font-normal outline-none" />
             </label>
-          </div>
-        </div>
-        <div className="mt-6 flex justify-end gap-2">
-          <button onClick={props.onClose} className="h-9 rounded-md border border-[#d9e0ea] px-4 text-xs font-semibold">Cancel</button>
-          <button onClick={props.onSubmit} className="inline-flex h-9 items-center gap-2 rounded-md bg-[#2563eb] px-4 text-xs font-semibold text-white"><Sparkles size={14} /> Create dataset and job</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function MetricGrid({ items }: { items: [string, number, string][] }) {
-  return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{items.map(([label, value, marker]) => <div key={label} className="h-[82px] rounded-lg border border-[#d9e0ea] bg-white p-4"><div className="flex items-center gap-2 text-[11px] font-medium text-[#64748b]"><span className={`h-2 w-2 rounded-full ${marker}`} />{label}</div><div className="mt-2 text-[22px] font-bold leading-[30px]">{value.toLocaleString('vi-VN')}</div></div>)}</div>
-}
-
-function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return <div className="overflow-hidden rounded-lg border border-[#d9e0ea] bg-white"><div className="p-5"><h3 className="text-base font-bold">{title}</h3><p className="mt-1 text-xs text-[#64748b]">{subtitle}</p></div>{children}</div>
-}
-
 function TableHeader({ columns }: { columns: string[] }) {
   return <div className="grid gap-3 rounded-t-lg bg-[#fbfcfd] px-3 py-3 text-[11px] font-semibold text-[#64748b]" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>{columns.map((column) => <div key={column}>{column}</div>)}</div>
 }
@@ -1025,25 +1059,25 @@ function Empty({ label, compact = false }: { label: string; compact?: boolean })
 
 function ProductionProjectView({
   series,
-  projects,
+  workflows,
   selectedSeries,
   parts,
   onSelect,
   onMarkReady
 }: {
   series: ContentSeries[]
-  projects: MediaWorkflow[]
+  workflows: MediaWorkflow[]
   selectedSeries: ContentSeries | null
-  parts: WorkflowPart[]
+  parts: StoryScene[]
   onSelect: (series: ContentSeries) => void
   onMarkReady: (series: ContentSeries) => void
 }) {
   const sourceMode = selectedSeries?.title?.toLowerCase().includes('bilibili') || selectedSeries?.title?.toLowerCase().includes('video') ? 'VIDEO_TRANSLATION' : 'AI_GENERATION'
 
-  const projectBySeriesId = new Map(projects.filter((project) => project.series_id).map((project) => [project.series_id, project]))
+  const projectBySeriesId = new Map(workflows.filter((workflow) => workflow.series_id).map((workflow) => [workflow.series_id, workflow]))
   const readySeries = series.filter((item) => {
-    const project = projectBySeriesId.get(item.id)
-    return Boolean(project && ['APPROVED', 'PRODUCTION_READY', 'READY', 'EDITING', 'VOICE_READY', 'RENDERING', 'RENDERED'].includes(project.status))
+    const workflow = projectBySeriesId.get(item.id)
+    return Boolean(workflow && ['APPROVED', 'PRODUCTION_READY', 'READY', 'EDITING', 'VOICE_READY', 'RENDERING', 'RENDERED'].includes(workflow.status))
   })
 
   return (
@@ -1114,22 +1148,21 @@ function ProductionProjectView({
             </div>
           </Panel>
 
-          {/* Dữ liệu Script Đầu Vào */}
-          <Panel title="Dữ Liệu Script Đầu Vào" subtitle="Bản tóm tắt Kịch Bản sẽ được nạp vào AI">
+          {/* Dữ liệu Story Data Đầu Vào */}
+          <Panel title="Story data đầu vào" subtitle="Các scene sẽ được nạp vào xưởng video">
             <div className="p-6">
               <div className="max-h-[500px] overflow-y-auto pr-2 space-y-4">
-                {parts.length === 0 ? <div className="text-sm text-[#94a3b8] text-center">Chưa có kịch bản (Script) nào được tạo</div> : parts.map((part) => (
-                  <div key={part.id} className="rounded-lg border border-slate-200 bg-white shadow-sm p-4 text-xs">
-                    <div className="font-bold text-slate-900 mb-2 text-sm">Tập {part.part_number}: {part.title}</div>
+                {parts.length === 0 ? <div className="text-sm text-[#94a3b8] text-center">Chưa có story_data nào được tạo</div> : parts.map((scene, index) => (
+                  <div key={`${scene.image || 'scene'}-${index}`} className="rounded-lg border border-slate-200 bg-white shadow-sm p-4 text-xs">
+                    <div className="font-bold text-slate-900 mb-2 text-sm">Scene {index + 1} · {scene.duration}s</div>
                     <div className="space-y-3 text-slate-700">
-                      {part.hook_direction && <div><span className="font-semibold text-slate-900 block mb-1">🔗 Hook:</span> {part.hook_direction}</div>}
+                      {scene.subtitle && <div><span className="font-semibold text-slate-900 block mb-1">Subtitle:</span> {scene.subtitle}</div>}
+                      {scene.voice_text && <div><span className="font-semibold text-slate-900 block mb-1">Voice:</span> {scene.voice_text}</div>}
+                      {scene.image && <div><span className="font-semibold text-slate-900 block mb-1">Image:</span> {scene.image}</div>}
                       <div>
-                         <span className="font-semibold text-slate-900 block mb-1">📖 Main Content ({part.main_beats?.length || 0} beats):</span>
-                         <ul className="list-disc pl-4 space-y-1">
-                           {part.main_beats?.map((beat, i) => <li key={i}>{beat}</li>)}
-                         </ul>
+                         <span className="font-semibold text-slate-900 block mb-1">Effect:</span>
+                         {scene.effect || 'slow-zoom'} · {scene.fit || 'cover'}
                       </div>
-                      {part.ending_direction && <div><span className="font-semibold text-slate-900 block mb-1">🎬 Ending:</span> {part.ending_direction}</div>}
                     </div>
                   </div>
                 ))}

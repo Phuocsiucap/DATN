@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from common.db.media_workflows import serialize_workflow
-from common.db.models import ContentItem, MediaWorkflow, CrawlJob, Episode, ProcessingRun, WorkflowArtifact, WorkflowRun, WorkflowSource, WorkflowCandidate, SocialProfile, Story, User
+from common.db.models import ContentItem, MediaWorkflow, CrawlJob, KafkaTask, SocialProfile, Story, User
 from common.db.session import get_db
 from app.api.deps import get_current_user
 
@@ -37,11 +37,11 @@ VIDEO_RUN_TYPES = {
 }
 
 
+from sqlalchemy import exists
 def _visible_in_video_workspace_filter():
     return or_(
         MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES),
-        MediaWorkflow.runs.any(WorkflowRun.run_type.in_(VIDEO_RUN_TYPES)),
-        MediaWorkflow.artifacts.any(WorkflowArtifact.artifact_type == "FINAL_VIDEO"),
+        exists().where(KafkaTask.reference_id == MediaWorkflow.id, KafkaTask.task_type.in_(VIDEO_RUN_TYPES)),
     )
 
 
@@ -57,7 +57,6 @@ class MediaWorkflowFromSourcesRequest(BaseModel):
     crawl_job_id: uuid.UUID | None = None
     content_ids: list[uuid.UUID] = Field(default_factory=list)
     story_ids: list[uuid.UUID] = Field(default_factory=list)
-    episode_ids: list[uuid.UUID] = Field(default_factory=list)
     title: str | None = None
     note: str | None = None
     selection_mode: str = "MANUAL"
@@ -76,6 +75,7 @@ class MediaWorkflowFromCrawlRequest(BaseModel):
 
 class MediaWorkflowUpdateRequest(BaseModel):
     title: str | None = None
+    series_id: uuid.UUID | None = None
     content_angle: str | None = None
     target_audience: str | None = None
     tone: str | None = None
@@ -85,6 +85,8 @@ class MediaWorkflowUpdateRequest(BaseModel):
     risk_level: str | None = None
     ai_reasoning: list | None = None
     production_requirements: dict | None = None
+    draft_json: dict | None = None
+    story_data: list | None = None
 
 
 @router.get("")
@@ -110,7 +112,7 @@ def get_media_workflow(workflow_id: uuid.UUID, user: User = Depends(get_current_
 
 @router.post("/from-content-series")
 def create_media_workflow_from_content_series(payload: MediaWorkflowFromContentSeriesRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    raise HTTPException(status_code=410, detail="Workflow-series production entrypoint was removed. Use media_workflows/workflow_parts.")
+    raise HTTPException(status_code=410, detail="Workflow-series production entrypoint was removed. Use media_workflows draft_json/story_data.")
 
 
 @router.post("/from-sources")
@@ -135,9 +137,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
     db.add(workflow)
     db.flush()
     _add_workflow_sources(db, workflow, payload, user)
-    db.flush()
-    active_count = db.query(WorkflowSource).filter(WorkflowSource.workflow_id == workflow.id, WorkflowSource.status == "ACTIVE").count()
-    if active_count == 0:
+    if not workflow.inputs_jsonb:
         raise HTTPException(status_code=400, detail="Content workflow requires at least one accessible source")
     workflow.status = "READY"
     db.commit()
@@ -156,16 +156,10 @@ def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = D
     metadata["approved_by"] = str(user.id)
     workflow.metadata_json = metadata
     workflow.status = "APPROVED"
-    for run in workflow.runs:
-        if run.run_type == "PLANNING" and run.status == "WAITING_REVIEW":
-            run.status = "SUCCEEDED"
-            run.current_stage = "APPROVED"
-            run.progress_percent = 100
-            db.add(run)
-    for part in workflow.parts:
-        if part.status == "DRAFT":
-            part.status = "APPROVED"
-            db.add(part)
+    tasks = db.query(KafkaTask).filter(KafkaTask.reference_id == workflow.id, KafkaTask.task_type == "PLANNING", KafkaTask.status == "WAITING_REVIEW").all()
+    for t in tasks:
+        t.status = "COMPLETED"
+        db.add(t)
     if payload.get("feedback_text") and not was_approved:
         from common.db.models import PlanningFeedback
         feedback = PlanningFeedback(media_workflow_id=workflow.id, feedback_type="APPROVE", feedback_text=payload["feedback_text"], created_by=user.id)
@@ -187,10 +181,6 @@ def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = De
     metadata["rejected_by"] = str(user.id)
     workflow.metadata_json = metadata
     workflow.status = "REJECTED"
-    for part in workflow.parts:
-        if part.status in {"DRAFT", "APPROVED"}:
-            part.status = "REJECTED"
-            db.add(part)
     if payload.get("feedback_text") and not was_rejected:
         from common.db.models import PlanningFeedback
         feedback = PlanningFeedback(media_workflow_id=workflow.id, feedback_type="REJECT", feedback_text=payload["feedback_text"], created_by=user.id)
@@ -201,6 +191,33 @@ def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = De
     return serialize_workflow(workflow, db)
 
 
+@router.get("/{workflow_id}/video-script")
+def get_media_workflow_video_script(workflow_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    workflow = db.get(MediaWorkflow, workflow_id)
+    if not workflow or workflow.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Content workflow not found")
+        
+    draft_json = workflow.draft_json or {}
+    metadata = workflow.metadata_json or {}
+    
+    story_data = draft_json.get("story_data") or metadata.get("story_data") or []
+    
+    return {
+        "id": str(workflow.id),
+        "title": workflow.title,
+        "status": workflow.status,
+        "production_requirements": metadata.get("production_requirements", {}),
+        "story_data": story_data,
+        # Required fields for VideoProductionWorkspace backwards compatibility
+        "video_draft_id": str(getattr(workflow, "video_draft_id", None)) if getattr(workflow, "video_draft_id", None) else None,
+        "artifacts": workflow.artifacts_jsonb if isinstance(workflow.artifacts_jsonb, list) else [],
+        "metadata": {k: v for k, v in metadata.items() if k != "story_data"},
+        "draft_json": {k: v for k, v in draft_json.items() if k != "story_data"},
+        "created_at": workflow.created_at,
+        "updated_at": workflow.updated_at
+    }
+
+
 @router.patch("/{workflow_id}")
 def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     workflow = db.get(MediaWorkflow, workflow_id)
@@ -209,8 +226,31 @@ def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRe
 
     data = payload.model_dump(exclude_unset=True)
     title = data.pop("title", None)
+    has_series_id = "series_id" in data
+    series_id = data.pop("series_id", None)
+    draft_json = data.pop("draft_json", None)
+    story_data = data.pop("story_data", None)
+
     if title is not None:
         workflow.title = title.strip() or workflow.title
+
+    if has_series_id:
+        if series_id:
+            series = db.get(ContentSeries, series_id)
+            if not series or series.user_id != user.id:
+                raise HTTPException(status_code=404, detail="Content series not found")
+            workflow.series_id = series_id
+        else:
+            workflow.series_id = None
+
+    if draft_json is not None:
+        workflow.draft_json = draft_json
+    elif story_data is not None:
+        draft = dict(workflow.draft_json or {})
+        draft["story_data"] = story_data
+        draft.pop("script_parts", None)
+        draft.pop("script_part", None)
+        workflow.draft_json = draft
 
     metadata = dict(workflow.metadata_json or {})
     for key, value in data.items():
@@ -234,7 +274,7 @@ def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, use
     min_quality = payload.min_quality_score
     query = (
         db.query(ContentItem)
-        .join(ProcessingRun, ProcessingRun.content_id == ContentItem.id)
+        .join(ProcessingRun.content_id == ContentItem.id)
         .filter(
             ProcessingRun.job_id == payload.crawl_job_id,
             ProcessingRun.processing_type == "CANONICAL_SAVE",
@@ -266,8 +306,12 @@ def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, use
     )
     db.add(workflow)
     db.flush()
+    inputs = []
     for item in items:
-        _add_workflow_source(db, workflow, "CONTENT", item.id, content_id=item.id, active=True, score=item.quality_score or 0)
+        inputs.append({"type": "CONTENT", "id": str(item.id), "score": item.quality_score or 0})
+        if not workflow.primary_content_id:
+            workflow.primary_content_id = item.id
+    workflow.inputs_jsonb = inputs
     db.commit()
     db.refresh(workflow)
     return serialize_workflow(workflow, db)
@@ -281,7 +325,7 @@ def _source_workflow_title(db: Session, payload: MediaWorkflowFromSourcesRequest
         story = db.get(Story, payload.story_ids[0])
         return story.canonical_name if story and _can_use_story(db, story, user) else None
     if payload.episode_ids:
-        episode = db.get(Episode, payload.episode_ids[0])
+        episode = db.get(payload.episode_ids[0])
         return episode.episode_title if episode and _can_use_episode(db, episode, user) else None
     return None
 
@@ -294,7 +338,7 @@ def _add_workflow_sources(db: Session, workflow: MediaWorkflow, payload: MediaWo
         story = db.get(Story, story_id)
         _add_workflow_source(db, workflow, "STORY", story_id, story_id=story_id, active=bool(story and _can_use_story(db, story, user)))
     for episode_id in payload.episode_ids:
-        episode = db.get(Episode, episode_id)
+        episode = db.get(episode_id)
         _add_workflow_source(db, workflow, "EPISODE", episode_id, episode_id=episode_id, active=bool(episode and _can_use_episode(db, episode, user)))
 
 
@@ -306,54 +350,6 @@ def _can_use_story(db: Session, story: Story, user: User) -> bool:
     if story.content_id:
         content = db.get(ContentItem, story.content_id)
         return bool(content and _can_use_content(content, user))
-    episode = db.query(Episode).filter(Episode.story_id == story.id).first()
-    return _can_use_episode(db, episode, user) if episode else user.is_system_admin
+    return user.is_system_admin
 
 
-def _can_use_episode(db: Session, episode: Episode | None, user: User) -> bool:
-    if not episode:
-        return False
-    content = db.get(ContentItem, episode.content_id)
-    return bool(content and _can_use_content(content, user))
-
-
-def _add_workflow_source(
-    db: Session,
-    workflow: MediaWorkflow,
-    source_type: str,
-    source_id: uuid.UUID,
-    *,
-    content_id=None,
-    story_id=None,
-    episode_id=None,
-    active: bool,
-    score: float = 0,
-) -> None:
-    source = WorkflowSource(
-        workflow_id=workflow.id,
-        source_type=source_type,
-        source_id=source_id,
-        content_id=content_id,
-        story_id=story_id,
-        episode_id=episode_id,
-        role="PRIMARY" if active else "REJECTED",
-        status="ACTIVE" if active else "REJECTED",
-        score=score,
-        metadata_json={},
-    )
-    db.add(source)
-    if active:
-        candidate = WorkflowCandidate(
-            workflow_id=workflow.id,
-            content_id=content_id,
-            story_id=story_id,
-            episode_id=episode_id,
-            rank_order=1,
-            score=score or 100,
-            eligible=True,
-            metadata_json={},
-        )
-        db.add(candidate)
-        if not workflow.primary_content_id and not workflow.primary_story_id:
-            workflow.primary_content_id = content_id
-            workflow.primary_story_id = story_id

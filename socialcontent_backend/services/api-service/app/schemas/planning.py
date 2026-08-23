@@ -117,35 +117,27 @@ class MediaWorkflowResponse(BaseModel):
     ai_reasoning: list[Any]
     production_requirements: dict[str, Any]
     draft_json: dict[str, Any] = Field(default_factory=dict)
+    story_data: list[dict[str, Any]] = Field(default_factory=list)
     approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
 
-class WorkflowPartResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    series_id: uuid.UUID | None = None
-    part_number: int
-    part_type: str
-    title: str
-    goal: str | None
-    hook_direction: str | None
-    ending_direction: str | None
-    previous_part_recap: str | None
-    next_part_tease: str | None
-    target_duration_seconds: int | None
-    status: str
-    source_refs: list[Any]
-    main_beats: list[Any]
-    production_notes: dict[str, Any]
-    risk_notes: list[Any]
-    created_at: datetime
-    updated_at: datetime
-
-
 class ProfileSeriesReviewSourceResponse(BaseModel):
+    id: uuid.UUID
+    content_type: str
+    canonical_title: str
+    summary: str | None = None
+    full_text: str | None = None
+    language: str
+    status: str
+    canonical_url: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    source_author: str | None = None
+    source_published_at: datetime | None = None
+    quality_score: float
+    published_at: datetime | None = None
     id: uuid.UUID
     content_type: str
     canonical_title: str
@@ -166,52 +158,27 @@ class ProfileSeriesReviewSourceResponse(BaseModel):
     media: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ContentSeriesCreateRequest(BaseModel):
+    title: str
+    description: str | None = None
+    series_type: str = "NARRATIVE"
+    profile_id: uuid.UUID | None = None
+    status: str = "ACTIVE"
+    total_parts: int = 0
+
+
 class ContentSeriesUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     series_type: str | None = None
     status: str | None = None
+    total_parts: int | None = None
+    current_part: int | None = None
+    profile_id: uuid.UUID | None = None
 
 
 class ContentSeriesRegenerateRequest(BaseModel):
     instructions: str | None = None
-
-
-class WorkflowPartCreateRequest(BaseModel):
-    part_number: int | None = None
-    part_type: str = "MIDDLE"
-    title: str
-    goal: str | None = None
-    hook_direction: str | None = None
-    ending_direction: str | None = None
-    previous_part_recap: str | None = None
-    next_part_tease: str | None = None
-    target_duration_seconds: int | None = None
-    source_refs: list[Any] = Field(default_factory=list)
-    main_beats: list[Any] = Field(default_factory=list)
-    production_notes: dict[str, Any] = Field(default_factory=dict)
-    risk_notes: list[Any] = Field(default_factory=list)
-
-
-class WorkflowPartUpdateRequest(BaseModel):
-    part_number: int | None = None
-    part_type: str | None = None
-    title: str | None = None
-    goal: str | None = None
-    hook_direction: str | None = None
-    ending_direction: str | None = None
-    previous_part_recap: str | None = None
-    next_part_tease: str | None = None
-    target_duration_seconds: int | None = None
-    status: str | None = None
-    source_refs: list[Any] | None = None
-    main_beats: list[Any] | None = None
-    production_notes: dict[str, Any] | None = None
-    risk_notes: list[Any] | None = None
-
-
-class WorkflowPartReorderRequest(BaseModel):
-    part_ids: list[uuid.UUID]
 
 
 class ContentSeriesResponse(BaseModel):
@@ -232,7 +199,7 @@ class ContentSeriesResponse(BaseModel):
 class ProfileSeriesReviewArticleResponse(BaseModel):
     plan: MediaWorkflowResponse | None = None
     source_content: ProfileSeriesReviewSourceResponse | None = None
-    parts: list[WorkflowPartResponse] = Field(default_factory=list)
+    story_data: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProfileSeriesReviewResponse(BaseModel):

@@ -10,7 +10,7 @@ from app.video.services.generate_video_timeline import normalize_story_for_proje
 
 
 def process_generate_video_script_run(workflow_run_id: uuid.UUID | str) -> None:
-    from common.db.models import WorkflowRun, MediaWorkflow
+    from common.db.models import WorkflowRun, MediaWorkflow, VideoDraft
     from common.db.session import SessionLocal
 
     db = SessionLocal()
@@ -38,7 +38,7 @@ def process_generate_video_script_run(workflow_run_id: uuid.UUID | str) -> None:
         story["meta"]["workflow_id"] = str(project.id)
         public_story = public_story_payload(story)
         public_story["project_status"] = "EDITING"
-        _upsert_project_rendered_draft(db,  project, public_story)
+        _upsert_project_rendered_draft(db, VideoDraft, project, public_story)
 
         run.status = "COMPLETED"
         run.progress_percent = 100
@@ -180,6 +180,81 @@ def process_generate_video_review_run(workflow_run_id: uuid.UUID | str) -> None:
 
 
 
+def process_generate_video_voice_run(workflow_run_id: uuid.UUID | str) -> None:
+    from common.db.models import WorkflowRun, MediaWorkflow, VideoDraft
+    from common.db.session import SessionLocal
+    from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice
+    from app.video.services.generate_video_alignment import fit_frames_with_whisper
+
+    db = SessionLocal()
+    try:
+        run = db.get(WorkflowRun, uuid.UUID(str(workflow_run_id)))
+        if not run or run.run_type != "GENERATE_VIDEO_VOICE" or run.status not in {"QUEUED", "FAILED"}:
+            return
+        project = run.project
+        metadata = run.metadata_json if isinstance(run.metadata_json, dict) else {}
+        story = metadata.get("story") or _find_project_draft_story(db, VideoDraft, project)
+        voice_id = metadata.get("voice_id")
+        voice_speed = float(metadata.get("voice_speed") or 1.0)
+        voice_provider = metadata.get("voice_provider")
+        if not isinstance(story, dict):
+            raise RuntimeError("Missing story payload for generate-video voice run")
+
+        run.status = "RUNNING"
+        run.progress_percent = 20
+        run.started_at = datetime.now(timezone.utc)
+        run.error_message = None
+        project.status = "EDITING"
+        db.add_all([run, project])
+        db.commit()
+
+        result = enhance_emotion_and_generate_voice(story, voice_id, voice_speed, voice_provider)
+        result_story = result.get("story") or {}
+        fit_error = None
+        try:
+            fit_result = fit_frames_with_whisper(result_story)
+            result_story = fit_result.get("story") or result_story
+        except Exception as error:
+            fit_error = str(error)
+
+        result_story = normalize_story_for_project(result_story)
+        result_story.setdefault("meta", {})
+        result_story["meta"]["workflow_id"] = str(project.id)
+        public_story = public_story_payload(result_story)
+        _upsert_project_rendered_draft(db, VideoDraft, project, public_story)
+
+        run.status = "COMPLETED"
+        run.progress_percent = 100
+        run.metadata_json = {
+            **metadata,
+            "story": public_story,
+            "voice_id": result.get("voice_id"),
+            "voice_provider": result.get("voice_provider"),
+            "voice_speed": result.get("voice_speed"),
+            "voice_text": result.get("voice_text"),
+            "audio_url": result.get("audio_url"),
+            "fit_frame_error": fit_error,
+        }
+        run.completed_at = datetime.now(timezone.utc)
+        project.progress_percent = 100
+        db.add_all([run, project])
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        run = db.get(WorkflowRun, uuid.UUID(str(workflow_run_id)))
+        if run:
+            run.status = "FAILED"
+            run.error_message = str(error)[-2000:]
+            run.completed_at = datetime.now(timezone.utc)
+            if run.project:
+                run.project.status = "FAILED"
+                db.add(run.project)
+            db.add(run)
+            db.commit()
+    finally:
+        db.close()
+
+
 def process_generate_video_render_run(workflow_run_id: uuid.UUID | str) -> None:
     _project_render_worker(str(workflow_run_id))
 
@@ -233,7 +308,7 @@ def _maybe_enqueue_auto_generate_video_render(db, project, story: dict[str, Any]
 
 
 def _project_render_worker(workflow_run_id: str) -> None:
-    from common.db.models import WorkflowArtifact, WorkflowRun, MediaWorkflow
+    from common.db.models import WorkflowArtifact, WorkflowRun, MediaWorkflow, VideoDraft
     from common.db.session import SessionLocal
 
     db = SessionLocal()
@@ -251,7 +326,7 @@ def _project_render_worker(workflow_run_id: str) -> None:
         db.commit()
 
         metadata = run.metadata_json if isinstance(run.metadata_json, dict) else {}
-        story = metadata.get("story") or _find_project_draft_story(db,  project)
+        story = metadata.get("story") or _find_project_draft_story(db, VideoDraft, project)
         if not isinstance(story, dict):
             raise RuntimeError("Missing story for project render run")
         story = normalize_story_for_project(story)
@@ -268,7 +343,7 @@ def _project_render_worker(workflow_run_id: str) -> None:
         if artifact_path:
             public_story.setdefault("video_artifacts", {})["final"] = artifact_path
 
-        _upsert_project_rendered_draft(db,  project, public_story)
+        _upsert_project_rendered_draft(db, VideoDraft, project, public_story)
         artifact = (
             db.query(WorkflowArtifact)
             .filter(WorkflowArtifact.workflow_id == project.id, WorkflowArtifact.artifact_type == "FINAL_VIDEO")

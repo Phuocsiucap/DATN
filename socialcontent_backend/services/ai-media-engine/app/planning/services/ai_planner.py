@@ -11,16 +11,31 @@ from common.core.llm import ChatCompletionResult, deepseek_chat_completion, open
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """Bạn là Chuyên gia Lập Kế hoạch Nội dung (Content Planner) hàng đầu cho (TikTok, Reels, Facebook).
+DEFAULT_SCENE_IMAGES = [
+    "assets/images/001-signal-room.png",
+    "assets/images/002-alien-tower.png",
+    "assets/images/003-final-light.png",
+]
+DEFAULT_SCENE_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
+
+
+SYSTEM_PROMPT = """Bạn là Chuyên gia tạo story_data sản xuất video ngắn cho TikTok, Reels, Facebook.
 Nhiệm vụ của bạn là phân tích tài khoản và nội dung đầu vào.
 BƯỚC 1 (QUAN TRỌNG NHẤT): Đánh giá xem Nội dung đầu vào có THỰC SỰ phù hợp với Chiến lược tài khoản hay không. Nếu không phù hợp hoặc vi phạm chủ đề né tránh, hãy từ chối.
-BƯỚC 2: Nếu phù hợp, hãy xây dựng một Content Plan độc đáo, kịch tính, thu hút khán giả.
+BƯỚC 2: Nếu phù hợp, hãy sinh THẲNG story_data theo từng scene để đưa vào xưởng video. Không sinh outline, không sinh script_parts, không chia bước lập kế hoạch.
 
 YÊU CẦU CHẤT LƯỢNG NỘI DUNG:
 - Không viết theo kiểu giới thiệu meta như "bài viết này nói về", "nội dung này đề cập", "hãy cùng tìm hiểu", "câu chuyện này".
-- Đi thẳng vào sự kiện/nhân vật/vấn đề cụ thể của nguồn; hook, goal và main_beats phải chứa chi tiết thật từ title, summary hoặc trích đoạn gốc.
-- Mỗi main_beats cần là một ý nội dung có thể chuyển thành lời dẫn/scene, không được là nhãn chung như "giới thiệu bối cảnh" hoặc "phát triển tình huống".
-- Nếu dữ liệu nguồn quá mỏng, vẫn phải bám vào chi tiết có sẵn và ghi rõ hạn chế trong risk_notes.
+- Đi thẳng vào sự kiện/nhân vật/vấn đề cụ thể của nguồn; mỗi scene phải chứa chi tiết thật từ title, summary hoặc trích đoạn gốc.
+- `subtitle` là lời thoại/phụ đề tiếng Việt của scene, có thể đem đi TTS ngay.
+- `voice_text` chỉ dùng khi cần lời thoại dài hơn subtitle.
+- Mỗi scene dùng đúng schema video cũ: duration, image, effect, subtitle, fit và các field media/timing optional.
+- Tổng thời lượng story_data phải khớp target_duration_seconds. Với video 60 giây phải có 12-15 scene, mỗi scene thường 4-5 giây; không được trả 3-4 scene rồi kéo duration lên 8 giây.
+- `image` chỉ được dùng default asset được cung cấp trong schema hoặc để null; không tự bịa đường dẫn asset theo nội dung.
+- `effect` chỉ dùng một trong: slow-zoom, pan-right, pan-left, push-in. Không dùng hiệu ứng rung, xoay, giật.
+- Không tạo nhãn chung chung như "giới thiệu bối cảnh", "phát triển tình huống" nếu không có chi tiết nguồn.
+- Nếu dữ liệu nguồn quá mỏng để đủ target duration, giảm `target_duration_seconds` xuống tổng thời lượng thật và ghi rõ `SOURCE_TOO_THIN` trong risk_flags; không được báo 60 giây khi story_data chỉ đủ 30 giây.
+- QUAN TRỌNG VỀ TÊN CHUỖI (series_title): `series_title` BẮT BUỘC phải là một tên chủ đề rộng, bao quát và mang tính thương hiệu lâu dài (VD: "Tiêu Điểm An Toàn Giao Thông", "Góc Nhìn Kinh Tế Số", "Bí Ẩn Lịch Sử"). KHÔNG ĐƯỢC đặt `series_title` theo tiêu đề cụ thể của đúng 1 bài viết đơn lẻ để các bài viết cùng chủ đề sau này có thể vào chung chuỗi này.
 
 Bạn BẮT BUỘC phải trả về kết quả dưới dạng cấu trúc JSON hợp lệ duy nhất, KHÔNG kèm thêm markdown fence hoặc bất kỳ giải thích nào bên ngoài.
 
@@ -28,25 +43,24 @@ Schema JSON đầu ra:
 {
   "is_suitable": true/false,
   "rejection_reason": "Nếu is_suitable=false, ghi rõ lý do từ chối (VD: Nội dung không liên quan đến thể thao). Nếu true thì để null",
-  "plan_title": "Tiêu đề kế hoạch nội dung thu hút (chỉ có khi is_suitable=true)",
+  "series_title": "Tên chuỗi/chủ đề rộng bao quát (VD: 'Tiêu Điểm Giao Thông', 'Kinh Tế Số 24/7'). BẮT BUỘC mang tính tổng quát để các bài viết khác cùng chủ đề có thể tham gia vào chuỗi này. KHÔNG ĐƯỢC lấy tiêu đề riêng của 1 bài báo làm series_title",
+  "plan_title": "Tiêu đề kịch bản/video cụ thể cho riêng bài viết/tập này",
   "content_angle": "Góc nhìn/hướng khai thác câu chuyện độc đáo (chỉ có khi is_suitable=true)",
   "tone": "Tông giọng đề xuất cho riêng nội dung này, vẫn phù hợp chiến lược tài khoản",
   "planning_mode": "SERIES hoặc SINGLE",
-  "recommended_part_count": số_lượng_phần_nguyên,
-  "target_duration_seconds": thời_lượng_mỗi_phần_giây,
+  "recommended_part_count": 1,
+  "target_duration_seconds": thời_lượng_video_giây,
   "target_series_id": "UUID chuỗi đang chạy nếu đây là bản cập nhật/tiếp nối của chuỗi đó, hoặc null nếu tạo chuỗi mới",
-  "script_part": {
-    "part_type": "OPENING/MIDDLE/ENDING",
-    "title": "Tiêu đề part/kịch bản cho bài này",
-    "goal": "Mục tiêu nội dung của bài",
-    "hook_direction": "Cách mở đầu 3-5 giây đầu",
-    "ending_direction": "Cách kết bài/kêu gọi tương tác",
-    "previous_part_recap": null,
-    "next_part_tease": null,
-    "main_beats": ["Beat 1", "Beat 2", "Beat 3"],
-    "production_notes": {"visuals": "...", "voice": "...", "editing": "..."},
-    "risk_notes": ["Lưu ý rủi ro nếu có"]
-  },
+  "story_data": [
+  {
+    "duration": 4,
+    "image": "assets/images/001-signal-room.png",
+    "effect": "slow-zoom",
+    "fit": "cover",
+    "subtitle": "Câu chữ/lời thoại tiếng Việt để hiện trên màn hình",
+    "voice_text": "Lời thoại TTS nếu khác subtitle"
+  }
+  ],
   "risk_flags": [
     {
       "type": "VIOLENCE/SENSITIVE/GENERAL",
@@ -61,21 +75,25 @@ Schema JSON đầu ra:
   "confidence_score": số_nguyên_từ_0_đến_100
 }
 
-Với nội dung dạng ARTICLE/bài báo hoặc yêu cầu SINGLE, hãy coi "script_part" là kịch bản hoàn chỉnh cho 1 bài video.
+Với nội dung dạng ARTICLE/bài báo hoặc yêu cầu SINGLE, hãy trả về story_data cho đúng 1 video.
 Chỉ đề xuất SERIES/nhiều part khi nguồn là story/playlist dài thật sự, người dùng yêu cầu rõ chia nhiều part, hoặc đang regenerate cả series lớn.
 """
 
 
-DIRECT_SCRIPT_SYSTEM_PROMPT = """Bạn là Chuyên gia viết kịch bản video cho mạng xã hội.
-Nhiệm vụ của bạn là tạo ngay Content Plan và script_part từ đúng nội dung người dùng đã chọn.
+DIRECT_SCRIPT_SYSTEM_PROMPT = """Bạn là Chuyên gia tạo story_data video cho mạng xã hội.
+Nhiệm vụ của bạn là tạo ngay story_data từng scene từ đúng nội dung người dùng đã chọn.
 Không đánh giá độ phù hợp với chiến lược tài khoản, không chấm điểm candidate, không từ chối nội dung vì topic/tone/audience.
-Nếu có chủ đề né tránh hoặc rủi ro, chỉ ghi vào risk_flags/risk_notes để người dùng biết khi biên tập.
+Nếu có chủ đề né tránh hoặc rủi ro, chỉ ghi vào risk_flags để người dùng biết khi biên tập.
 
 YÊU CẦU CHẤT LƯỢNG NỘI DUNG:
 - Không viết theo kiểu giới thiệu meta như "bài viết này nói về", "nội dung này đề cập", "hãy cùng tìm hiểu", "câu chuyện này".
-- Đi thẳng vào sự kiện/nhân vật/vấn đề cụ thể của nguồn; hook, goal và main_beats phải chứa chi tiết thật từ title, summary hoặc trích đoạn gốc.
-- Mỗi main_beats cần là một ý nội dung có thể chuyển thành lời dẫn/scene, không được là nhãn chung như "giới thiệu bối cảnh" hoặc "phát triển tình huống".
-- Nếu dữ liệu nguồn quá mỏng, vẫn phải bám vào chi tiết có sẵn và ghi rõ hạn chế trong risk_notes.
+- Mỗi scene phải có `duration`, `image`, `effect`, `subtitle`; có thể thêm `voice_text` nếu lời thoại TTS cần dài hơn subtitle.
+- Tổng thời lượng story_data phải khớp target_duration_seconds. Với video 60 giây phải có 12-15 scene, mỗi scene thường 4-5 giây; không được trả 3-4 scene rồi kéo duration lên 8 giây.
+- `image` chỉ được dùng default asset được cung cấp trong schema hoặc để null; không tự bịa đường dẫn asset theo nội dung.
+- `effect` chỉ dùng một trong: slow-zoom, pan-right, pan-left, push-in. Không dùng hiệu ứng rung, xoay, giật.
+- Không sinh outline, không sinh script_parts, không trả về beat/part.
+- Nếu dữ liệu nguồn quá mỏng để đủ target duration, giảm `target_duration_seconds` xuống tổng thời lượng thật và ghi rõ `SOURCE_TOO_THIN` trong risk_flags.
+- `series_title` BẮT BUỘC là tên chủ đề rộng bao quát cho chuỗi (VD: "Tin Tức Công Nghệ", "Hồ Sơ Vụ Án").
 
 Bạn BẮT BUỘC phải trả về JSON hợp lệ duy nhất, KHÔNG kèm markdown fence hoặc giải thích ngoài JSON.
 
@@ -83,31 +101,30 @@ Schema JSON đầu ra:
 {
   "is_suitable": true,
   "rejection_reason": null,
-  "plan_title": "Tiêu đề kế hoạch/kịch bản",
+  "series_title": "Tên chuỗi/chủ đề rộng bao quát cho Series",
+  "plan_title": "Tiêu đề kịch bản/video cụ thể",
   "content_angle": "Góc triển khai video",
   "tone": "Tông giọng đề xuất cho riêng nội dung này",
   "planning_mode": "SINGLE hoặc SERIES",
-  "recommended_part_count": số_lượng_phần_nguyên,
-  "target_duration_seconds": thời_lượng_mỗi_phần_giây,
+  "recommended_part_count": 1,
+  "target_duration_seconds": thời_lượng_video_giây,
   "target_series_id": null,
-  "script_part": {
-    "part_type": "OPENING/MIDDLE/ENDING",
-    "title": "Tiêu đề part/kịch bản",
-    "goal": "Mục tiêu nội dung",
-    "hook_direction": "Cách mở đầu 3-5 giây đầu",
-    "ending_direction": "Cách kết bài/kêu gọi tương tác",
-    "previous_part_recap": null,
-    "next_part_tease": null,
-    "main_beats": ["Beat 1", "Beat 2", "Beat 3"],
-    "production_notes": {"visuals": "...", "voice": "...", "editing": "..."},
-    "risk_notes": ["Lưu ý rủi ro nếu có"]
-  },
+  "story_data": [
+  {
+    "duration": 4,
+    "image": "assets/images/001-signal-room.png",
+    "effect": "slow-zoom",
+    "fit": "cover",
+    "subtitle": "Phụ đề/lời thoại tiếng Việt",
+    "voice_text": "Lời thoại TTS nếu khác subtitle"
+  }
+  ],
   "risk_flags": [{"type": "GENERAL", "severity": "LOW/MEDIUM/HIGH", "note": "Ghi chú rủi ro nếu có"}],
   "reasoning": ["Đã tạo trực tiếp từ nội dung người dùng chọn"],
   "confidence_score": số_nguyên_từ_0_đến_100
 }
 
-Với nội dung dạng ARTICLE hoặc yêu cầu SINGLE, hãy coi script_part là kịch bản hoàn chỉnh cho 1 video.
+Với nội dung dạng ARTICLE hoặc yêu cầu SINGLE, hãy trả về story_data cho 1 video hoàn chỉnh.
 """
 
 
@@ -143,7 +160,15 @@ class AIPlannerService:
 
         active_series_str = ""
         if active_series and not skip_ai_evaluation:
-            active_series_str = f"\nCác chuỗi nội dung đang chạy của kênh (Active Series), kèm tối đa 5 bài mới nhất của từng chuỗi:\n{json.dumps(active_series, ensure_ascii=False, indent=2)}\nChỉ điền 'target_series_id' khi nội dung đầu vào THỰC SỰ tiếp nối cùng mạch với một chuỗi đang chạy, dựa trên các bài gần nhất. Nếu chỉ cùng chủ đề rộng nhưng không cùng mạch nội dung, hãy để 'target_series_id': null để tạo chuỗi mới.\n"
+            active_series_str = f"""
+Các chuỗi nội dung đang chạy của kênh (Active Series), kèm tối đa 5 bài mới nhất của từng chuỗi:
+{json.dumps(active_series, ensure_ascii=False, indent=2)}
+
+HƯỚNG DẪN QUAN TRỌNG VỀ PHÂN LOẠI CHUỖI (SERIES):
+- Hãy kiểm tra xem bài viết/nội dung mới này có cùng chủ đề rộng, cùng lĩnh vực hoặc cùng hướng phát triển với một trong các Active Series ở trên hay không.
+- Nếu CÓ: Hãy ĐIỀN 'target_series_id' bằng UUID của series đó để xếp bài mới vào chung chuỗi.
+- Nếu KHÔNG (nội dung thuộc chủ đề mới): Hãy để 'target_series_id': null và ĐẶT 'series_title' MỚI thật bao quát để các bài viết cùng chủ đề sau này có thể tham gia vào chuỗi này.
+"""
 
         user_prompt = f"""
 Nội dung đầu vào:
@@ -154,13 +179,7 @@ Nội dung đầu vào:
 - Số tập/phần có sẵn: {episode_count}
 - Chất lượng dữ liệu: {quality:.0f}/100
 {active_series_str}
-Trích đoạn nội dung gốc để lập plan và viết script_part:
-{source_excerpt or 'Không có trích đoạn nội dung gốc, chỉ được dùng summary.'}
-
-Chiến lược tài khoản:
-- Chủ đề ưu tiên: {strategy_topics or 'Không giới hạn'}
-- Chủ đề né tránh: {avoid_topics or 'Không'}
-- Tông giọng mong muốn: {tone or 'kịch tính, hấp dẫn'}
+Trích đoạn nội dung gốc để viết kịch bản sản xuất:
 - Khán giả mục tiêu: {target_audience or 'Khán giả thích video ngắn'}
 - Mức độ rủi ro chấp nhận: {risk_level or 'medium'}
 
@@ -172,11 +191,16 @@ Yêu cầu cụ thể:
 
 Nguyên tắc:
 - Plan tổng quan có thể dùng title, summary, metadata và excerpt.
-- Nếu trả về script_part cho ARTICLE/SINGLE, script_part phải bám vào trích đoạn nội dung gốc ở trên, không chỉ dựa vào summary.
+- story_data phải bám vào trích đoạn nội dung gốc ở trên, không chỉ dựa vào summary.
+- Tổng duration của story_data phải nằm trong khoảng 90%-110% thời lượng yêu cầu.
+- Số scene tối thiểu: 30s cần 6 scene, 45s cần 9 scene, 60s cần 12 scene, 90s cần 18 scene.
+- Mỗi scene nên dài 4-5 giây. Chỉ dùng 6-8 giây khi câu thoại thật sự dài.
+- Nếu là bản tin/tổng hợp có nhiều headline, hãy tách từng headline thành nhiều scene: sự kiện, địa điểm/nhân vật, tác động, điểm cần theo dõi.
+- Không bịa đường dẫn image theo chủ đề; image để null hoặc dùng default asset trong schema.
 - Không mở đầu bằng việc giới thiệu "bài viết/nội dung/câu chuyện"; hãy bắt đầu bằng chi tiết nổi bật nhất trong nguồn.
 - main_beats phải đi sâu vào diễn biến/luận điểm/kết quả cụ thể, ưu tiên tên riêng, mốc thời gian, nguyên nhân, hệ quả, số liệu nếu nguồn có.
 - Không dùng beat chung chung như "Mở bằng bối cảnh", "Tóm tắt diễn biến", "Chốt lại ý nghĩa" nếu không kèm chi tiết nguồn.
-{"- Đây là yêu cầu tạo kịch bản trực tiếp: bỏ qua chấm điểm, bỏ qua đánh giá phù hợp, không reject nội dung." if skip_ai_evaluation else ""}
+{"- Đây là yêu cầu tạo story_data trực tiếp: bỏ qua chấm điểm, bỏ qua đánh giá phù hợp, không reject nội dung." if skip_ai_evaluation else ""}
 """
         system_prompt = DIRECT_SCRIPT_SYSTEM_PROMPT if skip_ai_evaluation else SYSTEM_PROMPT
         messages = [
@@ -294,6 +318,8 @@ Nguyên tắc:
     ) -> dict[str, Any]:
         if not payload.get("plan_title"):
             payload["plan_title"] = f"{fallback_title} - Kế hoạch video"
+        if not payload.get("series_title"):
+            payload["series_title"] = payload.get("plan_title") or fallback_title
         if not payload.get("content_angle"):
             payload["content_angle"] = f"Khai thác góc nhìn hấp dẫn từ {fallback_title}"
         payload["target_audience"] = default_target_audience or payload.get("target_audience") or "Khán giả thích video ngắn"
@@ -316,13 +342,15 @@ Nguyên tắc:
             payload["risk_flags"] = [{"type": "GENERAL", "severity": "LOW", "note": "Ghi nhận từ AI Analysis"}]
         if not payload.get("reasoning"):
             payload["reasoning"] = ["Đã qua bộ lọc AI Planner"]
-        payload["script_part"] = self._sanitize_script_part(
-            payload.get("script_part"),
+        payload["story_data"] = self._sanitize_story_data(
+            payload,
             fallback_title,
             payload.get("content_angle") or "",
             int(payload.get("target_duration_seconds") or target_duration or 60),
             source_text,
         )
+        payload.pop("script_parts", None)
+        payload.pop("script_part", None)
         return payload
 
     def _production_requirements(self, planning_mode: str | None) -> dict[str, bool]:
@@ -370,11 +398,192 @@ Nguyên tắc:
             "ending_direction": str(part.get("ending_direction") or "Kết bằng câu hỏi để kéo bình luận."),
             "previous_part_recap": part.get("previous_part_recap"),
             "next_part_tease": part.get("next_part_tease"),
+            "visual_direction": str(part.get("visual_direction") or self._visual_direction(part.get("production_notes"))),
+            "voiceover": str(part.get("voiceover") or self._voiceover_from_parts(part, main_beats)),
+            "duration_seconds": target_duration,
             "target_duration_seconds": target_duration,
             "main_beats": main_beats,
             "production_notes": production_notes,
             "risk_notes": risk_notes,
         }
+
+    def _sanitize_script_parts(
+        self,
+        payload: dict[str, Any],
+        fallback_title: str,
+        fallback_angle: str,
+        target_duration: int,
+        source_text: str | None = None,
+    ) -> list[dict[str, Any]]:
+        raw_parts = payload.get("script_parts")
+        if not isinstance(raw_parts, list) or not raw_parts:
+            raw_part = payload.get("script_part")
+            raw_parts = [raw_part] if isinstance(raw_part, dict) else []
+        if not raw_parts:
+            raw_parts = [{}]
+        result = []
+        for index, raw in enumerate(raw_parts, start=1):
+            part = self._sanitize_script_part(raw, fallback_title, fallback_angle, target_duration, source_text)
+            part["part_number"] = int((raw if isinstance(raw, dict) else {}).get("part_number") or index)
+            result.append(part)
+        return result
+
+    def _sanitize_story_data(
+        self,
+        payload: dict[str, Any],
+        fallback_title: str,
+        fallback_angle: str,
+        target_duration: int,
+        source_text: str | None = None,
+    ) -> list[dict[str, Any]]:
+        raw_scenes = payload.get("story_data")
+        if not isinstance(raw_scenes, list) or not raw_scenes:
+            raw_scenes = payload.get("scenes") if isinstance(payload.get("scenes"), list) else []
+        if not raw_scenes:
+            raw_scenes = self._scenes_from_legacy_script(payload, fallback_title, fallback_angle, target_duration, source_text)
+        if not raw_scenes:
+            raw_scenes = self._fallback_scenes_from_source(source_text or fallback_angle, fallback_title, target_duration)
+
+        scenes: list[dict[str, Any]] = []
+        for index, raw in enumerate(raw_scenes, start=1):
+            scene = self._sanitize_story_scene(raw if isinstance(raw, dict) else {}, index, target_duration)
+            if scene:
+                scenes.append(scene)
+        scenes = scenes or self._fallback_scenes_from_source(source_text or fallback_angle, fallback_title, target_duration)
+        self._validate_story_density(scenes, target_duration)
+        return scenes
+
+    def _sanitize_story_scene(self, raw: dict[str, Any], index: int, target_duration: int) -> dict[str, Any] | None:
+        voice_text = str(raw.get("voice_text") or raw.get("voiceover") or raw.get("narration") or raw.get("subtitle") or "").strip()
+        subtitle = str(raw.get("subtitle") or raw.get("text") or voice_text).strip()
+        if not voice_text and not subtitle:
+            return None
+        duration = raw.get("duration") if raw.get("duration") is not None else raw.get("duration_seconds")
+        try:
+            duration_value = float(duration)
+        except (TypeError, ValueError):
+            duration_value = max(3.0, min(8.0, len(voice_text.split()) / 2.5 + 0.8))
+        image = self._valid_scene_image(raw.get("image") or raw.get("src"), index)
+        scene = {
+            "duration": round(max(3.0, min(8.0, duration_value)), 2),
+            "image": image,
+            "effect": DEFAULT_SCENE_EFFECTS[(index - 1) % len(DEFAULT_SCENE_EFFECTS)],
+            "fit": "cover" if str(raw.get("fit") or "cover").lower() == "cover" else "contain",
+            "subtitle": self._compact_text(subtitle, 140),
+        }
+        if voice_text and voice_text != scene["subtitle"]:
+            scene["voice_text"] = voice_text
+        for key in ("media_type", "scale", "opacity", "position_x", "position_y", "rotation", "subtitle_start", "subtitle_duration"):
+            if raw.get(key) is not None:
+                scene[key] = raw[key]
+        if isinstance(raw.get("text_style"), dict):
+            scene["text_style"] = raw["text_style"]
+        if raw.get("voice_subtitle"):
+            scene["voice_subtitle"] = str(raw["voice_subtitle"])
+        if isinstance(raw.get("timing"), dict):
+            scene["timing"] = raw["timing"]
+        return scene
+
+    def _validate_story_density(self, scenes: list[dict[str, Any]], target_duration: int) -> None:
+        target = max(15, int(target_duration or 60))
+        required_count = self._target_scene_count(target)
+        total_duration = sum(float(scene.get("duration") or 0) for scene in scenes if isinstance(scene, dict))
+        if len(scenes) < required_count:
+            raise ValueError(f"AI story_data too sparse: expected at least {required_count} scenes for {target}s, got {len(scenes)}")
+        if total_duration < target * 0.9 or total_duration > target * 1.1:
+            raise ValueError(f"AI story_data duration mismatch: expected about {target}s, got {round(total_duration, 2)}s")
+
+    def _target_scene_count(self, target_duration: int) -> int:
+        return max(3, min(18, int(round(float(target_duration) / 5.0))))
+
+    def _valid_scene_image(self, value: Any, index: int) -> str:
+        image = str(value or "").strip()
+        if image.startswith("http://") or image.startswith("https://"):
+            return image
+        if image in DEFAULT_SCENE_IMAGES:
+            return image
+        return DEFAULT_SCENE_IMAGES[(index - 1) % len(DEFAULT_SCENE_IMAGES)]
+
+    def _scenes_from_legacy_script(
+        self,
+        payload: dict[str, Any],
+        fallback_title: str,
+        fallback_angle: str,
+        target_duration: int,
+        source_text: str | None,
+    ) -> list[dict[str, Any]]:
+        parts = self._sanitize_script_parts(payload, fallback_title, fallback_angle, target_duration, source_text)
+        scenes: list[dict[str, Any]] = []
+        for part in parts:
+            voiceover = str(part.get("voiceover") or "").strip()
+            if not voiceover:
+                continue
+            visual = str(part.get("visual_direction") or "").strip()
+            for segment in self._split_voiceover_segments(voiceover):
+                scenes.append(
+                    {
+                        "subtitle": segment,
+                        "voice_text": segment,
+                        "duration": max(3.0, min(8.0, len(segment.split()) / 2.5 + 0.8)),
+                    }
+                )
+        return scenes
+
+    def _fallback_scenes_from_source(self, source_text: str | None, title: str, target_duration: int) -> list[dict[str, Any]]:
+        sentences = self._source_sentences(source_text)
+        if not sentences:
+            sentences = [title]
+        max_scenes = max(3, min(12, int((target_duration or 60) / 5)))
+        picked = sentences[:max_scenes]
+        duration = max(3.0, round((target_duration or 60) / max(1, len(picked)), 2))
+        return [
+            {
+                "duration": duration,
+                "image": DEFAULT_SCENE_IMAGES[(index - 1) % len(DEFAULT_SCENE_IMAGES)],
+                "effect": DEFAULT_SCENE_EFFECTS[(index - 1) % len(DEFAULT_SCENE_EFFECTS)],
+                "fit": "cover",
+                "subtitle": self._compact_text(sentence, 140),
+                "voice_text": sentence,
+            }
+            for index, sentence in enumerate(picked, start=1)
+        ]
+
+    def _split_voiceover_segments(self, text: str) -> list[str]:
+        sentences = [item.strip() for item in re.split(r"(?<=[.!?。！？])\s+", text) if item.strip()]
+        if not sentences:
+            sentences = [text.strip()]
+        result: list[str] = []
+        for sentence in sentences:
+            if len(sentence) <= 180:
+                result.append(sentence)
+                continue
+            words = sentence.split()
+            current: list[str] = []
+            for word in words:
+                candidate = " ".join([*current, word]).strip()
+                if len(candidate) > 160 and current:
+                    result.append(" ".join(current))
+                    current = [word]
+                else:
+                    current.append(word)
+            if current:
+                result.append(" ".join(current))
+        return result
+
+    def _voiceover_from_parts(self, part: dict[str, Any], main_beats: list[str]) -> str:
+        lines = [
+            str(part.get("hook_direction") or "").strip(),
+            *main_beats,
+            str(part.get("ending_direction") or "").strip(),
+        ]
+        return "\n".join(line for line in lines if line)
+
+    def _visual_direction(self, production_notes: Any) -> str:
+        if isinstance(production_notes, dict):
+            return str(production_notes.get("visuals") or production_notes.get("visual") or "Dựng hình theo các chi tiết chính trong nguồn.")
+        if production_notes:
+            return str(production_notes)
+        return "Dựng hình theo các chi tiết chính trong nguồn."
 
     def _fallback_beats_from_source(self, source_text: str | None, title: str) -> list[str]:
         sentences = self._source_sentences(source_text)

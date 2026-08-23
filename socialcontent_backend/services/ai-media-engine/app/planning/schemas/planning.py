@@ -120,29 +120,6 @@ class MediaWorkflowResponse(BaseModel):
     updated_at: datetime
 
 
-class WorkflowPartResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    series_id: uuid.UUID
-    part_number: int
-    part_type: str
-    title: str
-    goal: str | None
-    hook_direction: str | None
-    ending_direction: str | None
-    previous_part_recap: str | None
-    next_part_tease: str | None
-    target_duration_seconds: int | None
-    status: str
-    source_refs: list[Any]
-    main_beats: list[Any]
-    production_notes: dict[str, Any]
-    risk_notes: list[Any]
-    created_at: datetime
-    updated_at: datetime
-
-
 class ContentSeriesUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -152,43 +129,6 @@ class ContentSeriesUpdateRequest(BaseModel):
 
 class ContentSeriesRegenerateRequest(BaseModel):
     instructions: str | None = None
-
-
-class WorkflowPartCreateRequest(BaseModel):
-    part_number: int | None = None
-    part_type: str = "MIDDLE"
-    title: str
-    goal: str | None = None
-    hook_direction: str | None = None
-    ending_direction: str | None = None
-    previous_part_recap: str | None = None
-    next_part_tease: str | None = None
-    target_duration_seconds: int | None = None
-    source_refs: list[Any] = Field(default_factory=list)
-    main_beats: list[Any] = Field(default_factory=list)
-    production_notes: dict[str, Any] = Field(default_factory=dict)
-    risk_notes: list[Any] = Field(default_factory=list)
-
-
-class WorkflowPartUpdateRequest(BaseModel):
-    part_number: int | None = None
-    part_type: str | None = None
-    title: str | None = None
-    goal: str | None = None
-    hook_direction: str | None = None
-    ending_direction: str | None = None
-    previous_part_recap: str | None = None
-    next_part_tease: str | None = None
-    target_duration_seconds: int | None = None
-    status: str | None = None
-    source_refs: list[Any] | None = None
-    main_beats: list[Any] | None = None
-    production_notes: dict[str, Any] | None = None
-    risk_notes: list[Any] | None = None
-
-
-class WorkflowPartReorderRequest(BaseModel):
-    part_ids: list[uuid.UUID]
 
 
 class ContentSeriesResponse(BaseModel):

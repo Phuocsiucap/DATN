@@ -74,26 +74,26 @@ export type WorkflowArtifact = {
   updated_at?: string | null
 }
 
-export type WorkflowPart = {
-  id: string
-  series_id?: string | null
-  part_number: number
-  part_type?: string | null
-  title: string
-  goal?: string | null
-  hook_direction?: string | null
-  ending_direction?: string | null
-  previous_part_recap?: string | null
-  next_part_tease?: string | null
-  target_duration_seconds?: number | null
-  status: string
-  source_refs?: unknown[]
-  main_beats?: string[]
-  production_notes?: unknown
-  risk_notes?: string[]
-  payload?: Record<string, unknown>
-  created_at?: string | null
-  updated_at?: string | null
+export type StoryScene = {
+  start?: number
+  end?: number
+  duration: number
+  image?: string | null
+  effect?: string | null
+  fit?: 'cover' | 'contain' | string | null
+  subtitle: string
+  media_type?: 'image' | 'video' | string
+  scale?: number
+  opacity?: number
+  position_x?: number
+  position_y?: number
+  rotation?: number
+  subtitle_start?: number
+  subtitle_duration?: number
+  text_style?: Record<string, unknown>
+  voice_subtitle?: string
+  voice_text?: string
+  timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number }
 }
 
 export type ContentSeries = {
@@ -134,9 +134,14 @@ export type MediaWorkflow = {
   series?: ContentSeries | null
   sources?: WorkflowSource[]
   candidates?: WorkflowCandidate[]
-  parts?: WorkflowPart[]
+  story_data?: StoryScene[]
   runs?: WorkflowRun[]
   artifacts?: WorkflowArtifact[]
+  draft_json?: {
+    title?: string
+    story_data?: StoryScene[]
+    [key: string]: unknown
+  }
   created_at: string
   updated_at?: string | null
 }
@@ -146,6 +151,8 @@ export type ContentPlan = {
   workflow_id?: string | null
   workflow_run_id?: string | null
   profile_id: string
+  series_id?: string | null
+  source_content?: ReviewSourceContent | null
   primary_content_id?: string | null
   primary_story_id?: string | null
   title: string
@@ -162,6 +169,12 @@ export type ContentPlan = {
   version: number
   ai_reasoning: string[]
   production_requirements: Record<string, unknown>
+  draft_json?: {
+    title?: string
+    story_data?: StoryScene[]
+    [key: string]: unknown
+  }
+  story_data?: StoryScene[]
   created_at: string
   updated_at: string
 }
@@ -215,7 +228,7 @@ export type ProfileSeriesReview = {
   articles: Array<{
     plan?: ContentPlan | null
     source_content?: ReviewSourceContent | null
-    parts: WorkflowPart[]
+    story_data?: StoryScene[]
   }>
 }
 
@@ -297,6 +310,12 @@ export const fetchMediaWorkflowApi = async (workflowId: string) => {
   return data as MediaWorkflow
 }
 
+export const fetchVideoScriptApi = async (workflowId: string) => {
+  const { data } = await api.get(`/media-workflows/${workflowId}/video-script`)
+  return data as any // Using any for now, could be typed as VideoScriptResponse if needed
+}
+
+
 export const updateMediaWorkflowApi = async (workflowId: string, payload: Record<string, unknown>) => {
   const { data } = await api.patch(`/media-workflows/${workflowId}`, payload)
   return data as MediaWorkflow
@@ -375,6 +394,8 @@ export const fetchAllContentPlansApi = async () => {
     id: wf.id,
     workflow_id: wf.id,
     profile_id: wf.profile_id,
+    series_id: wf.series_id || null,
+    source_content: wf.source_content || null,
     primary_content_id: wf.primary_content_id,
     primary_story_id: wf.primary_story_id,
     title: wf.title,
@@ -391,6 +412,8 @@ export const fetchAllContentPlansApi = async () => {
     version: 1,
     ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
     production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
+    draft_json: wf.draft_json || {},
+    story_data: wf.story_data || wf.draft_json?.story_data || [],
     created_at: wf.created_at,
     updated_at: wf.updated_at || wf.created_at,
   })) as ContentPlan[]
@@ -403,6 +426,8 @@ export const fetchContentPlansApi = async (profileId: string) => {
     id: wf.id,
     workflow_id: wf.id,
     profile_id: wf.profile_id,
+    series_id: wf.series_id || null,
+    source_content: wf.source_content || null,
     primary_content_id: wf.primary_content_id,
     primary_story_id: wf.primary_story_id,
     title: wf.title,
@@ -419,6 +444,8 @@ export const fetchContentPlansApi = async (profileId: string) => {
     version: 1,
     ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
     production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
+    draft_json: wf.draft_json || {},
+    story_data: wf.story_data || wf.draft_json?.story_data || [],
     created_at: wf.created_at,
     updated_at: wf.updated_at || wf.created_at,
   })) as ContentPlan[]
@@ -466,9 +493,37 @@ export const fetchProfileSeriesReviewApi = async (profileId: string) => {
   return data as ProfileSeriesReview[]
 }
 
-export const fetchWorkflowPartsApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/parts`)
-  return data as WorkflowPart[]
+export const createContentSeriesApi = async (payload: {
+  title: string
+  description?: string
+  series_type?: string
+  profile_id?: string
+  status?: string
+  total_parts?: number
+}) => {
+  const { data } = await api.post('/content-series', payload)
+  return data as ContentSeries
+}
+
+export const updateContentSeriesApi = async (
+  seriesId: string,
+  payload: {
+    title?: string
+    description?: string
+    series_type?: string
+    status?: string
+    total_parts?: number
+    current_part?: number
+    profile_id?: string
+  }
+) => {
+  const { data } = await api.patch(`/content-series/${seriesId}`, payload)
+  return data as ContentSeries
+}
+
+export const deleteContentSeriesApi = async (seriesId: string) => {
+  const { data } = await api.delete(`/content-series/${seriesId}`)
+  return data as { message: string; id: string }
 }
 
 export const regenerateContentSeriesApi = async (seriesId: string, instructions?: string) => {
@@ -482,7 +537,7 @@ export const regenerateContentSeriesApi = async (seriesId: string, instructions?
     workflow_id: workflow.id,
     planning_mode: workflow.planning_mode || 'SERIES',
     target_duration_seconds: 60,
-    preferred_part_count: workflow.parts?.length || null,
+    preferred_part_count: 1,
     language: 'vi',
     instructions: instructions || null,
   })

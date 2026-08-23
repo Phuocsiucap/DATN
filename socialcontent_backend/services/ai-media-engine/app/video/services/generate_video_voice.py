@@ -194,6 +194,9 @@ def generate_elevenlabs_voice(story: dict[str, Any], settings, voice_id: str, vo
 
 
 
+import time
+
+
 def generate_edge_tts_voice(text: str, voice: str, out_path: Path) -> None:
     try:
         import edge_tts
@@ -210,7 +213,18 @@ def generate_edge_tts_voice(text: str, voice: str, out_path: Path) -> None:
         await communicate.save(str(out_path))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(save_voice())
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            asyncio.run(save_voice())
+            return
+        except Exception as error:
+            last_error = error
+            print(f"[Edge TTS Warning] Attempt {attempt}/3 failed: {error}")
+            if attempt < 3:
+                time.sleep(2)
+    raise RuntimeError(f"Edge TTS voice generation failed after 3 attempts: {last_error}") from last_error
+
 
 
 

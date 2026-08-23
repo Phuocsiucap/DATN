@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, Episode, Story, User
+from common.db.models import ContentItem, Story, User
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
@@ -33,7 +33,7 @@ def get_story(story_id: uuid.UUID, user: User = Depends(get_current_user), db: S
 @router.get("/stories/{story_id}/episodes")
 def story_episodes(story_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_visible_story(db, story_id, user)
-    return db.query(Episode).filter(Episode.story_id == story_id).order_by(Episode.sequence_order.asc().nullslast()).all()
+    return db.query(ContentItem).filter(ContentItem.story_id == story_id).order_by(ContentItem.episode_order.asc().nullslast()).all()
 
 
 @router.post("/stories/{story_id}/regroup")
@@ -50,7 +50,7 @@ def regroup_story(story_id: uuid.UUID, _: User = Depends(require_admin), db: Ses
 
 @router.patch("/episodes/{episode_id}")
 def update_episode(episode_id: uuid.UUID, payload: schemas.EpisodeUpdateRequest, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    episode = db.get(Episode, episode_id)
+    episode = db.get(episode_id)
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
     for field, value in payload.model_dump(exclude_unset=True).items():

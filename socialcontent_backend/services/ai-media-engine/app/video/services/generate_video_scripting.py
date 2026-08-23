@@ -31,6 +31,12 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
     title = raw_article.get("title") or raw_article.get("canonical_title") or "Bản tin"
     images = collect_image_urls(raw_article)
     target_duration = resolve_target_duration_seconds(raw_article)
+    story_data = raw_article.get("story_data") if isinstance(raw_article.get("story_data"), list) else raw_article.get("scenes")
+    if _has_direct_story_data(story_data):
+        return create_story_from_story_data(raw_article, story_data, title, images, target_duration)
+    parts = raw_article.get("parts") if isinstance(raw_article.get("parts"), list) else raw_article.get("script_parts")
+    if _has_direct_script_parts(parts):
+        return create_story_from_script_parts(raw_article, parts, title, images, target_duration)
     timeline_source = {
         "title": title,
         "summary": raw_article.get("summary"),
@@ -58,6 +64,198 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
     }
     story = review_story_with_ai(story)
     return story
+
+
+def _has_direct_story_data(story_data: Any) -> bool:
+    if not isinstance(story_data, list):
+        return False
+    return any(isinstance(scene, dict) and str(scene.get("voice_text") or scene.get("subtitle") or "").strip() for scene in story_data)
+
+
+def create_story_from_story_data(
+    raw_article: dict[str, Any],
+    story_data: list[dict[str, Any]],
+    title: str,
+    images: list[str],
+    target_duration: int,
+) -> dict[str, Any]:
+    timeline = timeline_from_story_data(story_data, images)
+    story = {
+        "meta": {
+            "title": title,
+            "source": "content_project_story_data",
+            "target_duration_seconds": target_duration,
+            "scene_count": len([scene for scene in story_data if isinstance(scene, dict)]),
+            "llm_calls": 0,
+        },
+        "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
+        "audio": {"voiceVolume": 1, "musicVolume": 0},
+        "source": raw_article,
+        "timeline": timeline,
+    }
+    return normalize_story_for_project(story)
+
+
+def timeline_from_story_data(story_data: list[dict[str, Any]], images: list[str]) -> dict[str, Any]:
+    video: list[dict[str, Any]] = []
+    text: list[dict[str, Any]] = []
+    cursor = 0.0
+    image_pool = images or DEFAULT_IMAGES
+    for index, raw in enumerate(story_data, start=1):
+        if not isinstance(raw, dict):
+            continue
+        voice_text = strip_voice_tags(str(raw.get("voice_text") or raw.get("voiceover") or raw.get("subtitle") or "")).strip()
+        subtitle = strip_voice_tags(str(raw.get("subtitle") or raw.get("text") or voice_text)).strip()
+        if not voice_text and not subtitle:
+            continue
+        try:
+            duration = float(raw.get("duration") if raw.get("duration") is not None else raw.get("duration_seconds"))
+        except (TypeError, ValueError):
+            duration = _estimated_voice_duration(voice_text or subtitle)
+        start = round_to_frame(cursor, 30)
+        end = round_to_frame(cursor + max(1.0, duration), 30)
+        image = raw.get("image") or raw.get("src") or image_pool[(index - 1) % len(image_pool)]
+        video.append(
+            {
+                "id": f"video-{index}",
+                "scene_index": index - 1,
+                "type": raw.get("media_type") or "image",
+                "start": start,
+                "end": end,
+                "src": image,
+                "effect": raw.get("effect") or DEFAULT_EFFECTS[(index - 1) % len(DEFAULT_EFFECTS)],
+                "fit": raw.get("fit") or "cover",
+                **{key: raw[key] for key in ("scale", "opacity", "position_x", "position_y", "rotation") if raw.get(key) is not None},
+            }
+        )
+        try:
+            text_start = float(raw.get("subtitle_start")) if raw.get("subtitle_start") is not None else start
+        except (TypeError, ValueError):
+            text_start = start
+        try:
+            text_duration = float(raw.get("subtitle_duration")) if raw.get("subtitle_duration") is not None else max(1.0, duration)
+        except (TypeError, ValueError):
+            text_duration = max(1.0, duration)
+        text.append(
+            {
+                "id": f"text-{index}",
+                "scene_index": index - 1,
+                "type": "subtitle",
+                "start": round_to_frame(text_start, 30),
+                "end": round_to_frame(text_start + text_duration, 30),
+                "text": truncate_text(subtitle or voice_text, 140),
+                "voice_text": voice_text or subtitle,
+                "style": raw.get("text_style") if isinstance(raw.get("text_style"), dict) else {},
+                **({"timing": raw["timing"]} if isinstance(raw.get("timing"), dict) else {}),
+            }
+        )
+        cursor = end
+    return {"version": 1, "duration": round_to_frame(cursor, 30), "video": video, "text": text, "audio": []}
+
+
+def _has_direct_script_parts(parts: Any) -> bool:
+    if not isinstance(parts, list):
+        return False
+    return any(isinstance(part, dict) and str(part.get("voiceover") or "").strip() for part in parts)
+
+
+def create_story_from_script_parts(
+    raw_article: dict[str, Any],
+    parts: list[dict[str, Any]],
+    title: str,
+    images: list[str],
+    target_duration: int,
+) -> dict[str, Any]:
+    timeline = timeline_from_script_parts(parts, images)
+    story = {
+        "meta": {
+            "title": title,
+            "source": "content_project_script_parts",
+            "target_duration_seconds": target_duration,
+            "script_part_count": len([part for part in parts if isinstance(part, dict)]),
+            "llm_calls": 0,
+        },
+        "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
+        "audio": {"voiceVolume": 1, "musicVolume": 0},
+        "source": raw_article,
+        "timeline": timeline,
+    }
+    return normalize_story_for_project(story)
+
+
+def timeline_from_script_parts(parts: list[dict[str, Any]], images: list[str]) -> dict[str, Any]:
+    video: list[dict[str, Any]] = []
+    text: list[dict[str, Any]] = []
+    cursor = 0.0
+    image_pool = images or DEFAULT_IMAGES
+    for part_index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            continue
+        voiceover = strip_voice_tags(str(part.get("voiceover") or "")).strip()
+        if not voiceover:
+            continue
+        segments = _split_voiceover_segments(voiceover)
+        visual_direction = str(part.get("visual_direction") or part.get("visual") or "").strip()
+        part_number = part.get("part_number") or part_index + 1
+        for segment_index, segment in enumerate(segments):
+            duration = _estimated_voice_duration(segment)
+            start = round_to_frame(cursor, 30)
+            end = round_to_frame(cursor + duration, 30)
+            clip_index = len(video)
+            video_clip = {
+                "id": f"video-{clip_index + 1}",
+                "type": "image",
+                "start": start,
+                "end": end,
+                "src": image_pool[clip_index % len(image_pool)],
+                "effect": DEFAULT_EFFECTS[clip_index % len(DEFAULT_EFFECTS)],
+                "fit": "cover",
+                "visual_direction": visual_direction,
+                "script_part_number": part_number,
+            }
+            text_clip = {
+                "id": f"text-{clip_index + 1}",
+                "type": "subtitle",
+                "start": start,
+                "end": end,
+                "text": truncate_text(segment, 130),
+                "voice_text": segment,
+                "script_part_number": part_number,
+            }
+            if segment_index == 0 and part.get("title"):
+                text_clip["part_title"] = str(part.get("title"))
+            video.append(video_clip)
+            text.append(text_clip)
+            cursor = end
+    return {"version": 1, "duration": round_to_frame(cursor, 30), "video": video, "text": text, "audio": []}
+
+
+def _split_voiceover_segments(text: str) -> list[str]:
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?。！？])\s+", text) if item.strip()]
+    if not sentences:
+        sentences = [text.strip()]
+    segments: list[str] = []
+    for sentence in sentences:
+        if len(sentence) <= 180:
+            segments.append(sentence)
+            continue
+        words = sentence.split()
+        current: list[str] = []
+        for word in words:
+            candidate = " ".join([*current, word]).strip()
+            if len(candidate) > 160 and current:
+                segments.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            segments.append(" ".join(current))
+    return segments or [text.strip()]
+
+
+def _estimated_voice_duration(text: str) -> float:
+    word_count = max(1, len(strip_voice_tags(text).split()))
+    return round_to_frame(min(8.0, max(3.0, word_count / 2.45 + 0.8)), 30)
 
 
 

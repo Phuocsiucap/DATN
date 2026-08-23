@@ -7,12 +7,14 @@ from common.events.topics import (
     GENERATE_VIDEO_RENDER_REQUESTED,
     GENERATE_VIDEO_REVIEW_REQUESTED,
     GENERATE_VIDEO_SCRIPT_REQUESTED,
+    GENERATE_VIDEO_VOICE_REQUESTED,
 )
 from app.video.services.generate_video import (
     process_generate_video_edit_run,
     process_generate_video_render_run,
     process_generate_video_review_run,
     process_generate_video_script_run,
+    process_generate_video_voice_run,
 )
 
 
@@ -27,6 +29,7 @@ def run_generate_video_requested_consumer() -> None:
             GENERATE_VIDEO_SCRIPT_REQUESTED,
             GENERATE_VIDEO_EDIT_REQUESTED,
             GENERATE_VIDEO_REVIEW_REQUESTED,
+            GENERATE_VIDEO_VOICE_REQUESTED,
             GENERATE_VIDEO_RENDER_REQUESTED,
         ],
         group_id="generate-video-workers",
@@ -45,6 +48,8 @@ def run_generate_video_requested_consumer() -> None:
             process_generate_video_edit_run(job_id)
         elif event_type == GENERATE_VIDEO_REVIEW_REQUESTED:
             process_generate_video_review_run(job_id)
+        elif event_type == GENERATE_VIDEO_VOICE_REQUESTED:
+            process_generate_video_voice_run(job_id)
         elif event_type == GENERATE_VIDEO_RENDER_REQUESTED:
             process_generate_video_render_run(job_id)
         kafka_consumer.commit()

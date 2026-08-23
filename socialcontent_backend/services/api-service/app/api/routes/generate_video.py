@@ -13,12 +13,8 @@ from app.services import generate_video as pipeline
 from app.api.deps import get_current_user
 from common.db.models import (
     ContentItem,
-    ContentMedia,
-    
     MediaWorkflow,
-    ContentSource,
-    Episode,
-    WorkflowRun,
+    KafkaTask,
     PublishingQueueItem,
     SocialProfile,
     SocialProfileStrategy,
@@ -156,20 +152,19 @@ def create_story_from_project(
             project.metadata_json if isinstance(project.metadata_json, dict) else {},
         )
         existing = (
-            db.query(WorkflowRun)
-            .filter(WorkflowRun.workflow_id == project.id, WorkflowRun.run_type == "GENERATE_VIDEO_SCRIPT", WorkflowRun.status.in_(["QUEUED", "RUNNING"]))
-            .order_by(WorkflowRun.created_at.desc())
+            db.query(KafkaTask)
+            .filter(WorkflowRun.workflow_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_SCRIPT", KafkaTask.status.in_(["PENDING", "PROCESSING"]))
+            .order_by(KafkaTask.created_at.desc())
             .first()
         )
         if existing:
             return {"job": _serialize_workflow_run(db, existing)}
 
-        job = WorkflowRun(
+        job = KafkaTask(
             workflow_id=project.id,
-            run_type="GENERATE_VIDEO_SCRIPT",
-            status="QUEUED",
-            progress_percent=0,
-            metadata_json={"source": source},
+            task_type="GENERATE_VIDEO_SCRIPT",
+            status="PENDING",
+            payload_json={"source": source},
         )
         project.status = "SCRIPTING"
         db.add_all([job, project])
@@ -181,7 +176,7 @@ def create_story_from_project(
                 event_type=GENERATE_VIDEO_SCRIPT_REQUESTED,
                 source="api-service",
                 job_id=job.id,
-                payload={"workflow_id": str(project.id), "run_type": job.run_type},
+                payload={"workflow_id": str(project.id), "run_type": job.task_type},
                 correlation_id=project.id,
             ),
         )
@@ -277,7 +272,7 @@ def _project_content_ids(db: Session, project: MediaWorkflow, plan: MediaWorkflo
             if ref.get("content_id"):
                 content_ids.append(uuid.UUID(str(ref["content_id"])))
             if ref.get("episode_id"):
-                episode = db.get(Episode, uuid.UUID(str(ref["episode_id"])))
+                episode = db.get(uuid.UUID(str(ref["episode_id"])))
                 if episode and episode.content_id:
                     content_ids.append(episode.content_id)
             if ref.get("story_id"):
@@ -378,7 +373,7 @@ def _serialize_content_media(item: ContentMedia) -> dict:
         "height": item.height,
         "duration_seconds": item.duration_seconds,
         "checksum": item.checksum,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
     }
 
 
@@ -412,9 +407,9 @@ def _maybe_enqueue_auto_project_render(db: Session, project: MediaWorkflow, stor
 
 def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> WorkflowRun:
     existing = (
-        db.query(WorkflowRun)
-        .filter(WorkflowRun.workflow_id == project.id, WorkflowRun.run_type == "GENERATE_VIDEO_RENDER", WorkflowRun.status.in_(["QUEUED", "RUNNING"]))
-        .order_by(WorkflowRun.created_at.desc())
+        db.query(KafkaTask)
+        .filter(WorkflowRun.workflow_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_RENDER", KafkaTask.status.in_(["PENDING", "PROCESSING"]))
+        .order_by(KafkaTask.created_at.desc())
         .first()
     )
     if existing:
@@ -423,12 +418,11 @@ def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict
     render_story = _public_story(story)
     render_story.setdefault("meta", {})
     render_story["meta"]["workflow_id"] = str(project.id)
-    job = WorkflowRun(
+    job = KafkaTask(
         workflow_id=project.id,
-        run_type="GENERATE_VIDEO_RENDER",
-        status="QUEUED",
-        progress_percent=0,
-        metadata_json={"story": render_story, "trigger": trigger, "video_render_mode": mode},
+        task_type="GENERATE_VIDEO_RENDER",
+        status="PENDING",
+        payload_json={"story": render_story, "trigger": trigger, "video_render_mode": mode},
     )
     db.add(job)
     project.status = "RENDERING"
@@ -441,7 +435,7 @@ def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict
             event_type=GENERATE_VIDEO_RENDER_REQUESTED,
             source="api-service",
             job_id=job.id,
-            payload={"workflow_id": str(project.id), "run_type": job.run_type, "trigger": trigger},
+            payload={"workflow_id": str(project.id), "run_type": job.task_type, "trigger": trigger},
             correlation_id=project.id,
         ),
     )
@@ -564,7 +558,7 @@ def queue_project_video_for_posting(
             "scheduled_at": item.scheduled_at,
             "published_at": item.published_at,
             "error": item.error,
-            "created_at": item.created_at,
+            "created_at": item.get("created_at"),
             "updated_at": item.updated_at,
         },
     }
@@ -575,7 +569,7 @@ def _rendered_video_uri(project: MediaWorkflow, story: dict | None) -> str | Non
         (
             item
             for item in sorted(project.artifacts or [], key=lambda value: value.created_at, reverse=True)
-            if item.artifact_type == "FINAL_VIDEO" and item.uri
+            if item.get("type") == "FINAL_VIDEO" and item.get("uri")
         ),
         None,
     )
@@ -665,24 +659,23 @@ def edit_story(
             raise HTTPException(status_code=404, detail="Story not found for content project")
         story = _preserve_saved_source(db, project, story)
         existing = (
-            db.query(WorkflowRun)
+            db.query(KafkaTask)
             .filter(
                 WorkflowRun.workflow_id == project.id,
-                WorkflowRun.run_type == "GENERATE_VIDEO_EDIT",
-                WorkflowRun.status.in_(["QUEUED", "RUNNING"]),
+                KafkaTask.task_type == "GENERATE_VIDEO_EDIT",
+                KafkaTask.status.in_(["PENDING", "PROCESSING"]),
             )
-            .order_by(WorkflowRun.created_at.desc())
+            .order_by(KafkaTask.created_at.desc())
             .first()
         )
         if existing:
             return {"job": _serialize_workflow_run(db, existing)}
 
-        job = WorkflowRun(
+        job = KafkaTask(
             workflow_id=project.id,
-            run_type="GENERATE_VIDEO_EDIT",
-            status="QUEUED",
-            progress_percent=0,
-            metadata_json={"story": story, "prompt": payload.prompt},
+            task_type="GENERATE_VIDEO_EDIT",
+            status="PENDING",
+            payload_json={"story": story, "prompt": payload.prompt},
         )
         project.status = "EDITING"
         db.add_all([job, project])
@@ -694,7 +687,7 @@ def edit_story(
                 event_type=GENERATE_VIDEO_EDIT_REQUESTED,
                 source="api-service",
                 job_id=job.id,
-                payload={"workflow_id": str(project.id), "run_type": job.run_type, "prompt": payload.prompt},
+                payload={"workflow_id": str(project.id), "run_type": job.task_type, "prompt": payload.prompt},
                 correlation_id=project.id,
             ),
         )
@@ -720,24 +713,23 @@ def review_story(
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
         existing = (
-            db.query(WorkflowRun)
+            db.query(KafkaTask)
             .filter(
                 WorkflowRun.workflow_id == project.id,
-                WorkflowRun.run_type == "GENERATE_VIDEO_REVIEW",
-                WorkflowRun.status.in_(["QUEUED", "RUNNING"]),
+                KafkaTask.task_type == "GENERATE_VIDEO_REVIEW",
+                KafkaTask.status.in_(["PENDING", "PROCESSING"]),
             )
-            .order_by(WorkflowRun.created_at.desc())
+            .order_by(KafkaTask.created_at.desc())
             .first()
         )
         if existing:
             return {"job": _serialize_workflow_run(db, existing)}
 
-        job = WorkflowRun(
+        job = KafkaTask(
             workflow_id=project.id,
-            run_type="GENERATE_VIDEO_REVIEW",
-            status="QUEUED",
-            progress_percent=0,
-            metadata_json={"story": story, "instructions": payload.instructions},
+            task_type="GENERATE_VIDEO_REVIEW",
+            status="PENDING",
+            payload_json={"story": story, "instructions": payload.instructions},
         )
         project.status = "REVIEWING"
         db.add_all([job, project])
@@ -749,7 +741,7 @@ def review_story(
                 event_type=GENERATE_VIDEO_REVIEW_REQUESTED,
                 source="api-service",
                 job_id=job.id,
-                payload={"workflow_id": str(project.id), "run_type": job.run_type, "instructions": payload.instructions},
+                payload={"workflow_id": str(project.id), "run_type": job.task_type, "instructions": payload.instructions},
                 correlation_id=project.id,
             ),
         )
@@ -790,25 +782,25 @@ def get_render_job(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    job = db.get(WorkflowRun, job_id)
-    if not job or job.project.user_id != user.id or job.run_type not in {"GENERATE_VIDEO_RENDER", "GENERATE_VIDEO_SCRIPT", "GENERATE_VIDEO_EDIT", "GENERATE_VIDEO_REVIEW"}:
+    job = db.get(KafkaTask, job_id)
+    if not job or job.project.user_id != user.id or job.task_type not in {"GENERATE_VIDEO_RENDER", "GENERATE_VIDEO_SCRIPT", "GENERATE_VIDEO_EDIT", "GENERATE_VIDEO_REVIEW"}:
         raise HTTPException(status_code=404, detail="Render job not found")
     return {"job": _serialize_workflow_run(db, job)}
 
 
-def _serialize_workflow_run(db: Session, job: WorkflowRun) -> dict:
+def _serialize_workflow_run(db: Session, job: KafkaTask) -> dict:
     story = _find_video_draft_for_project(db, job.project) or {}
-    metadata = job.metadata_json if isinstance(job.metadata_json, dict) else {}
+    metadata = job.payload_json if isinstance(job.payload_json, dict) else {}
     output_path = metadata.get("output_path")
     return {
         "id": str(job.id),
         "workflow_id": str(job.workflow_id),
-        "run_type": job.run_type,
+        "run_type": job.task_type,
         "status": job.status,
-        "progress_percent": float(job.progress_percent or 0),
+        "progress_percent": 0.0,
         "output_path": output_path,
         "video_url": f"/api/v1/generate-video/output/{str(output_path).replace('out/', '')}" if output_path else None,
-        "error_message": job.error_message,
+        "error_message": job.error_detail,
         "story": _public_story(story) if story else None,
         "created_at": job.created_at,
         "updated_at": job.updated_at,

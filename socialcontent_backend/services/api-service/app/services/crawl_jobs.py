@@ -5,7 +5,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from common.db.models import AuditLog, CrawlJob, CrawlJobSource, CrawlTask, User
+from common.db.models import AuditLog, CrawlJob, CrawlJobSource, KafkaTask, User
 from common.events.envelope import build_event
 from common.events.kafka import publish
 from common.events.topics import CRAWL_JOB_CREATED
@@ -83,7 +83,7 @@ class CrawlJobService:
         job.progress_percent = 0
         job.started_at = None
         job.completed_at = None
-        db.query(CrawlTask).filter(CrawlTask.job_id == job.id).delete(synchronize_session=False)
+        db.query(KafkaTask).filter(KafkaTask.reference_id == str(job.id), KafkaTask.task_type.startswith("CRAWL")).delete(synchronize_session=False)
         db.add(AuditLog(actor_id=user.id, action="crawl_job.retry", target_type="crawl_job", target_id=str(job.id)))
         db.commit()
         db.refresh(job)

@@ -2,16 +2,14 @@ import { type FormEvent, useState } from 'react'
 import {
   AlertCircle,
   ArrowRight,
+  Check,
   CheckCircle2,
-  Database,
   Eye,
   EyeOff,
-  FileCheck2,
-  KeyRound,
-  LockKeyhole,
+  Layers,
+  Lock,
   Mail,
   ShieldCheck,
-  Sparkles,
   UserPlus,
 } from 'lucide-react'
 import { loginApi, registerApi } from '@/commons/apis/api'
@@ -55,7 +53,10 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
       await loginApi(loginForm)
       await onAuthenticated()
     } catch (error: unknown) {
-      setMessage({ type: 'error', text: getApiErrorMessage(error, 'Đăng nhập thất bại') })
+      setMessage({
+        type: 'error',
+        text: getApiErrorMessage(error, 'Đăng nhập thất bại. Vui lòng kiểm tra lại email hoặc mật khẩu.'),
+      })
     } finally {
       setLoading(false)
     }
@@ -65,13 +66,16 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
     setLoading(true)
     setMessage(null)
     try {
-      const roles = registerForm.roles.split(',').map((role) => role.trim()).filter(Boolean)
+      const roles = registerForm.roles
+        .split(',')
+        .map((role) => role.trim())
+        .filter(Boolean)
       await registerApi({
         email: registerForm.email,
         password: registerForm.password,
         roles,
       })
-      setMessage({ type: 'success', text: 'Tạo tài khoản thành công. Hãy đăng nhập bằng tài khoản vừa tạo.' })
+      setMessage({ type: 'success', text: 'Tạo tài khoản thành công! Vui lòng đăng nhập.' })
       setRegisterForm(emptyRegisterForm)
       setMode('login')
     } catch (error: unknown) {
@@ -93,304 +97,218 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const passwordValue = mode === 'login' ? loginForm.password : registerForm.password
 
   return (
-    <div
-      className="compact-ui min-h-screen overflow-hidden"
-      style={{ background: 'linear-gradient(135deg, #f7fafc 0%, #eef4fb 46%, #f8fafc 100%)' }}
-    >
-      <div className="mx-auto grid min-h-screen w-full max-w-[1440px] grid-cols-1 lg:grid-cols-[1.05fr_0.95fr]">
-        <aside
-          className="relative hidden min-h-screen overflow-hidden border-r px-8 py-7 lg:flex lg:flex-col xl:px-12"
-          style={{ backgroundColor: 'var(--primary)', borderColor: 'rgba(255,255,255,0.08)' }}
-        >
-          <div
-            className="absolute inset-0 opacity-80"
-            style={{
-              backgroundImage:
-                'linear-gradient(rgba(255,255,255,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.055) 1px, transparent 1px)',
-              backgroundSize: '44px 44px',
-            }}
-          />
-          <div
-            className="absolute inset-x-0 bottom-0 h-1/2"
-            style={{
-              background: 'linear-gradient(180deg, rgba(23,32,51,0) 0%, rgba(13,19,31,0.92) 100%)',
-            }}
-          />
-
-          <div className="relative z-10 flex items-center justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <img src="/logo.png" alt="SocialContent Studio" className="h-10 w-10 rounded-md object-contain" />
-              <div className="min-w-0">
-                <h1 className="text-sm font-extrabold leading-tight text-white">SocialContent</h1>
-                <p className="text-[10px] font-semibold uppercase" style={{ color: 'rgba(255,255,255,0.58)' }}>
-                  Studio Console
-                </p>
+    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 p-4 font-sans text-slate-900 sm:p-6 lg:p-8">
+      <div className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60 lg:grid-cols-12">
+        {/* Left Side: Clean Modern Branding Banner */}
+        <div className="relative flex flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 p-8 text-white sm:p-10 lg:col-span-5">
+          <div className="relative z-10">
+            <div className="mb-10 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-500/30">
+                <Layers className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold leading-tight tracking-tight text-white">SocialContent</h1>
+                <p className="text-xs font-medium text-slate-400">Studio Platform</p>
               </div>
             </div>
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-white">
-              <ShieldCheck size={13} className="text-emerald-300" />
-              Bảo mật phiên
-            </div>
-          </div>
 
-          <div className="relative z-10 flex flex-1 flex-col justify-center py-12">
-            <div className="max-w-xl">
-              <div className="mb-5 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.08] px-3 py-2 text-xs font-semibold text-white">
-                <Sparkles size={15} className="text-blue-200" />
-                SocialContent Studio
-              </div>
-              <h2 className="max-w-lg text-4xl font-extrabold leading-tight text-white xl:text-5xl">
-                Quản lý nội dung từ thu thập đến xuất bản.
+            <div className="my-8 space-y-4">
+              <h2 className="text-2xl font-extrabold leading-snug text-white sm:text-3xl">
+                Nền tảng quản lý & xuất bản nội dung
               </h2>
-              <p className="mt-5 max-w-lg text-sm leading-6" style={{ color: 'rgba(255,255,255,0.68)' }}>
-                Đăng nhập để theo dõi nguồn dữ liệu, kế hoạch nội dung, trạng thái duyệt và cấu hình tài khoản trong cùng một workspace.
+              <p className="text-sm leading-relaxed text-slate-300">
+                Tối ưu hóa quy trình từ thu thập tin tức, lên kịch bản đến quản lý đa kênh trong một giao diện duy nhất.
               </p>
             </div>
 
-            <div className="mt-10 max-w-2xl rounded-lg border border-white/10 bg-white/[0.07] p-4 shadow-2xl shadow-black/20 backdrop-blur">
-              <div className="mb-4 flex items-center justify-between gap-4 border-b border-white/10 pb-4">
-                <div>
-                  <p className="text-xs font-semibold text-white">Không gian làm việc</p>
-                  <p className="mt-0.5 text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    Các module chính sau khi đăng nhập
-                  </p>
-                </div>
-                <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white/[0.08] text-blue-200">
-                  <Database size={16} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ['Thu thập dữ liệu', 'Quản lý nguồn crawl và tác vụ đầu vào.'],
-                  ['Lập kế hoạch', 'Tạo lịch nội dung và kịch bản sản xuất.'],
-                  ['Duyệt nội dung', 'Kiểm tra bản nháp trước khi xuất bản.'],
-                  ['Tài khoản', 'Phân quyền người dùng trong hệ thống.'],
-                ].map(([title, description], index) => (
-                  <div key={title} className="rounded-md border border-white/10 bg-white/[0.06] p-3">
-                    <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-white/[0.08] text-white">
-                      {index === 0 ? <Database size={15} /> : <FileCheck2 size={15} />}
-                    </div>
-                    <p className="text-xs font-semibold text-white">{title}</p>
-                    <p className="mt-1 text-[11px] leading-5" style={{ color: 'rgba(255,255,255,0.56)' }}>
-                      {description}
-                    </p>
+            <div className="space-y-3 border-t border-slate-700/60 pt-4">
+              {[
+                'Quản lý nguồn tin & dữ liệu tập trung',
+                'Lập kế hoạch nội dung tự động',
+                'Quản lý phân quyền & an toàn dữ liệu',
+              ].map((item, idx) => (
+                <div key={idx} className="flex items-center gap-2.5 text-xs text-slate-200">
+                  <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+                    <Check className="h-2.5 w-2.5 stroke-[3]" />
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-md border border-white/10 bg-[#0f1726]/70 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold text-white">Truy cập theo vai trò</p>
-                    <p className="mt-1 text-[11px] leading-5" style={{ color: 'rgba(255,255,255,0.56)' }}>
-                      Người dùng chỉ thấy các khu vực phù hợp với quyền được cấp.
-                    </p>
-                  </div>
-                  <ShieldCheck size={17} className="shrink-0 text-emerald-300" />
+                  <span>{item}</span>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
-        </aside>
 
-        <main className="flex min-h-screen min-w-0 items-center justify-center px-4 py-8 sm:px-6 lg:px-10">
-          <div className="w-full max-w-[440px] min-w-0">
-            <div className="mb-8 flex items-center justify-between gap-3 lg:hidden">
-              <div className="flex min-w-0 items-center gap-3">
-                <img src="/logo.png" alt="SocialContent Studio" className="h-10 w-10 rounded-md object-contain" />
-                <div className="min-w-0">
-                  <h1 className="text-sm font-extrabold leading-tight" style={{ color: 'var(--on-surface)' }}>
-                    SocialContent
-                  </h1>
-                  <p className="text-[10px] font-semibold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
-                    Studio Console
-                  </p>
-                </div>
-              </div>
-              <div className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white" style={{ borderColor: 'var(--outline-variant)' }}>
-                <Sparkles size={15} style={{ color: 'var(--accent)' }} />
-              </div>
+          <div className="relative z-10 mt-8 flex items-center justify-between border-t border-slate-800 pt-8 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" /> Hệ thống bảo mật
+            </span>
+            <span>v2.5.0</span>
+          </div>
+
+          {/* Decorative ambient background blur */}
+          <div className="pointer-events-none absolute -bottom-16 -left-16 h-64 w-64 rounded-full bg-blue-600/10 blur-3xl" />
+        </div>
+
+        {/* Right Side: Simple Modern Form */}
+        <div className="flex flex-col justify-center bg-white p-8 sm:p-10 lg:col-span-7">
+          <div className="mx-auto w-full max-w-md">
+            {/* Tab Switcher */}
+            <div className="mb-8 flex rounded-xl border border-slate-200/60 bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login')
+                  setMessage(null)
+                }}
+                className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
+                  mode === 'login'
+                    ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Đăng nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('register')
+                  setMessage(null)
+                }}
+                className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
+                  mode === 'register'
+                    ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Tạo tài khoản
+              </button>
             </div>
 
-            <section className="rounded-lg border bg-white shadow-[0_18px_50px_rgba(16,24,40,0.10)]" style={{ borderColor: 'var(--outline-variant)' }}>
-              <div className="border-b px-5 py-5 sm:px-6" style={{ borderColor: 'var(--outline-variant)' }}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase" style={{ color: 'var(--accent)' }}>
-                      {mode === 'login' ? 'Đăng nhập' : 'Tài khoản mới'}
-                    </p>
-                    <h2 className="mt-2 text-2xl font-extrabold leading-tight" style={{ color: 'var(--on-surface)' }}>
-                      {mode === 'login' ? 'Đăng nhập vào Studio' : 'Tạo tài khoản truy cập'}
-                    </h2>
-                    <p className="mt-2 text-sm leading-5" style={{ color: 'var(--on-surface-variant)' }}>
-                      {mode === 'login'
-                        ? 'Tiếp tục công việc sản xuất, duyệt và xuất bản nội dung.'
-                        : 'Thêm người dùng mới vào workspace với role phù hợp.'}
-                    </p>
-                  </div>
-                  <div
-                    className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md sm:inline-flex"
-                    style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)' }}
-                  >
-                    {mode === 'login' ? <LockKeyhole size={18} /> : <UserPlus size={18} />}
-                  </div>
-                </div>
-              </div>
+            {/* Header */}
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-slate-900">
+                {mode === 'login' ? 'Chào mừng trở lại' : 'Tạo tài khoản mới'}
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {mode === 'login'
+                  ? 'Nhập thông tin đăng nhập để truy cập vào hệ thống'
+                  : 'Điền thông tin bên dưới để đăng ký tài khoản'}
+              </p>
+            </div>
 
-              <div className="px-5 py-5 sm:px-6">
-                <div className="mb-5 grid grid-cols-2 rounded-md border bg-[var(--surface-container-low)] p-1" style={{ borderColor: 'var(--outline-variant)' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('login')
-                      setMessage(null)
-                    }}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] px-3 text-xs font-bold transition-all"
-                    style={{
-                      backgroundColor: mode === 'login' ? 'var(--surface-container-lowest)' : 'transparent',
-                      color: mode === 'login' ? 'var(--on-surface)' : 'var(--on-surface-variant)',
-                      boxShadow: mode === 'login' ? 'var(--shadow-card)' : 'none',
-                    }}
-                  >
-                    <KeyRound size={14} />
-                    Đăng nhập
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('register')
-                      setMessage(null)
-                    }}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] px-3 text-xs font-bold transition-all"
-                    style={{
-                      backgroundColor: mode === 'register' ? 'var(--surface-container-lowest)' : 'transparent',
-                      color: mode === 'register' ? 'var(--on-surface)' : 'var(--on-surface-variant)',
-                      boxShadow: mode === 'register' ? 'var(--shadow-card)' : 'none',
-                    }}
-                  >
-                    <UserPlus size={14} />
-                    Đăng ký
-                  </button>
-                </div>
-
-                {message && (
-                  <div
-                    className="mb-5 flex items-start gap-2 rounded-md border px-3 py-2.5 text-xs leading-5"
-                    style={{
-                      borderColor: message.type === 'success' ? 'rgba(22,163,74,0.28)' : 'rgba(220,38,38,0.24)',
-                      backgroundColor: message.type === 'success' ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.07)',
-                      color: message.type === 'success' ? '#166534' : '#b91c1c',
-                    }}
-                  >
-                    {message.type === 'success' ? <CheckCircle2 size={15} className="mt-0.5 shrink-0" /> : <AlertCircle size={15} className="mt-0.5 shrink-0" />}
-                    <span>{message.text}</span>
-                  </div>
+            {/* Message alert */}
+            {message && (
+              <div
+                className={`mb-6 flex items-start gap-2.5 rounded-xl border p-3.5 text-xs ${
+                  message.type === 'success'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : 'border-rose-200 bg-rose-50 text-rose-800'
+                }`}
+              >
+                {message.type === 'success' ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
                 )}
+                <span className="leading-relaxed">{message.text}</span>
+              </div>
+            )}
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <label className="block space-y-1.5 text-xs font-bold" style={{ color: 'var(--on-surface)' }}>
-                    <span>Email</span>
-                    <div className="relative">
-                      <Mail size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--on-surface-variant)' }} />
-                      <input
-                        className="h-10 w-full rounded-md border bg-white pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-[var(--on-surface-variant)] focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-                        style={{ borderColor: 'var(--outline-variant)' }}
-                        type="email"
-                        autoComplete={mode === 'login' ? 'email' : 'username'}
-                        value={mode === 'login' ? loginForm.email : registerForm.email}
-                        onChange={(e) => {
-                          const email = e.target.value
-                          if (mode === 'login') {
-                            setLoginForm((prev) => ({ ...prev, email }))
-                            return
-                          }
-                          setRegisterForm((prev) => ({ ...prev, email }))
-                        }}
-                        placeholder={mode === 'login' ? 'admin@example.com' : 'user@example.com'}
-                        required
-                      />
-                    </div>
-                  </label>
-
-                  <label className="block space-y-1.5 text-xs font-bold" style={{ color: 'var(--on-surface)' }}>
-                    <span>Mật khẩu</span>
-                    <div className="relative">
-                      <LockKeyhole size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--on-surface-variant)' }} />
-                      <input
-                        className="h-10 w-full rounded-md border bg-white pl-9 pr-10 text-sm outline-none transition-colors placeholder:text-[var(--on-surface-variant)] focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-                        style={{ borderColor: 'var(--outline-variant)' }}
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                        value={passwordValue}
-                        onChange={(e) => {
-                          const password = e.target.value
-                          if (mode === 'login') {
-                            setLoginForm((prev) => ({ ...prev, password }))
-                            return
-                          }
-                          setRegisterForm((prev) => ({ ...prev, password }))
-                        }}
-                        placeholder="Nhập mật khẩu"
-                        required
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-container)]"
-                        style={{ color: 'var(--on-surface-variant)' }}
-                        onClick={() => setShowPassword((value) => !value)}
-                        aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                      >
-                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </label>
-
-                  {mode === 'register' && (
-                    <label className="block space-y-1.5 text-xs font-bold" style={{ color: 'var(--on-surface)' }}>
-                      <span>Roles</span>
-                      <input
-                        className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none transition-colors placeholder:text-[var(--on-surface-variant)] focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-                        style={{ borderColor: 'var(--outline-variant)' }}
-                        value={registerForm.roles}
-                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, roles: e.target.value }))}
-                        placeholder="user"
-                        required
-                      />
-                      <span className="block text-[11px] font-medium" style={{ color: 'var(--on-surface-variant)' }}>
-                        Có thể nhập nhiều role, phân tách bằng dấu phẩy.
-                      </span>
-                    </label>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-all disabled:opacity-55"
-                    style={{
-                      backgroundColor: mode === 'login' ? 'var(--accent)' : 'var(--primary)',
-                      color: mode === 'login' ? 'var(--on-secondary)' : 'var(--on-primary)',
-                      boxShadow: '0 10px 24px rgba(37, 99, 235, 0.20)',
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">Email</label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    autoComplete={mode === 'login' ? 'email' : 'username'}
+                    value={mode === 'login' ? loginForm.email : registerForm.email}
+                    onChange={(e) => {
+                      const email = e.target.value
+                      if (mode === 'login') {
+                        setLoginForm((prev) => ({ ...prev, email }))
+                        return
+                      }
+                      setRegisterForm((prev) => ({ ...prev, email }))
                     }}
+                    placeholder="name@company.com"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">Mật khẩu</label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    value={passwordValue}
+                    onChange={(e) => {
+                      const password = e.target.value
+                      if (mode === 'login') {
+                        setLoginForm((prev) => ({ ...prev, password }))
+                        return
+                      }
+                      setRegisterForm((prev) => ({ ...prev, password }))
+                    }}
+                    placeholder="••••••••"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                    aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                   >
-                    {loading ? 'Đang xử lý...' : mode === 'login' ? 'Vào dashboard' : 'Tạo tài khoản'}
-                    {!loading && (mode === 'login' ? <ArrowRight size={16} /> : <UserPlus size={16} />)}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
-                </form>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 border-t px-5 py-4 text-[11px] sm:px-6" style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}>
-                <ShieldCheck size={14} className="shrink-0" style={{ color: 'var(--success)' }} />
-                <span>Phiên đăng nhập được xác thực qua cookie bảo mật và tự động kiểm tra bằng `/auth/me`.</span>
-              </div>
-            </section>
+              {mode === 'register' && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">Vai trò (Roles)</label>
+                  <input
+                    type="text"
+                    required
+                    value={registerForm.roles}
+                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, roles: e.target.value }))}
+                    placeholder="user"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  <span className="mt-1 block text-[11px] text-slate-400">
+                    Phân tách bằng dấu phẩy nếu có nhiều role (vd: user, admin)
+                  </span>
+                </div>
+              )}
 
-            <p className="mt-5 text-center text-[11px] font-medium" style={{ color: 'var(--on-surface-variant)' }}>
-              SocialContent Studio - Nền tảng quản lý nội dung
-            </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 disabled:opacity-60"
+              >
+                {loading ? (
+                  <span>Đang xử lý...</span>
+                ) : (
+                  <>
+                    <span>{mode === 'login' ? 'Đăng nhập' : 'Đăng ký tài khoản'}</span>
+                    {mode === 'login' ? <ArrowRight className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-8 border-t border-slate-100 pt-6 text-center text-xs text-slate-400">
+              SocialContent Studio &copy; {new Date().getFullYear()}
+            </div>
           </div>
-        </main>
+        </div>
       </div>
     </div>
   )
 }
+

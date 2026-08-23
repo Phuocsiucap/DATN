@@ -7,6 +7,7 @@ from app.video.services.generate_video_jobs import (
     process_generate_video_render_run,
     process_generate_video_review_run,
     process_generate_video_script_run,
+    process_generate_video_voice_run,
 )
 from app.video.services.generate_video_rendering import export_final_video, generate_visual_video
 from app.video.services.generate_video_scripting import create_story_from_raw, edit_story_with_ai, review_story_with_ai
@@ -30,6 +31,7 @@ __all__ = [
     "process_generate_video_render_run",
     "process_generate_video_review_run",
     "process_generate_video_script_run",
+    "process_generate_video_voice_run",
     "public_story_payload",
     "review_story_with_ai",
     "save_uploaded_audio_base64",

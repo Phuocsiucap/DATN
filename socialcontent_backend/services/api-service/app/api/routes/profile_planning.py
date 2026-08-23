@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
 from common.db.media_workflows import _load_content_full_text, serialize_workflow
-from common.db.models import ContentItem, ContentMedia, ContentSource, Episode, WorkflowPart, ContentSeries, SocialProfile, User, MediaWorkflow
+from common.db.models import ContentItem, ContentSeries, SocialProfile, User, MediaWorkflow
 from common.db.session import get_db
 
 router = APIRouter()
@@ -22,7 +22,8 @@ def _get_owned_profile(db: Session, profile_id: uuid.UUID, user: User) -> Social
 @router.get("/{profile_id}/content-plans", response_model=list[schemas.MediaWorkflowResponse])
 def list_profile_content_plans(profile_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_profile(db, profile_id, user)
-    return db.query(MediaWorkflow).filter(MediaWorkflow.profile_id == profile_id).order_by(MediaWorkflow.updated_at.desc()).limit(100).all()
+    workflows = db.query(MediaWorkflow).filter(MediaWorkflow.profile_id == profile_id).order_by(MediaWorkflow.updated_at.desc()).limit(100).all()
+    return [serialize_workflow(workflow, db) for workflow in workflows]
 
 
 @router.get("/{profile_id}/content-series", response_model=list[schemas.ContentSeriesResponse])
@@ -46,49 +47,28 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
     result = []
     
     for series in series_items:
-        parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.updated_at.desc(), WorkflowPart.part_number.asc()).all()
-        plan = _series_plan(db, series)
-        content = db.get(ContentItem, plan.primary_content_id) if plan and plan.primary_content_id else None
-        source = (
-            db.query(ContentSource)
-            .filter(ContentSource.content_id == content.id)
-            .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
-            .first()
-            if content
-            else None
+        workflows = (
+            db.query(MediaWorkflow)
+            .filter(MediaWorkflow.series_id == series.id)
+            .order_by(MediaWorkflow.updated_at.desc())
+            .limit(50)
+            .all()
         )
-        sources = db.query(ContentSource).filter(ContentSource.content_id == content.id).all() if content else []
-        media = db.query(ContentMedia).filter(ContentMedia.content_id == content.id).all() if content else []
+        if not workflows:
+            plan = _series_plan(db, series)
+            workflows = [plan] if plan else []
         result.append(
             {
                 "series": _serialize_series(series),
                 "articles": [
-                    {
-                        "plan": serialize_workflow(plan, db) if plan else None,
-                        "source_content": _serialize_source_content(content, source, sources, media) if content else None,
-                        "parts": [_serialize_part(part) for part in parts],
-                    }
+                    _review_article_payload(db, workflow)
+                    for workflow in workflows
+                    if workflow
                 ],
             }
         )
         
     for plan in standalone_workflows:
-        parts = db.query(WorkflowPart).filter(WorkflowPart.workflow_id == plan.id).order_by(WorkflowPart.updated_at.desc(), WorkflowPart.part_number.asc()).all()
-        if not parts:
-            continue
-            
-        content = db.get(ContentItem, plan.primary_content_id) if plan and plan.primary_content_id else None
-        source = (
-            db.query(ContentSource)
-            .filter(ContentSource.content_id == content.id)
-            .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
-            .first()
-            if content
-            else None
-        )
-        sources = db.query(ContentSource).filter(ContentSource.content_id == content.id).all() if content else []
-        media = db.query(ContentMedia).filter(ContentMedia.content_id == content.id).all() if content else []
-        
         mock_series = {
             "id": plan.id,
             "content_plan_id": plan.id,
@@ -96,7 +76,7 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
             "title": plan.title or "Standalone Video",
             "description": (plan.metadata_json or {}).get("content_angle") or "Kịch bản độc lập",
             "series_type": "SINGLE",
-            "total_parts": len(parts),
+            "total_parts": 1,
             "current_part": 1,
             "status": "ACTIVE",
             "context_version": 1,
@@ -108,11 +88,7 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
             {
                 "series": mock_series,
                 "articles": [
-                    {
-                        "plan": serialize_workflow(plan, db) if plan else None,
-                        "source_content": _serialize_source_content(content, source, sources, media) if content else None,
-                        "parts": [_serialize_part(part) for part in parts],
-                    }
+                    _review_article_payload(db, plan)
                 ],
             }
         )
@@ -150,30 +126,40 @@ def _serialize_series(series: ContentSeries) -> dict:
     }
 
 
-def _serialize_part(part: WorkflowPart) -> dict:
-    payload = part.payload or {}
+def _review_article_payload(db: Session, plan: MediaWorkflow) -> dict:
+    content = db.get(ContentItem, plan.primary_content_id) if plan.primary_content_id else None
+    serialized = serialize_workflow(plan, db)
     return {
-        "id": part.id,
-        "series_id": part.series_id,
-        "part_number": part.part_number,
-        "part_type": payload.get("part_type") or "MIDDLE",
-        "title": part.title,
-        "goal": payload.get("goal"),
-        "hook_direction": payload.get("hook_direction"),
-        "ending_direction": payload.get("ending_direction"),
-        "previous_part_recap": payload.get("previous_part_recap"),
-        "next_part_tease": payload.get("next_part_tease"),
-        "target_duration_seconds": part.target_duration_seconds if part.target_duration_seconds is not None else payload.get("target_duration_seconds"),
-        "status": part.status,
-        "source_refs": payload.get("source_refs") or [],
-        "main_beats": payload.get("main_beats") or [],
-        "production_notes": payload.get("production_notes") or {},
-        "risk_notes": payload.get("risk_notes") or [],
-        "created_at": part.created_at,
-        "updated_at": part.updated_at,
+        "plan": serialized,
+        "source_content": _serialize_source_content(content) if content else None,
+        "story_data": serialized.get("story_data") or [],
     }
 
-
+def _serialize_source_content(content: ContentItem) -> dict:
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary_source = sources[0] if sources else {}
+    media = content.media_jsonb if isinstance(content.media_jsonb, list) else []
+    
+    return {
+        "id": content.id,
+        "content_type": content.content_type,
+        "canonical_title": content.canonical_title,
+        "summary": content.summary,
+        "full_text": _load_content_full_text(content.mongo_raw_id, content.mongo_normalized_id) or content.summary,
+        "language": content.language,
+        "status": content.status,
+        "canonical_url": content.canonical_url,
+        "source_type": primary_source.get("source_type"),
+        "source_url": primary_source.get("source_url"),
+        "source_author": primary_source.get("source_author"),
+        "source_published_at": primary_source.get("source_published_at"),
+        "quality_score": float(content.quality_score or 0),
+        "published_at": content.published_at,
+        "created_at": content.created_at,
+        "updated_at": content.updated_at,
+        "sources": sources,
+        "media": media,
+    }
 def _serialize_source_content(content: ContentItem, source: ContentSource | None, sources: list[ContentSource], media: list[ContentMedia]) -> dict:
     return {
         "id": content.id,

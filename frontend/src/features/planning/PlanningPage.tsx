@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { Loader2, RefreshCcw, Video, CheckCircle2, XCircle, ChevronRight, Filter, Lightbulb, ListVideo, BrainCircuit, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
+import { Loader2, RefreshCcw, CheckCircle2, XCircle, ChevronRight, Filter, Lightbulb, ListVideo, BrainCircuit, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
 
 import {
   approveContentPlanApi,
@@ -13,6 +13,7 @@ import {
   type WorkflowRun,
   type ProfileSeriesReview,
   type ReviewSourceContent,
+  type StoryScene,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
@@ -21,7 +22,7 @@ import { WorkflowRunDetailDialog } from './WorkflowRunDetailDialog'
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
-type PipelineStep = 'jobs' | 'plans' | 'series' | 'output'
+type PipelineStep = 'jobs' | 'plans' | 'series'
 
 const isTopicConfigError = (job: WorkflowRun) =>
   job.status === 'FAILED' &&
@@ -117,10 +118,9 @@ export default function PlanningPage({
   useEffect(() => {
     if (!selectedReviewArticle) return
     const selectedPlanId = selectedReviewArticle.article.plan?.id
-    const selectedPartIds = new Set(selectedReviewArticle.article.parts.map(part => part.id))
     const stillExists = reviewSeries.some(item => item.articles.some(article => {
       if (selectedPlanId && article.plan?.id === selectedPlanId) return true
-      return article.parts.some(part => selectedPartIds.has(part.id))
+      return false
     }))
     if (stillExists) return
     setSelectedReviewArticle(null)
@@ -128,14 +128,10 @@ export default function PlanningPage({
 
   const pageTitle = activeStep === 'jobs'
     ? 'Tiến Trình Job'
-    : activeStep === 'plans'
-      ? 'Duyệt Thành Phẩm'
-      : 'Xem Đầu Ra'
+    : 'Duyệt Thành Phẩm'
   const pageDescription = activeStep === 'jobs'
     ? 'Theo dõi các job AI Planning, trạng thái xử lý và log chi tiết.'
-    : activeStep === 'plans'
-      ? 'Duyệt kế hoạch theo từng social profile, nhóm theo series và xem từng bài trong series.'
-      : 'Xem đầu ra đã sẵn sàng chuyển sang Generate Video để sản xuất video.'
+    : 'Duyệt kế hoạch theo từng social profile, nhóm theo series và xem từng bài trong series.'
 
   const handleRefresh = () => {
     if (activeStep === 'plans' && selectedProfileId) {
@@ -336,7 +332,7 @@ export default function PlanningPage({
                           <span className="text-xs font-semibold text-slate-500">{item.articles.length} bài</span>
                         </div>
                         <h3 className="text-xl font-black text-[#0f172a]">{item.series.title}</h3>
-                        <p className="mt-1 line-clamp-2 max-w-3xl text-sm leading-6 text-slate-600">{item.series.description || 'Các bài trong series này được nhóm theo nguồn content và mỗi bài có các part kịch bản riêng.'}</p>
+                        <p className="mt-1 line-clamp-2 max-w-3xl text-sm leading-6 text-slate-600">{item.series.description || 'Các bài trong series này được nhóm theo nguồn content và mỗi bài có story_data riêng.'}</p>
                       </div>
                     </div>
 
@@ -347,7 +343,7 @@ export default function PlanningPage({
                           <div>Bài báo gốc</div>
                           <div>Nguồn</div>
                           <div>Quality</div>
-                          <div>Part</div>
+                          <div>Kịch bản</div>
                           <div className="text-right">Thao tác</div>
                         </div>
                       {item.articles.length === 0 ? (
@@ -370,7 +366,7 @@ export default function PlanningPage({
                           <div className="font-medium text-[#64748b]">{article.source_content?.source_type || article.source_content?.content_type || '-'}</div>
                           <div className="font-bold text-[#0f172a]">{article.source_content ? Number(article.source_content.quality_score || 0).toFixed(1) : '-'}</div>
                           <div className="flex items-center gap-2">
-                            <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">{article.parts.length} part</span>
+                            <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
                             {article.plan ? <Badge value={article.plan.status} /> : <Badge value="UNLINKED" />}
                           </div>
                           <div className="flex justify-end gap-2">
@@ -440,18 +436,6 @@ export default function PlanningPage({
             </div>
           )}
 
-          {activeStep === 'output' && (
-            <div className="flex items-center justify-center h-[500px] border-2 border-dashed border-slate-300 rounded-xl bg-slate-50">
-              <div className="text-center max-w-sm">
-                <Video size={48} className="mx-auto text-slate-400 mb-4" />
-                <h3 className="text-lg font-bold text-slate-700 mb-2">Generate Video</h3>
-                <p className="text-sm text-slate-500 mb-6">Đầu ra của Series đã sẵn sàng chuyển sang Generate Video để tự động dựng video và lồng tiếng.</p>
-                <button onClick={() => onOpenGenerateVideo?.()} className="h-9 rounded-md bg-[var(--primary)] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#1e293b]">
-                  Chuyển sang Sản Xuất Video
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -492,7 +476,7 @@ export default function PlanningPage({
                   value={regenerateInstructions}
                   onChange={(event) => setRegenerateInstructions(event.target.value)}
                   className="min-h-[180px] w-full resize-none rounded-md border border-[#d9e0ea] bg-white px-3 py-2 text-sm leading-6 text-[#0f172a] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-                  placeholder="Ví dụ: viết hook mạnh hơn, giọng căng hơn, chỉ giữ 1 part. Nếu muốn chia nhiều part, ghi rõ: chia thành 3 part..."
+                  placeholder="Ví dụ: viết hook mạnh hơn, giọng căng hơn, chia thành nhiều scene ngắn hơn..."
                 />
               </label>
             </div>
@@ -538,6 +522,7 @@ function ArticleReviewSheet({
   const { article, seriesTitle } = selection
   const source = article.source_content
   const sourceUrl = source?.source_url || source?.canonical_url
+  const storyData = getArticleStoryData(article)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -547,7 +532,7 @@ function ArticleReviewSheet({
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <span className="rounded-md bg-[var(--primary)] px-2 py-0.5 text-[10px] font-black uppercase text-white">Bài review</span>
               {article.plan ? <Badge value={article.plan.status} /> : <Badge value="UNLINKED" />}
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{article.parts.length} part</span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{storyData.length} scene</span>
             </div>
             <h2 className="text-xl font-black leading-tight text-[#0f172a]">{article.plan?.title || source?.canonical_title || 'Bài chưa liên kết kế hoạch'}</h2>
             <p className="mt-2 text-xs font-semibold text-[#64748b]">{seriesTitle}</p>
@@ -605,7 +590,7 @@ function ArticleReviewSheet({
 
               {article.plan && (
                 <section className="detail-section">
-                  <div className="detail-label mb-2">Plan</div>
+                  <div className="detail-label mb-2">Metadata kịch bản</div>
                   <h3 className="text-base font-black text-[#0f172a]">{article.plan.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-700">{article.plan.content_angle || 'Chưa có góc khai thác.'}</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -627,40 +612,34 @@ function ArticleReviewSheet({
 
               <section className="detail-section">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="detail-label">Part / kịch bản sinh ra</div>
-                  <span className="text-xs font-bold text-slate-400">{article.parts.length} part</span>
+                  <div className="detail-label">Story data</div>
+                  <span className="text-xs font-bold text-slate-400">{storyData.length} scene</span>
                 </div>
-                {article.parts.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Bài này chưa có part.</div>
+                {storyData.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Bài này chưa có story_data.</div>
                 ) : (
                   <div className="grid gap-4">
-                    {article.parts.map((part) => (
-                      <div key={part.id} className="rounded-md border border-slate-200 bg-[#fbfcfe] p-4">
+                    {storyData.map((scene, index) => (
+                      <div key={`${scene.image || 'scene'}-${index}`} className="rounded-md border border-slate-200 bg-[#fbfcfe] p-4">
                         <div className="mb-3 flex flex-wrap items-center gap-2">
-                          <span className="rounded-md bg-[var(--primary)] px-2 py-0.5 text-[10px] font-black uppercase text-white">Part {part.part_number}</span>
-                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{part.part_type}</span>
-                          <Badge value={part.status} />
+                          <span className="rounded-md bg-[var(--primary)] px-2 py-0.5 text-[10px] font-black uppercase text-white">Scene {index + 1}</span>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{scene.duration}s</span>
+                          <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500">{scene.effect || 'slow-zoom'}</span>
                         </div>
-                        <h4 className="text-base font-black text-[#0f172a]">{part.title}</h4>
                         <div className="mt-4 grid gap-4">
-                          <DetailBlock title="Mục tiêu tập" tone="slate">
-                            {part.goal || 'Chưa có mục tiêu cụ thể.'}
+                          <DetailBlock title="Subtitle" tone="slate">
+                            {scene.subtitle || 'Chưa có subtitle.'}
                           </DetailBlock>
-                          {part.hook_direction && (
-                            <DetailBlock title="Hook mở bài" tone="blue">
-                              {part.hook_direction}
+                          {scene.voice_text && (
+                            <DetailBlock title="Voice text" tone="blue">
+                              {scene.voice_text}
                             </DetailBlock>
                           )}
-                          <DetailList title="Diễn biến chính" items={part.main_beats} emptyLabel="Chưa có beat nội dung." />
-                          {part.ending_direction && (
-                            <DetailBlock title="Hướng kết bài" tone="amber">
-                              {part.ending_direction}
+                          {scene.image && (
+                            <DetailBlock title="Image" tone="emerald">
+                              {scene.image}
                             </DetailBlock>
                           )}
-                          <div className="grid gap-4 lg:grid-cols-2">
-                            <DetailList title="Ghi chú sản xuất" items={part.production_notes || []} emptyLabel="Chưa có ghi chú sản xuất." compact />
-                            <DetailList title="Rủi ro cần lưu ý" items={part.risk_notes || []} emptyLabel="Chưa có rủi ro được ghi nhận." compact />
-                          </div>
                         </div>
                       </div>
                     ))}
@@ -673,6 +652,10 @@ function ArticleReviewSheet({
       </SheetContent>
     </Sheet>
   )
+}
+
+function getArticleStoryData(article: ProfileSeriesReview['articles'][number]): StoryScene[] {
+  return article.story_data || article.plan?.story_data || article.plan?.draft_json?.story_data || []
 }
 
 function ReviewMediaPreview({
@@ -929,58 +912,6 @@ function DetailBlock({
       <p className="text-sm leading-6">{children}</p>
     </section>
   )
-}
-
-function DetailList({
-  title,
-  items,
-  emptyLabel,
-  compact = false,
-}: {
-  title: string
-  items: unknown
-  emptyLabel: string
-  compact?: boolean
-}) {
-  const normalizedItems = normalizeDetailItems(items)
-
-  return (
-    <section className="rounded-md border border-slate-200 bg-white p-3">
-      <div className="detail-label mb-3">{title}</div>
-      {normalizedItems.length === 0 ? (
-        <p className="text-sm text-slate-500">{emptyLabel}</p>
-      ) : (
-        <ol className={compact ? 'space-y-2' : 'space-y-3'}>
-          {normalizedItems.map((item, index) => (
-            <li key={`${title}-${index}`} className="flex gap-3 text-sm leading-6 text-slate-700">
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-black text-slate-500">{index + 1}</span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  )
-}
-
-function normalizeDetailItems(value: unknown): string[] {
-  if (!value) return []
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => typeof item === 'string' ? item : JSON.stringify(item))
-      .filter((item) => item && item !== 'null' && item !== 'undefined')
-  }
-  if (typeof value === 'string') return value.trim() ? [value] : []
-  if (typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => {
-        if (Array.isArray(item)) return `${key}: ${item.join(', ')}`
-        if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') return `${key}: ${item}`
-        return `${key}: ${JSON.stringify(item)}`
-      })
-      .filter((item) => item && !item.endsWith(': null') && !item.endsWith(': undefined'))
-  }
-  return [String(value)]
 }
 
 function Badge({ value }: { value: string }) {

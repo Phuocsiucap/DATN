@@ -4,11 +4,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.db.models import AuditLog, WorkflowPart, ContentSeries, SocialProfile, User
-from common.db.mongo import series_contexts
-from common.db.session import get_db
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
+from common.db.models import AuditLog, ContentSeries, MediaWorkflow, SocialProfile, User
+from common.db.mongo import series_contexts
+from common.db.session import get_db
 
 router = APIRouter()
 
@@ -23,6 +23,48 @@ def list_content_series(user: User = Depends(get_current_user), db: Session = De
         .all()
     )
     return [_serialize_series(row) for row in rows]
+
+
+@router.post("", response_model=schemas.ContentSeriesResponse)
+def create_content_series(
+    payload: schemas.ContentSeriesCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile_id = payload.profile_id
+    if not profile_id:
+        first_profile = (
+            db.query(SocialProfile)
+            .filter(SocialProfile.user_id == user.id)
+            .first()
+        )
+        if not first_profile:
+            raise HTTPException(status_code=400, detail="Cần ít nhất một Social Profile để tạo Series")
+        profile_id = first_profile.id
+    else:
+        profile = db.get(SocialProfile, profile_id)
+        if not profile or profile.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Social Profile không tồn tại hoặc không thuộc về người dùng")
+
+    series = ContentSeries(
+        user_id=user.id,
+        profile_id=profile_id,
+        title=payload.title,
+        description=payload.description,
+        series_type=payload.series_type or "NARRATIVE",
+        status=payload.status or "ACTIVE",
+        current_part=0,
+        total_parts=payload.total_parts or 0,
+        context_json={"version": 1},
+        metadata_json={},
+    )
+    db.add(series)
+    db.commit()
+    db.refresh(series)
+
+    db.add(AuditLog(actor_id=user.id, action="content_series.created", target_type="content_series", target_id=str(series.id)))
+    db.commit()
+    return _serialize_series(series)
 
 
 @router.get("/{series_id}", response_model=schemas.ContentSeriesResponse)
@@ -43,97 +85,26 @@ def update_content_series(series_id: uuid.UUID, payload: schemas.ContentSeriesUp
     return _serialize_series(series)
 
 
+@router.delete("/{series_id}")
+def delete_content_series(
+    series_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    series = _get_owned_series(db, series_id, user)
+    workflows = db.query(MediaWorkflow).filter(MediaWorkflow.series_id == series.id).all()
+    for wf in workflows:
+        wf.series_id = None
+    db.delete(series)
+    db.add(AuditLog(actor_id=user.id, action="content_series.deleted", target_type="content_series", target_id=str(series_id)))
+    db.commit()
+    return {"message": "Xóa series thành công", "id": series_id}
+
+
 @router.post("/{series_id}/regenerate", response_model=schemas.WorkflowRunResponse)
 def regenerate_content_series(series_id: uuid.UUID, payload: schemas.ContentSeriesRegenerateRequest | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_owned_series(db, series_id, user)
     raise HTTPException(status_code=410, detail="Series regeneration must create a new workflow_run from workflow_sources.")
-
-
-@router.get("/{series_id}/parts", response_model=list[schemas.WorkflowPartResponse])
-def list_workflow_parts(series_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    series = _get_owned_series(db, series_id, user)
-    parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.part_number.asc()).all()
-    return [_serialize_part(part) for part in parts]
-
-
-@router.post("/{series_id}/parts", response_model=schemas.WorkflowPartResponse)
-def create_workflow_part(series_id: uuid.UUID, payload: schemas.WorkflowPartCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    series = _get_owned_series(db, series_id, user)
-    project = series.projects[0] if series.projects else None
-    if not project:
-        raise HTTPException(status_code=400, detail="Project series has no owning content project")
-    next_number = payload.part_number
-    if next_number is None:
-        max_part = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.part_number.desc()).first()
-        next_number = (max_part.part_number if max_part else 0) + 1
-    data = payload.model_dump(exclude={"part_number"})
-    target_duration_seconds = data.get("target_duration_seconds")
-    part = WorkflowPart(
-        workflow_id=project.id,
-        series_id=series.id,
-        part_number=next_number,
-        title=data.pop("title"),
-        target_duration_seconds=target_duration_seconds,
-        status=data.pop("status", "DRAFT") or "DRAFT",
-        payload=data,
-    )
-    series.total_parts = max(series.total_parts or 0, next_number)
-    db.add(part)
-    db.add(AuditLog(actor_id=user.id, action="workflow_part.created", target_type="content_series", target_id=str(series.id)))
-    db.commit()
-    db.refresh(part)
-    return _serialize_part(part)
-
-
-@router.patch("/{series_id}/parts/{part_id}", response_model=schemas.WorkflowPartResponse)
-def update_workflow_part(series_id: uuid.UUID, part_id: uuid.UUID, payload: schemas.WorkflowPartUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    series = _get_owned_series(db, series_id, user)
-    part = db.get(WorkflowPart, part_id)
-    if not part or part.series_id != series.id:
-        raise HTTPException(status_code=404, detail="Series part not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        if field == "title":
-            part.title = value
-        elif field == "status":
-            part.status = value
-        elif field == "part_number":
-            part.part_number = value
-        elif field == "target_duration_seconds":
-            part.target_duration_seconds = value
-            part.payload = {**(part.payload or {}), field: value}
-        else:
-            part.payload = {**(part.payload or {}), field: value}
-    db.add(AuditLog(actor_id=user.id, action="workflow_part.updated", target_type="workflow_part", target_id=str(part.id)))
-    db.commit()
-    db.refresh(part)
-    return _serialize_part(part)
-
-
-@router.delete("/{series_id}/parts/{part_id}")
-def delete_workflow_part(series_id: uuid.UUID, part_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    series = _get_owned_series(db, series_id, user)
-    part = db.get(WorkflowPart, part_id)
-    if not part or part.series_id != series.id:
-        raise HTTPException(status_code=404, detail="Series part not found")
-    db.delete(part)
-    series.total_parts = max((series.total_parts or 1) - 1, 0)
-    db.add(AuditLog(actor_id=user.id, action="workflow_part.deleted", target_type="workflow_part", target_id=str(part.id)))
-    db.commit()
-    return {"status": "deleted", "part_id": part_id}
-
-
-@router.post("/{series_id}/parts/reorder", response_model=list[schemas.WorkflowPartResponse])
-def reorder_workflow_parts(series_id: uuid.UUID, payload: schemas.WorkflowPartReorderRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    series = _get_owned_series(db, series_id, user)
-    parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).all()
-    by_id = {part.id: part for part in parts}
-    if set(by_id) != set(payload.part_ids):
-        raise HTTPException(status_code=400, detail="part_ids must include every part in the series")
-    for index, part_id in enumerate(payload.part_ids, start=1):
-        by_id[part_id].part_number = index
-    db.add(AuditLog(actor_id=user.id, action="workflow_part.reordered", target_type="content_series", target_id=str(series.id)))
-    db.commit()
-    return [_serialize_part(part) for part in db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.part_number.asc()).all()]
 
 
 @router.get("/{series_id}/context")
@@ -152,7 +123,7 @@ def get_series_context(series_id: uuid.UUID, user: User = Depends(get_current_us
 @router.post("/{series_id}/context/rebuild")
 def rebuild_series_context(series_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     series = _get_owned_series(db, series_id, user)
-    parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.part_number.asc()).all()
+    scenes = _series_story_data(db, series)
     next_version = int((series.context_json or {}).get("version") or 0) + 1
     doc = {
         "series_id": str(series.id),
@@ -161,9 +132,9 @@ def rebuild_series_context(series_id: uuid.UUID, user: User = Depends(get_curren
         "rebuilt_at": datetime.utcnow().isoformat(),
         "continuity": {
             "series_title": series.title,
-            "part_titles": [part.title for part in parts],
-            "open_threads": [(part.payload or {}).get("next_part_tease") for part in parts if (part.payload or {}).get("next_part_tease")],
-            "risk_notes": [note for part in parts for note in ((part.payload or {}).get("risk_notes") or [])],
+            "scene_count": len(scenes),
+            "recent_voiceover": [scene.get("voice_text") or scene.get("subtitle") for scene in scenes[-8:]],
+            "visual_directions": [scene.get("visual_direction") for scene in scenes[-8:] if scene.get("visual_direction")],
         },
     }
     result = series_contexts().insert_one(doc)
@@ -176,16 +147,15 @@ def rebuild_series_context(series_id: uuid.UUID, user: User = Depends(get_curren
 @router.get("/{series_id}/consistency-check")
 def consistency_check(series_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     series = _get_owned_series(db, series_id, user)
-    parts = db.query(WorkflowPart).filter(WorkflowPart.series_id == series.id).order_by(WorkflowPart.part_number.asc()).all()
+    scenes = _series_story_data(db, series)
     warnings = []
-    expected_numbers = list(range(1, len(parts) + 1))
-    actual_numbers = [part.part_number for part in parts]
+    expected_numbers = list(range(1, len(scenes) + 1))
+    actual_numbers = [int(scene.get("scene_number") or 0) for scene in scenes]
     if actual_numbers != expected_numbers:
-        warnings.append({"type": "PART_NUMBER_GAP", "severity": "HIGH", "message": "Part numbers must be continuous from 1."})
-    for part in parts:
-        payload = part.payload or {}
-        if not payload.get("main_beats"):
-            warnings.append({"type": "EMPTY_BEATS", "severity": "HIGH", "part_id": str(part.id), "message": "Part has no main beats."})
+        warnings.append({"type": "SCENE_NUMBER_GAP", "severity": "HIGH", "message": "Scene numbers must be continuous from 1."})
+    for scene in scenes:
+        if not scene.get("voice_text") and not scene.get("subtitle"):
+            warnings.append({"type": "EMPTY_SCENE", "severity": "HIGH", "scene_number": scene.get("scene_number"), "message": "Scene has no voice_text or subtitle."})
     return {"series_id": series.id, "passed": not warnings, "warning_count": len(warnings), "warnings": warnings}
 
 
@@ -214,25 +184,17 @@ def _serialize_series(series: ContentSeries) -> dict:
     }
 
 
-def _serialize_part(part: WorkflowPart) -> dict:
-    payload = part.payload or {}
-    return {
-        "id": part.id,
-        "series_id": part.series_id,
-        "part_number": part.part_number,
-        "part_type": payload.get("part_type") or "MIDDLE",
-        "title": part.title,
-        "goal": payload.get("goal"),
-        "hook_direction": payload.get("hook_direction"),
-        "ending_direction": payload.get("ending_direction"),
-        "previous_part_recap": payload.get("previous_part_recap"),
-        "next_part_tease": payload.get("next_part_tease"),
-        "target_duration_seconds": part.target_duration_seconds if part.target_duration_seconds is not None else payload.get("target_duration_seconds"),
-        "status": part.status,
-        "source_refs": payload.get("source_refs") or [],
-        "main_beats": payload.get("main_beats") or [],
-        "production_notes": payload.get("production_notes") or {},
-        "risk_notes": payload.get("risk_notes") or [],
-        "created_at": part.created_at,
-        "updated_at": part.updated_at,
-    }
+def _series_story_data(db: Session, series: ContentSeries) -> list[dict]:
+    workflows = (
+        db.query(MediaWorkflow)
+        .filter(MediaWorkflow.series_id == series.id)
+        .order_by(MediaWorkflow.updated_at.asc())
+        .all()
+    )
+    result: list[dict] = []
+    for workflow in workflows:
+        draft = workflow.draft_json if isinstance(workflow.draft_json, dict) else {}
+        for raw in draft.get("story_data") or []:
+            if isinstance(raw, dict):
+                result.append(raw)
+    return result
