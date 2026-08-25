@@ -84,8 +84,10 @@ export type GenerateVideoJob = {
   id: string
   workflow_id: string
   run_type?: string
+  task_type?: string
   status: 'QUEUED' | 'RUNNING' | 'RENDERED' | 'FAILED' | string
   progress_percent: number
+  current_stage?: string | null
   output_path?: string | null
   video_url?: string | null
   error_message?: string | null
@@ -94,6 +96,71 @@ export type GenerateVideoJob = {
   updated_at?: string
   started_at?: string | null
   completed_at?: string | null
+}
+
+export type VideoWorkflowTask = {
+  id: string
+  workflow_id: string
+  task_type: string
+  status: string
+  current_stage?: string | null
+  progress_percent: number
+  error_message?: string | null
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+export type VideoWorkspaceSummary = {
+  id: string
+  profile: { id: string; name: string; platform: string }
+  series?: { id: string; title: string; status: string } | null
+  primary_content?: { id: string; title?: string | null; summary?: string | null } | null
+  title: string
+  status: string
+  current_stage?: string | null
+  progress_percent: number
+  latest_task?: VideoWorkflowTask | null
+  final_video?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type VideoWorkspaceDetail = {
+  id: string
+  profile?: { id: string; name: string; platform: string } | null
+  series?: { id: string; title: string; description?: string | null; status: string; current_part: number; total_parts: number } | null
+  primary_content_id?: string | null
+  title: string
+  status: string
+  current_stage?: string | null
+  progress_percent: number
+  planning_mode?: string | null
+  metadata: Record<string, unknown>
+  source_content?: Record<string, unknown> | null
+  draft: Partial<GenerateVideoStory> & { story_data?: GenerateVideoScene[] }
+  final_video?: string | null
+  tasks: VideoWorkflowTask[]
+  capabilities: {
+    can_generate_draft: boolean
+    can_edit: boolean
+    can_generate_voice: boolean
+    can_render: boolean
+    can_approve: boolean
+    can_queue: boolean
+  }
+  created_at: string
+  updated_at: string
+}
+
+export type VideoWorkflowProgress = {
+  workflow_id: string
+  status: string
+  current_stage?: string | null
+  progress_percent: number
+  tasks: VideoWorkflowTask[]
+  final_video?: string | null
+  updated_at?: string | null
 }
 
 export type ElevenLabsSharedVoice = {
@@ -175,11 +242,6 @@ export const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): Gener
   }
 }
 
-export const createGenerateVideoStoryFromManualApi = async (source: any) => {
-  const { data } = await api.post(`${basePath}/create-story`, { source }, { timeout: 90000 })
-  return normalizeStoryResponse(data)
-}
-
 export const createGenerateVideoStoryFromProjectApi = async (workflowId: string) => {
   const { data } = await api.post(`${basePath}/projects/${workflowId}/create-story`, undefined, { timeout: 90000 })
   return data as { job: GenerateVideoJob }
@@ -192,29 +254,18 @@ export const saveGenerateVideoStoryApi = async (story: GenerateVideoStory) => {
   return data as { story: GenerateVideoStory }
 }
 
-export const fetchGenerateVideoSavedStoryApi = async (workflowId: string) => {
-  const { data } = await api.get(`${basePath}/projects/${workflowId}/story`)
-  return normalizeStoryResponse(data)
+export const editGenerateVideoStoryWithAiApi = async (workflowId: string, prompt: string) => {
+  const { data } = await api.post(`${basePath}/edit-story`, { workflow_id: workflowId, prompt })
+  return data as { job: GenerateVideoJob }
 }
 
-export const editGenerateVideoStoryWithAiApi = async (story: GenerateVideoStory, prompt: string) => {
-  const workflowId = story.meta?.workflow_id
-  if (!workflowId) throw new Error('Missing workflow_id')
-  const { data } = await api.post(`${basePath}/edit-story`, { workflow_id: workflowId, story, prompt }, { timeout: 90000 })
-  return normalizeStoryResponse(data)
+export const reviewGenerateVideoStoryWithAiApi = async (workflowId: string, instructions?: string) => {
+  const { data } = await api.post(`${basePath}/review-story`, { workflow_id: workflowId, instructions })
+  return data as { job: GenerateVideoJob }
 }
 
-export const reviewGenerateVideoStoryWithAiApi = async (story: GenerateVideoStory, instructions?: string) => {
-  const workflowId = story.meta?.workflow_id
-  if (!workflowId) throw new Error('Missing workflow_id')
-  const { data } = await api.post(`${basePath}/review-story`, { workflow_id: workflowId, story, instructions }, { timeout: 90000 })
-  return { story: normalizeStoryResponse(data.story), review: data.review as GenerateVideoStoryReview | undefined }
-}
-
-export const generateFinalVideoApi = async (story: GenerateVideoStory) => {
-  const workflowId = story.meta?.workflow_id
-  if (!workflowId) throw new Error('Missing workflow_id')
-  const { data } = await api.post(`${basePath}/generate-video`, { workflow_id: workflowId, story })
+export const generateFinalVideoApi = async (workflowId: string) => {
+  const { data } = await api.post(`${basePath}/generate-video`, { workflow_id: workflowId })
   return data as { job: GenerateVideoJob }
 }
 
@@ -244,18 +295,13 @@ export const fetchGenerateVideoJobApi = async (jobId: string) => {
   return request
 }
 
-export const generateVideoVoiceApi = async (story: GenerateVideoStory, voiceId?: string, voiceSpeed = 1, voiceProvider: GenerateVideoVoiceProvider = 'elevenlabs') => {
-  const workflowId = story.meta?.workflow_id
-  if (!workflowId) throw new Error('Missing workflow_id')
-  const { data } = await api.post(`${basePath}/emotion-voice`, { workflow_id: workflowId, story, voice_id: voiceId, voice_speed: voiceSpeed, voice_provider: voiceProvider }, { timeout: 300000 })
+export const generateVideoVoiceApi = async (workflowId: string, voiceId?: string, voiceSpeed = 1, voiceProvider: GenerateVideoVoiceProvider = 'edge_tts_namminh') => {
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/voice`, {
+    voice_id: voiceId,
+    voice_speed: voiceSpeed,
+    voice_provider: voiceProvider,
+  })
   return data as { job: GenerateVideoJob }
-}
-
-export const fitGenerateVideoFramesApi = async (story: GenerateVideoStory) => {
-  const workflowId = story.meta?.workflow_id
-  if (!workflowId) throw new Error('Missing workflow_id')
-  const { data } = await api.post(`${basePath}/fit-frames`, { workflow_id: workflowId, story }, { timeout: 180000 })
-  return data as { meta?: GenerateVideoStory['meta']; audio?: GenerateVideoStory['audio']; timeline?: GenerateVideoStory['timeline']; debug: any }
 }
 
 export const uploadGenerateVideoAudioApi = async (file: File) => {
@@ -298,4 +344,48 @@ export const generateVideoOutputUrl = (outputUrlOrPath: string) => {
     return `${base.replace(/\/api\/v1$/, '')}/${value}`
   }
   return `${base}${basePath}/output/${value.replace(/^out\//, '')}`
+}
+
+/**
+ * Tạo MediaWorkflow từ content/story item trực tiếp + enqueue AI script generation ngay.
+ * Bỏ qua hoàn toàn bước AI chọn lọc / đánh giá điểm.
+ */
+export const createDirectScriptApi = async (payload: {
+  profile_id: string
+  content_id: string
+  title?: string
+  instructions?: string
+  target_duration_seconds?: number
+  note?: string
+}) => {
+  const { data } = await api.post(`${basePath}/direct-script`, payload)
+  return data as { workflow: Record<string, unknown>; job: GenerateVideoJob }
+}
+
+export const fetchVideoWorkspacesApi = async (params: {
+  profile_id?: string
+  series_id?: string
+  status?: string
+  stage?: string
+  search?: string
+  limit?: number
+  offset?: number
+} = {}) => {
+  const { data } = await api.get('/media-workflows/video-workspace', { params })
+  return data as { items: VideoWorkspaceSummary[]; total: number; limit: number; offset: number }
+}
+
+export const fetchVideoWorkspaceApi = async (workflowId: string) => {
+  const { data } = await api.get(`/media-workflows/${workflowId}/workspace`)
+  return data as VideoWorkspaceDetail
+}
+
+export const fetchVideoWorkflowProgressApi = async (workflowId: string) => {
+  const { data } = await api.get(`/media-workflows/${workflowId}/progress`)
+  return data as VideoWorkflowProgress
+}
+
+export const updateVideoWorkspaceApi = async (workflowId: string, payload: Record<string, unknown>) => {
+  const { data } = await api.patch(`/media-workflows/${workflowId}`, payload)
+  return data
 }

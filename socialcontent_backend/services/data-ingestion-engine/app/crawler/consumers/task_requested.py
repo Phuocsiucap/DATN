@@ -13,22 +13,22 @@ def run_task_requested_consumer() -> None:
         print("[crawler-service] Kafka disabled; running DB polling loop...")
         runner = CrawlerRunner()
         import time
-        from common.db.models import CrawlTask
+        from common.db.models import KafkaTask
         while True:
             try:
                 with SessionLocal() as db:
-                    queued_tasks = db.query(CrawlTask).filter(CrawlTask.status == "QUEUED").all()
+                    queued_tasks = db.query(KafkaTask).filter(KafkaTask.status == "QUEUED", KafkaTask.task_type == "CRAWL_URL").all()
                     for task in queued_tasks:
                         runner.handle_task_requested(
                             db,
                             {
                                 "payload": {
                                     "task_id": str(task.id),
-                                    "job_id": str(task.job_id),
-                                    "source_type": task.job_source.source_type if task.job_source else "BILIBILI",
-                                    "source_url": task.job_source.source_url if task.job_source else None,
-                                    "keywords": task.job_source.keywords if task.job_source else [],
-                                    "configuration": task.job_source.configuration if task.job_source else {},
+                                    "job_id": str(task.reference_id),
+                                    "source_type": task.payload_jsonb.get("source_type") if isinstance(task.payload_jsonb, dict) else "BILIBILI",
+                                    "source_url": task.payload_jsonb.get("source_url") if isinstance(task.payload_jsonb, dict) else None,
+                                    "keywords": task.payload_jsonb.get("keywords") if isinstance(task.payload_jsonb, dict) else [],
+                                    "configuration": task.payload_jsonb.get("configuration") if isinstance(task.payload_jsonb, dict) else {},
                                 }
                             },
                         )

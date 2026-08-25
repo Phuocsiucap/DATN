@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from common.core.config import get_settings
 from common.db.idempotency import claim_event
-from common.db.models import ContentItem, MediaWorkflow, KafkaTask, SocialProfile
+from common.db.models import ContentItem, MediaWorkflow, KafkaTask, SocialProfile, PlanningCandidate, PlanningRun
 from common.db.session import SessionLocal
 from common.events.envelope import build_event
 from common.events.kafka import consumer, publish
-from common.events.topics import CRAWL_JOB_COMPLETED, PLANNING_AI_REQUESTED
+from common.events.topics import CRAWL_JOB_COMPLETED, GENERATE_VIDEO_SCRIPT_REQUESTED
 
 logger = logging.getLogger(__name__)
 
@@ -68,38 +69,16 @@ def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
         try:
             candidate_limit = max(1, min(int(getattr(strategy, "max_system_recommendations", 20) or 20), 100))
             project = _create_project_from_crawl(db, profile, job_id, candidate_limit)
-            
-            if getattr(strategy, "auto_planning_enabled", False):
-                run = KafkaTask(
-                    reference_id=str(project.id),
-                    task_type="AI_PLANNING",
-                    status="PENDING",
-                    payload_json={
-                        "planning_mode": "AUTO",
-                        "target_duration_seconds": 60,
-                        "language": "vi",
-                    },
+            script_task = _enqueue_script_from_project(db, project, trigger="crawl_job_completed")
+            if script_task:
+                print(
+                    f"[planning-orchestrator] Created content project {project.id} and script task {script_task.id} "
+                    f"for profile {profile.id} from crawl job {job_id}"
                 )
-                db.add(run)
-                project.status = "PLANNING"
-                db.add(project)
-                db.commit()
-                db.refresh(run)
-
-                publish(
-                    PLANNING_AI_REQUESTED,
-                    build_event(
-                        event_type=PLANNING_AI_REQUESTED,
-                        source="api-service",
-                        payload={"workflow_id": str(project.id), "task_id": str(run.id)},
-                        correlation_id=project.id,
-                    ),
-                )
-                print(f"[planning-orchestrator] Created content project {project.id} and planning task {run.id} for profile {profile.id} from crawl job {job_id}")
             else:
                 print(
                     f"[planning-orchestrator] Created content project {project.id} for profile {profile.id} from crawl job {job_id}; "
-                    "auto_planning_enabled=False so planning task was not created"
+                    "no eligible content was available for video scripting"
                 )
         except Exception as exc:
             print(f"[planning-orchestrator] Failed auto project for profile {profile.id} on crawl job {job_id}: {exc}")
@@ -107,6 +86,7 @@ def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
 
 def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, candidate_limit: int = 20) -> MediaWorkflow:
     crawl_job_id = uuid.UUID(str(job_id))
+    items = _content_items_for_crawl_job(db, crawl_job_id, candidate_limit)
     existing = next(
         (
             project
@@ -122,26 +102,18 @@ def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, can
         None,
     )
     if existing:
+        if items and not existing.primary_content_id:
+            existing.primary_content_id = items[0].id
+            existing.inputs_jsonb = _workflow_inputs(items)
+            existing.status = "READY"
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
+        _ensure_auto_planning_records(db, existing, items, job_id)
         return existing
 
-    # Get content items from this crawl_job by checking sources_jsonb
-    items = (
-        db.query(ContentItem)
-        .filter(ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]))
-        .order_by(ContentItem.quality_score.desc(), ContentItem.updated_at.desc())
-        .limit(candidate_limit)
-        .all()
-    )
-    
-    # Filter in python to avoid complex jsonb query for now
-    items = [item for item in items if any(s.get("crawl_job_id") == str(job_id) for s in (item.sources_jsonb if isinstance(item.sources_jsonb, list) else []))]
-    
-    inputs = []
-    primary_content_id = None
-    for item in items:
-        inputs.append({"type": "CONTENT", "id": str(item.id), "score": item.quality_score or 0})
-        if not primary_content_id:
-            primary_content_id = item.id
+    inputs = _workflow_inputs(items)
+    primary_content_id = items[0].id if items else None
 
     project = MediaWorkflow(
         user_id=profile.user_id,
@@ -155,4 +127,174 @@ def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, can
     db.add(project)
     db.commit()
     db.refresh(project)
+    _ensure_auto_planning_records(db, project, items, job_id)
     return project
+
+
+def _content_items_for_crawl_job(db: Any, crawl_job_id: uuid.UUID, candidate_limit: int) -> list[ContentItem]:
+    return (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.crawl_job_id == crawl_job_id,
+            ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
+        )
+        .order_by(ContentItem.quality_score.desc(), ContentItem.updated_at.desc())
+        .limit(candidate_limit)
+        .all()
+    )
+
+
+def _workflow_inputs(items: list[ContentItem]) -> list[dict[str, Any]]:
+    return [{"type": "content", "id": str(item.id), "score": float(item.quality_score or 0)} for item in items]
+
+
+def _ensure_auto_planning_records(db: Any, project: MediaWorkflow, items: list[ContentItem], job_id: str) -> PlanningRun:
+    crawl_job_id = uuid.UUID(str(job_id))
+    existing_run = (
+        db.query(PlanningRun)
+        .filter(
+            PlanningRun.workflow_id == project.id,
+            PlanningRun.planning_mode == "AUTO",
+            PlanningRun.crawl_job_id == crawl_job_id,
+        )
+        .order_by(PlanningRun.created_at.desc())
+        .first()
+    )
+    now = datetime.now(timezone.utc)
+    input_payload = {
+        "crawl_job_id": str(job_id),
+        "candidate_limit": len(items),
+        "content_ids": [str(item.id) for item in items],
+        "filters": {
+            "content_item_crawl_job_id": str(job_id),
+            "statuses": ["READY", "USABLE_WITH_WARNING"],
+            "order_by": ["quality_score DESC", "updated_at DESC"],
+        },
+    }
+    output_payload = {
+        "workflow_id": str(project.id),
+        "selected_content_id": str(project.primary_content_id) if project.primary_content_id else None,
+        "input_count": len(items),
+    }
+    reason_payload = {
+        "trigger": "crawl_job_completed",
+        "selection_reasons": [
+            "Selected from ContentItem rows directly linked to this crawl_job_id",
+            "Ordered by quality_score descending, then updated_at descending",
+        ],
+    }
+    if existing_run:
+        existing_run.status = "SUCCEEDED" if items else "WAITING_REVIEW"
+        existing_run.input_jsonb = input_payload
+        existing_run.output_jsonb = output_payload
+        existing_run.reason_jsonb = reason_payload
+        existing_run.metadata_json = {**(existing_run.metadata_json or {}), "trigger": "crawl_job_completed"}
+        existing_run.completed_at = existing_run.completed_at or now
+        db.add(existing_run)
+        run = existing_run
+    else:
+        run = PlanningRun(
+            user_id=project.user_id,
+            profile_id=project.profile_id,
+            workflow_id=project.id,
+            crawl_job_id=crawl_job_id,
+            planning_mode="AUTO",
+            status="SUCCEEDED" if items else "WAITING_REVIEW",
+            input_jsonb=input_payload,
+            output_jsonb=output_payload,
+            reason_jsonb=reason_payload,
+            metadata_json={"trigger": "crawl_job_completed"},
+            started_at=now,
+            completed_at=now,
+        )
+        db.add(run)
+        db.flush()
+
+    for index, item in enumerate(items, start=1):
+        _ensure_planning_candidate(db, run, project, item, index, job_id)
+
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _ensure_planning_candidate(db: Any, run: PlanningRun, project: MediaWorkflow, item: ContentItem, rank: int, job_id: str) -> PlanningCandidate:
+    candidate = (
+        db.query(PlanningCandidate)
+        .filter(
+            PlanningCandidate.planning_run_id == run.id,
+            PlanningCandidate.content_id == item.id,
+        )
+        .first()
+    )
+    if not candidate:
+        candidate = PlanningCandidate(
+            planning_run_id=run.id,
+            workflow_id=project.id,
+            content_id=item.id,
+        )
+    candidate.rank_order = rank
+    candidate.score = item.quality_score or 0
+    candidate.selected = project.primary_content_id == item.id
+    candidate.eligible = True
+    candidate.reason_jsonb = {
+        "crawl_job_id": str(job_id),
+        "selection_reasons": [
+            "Included because content item is linked to this crawl_job_id",
+            "Eligible status: READY/USABLE_WITH_WARNING",
+        ],
+        "rejection_reasons": [],
+    }
+    candidate.metadata_json = {
+        "quality_score": float(item.quality_score or 0),
+        "status": item.status,
+    }
+    db.add(candidate)
+    return candidate
+
+
+def _enqueue_script_from_project(db: Any, project: MediaWorkflow, *, trigger: str) -> KafkaTask | None:
+    if not project.primary_content_id:
+        return None
+    existing = (
+        db.query(KafkaTask)
+        .filter(
+            KafkaTask.reference_id == project.id,
+            KafkaTask.task_type == "GENERATE_VIDEO_SCRIPT",
+            KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
+        )
+        .order_by(KafkaTask.created_at.desc())
+        .first()
+    )
+    if existing:
+        return existing
+
+    task = KafkaTask(
+        reference_id=project.id,
+        reference_type="media_workflow",
+        task_type="GENERATE_VIDEO_SCRIPT",
+        status="PENDING",
+        current_stage="QUEUED_SCRIPT",
+        progress_percent=0,
+        payload_jsonb={
+            "content_id": str(project.primary_content_id),
+            "trigger": trigger,
+        },
+    )
+    project.status = "SCRIPTING"
+    project.current_stage = "QUEUED_SCRIPT"
+    project.progress_percent = 0
+    db.add_all([task, project])
+    db.commit()
+    db.refresh(task)
+    publish(
+        GENERATE_VIDEO_SCRIPT_REQUESTED,
+        build_event(
+            event_type=GENERATE_VIDEO_SCRIPT_REQUESTED,
+            source="planning-orchestrator",
+            job_id=task.id,
+            payload={"workflow_id": str(project.id), "run_type": task.task_type, "task_id": str(task.id), "trigger": trigger},
+            correlation_id=project.id,
+        ),
+    )
+    return task

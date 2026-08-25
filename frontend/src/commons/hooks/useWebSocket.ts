@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useAppDispatch } from './useAppDispatch'
 import { addEvent } from '@/commons/store/slices/eventsSlice'
-import { prependArticle, updateArticleStatus } from '@/commons/store/slices/articlesSlice'
 import { fetchStats } from '@/commons/store/slices/statsSlice'
 import { subscribeWebSocket } from './webSocketClient'
 
@@ -37,18 +36,7 @@ export function useWebSocket(enabled: boolean) {
 
       dispatch(addEvent(event))
 
-      if (event.type === 'article_crawled') {
-        dispatch(prependArticle({
-          title: event.title ?? '',
-          link: event.link ?? '',
-          status: 'crawled',
-          crawled_at: event.timestamp,
-        }))
-        dispatch(fetchStats())
-      }
-
-      if (event.type === 'article_published') {
-        dispatch(updateArticleStatus({ link: event.link ?? '', status: 'published' }))
+      if (event.type === 'article_crawled' || event.type === 'article_published') {
         dispatch(fetchStats())
       }
     })

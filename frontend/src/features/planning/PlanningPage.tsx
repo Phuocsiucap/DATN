@@ -1,30 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { Loader2, RefreshCcw, CheckCircle2, XCircle, ChevronRight, Filter, Lightbulb, ListVideo, BrainCircuit, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
+import { Loader2, RefreshCcw, CheckCircle2, XCircle, ChevronRight, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
 
 import {
   approveContentPlanApi,
-  fetchWorkflowRunsApi,
+  fetchPlanningRunsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
   rejectContentPlanApi,
   type ContentPlan,
   type PlanningProfile,
-  type WorkflowRun,
+  type PlanningRun,
   type ProfileSeriesReview,
   type ReviewSourceContent,
   type StoryScene,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
-import { WorkflowRunDetailDialog } from './WorkflowRunDetailDialog'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
 
 type PipelineStep = 'jobs' | 'plans' | 'series'
 
-const isTopicConfigError = (job: WorkflowRun) =>
+const isTopicConfigError = (job: PlanningRun) =>
   job.status === 'FAILED' &&
   !!job.error_message &&
   (job.error_message.includes('Content Topics') || job.error_message.includes('content_topics') || job.error_message.includes('chu de') || job.error_message.includes('Chua cau hinh'))
@@ -41,12 +40,11 @@ export default function PlanningPage({
   onOpenGenerateVideo?: (workflowId?: string) => void
 }) {
   const activeStep = initialStep
-  const [jobs, setJobs] = useState<WorkflowRun[]>([])
+  const [jobs, setJobs] = useState<PlanningRun[]>([])
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
 
-  const [selectedJob, setSelectedJob] = useState<WorkflowRun | null>(null)
   const [selectedReviewArticle, setSelectedReviewArticle] = useState<{
     article: ProfileSeriesReview['articles'][number]
     seriesTitle: string
@@ -84,8 +82,8 @@ export default function PlanningPage({
     setMessage('')
     try {
       if (activeStep === 'jobs') {
-        const nextJobs = await fetchWorkflowRunsApi()
-        setJobs(nextJobs)
+        const nextRuns = await fetchPlanningRunsApi()
+        setJobs(nextRuns.items)
         return
       }
 
@@ -116,6 +114,17 @@ export default function PlanningPage({
   }, [activeStep, selectedProfileId])
 
   useEffect(() => {
+    if (activeStep !== 'jobs') return
+    const interval = setInterval(() => {
+      const hasRunningJobs = jobs.some((job) => !['COMPLETED', 'FAILED', 'SUCCEEDED'].includes(job.status))
+      if (hasRunningJobs) {
+        fetchPlanningRunsApi().then((response) => setJobs(response.items)).catch(() => {})
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [activeStep, jobs])
+
+  useEffect(() => {
     if (!selectedReviewArticle) return
     const selectedPlanId = selectedReviewArticle.article.plan?.id
     const stillExists = reviewSeries.some(item => item.articles.some(article => {
@@ -127,10 +136,10 @@ export default function PlanningPage({
   }, [reviewSeries, selectedReviewArticle])
 
   const pageTitle = activeStep === 'jobs'
-    ? 'Tiến Trình Job'
+    ? 'Lịch Sử Auto Planning'
     : 'Duyệt Thành Phẩm'
   const pageDescription = activeStep === 'jobs'
-    ? 'Theo dõi các job AI Planning, trạng thái xử lý và log chi tiết.'
+    ? 'Theo dõi đầu vào, kết quả chọn content và lý do của mỗi lần auto planning sau crawl.'
     : 'Duyệt kế hoạch theo từng social profile, nhóm theo series và xem từng bài trong series.'
 
   const handleRefresh = () => {
@@ -193,8 +202,8 @@ export default function PlanningPage({
         <div className="min-h-[600px]">
           {activeStep === 'jobs' && (
             <div className="space-y-4">
-              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Không có Job AI nào đang chạy" /></div> : jobs.map((job) => (
-                <div key={job.id} onClick={() => setSelectedJob(job)} className="workspace-card p-4 cursor-pointer hover:border-slate-300 transition-all relative overflow-hidden group">
+              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào" /></div> : jobs.map((job) => (
+                <div key={job.id} className="workspace-card relative overflow-hidden p-4">
                   <div className="flex justify-between items-start mb-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -203,70 +212,29 @@ export default function PlanningPage({
                         <Badge value={job.status} />
                       </div>
                       <div className="mt-2 mb-1 text-sm font-bold text-[var(--accent)]">
-                        Job AI Planning
+                        {job.workflow_title}
                       </div>
-                      <div className="text-xs text-slate-500 font-mono">Started: {formatDate(job.created_at)}</div>
+                      <div className="text-xs text-slate-500">{job.profile_name} · Crawl #{job.crawl_job_id ? shortId(job.crawl_job_id) : '-'}</div>
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-bold text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
-                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Tiến độ</div>
+                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{job.current_stage}</div>
                     </div>
                   </div>
 
-                  {/* Pipeline Topology */}
-                  <div className="relative px-2 pb-2">
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-[2px] bg-slate-100 z-0 rounded-full"></div>
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[2px] bg-[var(--accent)] z-0 transition-all duration-1000 rounded-full" style={{ width: `${job.progress_percent}%` }}></div>
-
-                    <div className="flex items-center justify-between relative z-10">
-                      {[
-                        { id: 'SCORING_CANDIDATES', label: 'Score', icon: Filter },
-                        { id: 'CREATING_PLAN', label: 'Plan', icon: Lightbulb },
-                        { id: 'CREATING_SERIES', label: 'Series', icon: ListVideo },
-                        { id: 'BUILDING_CONTEXT', label: 'Context', icon: BrainCircuit },
-                        { id: 'VALIDATING_PLAN', label: 'Review', icon: CheckCircle2 }
-                      ].map((stage, idx, arr) => {
-                        const Icon = stage.icon;
-                        const stageIndex = arr.findIndex(s => s.id === job.current_stage)
-                        let state = 'pending'
-                        if (job.status === 'COMPLETED' || job.status === 'WAITING_REVIEW') state = 'done'
-                        else if (job.status === 'FAILED') {
-                          state = idx <= stageIndex ? 'failed' : 'pending'
-                        } else {
-                          if (idx < stageIndex) state = 'done'
-                          else if (idx === stageIndex) state = 'current'
-                        }
-
-                        let boxClass = 'bg-white border-slate-200 text-slate-400'
-                        let iconClass = 'text-slate-400'
-                        if (state === 'done') {
-                          boxClass = 'bg-blue-50 border-[var(--accent)] text-[var(--accent-strong)] shadow-sm'
-                          iconClass = 'text-[var(--accent)]'
-                        } else if (state === 'current') {
-                          boxClass = 'bg-blue-50 border-blue-400 text-blue-700 ring-4 ring-blue-100/50 shadow-sm'
-                          iconClass = 'text-blue-600 animate-pulse'
-                        } else if (state === 'failed') {
-                          boxClass = 'bg-red-50 border-red-400 text-red-600'
-                          iconClass = 'text-red-500'
-                        }
-
-                        return (
-                          <div key={stage.id} className="flex items-center">
-                            <div className={`px-4 py-2 border rounded-lg text-center flex flex-col items-center justify-center w-[85px] transition-colors ${boxClass}`}>
-                              <Icon size={16} className={`mb-1.5 ${iconClass}`} />
-                              <span className="text-[10px] font-mono font-bold uppercase tracking-wide">{stage.label}</span>
-                            </div>
-                            {idx < arr.length - 1 && (
-                              <div className="px-2">
-                                <ChevronRight size={16} className={`${state === 'done' ? 'text-[var(--accent)]' : 'text-slate-300'}`} />
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                  <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+                    <RunMetric label="Content đầu vào" value={job.candidate_count} />
+                    <RunMetric label="Đủ điều kiện" value={job.eligible_count} />
+                    <RunMetric label="Được chọn" value={job.selected_count} accent />
                   </div>
-                  {/* Error banner: Chưa cấu hình Content Topics */}
+                  {job.selection_reasons.length > 0 && (
+                    <div className="mt-4 rounded-md bg-slate-50 px-3 py-2">
+                      <div className="text-[10px] font-black uppercase text-slate-400">Lý do chọn</div>
+                      {job.selection_reasons.map((reason) => (
+                        <div key={reason} className="mt-1 text-xs text-slate-600">{reason}</div>
+                      ))}
+                    </div>
+                  )}
                   {isTopicConfigError(job) && (
                     <div
                       className="mt-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
@@ -278,13 +246,14 @@ export default function PlanningPage({
                         <p className="mt-0.5 text-amber-700">Profile này chưa có <strong>Content Topics</strong>. Auto Planning cần ít nhất 1 chủ đề để chọn bài phù hợp.</p>
                       </div>
                       <button
-                        onClick={() => job.profile_id && onOpenProfileSettings?.(job.profile_id)}
+                        onClick={() => onOpenProfileSettings?.(job.profile_id)}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors"
                       >
                         <Settings2 size={13} /> Cấu hình ngay
                       </button>
                     </div>
                   )}
+                  <div className="mt-4 text-[11px] text-slate-400">Bắt đầu {formatDate(job.started_at || job.created_at)} · Hoàn tất {formatDate(job.completed_at)}</div>
                 </div>
               ))}
             </div>
@@ -367,7 +336,6 @@ export default function PlanningPage({
                           <div className="font-bold text-[#0f172a]">{article.source_content ? Number(article.source_content.quality_score || 0).toFixed(1) : '-'}</div>
                           <div className="flex items-center gap-2">
                             <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
-                            {article.plan ? <Badge value={article.plan.status} /> : <Badge value="UNLINKED" />}
                           </div>
                           <div className="flex justify-end gap-2">
                             {article.source_content && (
@@ -435,16 +403,7 @@ export default function PlanningPage({
               </div>
             </div>
           )}
-
         </div>
-      )}
-
-      {selectedJob && (
-        <WorkflowRunDetailDialog
-          job={selectedJob}
-          open={!!selectedJob}
-          onOpenChange={(open) => !open && setSelectedJob(null)}
-        />
       )}
 
       <ArticleReviewSheet
@@ -921,6 +880,15 @@ function Badge({ value }: { value: string }) {
   if (['RUNNING', 'PENDING', 'PROCESSING', 'GENERATED'].includes(value)) color = 'bg-blue-100 text-blue-800'
   if (['NEEDS_REVIEW'].includes(value)) color = 'bg-amber-100 text-amber-800'
   return <span className={`px-2 py-1 inline-flex items-center justify-center rounded-md text-[10px] font-bold uppercase tracking-wider ${color}`}>{value}</span>
+}
+
+function RunMetric({ label, value, accent = false }: { label: string; value: number; accent?: boolean }) {
+  return (
+    <div className={`rounded-md border px-3 py-2 ${accent ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+      <div className="text-[10px] font-black uppercase text-slate-400">{label}</div>
+      <div className={`mt-1 text-lg font-black tabular-nums ${accent ? 'text-blue-700' : 'text-slate-800'}`}>{value}</div>
+    </div>
+  )
 }
 
 function Empty({ label }: { label: string }) {

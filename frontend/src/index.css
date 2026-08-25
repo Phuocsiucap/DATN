@@ -91,6 +91,26 @@
   }
 }
 
+@keyframes workflow-progress-scan {
+  0% { left: -5rem; opacity: 0.15; }
+  50% { opacity: 0.95; }
+  100% { left: 100%; opacity: 0.15; }
+}
+
+@keyframes workflow-status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+}
+
+@keyframes workflow-active-node {
+  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.25); }
+  50% { transform: translateY(-2px); box-shadow: 0 0 0 5px rgba(37, 99, 235, 0); }
+}
+
+.workflow-progress-scan { animation: workflow-progress-scan 1.8s ease-in-out infinite alternate; }
+.workflow-status-pulse { animation: workflow-status-pulse 1.5s ease-in-out infinite; }
+.workflow-active-node { animation: workflow-active-node 1.4s ease-in-out infinite; }
+
 .bento-card {
   background: var(--surface-container-lowest);
   border: 1px solid var(--outline-variant);

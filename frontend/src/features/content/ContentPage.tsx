@@ -91,7 +91,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
               <div className="flex-1 overflow-y-auto">
                 {contents.length === 0 ? <div className="empty-state m-3">Chưa có dữ liệu.</div> : contents.map((item) => (
                   <div key={item.id} onClick={() => setSelectedContent(item)} className={`grid cursor-pointer grid-cols-[84px_2fr_0.8fr_0.9fr_1fr] items-center gap-3 border-b border-[var(--outline-variant)] px-4 py-3 text-xs transition-colors ${selectedContent?.id === item.id ? 'bg-[var(--secondary-container)]/40' : 'bg-white hover:bg-[var(--surface-container-low)]'}`}>
-                    <MediaPreview media={item.media} compact />
+                    <MediaPreview media={item.media_jsonb || item.media} compact />
                     <div className="min-w-0">
                       <div className="truncate font-bold text-[var(--on-surface)]">{activeTab === 'series' ? item.series?.canonical_name || item.canonical_title : item.canonical_title}</div>
                       <div className="truncate text-xs text-[var(--on-surface-variant)] mt-0.5">{activeTab === 'series' ? (item.episode_title || item.canonical_title) : (item.summary || item.canonical_url || shortId(item.id))}</div>

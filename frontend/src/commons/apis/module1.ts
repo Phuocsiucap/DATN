@@ -76,9 +76,11 @@ export type ContentDetail = ContentItem & {
   content_hash?: string | null
   transcript_hash?: string | null
   updated_at: string
-  sources: ContentSourceDetail[]
-  media: ContentMediaDetail[]
-  processing_runs: ProcessingRunDetail[]
+  sources?: ContentSourceDetail[]
+  sources_jsonb?: ContentSourceDetail[]
+  media?: ContentMediaDetail[]
+  media_jsonb?: ContentMediaDetail[]
+  processing_runs?: ProcessingRunDetail[]
 }
 
 export type FinalSeriesInfo = {
@@ -93,7 +95,8 @@ export type FinalContentItem = ContentItem & {
   source_type?: string | null
   source_url?: string | null
   published_at?: string | null
-  media: ContentMediaDetail[]
+  media?: ContentMediaDetail[]
+  media_jsonb?: ContentMediaDetail[]
   episode_id?: string | null
   episode_number?: number | null
   sequence_order?: number | null

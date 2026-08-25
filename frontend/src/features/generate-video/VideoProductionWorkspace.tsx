@@ -41,9 +41,9 @@ import {
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
   editGenerateVideoStoryWithAiApi,
-  fetchGenerateVideoSavedStoryApi,
-  fitGenerateVideoFramesApi,
   fetchGenerateVideoJobApi,
+  fetchVideoWorkflowProgressApi,
+  fetchVideoWorkspaceApi,
   generateFinalVideoApi,
   generateVideoVoiceApi,
   generateVideoMediaUrl,
@@ -51,13 +51,17 @@ import {
   queueGenerateVideoProjectApi,
   reviewGenerateVideoStoryWithAiApi,
   saveGenerateVideoStoryApi,
+  updateVideoWorkspaceApi,
   uploadGenerateVideoAudioApi,
   normalizeStoryResponse,
   type GenerateVideoScene,
+  type GenerateVideoJob,
   type GenerateVideoStory,
   type GenerateVideoVoiceProvider,
+  type VideoWorkflowProgress,
+  type VideoWorkspaceDetail,
 } from '@/commons/apis/generateVideo'
-import { fetchVideoScriptApi, updateMediaWorkflowApi, type MediaWorkflow } from '@/commons/apis/planning'
+import WorkflowProgress from './WorkflowProgress'
 
 type StepId = 'plan' | 'story' | 'video' | 'preview'
 type PlanDraft = {
@@ -74,7 +78,7 @@ type PlanDraft = {
   story_data: string
 }
 
-const defaultVoiceId = 'pNInz6obpgDQGcFmaJgB'
+const defaultVoiceId = ''
 const voiceProviderOptions: Array<{ value: GenerateVideoVoiceProvider; label: string }> = [
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'edge_tts_namminh', label: 'Edge NamMinh' },
@@ -128,9 +132,10 @@ const emptyPlanDraft: PlanDraft = {
   story_data: '[]',
 }
 
-function planDraftFromProject(workflow: MediaWorkflow | null): PlanDraft {
+function planDraftFromProject(workflow: VideoWorkspaceDetail | null): PlanDraft {
   if (!workflow) return emptyPlanDraft
   const metadata = workflow.metadata || {}
+  const draftStory = workflowStory(workflow)
   return {
     title: workflow.title || '',
     content_angle: String(metadata.content_angle || ''),
@@ -142,7 +147,7 @@ function planDraftFromProject(workflow: MediaWorkflow | null): PlanDraft {
     recommended_part_count: metadata.recommended_part_count ? String(metadata.recommended_part_count) : '',
     ai_reasoning: Array.isArray(metadata.ai_reasoning) ? metadata.ai_reasoning.map(String).join('\n') : '',
     production_requirements: JSON.stringify(metadata.production_requirements || {}, null, 2),
-    story_data: JSON.stringify(workflow.story_data || workflow.draft_json?.story_data || [], null, 2),
+    story_data: JSON.stringify(draftStory ? storyTimelineScenes(draftStory) : [], null, 2),
   }
 }
 
@@ -184,7 +189,7 @@ type VideoProductionWorkspaceProps = {
 
 export default function VideoProductionWorkspace({ workflowId, onBackToList }: VideoProductionWorkspaceProps) {
   const [selectedId, setSelectedId] = useState('')
-  const [selectedProject, setSelectedProject] = useState<MediaWorkflow | null>(null)
+  const [selectedProject, setSelectedProject] = useState<VideoWorkspaceDetail | null>(null)
   const [planDraft, setPlanDraft] = useState<PlanDraft>(emptyPlanDraft)
   const [story, setStory] = useState<GenerateVideoStory | null>(null)
   const [previewStory, setPreviewStory] = useState<GenerateVideoStory | null>(null)
@@ -196,18 +201,21 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const [activeStep, setActiveStep] = useState<StepId>('story')
   const [voiceId] = useState(defaultVoiceId)
   const [voiceSpeed] = useState(1)
-  const [voiceProvider, setVoiceProvider] = useState<GenerateVideoVoiceProvider>('elevenlabs')
+  const [voiceProvider, setVoiceProvider] = useState<GenerateVideoVoiceProvider>('edge_tts_namminh')
+  const [workflowProgress, setWorkflowProgress] = useState<VideoWorkflowProgress | null>(null)
   const [status, setStatus] = useState('Sẵn sàng')
   const [loadError, setLoadError] = useState('')
-  const [storyLoadError, setStoryLoadError] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [audioVersion, setAudioVersion] = useState(Date.now())
   const [previewVersion, setPreviewVersion] = useState(0)
   const createStoryBusyRef = useRef(false)
   const actionLocksRef = useRef<Record<string, boolean>>({})
+  const refreshedTaskRef = useRef('')
   const activeStory = story || previewStory
   const hasStoryInput = Boolean(activeStory || storyText.trim())
   const canRenderMp4 = Boolean(activeStory || storyText.trim())
+  const workflowRunning = Boolean(activeProgressTask(workflowProgress))
+  const actionsLocked = Boolean(busy) || workflowRunning
 
   const beginAction = (key: string) => {
     if (actionLocksRef.current[key]) return false
@@ -226,26 +234,49 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setPreviewStory(null)
     setStoryText('')
     setExportedVideoUrl('')
+    setWorkflowProgress(null)
+    refreshedTaskRef.current = ''
     setLoadError('')
-    setStoryLoadError('')
     setActiveStep('story')
     setStatus('Đang tải workflow kịch bản...')
     void loadInitial()
   }, [workflowId])
 
-  const totalDuration = useMemo(() => {
-    if (!story) return 0
-    const scenes = storyTimelineScenes(story)
-    return storyTimelineDuration(story, scenes)
-  }, [story])
+  useEffect(() => {
+    if (!workflowId) return
+    let disposed = false
+    const poll = async () => {
+      try {
+        const next = await fetchVideoWorkflowProgressApi(workflowId)
+        if (disposed) return
+        setWorkflowProgress(next)
+        if (next.final_video) setExportedVideoUrl(generateVideoOutputUrl(next.final_video))
+        const latest = next.tasks[0]
+        if (latest && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(latest.status) && refreshedTaskRef.current !== latest.id) {
+          refreshedTaskRef.current = latest.id
+          await loadProjectById(workflowId, { openSavedStory: true, quiet: true })
+        }
+      } catch {
+        // The main workspace request owns user-facing errors.
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 2000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [workflowId])
 
   const audioSrc = previewStory?.audio?.voice
     ? `${generateVideoMediaUrl(previewStory.audio.voice)}?v=${audioVersion}`
     : ''
+
+
   const editSourceContent = {
-    ...((selectedProject?.source_content || selectedProject?.metadata?.source_content || selectedProject?.metadata || {}) as Record<string, any>),
-    title: selectedProject?.source_content?.title || selectedProject?.metadata?.source_content?.title || selectedProject?.title,
-    full_text: selectedProject?.source_content?.full_text || selectedProject?.metadata?.source_content?.full_text || selectedProject?.metadata?.content_angle || selectedProject?.metadata?.note || '',
+    ...((selectedProject?.source_content || {}) as Record<string, any>),
+    title: (selectedProject?.source_content as any)?.title || selectedProject?.title,
+    full_text: (selectedProject?.source_content as any)?.full_text || '',
   }
   const loadInitial = async () => {
     setBusy('load')
@@ -275,25 +306,20 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     return parsed
   }
 
-  const loadProjectById = async (workflowId: string, options: { openSavedStory?: boolean } = {}) => {
-    setBusy('load-project')
+  const loadProjectById = async (workflowId: string, options: { openSavedStory?: boolean; quiet?: boolean } = {}) => {
+    if (!options.quiet) setBusy('load-project')
     try {
       setLoadError('')
-      setStoryLoadError('')
-      const workflow = await fetchVideoScriptApi(workflowId)
+      const workflow = await fetchVideoWorkspaceApi(workflowId)
       setSelectedProject(workflow)
       setPlanDraft(planDraftFromProject(workflow))
       setSelectedId(workflowId)
-      const artifacts = getWorkflowArtifacts(workflow)
-      setExportedVideoUrl(artifacts?.final ? generateVideoOutputUrl(String(artifacts.final)) : '')
+      setWorkflowProgress(workflowProgressFromDetail(workflow))
+      setExportedVideoUrl(workflow.final_video ? generateVideoOutputUrl(workflow.final_video) : '')
       window.history.replaceState({ workflowId }, '', `/generate-video/${encodeURIComponent(workflowId)}`)
 
-      if ((workflow.story_data && workflow.story_data.length > 0) || (workflow as any).story) {
-        const directStory = normalizeStoryResponse({
-          ...((workflow as any).story || (workflow.metadata?.story as Record<string, any>) || {}),
-          story_data: workflow.story_data && workflow.story_data.length > 0 ? workflow.story_data : ((workflow as any).story?.story_data || []),
-          meta: { workflow_id: workflow.id, ...(((workflow as any).story?.meta) || {}) }
-        })
+      const directStory = workflowStory(workflow)
+      if (directStory) {
         updateStory(directStory)
         setPreviewStory(directStory)
         setPreviewVersion(Date.now())
@@ -303,7 +329,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
         setStory(null)
         setPreviewStory(null)
         setStoryText('')
-        setStoryLoadError('')
         setActiveStep('plan')
         setStatus('')
       }
@@ -312,7 +337,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       setLoadError(message)
       setStatus(message)
     } finally {
-      setBusy(null)
+      if (!options.quiet) setBusy(null)
     }
   }
 
@@ -324,21 +349,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       const result = await createGenerateVideoStoryFromProjectApi(selectedId)
       setStatus(`Đã đưa vào hàng đợi tạo kịch bản (${result.job.id.slice(0, 8)})`)
       const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
+        setWorkflowProgress(progressFromJob(selectedId, job))
         setStatus(`Đang tạo kịch bản: ${job.status} · ${Math.round(Number(job.progress_percent || 0))}%`)
       }, 5 * 60 * 1000)
       if (completedJob.status === 'FAILED') {
         throw new Error(completedJob.error_message || 'Script job failed')
       }
-      let nextStory = completedJob.story
-      if (!nextStory) {
-        const updatedProject = await fetchVideoScriptApi(selectedId)
-        if (updatedProject.story_data && updatedProject.story_data.length > 0) {
-          nextStory = normalizeStoryResponse({
-            story_data: updatedProject.story_data,
-            meta: { workflow_id: selectedId }
-          })
-        }
-      }
+      const updatedProject = await fetchVideoWorkspaceApi(selectedId)
+      const nextStory = workflowStory(updatedProject)
       if (nextStory) {
         nextStory.meta = { ...(nextStory.meta || {}), workflow_id: selectedId }
         updateStory(nextStory)
@@ -360,10 +378,18 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('save-plan')
     try {
       const payload = planDraftToPayload(planDraft)
-      const workflow = await updateMediaWorkflowApi(selectedId, payload)
+      const { story_data: storyData, ...metadata } = payload
+      await updateVideoWorkspaceApi(selectedId, {
+        ...metadata,
+        draft_json: {
+          ...(selectedProject?.draft || {}),
+          story_data: storyData,
+        },
+      })
+      const workflow = await fetchVideoWorkspaceApi(selectedId)
       setSelectedProject(workflow)
       setPlanDraft(planDraftFromProject(workflow))
-      setStatus('Đã lưu story_data. Nếu video draft đã tạo trước đó, hãy tạo lại để đồng bộ.')
+      setStatus('Đã lưu draft. Hãy tạo lại voice hoặc video nếu timeline đã thay đổi.')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không lưu được kế hoạch AI')
     } finally {
@@ -382,7 +408,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       setPreviewStory(result.story)
       setPreviewVersion(Date.now())
       const review = result.story.meta?.ai_story_review
-      setStatus(review?.action === 'REVISED' ? 'Đã lưu. AI reviewer đã sửa story_data cho khớp kịch bản.' : 'Đã lưu. AI reviewer đã duyệt story_data.')
+      setStatus(review?.action === 'REVISED' ? 'Đã lưu. AI reviewer đã sửa draft cho khớp kịch bản.' : 'Đã lưu. AI reviewer đã duyệt draft.')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'JSON story không hợp lệ')
     } finally {
@@ -396,8 +422,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('edit-story')
     try {
       const parsed = currentStoryForAction()
-      const result = await editGenerateVideoStoryWithAiApi(parsed, editPrompt.trim())
-      updateStory(result)
+      await saveGenerateVideoStoryApi(parsed)
+      const result = await editGenerateVideoStoryWithAiApi(selectedId, editPrompt.trim())
+      const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
+        setWorkflowProgress(progressFromJob(selectedId, job))
+        setStatus(`Đang chỉnh draft bằng AI · ${Math.round(Number(job.progress_percent || 0))}%`)
+      }, 5 * 60 * 1000)
+      if (completedJob.status === 'FAILED') throw new Error(completedJob.error_message || 'AI edit thất bại')
+      await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
       setActiveStep('story')
       setShowEditDialog(false)
       setStatus('Đã chỉnh timeline bằng AI từ dữ liệu đã gen + tài liệu gốc')
@@ -414,14 +446,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('review-story')
     try {
       const parsed = currentStoryForAction()
-      const result = await reviewGenerateVideoStoryWithAiApi(parsed, 'Duyệt story_data trước khi tạo voice hoặc render video.')
-      updateStory(result.story)
-      setPreviewStory(result.story)
+      await saveGenerateVideoStoryApi(parsed)
+      const result = await reviewGenerateVideoStoryWithAiApi(selectedId, 'Duyệt draft trước khi tạo voice hoặc render video.')
+      const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
+        setWorkflowProgress(progressFromJob(selectedId, job))
+        setStatus(`AI đang review draft · ${Math.round(Number(job.progress_percent || 0))}%`)
+      }, 5 * 60 * 1000)
+      if (completedJob.status === 'FAILED') throw new Error(completedJob.error_message || 'AI review thất bại')
+      await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
       setPreviewVersion(Date.now())
-      const review = result.review || result.story.meta?.ai_story_review
-      setStatus(review?.action === 'REVISED'
-        ? 'AI reviewer đã sửa story_data để khớp kịch bản và nguồn. Hãy tạo lại voice nếu voice cũ bị bỏ.'
-        : 'AI reviewer đã duyệt story_data, có thể tiếp tục tạo voice/render.')
+      setStatus('AI review hoàn tất, draft mới nhất đã được lưu.')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không duyệt được story bằng AI')
     } finally {
@@ -435,48 +469,23 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('voice')
     try {
       const parsed = currentStoryForAction()
-      const saved = await saveGenerateVideoStoryApi(parsed)
-      const result = await generateVideoVoiceApi(saved.story, voiceId, voiceSpeed, voiceProvider)
-      setStatus(`Đang chờ hàng đợi tạo voice (${result.job.id.slice(0, 8)})...`)
+      await saveGenerateVideoStoryApi(parsed)
+      const result = await generateVideoVoiceApi(selectedId, voiceId || undefined, voiceSpeed, voiceProvider)
       const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
-        setStatus(`Đang khởi tạo voice & căn chỉnh timeline: ${Math.round(Number(job.progress_percent || 0))}%`)
+        setWorkflowProgress(progressFromJob(selectedId, job))
+        setStatus(`Đang tạo voice và căn timeline · ${Math.round(Number(job.progress_percent || 0))}%`)
       }, 5 * 60 * 1000)
-      if (completedJob.status === 'FAILED') {
-        throw new Error(completedJob.error_message || 'Tạo voice thất bại')
-      }
-      const nextStory = completedJob.story || saved.story
-      updateStory(nextStory)
-      setPreviewStory(nextStory)
+      if (completedJob.status === 'FAILED') throw new Error(completedJob.error_message || 'Tạo voice thất bại')
+      await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
       setAudioVersion(Date.now())
       setPreviewVersion(Date.now())
       setActiveStep('video')
       const voiceLabel = voiceProviderOptions.find((option) => option.value === voiceProvider)?.label || voiceId
-      setStatus(`Đã tạo voice và fit frame bằng Whisper-1 (${voiceLabel}, ${voiceSpeed}x)`)
+      setStatus(`Đã tạo voice và fit frame thành công (${voiceLabel}, ${voiceSpeed}x)`)
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không tạo được voice')
     } finally {
       endAction('voice')
-      setBusy(null)
-    }
-  }
-
-  const fitFrames = async () => {
-    if (!beginAction('fit')) return
-    setBusy('fit')
-    try {
-      const parsed = currentStoryForAction()
-      const saved = await saveGenerateVideoStoryApi(parsed)
-      const result = await fitGenerateVideoFramesApi(saved.story)
-      const nextStory = { ...saved.story, meta: result.meta || saved.story.meta, audio: result.audio || saved.story.audio, timeline: result.timeline || saved.story.timeline }
-      updateStory(nextStory)
-      setPreviewStory(nextStory)
-      setPreviewVersion(Date.now())
-      setActiveStep('video')
-      setStatus('Đã fit frame bằng Whisper-1, preview audio đã cập nhật theo duration mới')
-    } catch (error: any) {
-      setStatus(error?.response?.data?.detail || error?.message || 'Không fit được frame')
-    } finally {
-      endAction('fit')
       setBusy(null)
     }
   }
@@ -486,20 +495,18 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     setBusy('export-video')
     try {
       const parsed = currentStoryForAction()
-      const saved = await saveGenerateVideoStoryApi(parsed)
-      const result = await generateFinalVideoApi(saved.story)
+      await saveGenerateVideoStoryApi(parsed)
+      const result = await generateFinalVideoApi(selectedId)
       setActiveStep('preview')
       setStatus(`Đã đưa vào hàng đợi render (${result.job.id.slice(0, 8)})`)
       const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
+        setWorkflowProgress(progressFromJob(selectedId, job))
         setStatus(`Đang render MP4: ${job.status} · ${Math.round(Number(job.progress_percent || 0))}%`)
       }, 10 * 60 * 1000)
       if (completedJob.status === 'FAILED') {
         throw new Error(completedJob.error_message || 'Render job failed')
       }
-      if (completedJob.story) {
-        updateStory(completedJob.story)
-        setPreviewStory(completedJob.story)
-      }
+      await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
       if (completedJob.video_url) {
         setExportedVideoUrl(generateVideoOutputUrl(completedJob.video_url))
       }
@@ -575,16 +582,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                   <Mic2 size={13} className="text-slate-400" />
                   {String(selectedProject.metadata?.tone || 'Tự nhiên')}
                 </div>
-                {selectedProject.metadata?.target_duration_seconds && (
+                {Boolean(selectedProject.metadata?.target_duration_seconds) && (
                   <div className="flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1">
                     <Clock size={13} className="text-slate-400" />
-                    {selectedProject.metadata.target_duration_seconds}s
+                    {String(selectedProject.metadata?.target_duration_seconds)}s
                   </div>
                 )}
-                {selectedProject.metadata?.confidence_score && (
+                {Boolean(selectedProject.metadata?.confidence_score) && (
                    <div className="flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">
                      <CheckCircle2 size={13} />
-                     Confidence: {selectedProject.metadata.confidence_score}%
+                     Confidence: {String(selectedProject.metadata?.confidence_score)}%
                    </div>
                 )}
                 <div className="ml-1 text-[11px] text-slate-400">
@@ -619,12 +626,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
               )
             })}
           </div>
-          {(busy || status) ? (
+          {status ? (
             <div className="flex items-center rounded-md border border-slate-200 bg-white px-4 py-2 text-[12px] font-bold text-slate-700 shadow-sm">
-              {busy ? <span className="flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-blue-500"></span> Đang xử lý...</span> : status}
+              {status}
             </div>
           ) : null}
         </div>
+
+        <WorkflowProgress progress={workflowProgress} />
 
         {loadError && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
@@ -653,16 +662,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
         {activeStep === 'story' && (
           <Panel title="2. Kịch bản & nội dung bài">
             <div className="flex flex-wrap gap-2">
-              <button disabled={!selectedId || Boolean(busy)} onClick={() => void createStory()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <button disabled={!selectedId || actionsLocked} onClick={() => void createStory()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                 Create story
               </button>
-              <button disabled={!hasStoryInput || Boolean(busy)} onClick={() => setShowEditDialog(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <button disabled={!hasStoryInput || actionsLocked} onClick={() => setShowEditDialog(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                 <Wand2 size={14} /> Edit with AI
               </button>
-              <button disabled={!hasStoryInput || Boolean(busy)} onClick={() => void reviewStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0f766e] px-3 text-xs font-semibold text-white disabled:opacity-50">
+              <button disabled={!hasStoryInput || actionsLocked} onClick={() => void reviewStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0f766e] px-3 text-xs font-semibold text-white disabled:opacity-50">
                 <ShieldCheck size={14} /> AI review story
               </button>
-              <button disabled={!hasStoryInput || Boolean(busy)} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
+              <button disabled={!hasStoryInput || actionsLocked} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
                 <Save size={14} /> Lưu kịch bản
               </button>
             </div>
@@ -707,7 +716,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                   <button onClick={() => setShowEditDialog(false)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
                     Cancel
                   </button>
-                  <button disabled={!editPrompt.trim() || Boolean(busy)} onClick={() => void editStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                  <button disabled={!editPrompt.trim() || actionsLocked} onClick={() => void editStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                     <Wand2 size={14} /> Submit
                   </button>
                 </div>
@@ -725,14 +734,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           audioSrc={audioSrc}
           saving={busy === 'save'}
           exporting={busy === 'export-video'}
-          voiceGenerating={busy === 'voice'}
+          voiceGenerating={busy === 'voice' || workflowRunning}
           voiceProvider={voiceProvider}
-          fitting={busy === 'fit'}
+          fitting={busy === 'voice'}
           onSave={() => void saveStory()}
           onExport={() => void exportVideo()}
           onGenerateVoice={() => void generateVoice()}
           onVoiceProviderChange={setVoiceProvider}
-          onFitFrames={() => void fitFrames()}
+          onFitFrames={() => void generateVoice()}
           onExit={() => setActiveStep('story')}
           onChange={(nextStory) => {
             setPreviewStory(nextStory)
@@ -747,7 +756,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           <Panel title="3. Export MP4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
               <div className="space-y-3">
-                <button disabled={!canRenderMp4 || busy === 'export-video'} onClick={() => void exportVideo()} className="h-8 w-full rounded-md bg-[var(--error)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                <button disabled={!canRenderMp4 || actionsLocked} onClick={() => void exportVideo()} className="h-8 w-full rounded-md bg-[var(--error)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                   {busy === 'export-video' ? 'Đang render MP4...' : 'Render ra file MP4'}
                 </button>
                 <p className="text-sm text-slate-500">Bấm render để backend gọi Remotion và ghi file MP4 vào `data_demo/video_gen_demo/out`.</p>
@@ -759,10 +768,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                     <a href={exportedVideoUrl} download className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800">
                       <Download size={14} /> Tải video
                     </a>
-                    <button disabled={Boolean(busy)} onClick={() => void approveVideo()} className="h-8 rounded-md bg-[var(--success)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                    <button disabled={actionsLocked || !selectedProject?.capabilities.can_approve} onClick={() => void approveVideo()} className="h-8 rounded-md bg-[var(--success)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                       Duyệt video
                     </button>
-                    <button disabled={Boolean(busy)} onClick={() => void queueVideo()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                    <button disabled={actionsLocked || !selectedProject?.capabilities.can_queue} onClick={() => void queueVideo()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                       Đưa vào queue đăng
                     </button>
                   </div>
@@ -817,51 +826,6 @@ async function waitForGenerateVideoJob(
   throw new Error('Job xử lý quá lâu, kiểm tra lại sau.')
 }
 
-function ProjectHealthSummary({
-  workflow,
-  story,
-  storyLoadError,
-  totalDuration,
-}: {
-  workflow: MediaWorkflow | null
-  story: GenerateVideoStory | null
-  storyLoadError: string
-  totalDuration: number
-}) {
-  const artifacts = getWorkflowArtifacts(workflow)
-  const timeline = workflow?.metadata?.timeline as Record<string, any> | undefined
-  const timelineDuration = Number(story?.timeline?.duration || timeline?.duration || totalDuration || 0)
-  const savedStoryState = story
-    ? 'Đã có story/timeline'
-    : storyLoadError
-      ? 'Chưa có story đã lưu'
-      : 'Đang kiểm tra story'
-  const projectStatus = inferProjectStatus(workflow, story)
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <HealthCard label="Workflow" value={workflow ? projectStatus : 'Đang tải'} tone={workflow ? 'blue' : 'muted'} />
-      <HealthCard label="Workflow sources" value={workflow?.sources?.length ? `${workflow.sources.length} source` : 'Chưa có source'} tone={workflow?.sources?.length ? 'green' : 'muted'} />
-      <HealthCard label="Story data" value={savedStoryState} tone={story ? 'green' : storyLoadError ? 'amber' : 'muted'} />
-      <HealthCard label="Duration / Output" value={`${timelineDuration.toFixed(2)}s · ${artifacts?.final ? 'Có MP4' : 'Chưa render'}`} tone={artifacts?.final ? 'green' : 'muted'} />
-    </div>
-  )
-}
-
-function HealthCard({ label, value, tone }: { label: string; value: string; tone: 'blue' | 'green' | 'amber' | 'muted' }) {
-  const toneClass = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
-    green: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    amber: 'border-amber-200 bg-amber-50 text-amber-800',
-    muted: 'border-slate-200 bg-white text-slate-700',
-  }[tone]
-  return (
-    <div className={`rounded-lg border p-3 ${toneClass}`}>
-      <div className="text-[11px] font-black uppercase text-current opacity-70">{label}</div>
-      <div className="mt-1 text-sm font-black">{value}</div>
-    </div>
-  )
-}
 
 function PlanEditor({
   workflow,
@@ -871,14 +835,15 @@ function PlanEditor({
   onSave,
   onCreateStory,
 }: {
-  workflow: MediaWorkflow | null
+  workflow: VideoWorkspaceDetail | null
   draft: PlanDraft
   saving: boolean
   onChange: (draft: PlanDraft) => void
   onSave: () => void
   onCreateStory: () => void
 }) {
-  const scenes = workflow?.story_data || workflow?.draft_json?.story_data || []
+  const draftStory = workflowStory(workflow)
+  const scenes = draftStory ? storyTimelineScenes(draftStory) : []
   const update = (field: keyof PlanDraft, value: string) => onChange({ ...draft, [field]: value })
 
   return (
@@ -887,7 +852,7 @@ function PlanEditor({
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-base font-black text-[#0f172a]">Story data</div>
+              <div className="text-base font-black text-[#0f172a]">Draft video</div>
               <div className="mt-1 text-xs font-semibold text-slate-500">
                 Đây là scene-level input để tạo video draft, voice và timeline.
               </div>
@@ -973,8 +938,8 @@ function PlanEditor({
                         {item.label}
                       </label>
                     ))
-                  } catch (e) {
-                    return <span className="text-sm text-red-500">Lỗi JSON: {(e).message}</span>
+                  } catch (e: any) {
+                    return <span className="text-sm text-red-500">Lỗi JSON: {e?.message || 'Error'}</span>
                   }
                 })()}
               </div>
@@ -986,7 +951,7 @@ function PlanEditor({
               <Save size={14} /> {saving ? 'Đang lưu...' : 'Lưu kế hoạch'}
             </button>
             <button disabled={saving || !workflow} onClick={onCreateStory} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-              <Wand2 size={14} /> Tạo video draft từ story_data
+              <Wand2 size={14} /> Tạo lại draft bằng AI
             </button>
           </div>
         </div>
@@ -1001,7 +966,7 @@ function PlanEditor({
               <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-400">
                 Chưa có scene nào.
               </div>
-            ) : scenes.map((scene, index) => {
+            ) : scenes.map((scene: any, index: number) => {
               const voiceText = scene.voice_text || scene.subtitle || ''
               return (
                 <div key={`${scene.image || 'scene'}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -1019,9 +984,9 @@ function PlanEditor({
           </div>
         </div>
         <SourceContentPreview source={{
-          ...((workflow?.source_content || workflow?.metadata?.source_content || workflow?.metadata || {}) as Record<string, any>),
-          title: workflow?.source_content?.title || workflow?.metadata?.source_content?.title || workflow?.title,
-          full_text: workflow?.source_content?.full_text || workflow?.metadata?.source_content?.full_text || workflow?.metadata?.content_angle || workflow?.metadata?.note || '',
+          ...((workflow?.source_content || {}) as Record<string, any>),
+          title: (workflow?.source_content as any)?.title || workflow?.title,
+          full_text: (workflow?.source_content as any)?.full_text || '',
         }} />
       </div>
     </div>
@@ -1189,7 +1154,7 @@ function StoryDataEditor({
           <div className={`mb-3 rounded-md border px-3 py-2 text-xs font-semibold ${meta.ai_story_review.action === 'REVISED' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
             <div className="flex flex-wrap items-center gap-2">
               <ShieldCheck size={14} />
-              <span>{meta.ai_story_review.action === 'REVISED' ? 'AI reviewer đã sửa story_data' : 'AI reviewer đã duyệt story_data'}</span>
+              <span>{meta.ai_story_review.action === 'REVISED' ? 'AI reviewer đã sửa draft' : 'AI reviewer đã duyệt draft'}</span>
               {meta.ai_story_review.reviewed_at && <span className="text-[11px] opacity-75">{new Date(meta.ai_story_review.reviewed_at).toLocaleString()}</span>}
             </div>
             {meta.ai_story_review.notes?.length ? (
@@ -3961,8 +3926,56 @@ function readApiError(error: any, fallback: string) {
   return error?.message || fallback
 }
 
-function inferProjectStatus(workflow: MediaWorkflow | null, story: GenerateVideoStory | null) {
-  const projectStatus = workflow?.status || String(workflow?.metadata?.project_status || '')
+function progressFromJob(workflowId: string, job: GenerateVideoJob): VideoWorkflowProgress {
+  const task = {
+    id: job.id,
+    workflow_id: workflowId,
+    task_type: job.run_type || job.task_type || '',
+    status: job.status,
+    current_stage: job.current_stage,
+    progress_percent: Number(job.progress_percent || 0),
+    error_message: job.error_message,
+    created_at: job.created_at,
+    started_at: job.started_at,
+    completed_at: job.completed_at,
+  }
+  return {
+    workflow_id: workflowId,
+    status: job.status,
+    current_stage: job.current_stage,
+    progress_percent: Number(job.progress_percent || 0),
+    tasks: [task],
+  }
+}
+
+function workflowProgressFromDetail(workflow: VideoWorkspaceDetail): VideoWorkflowProgress {
+  return {
+    workflow_id: workflow.id,
+    status: workflow.status,
+    current_stage: workflow.current_stage,
+    progress_percent: workflow.progress_percent,
+    tasks: workflow.tasks,
+    final_video: workflow.final_video,
+    updated_at: workflow.updated_at,
+  }
+}
+
+function activeProgressTask(progress: VideoWorkflowProgress | null) {
+  return progress?.tasks.find((task) => ['PENDING', 'RUNNING', 'PROCESSING'].includes(task.status)) || null
+}
+
+function workflowStory(workflow: VideoWorkspaceDetail | null): GenerateVideoStory | null {
+  if (!workflow?.draft) return null
+  const draft = workflow.draft
+  if (!draft.timeline && !draft.story_data?.length && !draft.scenes?.length) return null
+  return normalizeStoryResponse({
+    ...draft,
+    meta: { ...(draft.meta || {}), workflow_id: workflow.id },
+  })
+}
+
+function inferProjectStatus(workflow: VideoWorkspaceDetail | null, story: GenerateVideoStory | null) {
+  const projectStatus = workflow?.status || ''
   if (projectStatus) return projectStatus
   if (getWorkflowArtifacts(workflow)?.final) return 'RENDERED'
   if (story?.audio?.voice) return 'VOICE_READY'
@@ -3970,7 +3983,7 @@ function inferProjectStatus(workflow: MediaWorkflow | null, story: GenerateVideo
   return 'READY'
 }
 
-function inferActiveStepFromProject(workflow: MediaWorkflow | null, story: GenerateVideoStory | null): StepId {
+function inferActiveStepFromProject(workflow: VideoWorkspaceDetail | null, story: GenerateVideoStory | null): StepId {
   const artifacts = getWorkflowArtifacts(workflow)
   if (artifacts?.final && story) return 'video'
   if (story) {
@@ -3979,11 +3992,8 @@ function inferActiveStepFromProject(workflow: MediaWorkflow | null, story: Gener
   return 'story'
 }
 
-function getWorkflowArtifacts(workflow: MediaWorkflow | null) {
-  const finalArtifact = workflow?.artifacts?.find((artifact) => artifact.artifact_type === 'FINAL_VIDEO' && artifact.uri)
-  if (finalArtifact?.uri) return { final: finalArtifact.uri }
-  const rendered = workflow?.rendered_video || workflow?.metadata?.rendered_video
-  return rendered ? { final: String(rendered) } : null
+function getWorkflowArtifacts(workflow: VideoWorkspaceDetail | null) {
+  return workflow?.final_video ? { final: workflow.final_video } : null
 }
 
 function roundToFrame(value: number, fps: number) {

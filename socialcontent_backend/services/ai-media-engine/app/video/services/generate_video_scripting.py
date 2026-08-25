@@ -6,6 +6,7 @@ from typing import Any
 
 from common.core.config import get_settings
 from common.core.llm import deepseek_chat_completion
+from common.db.prompt_runs import log_prompt_run
 from app.video.services.generate_video_constants import DEFAULT_EFFECTS, DEFAULT_IMAGES
 from app.video.services.generate_video_timeline import (
     _prevent_subtitle_overlap,
@@ -27,7 +28,9 @@ from app.video.services.generate_video_timeline import (
 
 
 def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
-    text = raw_article.get("text") or raw_article.get("content") or raw_article.get("full_text") or raw_article.get("summary") or ""
+    text = raw_article.get("text") or raw_article.get("full_text") or raw_article.get("summary") or ""
+    if not text and isinstance(raw_article.get("content"), str):
+        text = raw_article["content"]
     title = raw_article.get("title") or raw_article.get("canonical_title") or "Bản tin"
     images = collect_image_urls(raw_article)
     target_duration = resolve_target_duration_seconds(raw_article)
@@ -38,12 +41,18 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
     if _has_direct_script_parts(parts):
         return create_story_from_script_parts(raw_article, parts, title, images, target_duration)
     timeline_source = {
+        "id": raw_article.get("id"),
+        "workflow_id": raw_article.get("workflow_id"),
+        "user_id": raw_article.get("user_id"),
         "title": title,
         "summary": raw_article.get("summary"),
         "source_text": text,
         "source": raw_article,
         "raw_article": raw_article,
+        "content": raw_article.get("content") if isinstance(raw_article.get("content"), dict) else {},
         "plan": raw_article.get("plan") if isinstance(raw_article.get("plan"), dict) else {},
+        "series": raw_article.get("series") if isinstance(raw_article.get("series"), dict) else {},
+        "active_series": raw_article.get("active_series") if isinstance(raw_article.get("active_series"), list) else [],
         "parts": raw_article.get("parts") if isinstance(raw_article.get("parts"), list) else [],
         "target_duration_seconds": target_duration,
     }
@@ -51,6 +60,7 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
         timeline_source,
         images,
     )
+    series_decision = _timeline_series_decision(timeline)
     story = {
         "meta": {
             "title": title,
@@ -62,8 +72,16 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
         "source": raw_article,
         "timeline": timeline,
     }
+    if series_decision:
+        story["meta"]["series_decision"] = series_decision
     story = review_story_with_ai(story)
     return story
+
+
+def _timeline_series_decision(timeline: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = timeline.get("metadata") if isinstance(timeline, dict) and isinstance(timeline.get("metadata"), dict) else {}
+    decision = metadata.get("series_decision")
+    return decision if isinstance(decision, dict) else None
 
 
 def _has_direct_story_data(story_data: Any) -> bool:
@@ -323,6 +341,14 @@ def edit_story_with_ai(story: dict[str, Any], edit_prompt: str) -> dict[str, Any
         temperature=0.45,
         response_format={"type": "json_object"},
     )
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    log_prompt_run(
+        user_id=meta.get("user_id"),
+        reference_id=meta.get("workflow_id"),
+        run_type="EDIT_VIDEO_TIMELINE",
+        step_name="edit_story_timeline_with_ai",
+        result=result,
+    )
     parsed = result.parsed_json()
     normalized = normalize_ai_timeline(parsed.get("timeline") if isinstance(parsed, dict) else parsed, image_urls)
     if not normalized.get("video") and not normalized.get("text"):
@@ -337,8 +363,23 @@ def edit_story_with_ai(story: dict[str, Any], edit_prompt: str) -> dict[str, Any
 
 
 
+def sanitize_user_instructions(instructions: str | None) -> str | None:
+    if not instructions or not isinstance(instructions, str):
+        return None
+    text = instructions.strip()
+    if "manual_direct_script" in text or "bypass_ai_selection" in text or text.startswith("{'") or text.startswith("{\""):
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if "manual_direct_script" not in line and "bypass_ai_selection" not in line and not line.strip().startswith("{")
+        ]
+        text = " ".join(lines).strip()
+    return text if text else None
+
+
 def review_story_with_ai(story: dict[str, Any], review_instructions: str | None = None) -> dict[str, Any]:
     settings = get_settings()
+    review_instructions = sanitize_user_instructions(review_instructions)
     next_story = json.loads(json.dumps(story, ensure_ascii=False))
     sync_story_timeline(next_story)
     current_timeline = next_story.get("timeline") if isinstance(next_story.get("timeline"), dict) else {}
@@ -419,6 +460,14 @@ def review_story_with_ai(story: dict[str, Any], review_instructions: str | None 
         response_format={"type": "json_object"},
         timeout=45,
     )
+    meta = next_story.get("meta") if isinstance(next_story.get("meta"), dict) else {}
+    log_prompt_run(
+        user_id=meta.get("user_id"),
+        reference_id=meta.get("workflow_id"),
+        run_type="GENERATE_VIDEO_SCRIPT",
+        step_name="review_story_with_ai",
+        result=result,
+    )
     parsed = result.parsed_json()
     if not isinstance(parsed, dict):
         raise RuntimeError("AI reviewer did not return a JSON object")
@@ -428,6 +477,13 @@ def review_story_with_ai(story: dict[str, Any], review_instructions: str | None 
         reviewed_timeline = current_timeline
     if target_duration:
         reviewed_timeline = enforce_timeline_target_duration(reviewed_timeline, target_duration, image_urls)
+    current_metadata = current_timeline.get("metadata") if isinstance(current_timeline.get("metadata"), dict) else {}
+    if current_metadata.get("series_decision"):
+        reviewed_metadata = reviewed_timeline.get("metadata") if isinstance(reviewed_timeline.get("metadata"), dict) else {}
+        reviewed_timeline["metadata"] = {
+            **reviewed_metadata,
+            "series_decision": reviewed_metadata.get("series_decision") or current_metadata["series_decision"],
+        }
 
     timeline_changed = _json_signature(reviewed_timeline) != _json_signature(current_timeline)
     next_story["timeline"] = reviewed_timeline
@@ -462,6 +518,7 @@ def compact_story_source_for_ai(source: dict[str, Any]) -> dict[str, Any]:
         "full_text": truncate_text(str(source.get("full_text") or source.get("source_text") or source_content.get("full_text") or raw_source.get("text") or raw_source.get("content") or ""), 5000),
         "plan": source.get("plan") if isinstance(source.get("plan"), dict) else {},
         "series": source.get("series") if isinstance(source.get("series"), dict) else {},
+        "active_series": compact_active_series_for_ai(source.get("active_series")),
         "parts": source.get("parts") if isinstance(source.get("parts"), list) else [],
         "source_content": {
             "canonical_title": source_content.get("canonical_title"),
@@ -473,6 +530,70 @@ def compact_story_source_for_ai(source: dict[str, Any]) -> dict[str, Any]:
             "summary": raw_source.get("summary"),
             "text": truncate_text(str(raw_source.get("text") or raw_source.get("content") or ""), 5000),
         },
+    }
+
+
+def compact_active_series_for_ai(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    compact: list[dict[str, Any]] = []
+    for raw in value[:20]:
+        if not isinstance(raw, dict):
+            continue
+        recent_items = raw.get("recent_items") if isinstance(raw.get("recent_items"), list) else []
+        compact.append(
+            {
+                "id": raw.get("id"),
+                "title": raw.get("title"),
+                "description": raw.get("description"),
+                "series_type": raw.get("series_type"),
+                "current_part": raw.get("current_part"),
+                "total_parts": raw.get("total_parts"),
+                "recent_items": [
+                    {
+                        "workflow_id": item.get("workflow_id"),
+                        "title": item.get("title"),
+                        "summary": truncate_text(str(item.get("summary") or ""), 500),
+                        "voice_text": truncate_text(str(item.get("voice_text") or ""), 900),
+                        "status": item.get("status"),
+                    }
+                    for item in recent_items[:5]
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+    return compact
+
+
+def sanitize_series_decision(value: Any, active_series: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    action = str(value.get("action") or "").strip().upper()
+    if action not in {"USE_EXISTING", "CREATE_NEW", "NONE"}:
+        action = "NONE"
+
+    known_series_ids = {str(item.get("id")) for item in active_series if item.get("id")}
+    target_series_id = value.get("target_series_id")
+    if target_series_id is not None:
+        target_series_id = str(target_series_id).strip() or None
+    if action == "USE_EXISTING" and target_series_id not in known_series_ids:
+        action = "CREATE_NEW"
+        target_series_id = None
+    if action != "USE_EXISTING":
+        target_series_id = None
+
+    series_title = str(value.get("series_title") or "").strip()
+    reason = str(value.get("reason") or "").strip()
+    if action == "CREATE_NEW" and not series_title:
+        action = "NONE"
+
+    return {
+        "action": action,
+        "target_series_id": target_series_id,
+        "series_title": series_title or None,
+        "reason": reason or None,
     }
 
 
@@ -504,9 +625,16 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
 
     plan = source.get("plan") if isinstance(source.get("plan"), dict) else {}
     raw_article = source.get("raw_article") if isinstance(source.get("raw_article"), dict) else {}
+    active_series = compact_active_series_for_ai(source.get("active_series"))
     prompt_payload = {
         "task": "Generate a timeline for a vertical Vietnamese short video from a content project.",
         "required_output": {
+            "series_decision": {
+                "action": "USE_EXISTING, CREATE_NEW, or NONE",
+                "target_series_id": "existing active series id when action is USE_EXISTING; otherwise null",
+                "series_title": "broad reusable series title when creating a new series; otherwise existing title or null",
+                "reason": "short Vietnamese reason for the series choice",
+            },
             "timeline": {
                 "version": 1,
                 "duration": "number seconds",
@@ -550,6 +678,10 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "Use available_images in order when possible; otherwise use default_images.",
             "Use allowed_effects only.",
             "Do not output scenes or story_data.",
+            "Also decide series in the same JSON response. Use active_series and their 5 recent_items.",
+            "If the new content naturally continues one active series, set series_decision.action=USE_EXISTING and target_series_id to that exact id.",
+            "If it does not match any active series but should become a reusable topic, set action=CREATE_NEW and choose a broad long-lived Vietnamese series_title.",
+            "Do not create a series_title from the exact one-off article title.",
         ],
         "duration_contract": {
             "target_duration_seconds": target_duration,
@@ -560,6 +692,8 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
         },
         "title": source.get("title"),
         "summary": source.get("summary"),
+        "current_series": source.get("series") if isinstance(source.get("series"), dict) else {},
+        "active_series": active_series,
         "plan": {
             "title": plan.get("title"),
             "content_angle": plan.get("content_angle"),
@@ -607,10 +741,22 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             response_format={"type": "json_object"},
             timeout=35,
         )
+        log_prompt_run(
+            user_id=source.get("user_id") or (source.get("content") or {}).get("user_id"),
+            reference_id=source.get("workflow_id") or source.get("id"),
+            run_type="GENERATE_VIDEO_SCRIPT",
+            step_name="generate_story_timeline_with_ai",
+            result=result,
+        )
         parsed = result.parsed_json()
         normalized = normalize_ai_timeline(parsed.get("timeline") if isinstance(parsed, dict) else parsed, image_urls)
         normalized = enforce_timeline_target_duration(normalized, target_duration, image_urls)
         normalized = ensure_timeline_density(normalized, fallback, target_duration)
+        if isinstance(parsed, dict):
+            series_decision = sanitize_series_decision(parsed.get("series_decision"), active_series)
+            if series_decision:
+                metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+                normalized["metadata"] = {**metadata, "series_decision": series_decision}
         return normalized or fallback
     except Exception:
         return fallback
@@ -914,6 +1060,13 @@ def generate_story_scenes_with_ai(source: dict[str, Any], image_urls: list[str] 
             temperature=0.65,
             response_format={"type": "json_object"},
             timeout=35,
+        )
+        log_prompt_run(
+            user_id=source.get("user_id") or (source.get("content") or {}).get("user_id"),
+            reference_id=source.get("workflow_id") or source.get("id"),
+            run_type="GENERATE_VIDEO_SCRIPT",
+            step_name="generate_story_scenes_with_ai",
+            result=result,
         )
         parsed = result.parsed_json()
         scenes = parsed.get("scenes") if isinstance(parsed, dict) else parsed

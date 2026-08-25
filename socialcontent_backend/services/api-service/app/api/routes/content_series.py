@@ -101,12 +101,6 @@ def delete_content_series(
     return {"message": "Xóa series thành công", "id": series_id}
 
 
-@router.post("/{series_id}/regenerate", response_model=schemas.WorkflowRunResponse)
-def regenerate_content_series(series_id: uuid.UUID, payload: schemas.ContentSeriesRegenerateRequest | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _get_owned_series(db, series_id, user)
-    raise HTTPException(status_code=410, detail="Series regeneration must create a new workflow_run from workflow_sources.")
-
-
 @router.get("/{series_id}/context")
 def get_series_context(series_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     series = _get_owned_series(db, series_id, user)
@@ -167,10 +161,8 @@ def _get_owned_series(db: Session, series_id: uuid.UUID, user: User) -> ContentS
 
 
 def _serialize_series(series: ContentSeries) -> dict:
-    metadata = series.metadata_json or {}
     return {
         "id": series.id,
-        "content_plan_id": uuid.UUID(str(metadata["content_plan_id"])) if metadata.get("content_plan_id") else series.id,
         "profile_id": series.profile_id,
         "title": series.title,
         "description": series.description,

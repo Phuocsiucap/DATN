@@ -29,51 +29,6 @@ class ContentResponse(BaseModel):
     created_at: datetime
 
 
-class ContentSourceDetailResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    source_type: str
-    source_external_id: str
-    source_url: str | None
-    raw_document_id: str | None
-    processed_document_id: str | None = None
-    source_title: str | None
-    source_author: str | None
-    source_published_at: datetime | None
-    metadata_json: dict[str, Any]
-    first_seen_at: datetime
-    last_seen_at: datetime
-
-
-class ContentMediaDetailResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    media_type: str
-    source_url: str | None
-    storage_url: str | None
-    thumbnail_url: str | None
-    mime_type: str | None
-    duration_seconds: int | None
-    created_at: datetime
-
-
-class ProcessingRunDetailResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    processing_type: str
-    status: str
-    processor_version: str | None
-    input_reference: str | None
-    output_reference: str | None
-    started_at: datetime | None
-    completed_at: datetime | None
-    error_message: str | None
-    created_at: datetime
-
-
 class ContentDetailResponse(ContentResponse):
     full_text: str | None = None
     published_at: datetime | None
@@ -81,9 +36,10 @@ class ContentDetailResponse(ContentResponse):
     content_hash: str | None
     transcript_hash: str | None
     updated_at: datetime
-    sources: list[ContentSourceDetailResponse]
-    media: list[ContentMediaDetailResponse]
-    processing_runs: list[ProcessingRunDetailResponse]
+    sources_jsonb: list[Any] = Field(default_factory=list)
+    media_jsonb: list[Any] = Field(default_factory=list)
+    story_id: uuid.UUID | None = None
+    episode_order: int | None = None
 
 
 class FinalSeriesInfoResponse(BaseModel):
@@ -98,12 +54,9 @@ class FinalContentItemResponse(ContentResponse):
     source_type: str | None = None
     source_url: str | None = None
     published_at: datetime | None = None
-    media: list[ContentMediaDetailResponse] = Field(default_factory=list)
-    episode_id: uuid.UUID | None = None
-    episode_number: int | None = None
-    sequence_order: int | None = None
-    episode_title: str | None = None
-    series: FinalSeriesInfoResponse | None = None
+    media_jsonb: list[Any] = Field(default_factory=list)
+    story_id: uuid.UUID | None = None
+    episode_order: int | None = None
 
 
 class FinalContentViewResponse(BaseModel):

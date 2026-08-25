@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import HTTPException
 
 from common.core.config import get_settings
@@ -16,10 +15,7 @@ PUBLIC_DIR = RENDER_WORKSPACE_ROOT / "public"
 AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_OUT_DIR = RENDER_WORKSPACE_ROOT / "out"
 
-
 import json
-from common.core.config import get_settings
-from fastapi import HTTPException
 
 def get_elevenlabs_api_key(settings=None) -> str:
     current_settings = settings or get_settings()
@@ -40,6 +36,33 @@ def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
         "audio": normalized.get("audio"),
         "timeline": normalized.get("timeline") or {},
         "video_artifacts": normalized.get("video_artifacts") or {},
-        "source": normalized.get("source") or {},
         "story_data": normalized.get("story_data") or [],
     }
+
+
+try:
+    from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice
+except ImportError:
+    try:
+        import sys
+        from pathlib import Path
+        engine_path = str(Path(__file__).resolve().parents[3] / "ai-media-engine")
+        if engine_path not in sys.path:
+            sys.path.insert(0, engine_path)
+        from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice
+    except ImportError:
+        def enhance_emotion_and_generate_voice(
+            story: dict[str, Any],
+            voice_id: str | None = None,
+            voice_speed: float = 1.0,
+            voice_provider: str | None = None,
+        ) -> dict[str, Any]:
+            return {"story": normalize_story_for_project(story)}
+
+
+def fit_frames_with_whisper(story: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from app.video.services.generate_video_voice import fit_frames_with_whisper as _fit
+        return _fit(story)
+    except Exception:
+        return {"story": normalize_story_for_project(story)}

@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from common.db.models import CrawlJob, CrawlTask, ProcessingRun
+from common.db.models import CrawlJob, KafkaTask
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,11 @@ def add_crawl_log(
 
 def canonical_saved_count(db: Session, job_id: uuid.UUID) -> int:
     return (
-        db.query(func.count(ProcessingRun.id))
+        db.query(func.count(KafkaTask.id))
         .filter(
-            ProcessingRun.job_id == job_id,
-            ProcessingRun.processing_type == "CANONICAL_SAVE",
-            ProcessingRun.status == "SUCCEEDED",
+            KafkaTask.reference_id == job_id,
+            KafkaTask.task_type == "NORMALIZE",
+            KafkaTask.status == "COMPLETED",
         )
         .scalar()
         or 0
@@ -52,7 +52,8 @@ def finalize_job_if_ready(db: Session, job: CrawlJob | None) -> bool:
     if not job or job.status in {"SUCCEEDED", "PARTIAL_SUCCESS", "FAILED", "CANCELLED"}:
         return False
 
-    tasks = list(job.tasks)
+    tasks = db.query(KafkaTask).filter(KafkaTask.reference_id == job.id, KafkaTask.task_type == "CRAWL_URL").all()
+
     if not tasks:
         return False
     if any(task.status in ACTIVE_TASK_STATUSES for task in tasks):

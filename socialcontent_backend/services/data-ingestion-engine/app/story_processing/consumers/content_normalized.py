@@ -16,12 +16,12 @@ def run_content_normalized_consumer() -> None:
         writer = CanonicalWriter()
         import time
         from common.db.mongo import processed_documents
-        from common.db.models import ProcessingRun
+        from common.db.models import KafkaTask
         while True:
             try:
                 with SessionLocal() as db:
                     canonical_input_refs = set(
-                        r[0] for r in db.query(ProcessingRun.input_reference).filter(ProcessingRun.processing_type == "CANONICAL_SAVE").all()
+                        r[0] for r in db.query(KafkaTask.payload_jsonb["input_reference"].astext).filter(KafkaTask.task_type == "NORMALIZE").all()
                     )
                     all_procs = list(processed_documents().find())
                     for pdoc in all_procs:

@@ -427,7 +427,6 @@ class SocialProfileService:
             "require_video": strategy.require_video,
             "receive_system_content": getattr(strategy, "receive_system_content", True),
             "auto_project_queue_enabled": getattr(strategy, "auto_project_queue_enabled", False),
-            "auto_planning_enabled": getattr(strategy, "auto_planning_enabled", False),
             "video_render_mode": getattr(strategy, "video_render_mode", "manual"),
             "max_system_recommendations": getattr(strategy, "max_system_recommendations", 20),
             "auto_queue_enabled": strategy.auto_queue_enabled,

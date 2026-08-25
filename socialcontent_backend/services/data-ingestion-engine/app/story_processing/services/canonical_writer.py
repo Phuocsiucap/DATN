@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log, finalize_job_if_ready
 from common.db.idempotency import claim_event
-from common.db.models import ContentItem, ContentMedia, ContentSource, CrawlJob, Episode, ProcessingRun, Story
-from app.story_processing.deduplication.rules import find_duplicate_content, find_or_mark_duplicate
+from common.db.models import ContentItem, CrawlJob, Story, KafkaTask, ProfileContentLink, SocialProfile, SocialProfileStrategy
+from app.story_processing.deduplication.rules import find_duplicate_content
 from app.story_processing.grouping.rules import extract_episode_number, grouping_key, normalize_story_text
 from app.story_processing.ordering.episodes import update_story_completion
 from app.story_processing.producers.story_events import StoryEventProducer
@@ -64,7 +64,7 @@ class CanonicalWriter:
             return
 
         try:
-            content, story, is_duplicate, finalized, job_status = self._save_canonical(db, doc, processed_document_id, message.get("job_id"))
+            content, story, is_duplicate, finalized, job_status = self._save_canonical(db, doc, processed_document_id, message.get("job_id"), message.get("task_id"))
             db.commit()
         except Exception as exc:
             db.rollback()
@@ -72,15 +72,15 @@ class CanonicalWriter:
             if job:
                 job.total_failed += 1
                 db.add(
-                    ProcessingRun(
-                        job_id=job.id,
-                        processing_type="CANONICAL_SAVE",
+                    KafkaTask(
+                        reference_id=job.id,
+                        reference_type="crawl_job",
+                        task_type="NORMALIZE",
                         status="FAILED",
-                        processor_version="1.0.0",
-                        input_reference=processed_document_id,
                         started_at=datetime.utcnow(),
                         completed_at=datetime.utcnow(),
                         error_message=str(exc)[-2000:],
+                        payload_jsonb={"input_reference": processed_document_id},
                     )
                 )
                 add_crawl_log(
@@ -103,26 +103,17 @@ class CanonicalWriter:
             if finalized:
                 self.producer.job_completed(job_id=message.get("job_id"), status=job_status or "SUCCEEDED")
 
-    def _save_canonical(self, db: Session, doc: dict, processed_document_id: str, job_id: str | None):
+    def _save_canonical(self, db: Session, doc: dict, processed_document_id: str, job_id: str | None, task_id: str | None):
         normalized = doc["normalized"]
         quality = doc["quality"]
         source_type = doc.get("source_type") or "BILIBILI"
         source_external_id = normalized.get("source_external_id") or normalized.get("source_url") or doc.get("raw_document_id") or processed_document_id
         self._lock_source_identity(db, source_type, str(source_external_id))
         job = db.get(CrawlJob, job_id) if job_id else None
-        existing_sources = (
-            db.query(ContentSource)
-            .filter(
-                ContentSource.source_type == source_type,
-                ContentSource.source_external_id == str(source_external_id),
-            )
-            .order_by(ContentSource.last_seen_at.desc())
-            .all()
-        )
-        existing_source = self._find_reusable_source(db, existing_sources, job)
-        if existing_source:
-            return self._handle_source_duplicate(db, existing_source, normalized, quality, doc.get("raw_document_id"), processed_document_id, job_id)
 
+        # In JSONB model, we check if ContentItem already exists with this source_external_id
+        # We can use JSONB containment or just fallback to content duplicates for now
+        # Actually it's easier to find existing content that matches content_hash
         scope = job.content_scope if job and hasattr(job, "content_scope") else "GLOBAL"
         owner = job.requested_by if job and scope == "PRIVATE" else None
         created_by = job.created_by_type if job and hasattr(job, "created_by_type") else "SYSTEM"
@@ -154,6 +145,21 @@ class CanonicalWriter:
                 job_id=job_id,
             )
 
+        sources_jsonb = [{
+            "source_type": source_type,
+            "source_external_id": str(source_external_id),
+            "source_url": normalized.get("source_url"),
+            "raw_document_id": doc.get("raw_document_id"),
+            "processed_document_id": processed_document_id,
+            "source_title": normalized.get("title"),
+            "source_author": normalized.get("author"),
+            "source_published_at": normalized.get("published_at"),
+            "is_primary": True,
+            "metadata_json": self._source_metadata(normalized, processed_document_id),
+        }]
+
+        media_jsonb = self._extract_media(normalized)
+
         content = ContentItem(
             content_type=normalized.get("content_type", "VIDEO"),
             canonical_title=_clean_text(normalized.get("title")) or "Untitled",
@@ -162,6 +168,7 @@ class CanonicalWriter:
             language=normalized.get("language") or "vi",
             content_scope=scope,
             owner_user_id=owner,
+            crawl_job_id=job.id if job else None,
             created_by_type=created_by,
             status=quality.get("status", "NEEDS_REVIEW"),
             published_at=self._parse_datetime(normalized.get("published_at")),
@@ -170,30 +177,41 @@ class CanonicalWriter:
             content_hash=content_hash,
             transcript_hash=transcript_hash,
             quality_score=quality.get("score", 0),
+            mongo_raw_id=doc.get("raw_document_id"),
+            mongo_normalized_id=processed_document_id,
+            sources_jsonb=sources_jsonb,
+            media_jsonb=media_jsonb,
         )
         db.add(content)
         db.flush()
 
-        db.add(
-            ContentSource(
-                content_id=content.id,
-                source_type=source_type,
-                source_external_id=str(source_external_id),
-                source_url=normalized.get("source_url"),
-                raw_document_id=doc.get("raw_document_id"),
-                processed_document_id=processed_document_id,
-                source_title=normalized.get("title"),
-                source_author=normalized.get("author"),
-                source_published_at=self._parse_datetime(normalized.get("published_at")),
-                metadata_json=self._source_metadata(normalized, processed_document_id),
+        if content.content_scope == "GLOBAL":
+            profiles = (
+                db.query(SocialProfile)
+                .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
+                .filter(SocialProfileStrategy.receive_system_content == True)
+                .all()
             )
-        )
-        self._create_media(db, content, normalized)
+            for profile in profiles:
+                link = ProfileContentLink(
+                    user_id=profile.user_id,
+                    profile_id=profile.id,
+                    content_id=content.id,
+                    relation_type="CONTENT_RECOMMENDATION",
+                    relation_reason="AUTO_GLOBAL",
+                    source_scope=content.content_scope,
+                    recommendation_status="RECOMMENDED",
+                    score=0,
+                    status="ACTIVE",
+                    metadata_json={"reason": "Auto-recommended from GLOBAL scope"},
+                )
+                db.add(link)
+            db.flush()
 
         story = None
         if self._should_group_as_story(source_type, normalized):
             story = self._find_or_create_story(db, content, normalized)
-            self._create_episode_if_needed(db, content, story, normalized)
+            self._apply_episode(content, story, normalized)
             db.flush()
             db.refresh(story)
             update_story_completion(story)
@@ -216,19 +234,25 @@ class CanonicalWriter:
                 },
             )
 
-        db.add(
-            ProcessingRun(
-                content_id=content.id,
-                job_id=job.id if job else None,
-                processing_type="CANONICAL_SAVE",
-                status="SUCCEEDED",
-                processor_version="1.0.0",
-                input_reference=processed_document_id,
-                output_reference=str(content.id),
-                started_at=datetime.utcnow(),
-                completed_at=datetime.utcnow(),
+        task = db.get(KafkaTask, task_id) if task_id else None
+        if task:
+            task.status = "COMPLETED"
+            task.completed_at = datetime.utcnow()
+            task.result_jsonb = {"output_reference": str(content.id)}
+            db.add(task)
+        else:
+            db.add(
+                KafkaTask(
+                    reference_id=job.id if job else None,
+                    reference_type="crawl_job",
+                    task_type="NORMALIZE",
+                    status="COMPLETED",
+                    started_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow(),
+                    payload_jsonb={"input_reference": processed_document_id},
+                    result_jsonb={"output_reference": str(content.id)},
+                )
             )
-        )
         db.flush()
         finalized = finalize_job_if_ready(db, job)
         return content, story, False, finalized, job.status if job else None
@@ -247,32 +271,43 @@ class CanonicalWriter:
         processed_document_id: str,
         job_id: str | None,
     ):
-        db.add(
-            ContentSource(
-                content_id=existing_content.id,
-                source_type=source_type,
-                source_external_id=str(source_external_id),
-                source_url=normalized.get("source_url"),
-                raw_document_id=raw_document_id,
-                processed_document_id=processed_document_id,
-                source_title=normalized.get("title"),
-                source_author=normalized.get("author"),
-                source_published_at=self._parse_datetime(normalized.get("published_at")),
-                is_primary=False,
-                metadata_json={
-                    **self._source_metadata(normalized, processed_document_id),
-                    "content_duplicate": True,
-                    "match_type": match_type,
-                    "decision_reason": reason,
-                },
-            )
-        )
-        self._create_media(db, existing_content, normalized)
+        new_source = {
+            "source_type": source_type,
+            "source_external_id": str(source_external_id),
+            "source_url": normalized.get("source_url"),
+            "raw_document_id": raw_document_id,
+            "processed_document_id": processed_document_id,
+            "source_title": normalized.get("title"),
+            "source_author": normalized.get("author"),
+            "source_published_at": normalized.get("published_at"),
+            "is_primary": False,
+            "metadata_json": {
+                **self._source_metadata(normalized, processed_document_id),
+                "content_duplicate": True,
+                "match_type": match_type,
+                "decision_reason": reason,
+            },
+        }
+
+        sources = existing_content.sources_jsonb if isinstance(existing_content.sources_jsonb, list) else []
+        sources.append(new_source)
+        existing_content.sources_jsonb = sources
+
+        media = existing_content.media_jsonb if isinstance(existing_content.media_jsonb, list) else []
+        new_media = self._extract_media(normalized)
+
+        existing_urls = {m.get("source_url") for m in media if isinstance(m, dict)}
+        for m in new_media:
+            if m.get("source_url") not in existing_urls:
+                media.append(m)
+        existing_content.media_jsonb = media
+        existing_content.duplicate_count = (existing_content.duplicate_count or 0) + 1
+        db.add(existing_content)
 
         story = None
         if self._should_group_as_story(source_type, normalized):
             story = self._find_existing_story(db, existing_content) or self._find_or_create_story(db, existing_content, normalized)
-            self._create_episode_if_needed(db, existing_content, story, normalized)
+            self._apply_episode(existing_content, story, normalized)
             db.flush()
             if story:
                 db.refresh(story)
@@ -300,104 +335,20 @@ class CanonicalWriter:
             )
 
         db.add(
-            ProcessingRun(
-                content_id=existing_content.id,
-                job_id=job.id if job else None,
-                processing_type="CANONICAL_SAVE",
-                status="SUCCEEDED",
-                processor_version="1.0.0",
-                input_reference=processed_document_id,
-                output_reference=str(existing_content.id),
+            KafkaTask(
+                reference_id=job.id if job else None,
+                reference_type="crawl_job",
+                task_type="NORMALIZE",
+                status="COMPLETED",
                 started_at=datetime.utcnow(),
                 completed_at=datetime.utcnow(),
+                payload_jsonb={"input_reference": processed_document_id},
+                result_jsonb={"output_reference": str(existing_content.id)},
             )
         )
         db.flush()
         finalized = finalize_job_if_ready(db, job)
         return existing_content, story, True, finalized, job.status if job else None
-
-    def _find_reusable_source(self, db: Session, sources: list[ContentSource], job: CrawlJob | None) -> ContentSource | None:
-        for source in sources:
-            content = db.get(ContentItem, source.content_id)
-            if content and self._content_visible_for_job(content, job):
-                return source
-        return None
-
-    def _content_visible_for_job(self, content: ContentItem, job: CrawlJob | None) -> bool:
-        if content.content_scope == "GLOBAL":
-            return True
-        if not job:
-            return False
-        return content.content_scope == "PRIVATE" and content.owner_user_id == job.requested_by
-
-    def _handle_source_duplicate(
-        self,
-        db: Session,
-        existing_source: ContentSource,
-        normalized: dict,
-        quality: dict,
-        raw_document_id: str | None,
-        processed_document_id: str,
-        job_id: str | None,
-    ):
-        content = db.get(ContentItem, existing_source.content_id)
-        if not content:
-            raise ValueError(f"Content source points to missing content: {existing_source.id}")
-        existing_source.last_seen_at = datetime.utcnow()
-        existing_source.raw_document_id = raw_document_id or existing_source.raw_document_id
-        existing_source.processed_document_id = processed_document_id or existing_source.processed_document_id
-        existing_source.metadata_json = {
-            **(existing_source.metadata_json or {}),
-            **self._source_metadata(normalized, processed_document_id),
-            "source_duplicate": True,
-        }
-        story = None
-        if self._should_group_as_story(existing_source.source_type, normalized):
-            story = self._find_existing_story(db, content) or self._find_or_create_story(db, content, normalized)
-            self._create_episode_if_needed(db, content, story, normalized)
-        self._create_media(db, content, normalized)
-        db.flush()
-        if story:
-            db.refresh(story)
-            update_story_completion(story)
-
-        job = db.get(CrawlJob, job_id) if job_id else None
-        if job:
-            job.current_stage = "GROUPING" if story else "CANONICAL"
-            job.total_duplicates += 1
-            job.progress_percent = max(float(job.progress_percent), 85)
-            add_crawl_log(
-                db,
-                job_id=job.id,
-                stage=job.current_stage,
-                level="INFO",
-                message="Source duplicate linked to existing canonical content",
-                metadata={
-                    "processed_document_id": processed_document_id,
-                    "content_id": str(content.id),
-                    "source_type": existing_source.source_type,
-                    "source_external_id": existing_source.source_external_id,
-                    "quality_score": quality.get("score", 0),
-                    **({"story_id": str(story.id)} if story else {}),
-                },
-            )
-
-        db.add(
-            ProcessingRun(
-                content_id=content.id,
-                job_id=job.id if job else None,
-                processing_type="CANONICAL_SAVE",
-                status="SUCCEEDED",
-                processor_version="1.0.0",
-                input_reference=processed_document_id,
-                output_reference=str(content.id),
-                started_at=datetime.utcnow(),
-                completed_at=datetime.utcnow(),
-            )
-        )
-        db.flush()
-        finalized = finalize_job_if_ready(db, job)
-        return content, story, True, finalized, job.status if job else None
 
     def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:
         key_bytes = hashlib.sha256(f"{source_type}:{source_external_id}".encode("utf-8")).digest()[:8]
@@ -455,13 +406,12 @@ class CanonicalWriter:
         return story
 
     def _find_existing_story(self, db: Session, content: ContentItem) -> Story | None:
+        if content.story_id:
+            return db.get(Story, content.story_id)
         story = db.query(Story).filter(Story.content_id == content.id).first()
-        if story:
-            return story
-        episode = db.query(Episode).filter(Episode.content_id == content.id).first()
-        return db.get(Story, episode.story_id) if episode else None
+        return story
 
-    def _create_media(self, db: Session, content: ContentItem, normalized: dict) -> None:
+    def _extract_media(self, normalized: dict) -> list[dict]:
         media_items = normalized.get("media") if isinstance(normalized.get("media"), list) else []
         if normalized.get("thumbnail_url"):
             media_items = [
@@ -469,6 +419,7 @@ class CanonicalWriter:
                 {"media_type": "IMAGE", "source_url": normalized.get("thumbnail_url"), "role": "thumbnail"},
             ]
         seen: set[tuple[str, str]] = set()
+        result = []
         for item in media_items:
             if not isinstance(item, dict):
                 continue
@@ -480,79 +431,28 @@ class CanonicalWriter:
             if media_key in seen:
                 continue
             seen.add(media_key)
-            exists = (
-                db.query(ContentMedia)
-                .filter(
-                    ContentMedia.content_id == content.id,
-                    ContentMedia.source_url == source_url,
-                    ContentMedia.media_type == media_type,
-                )
-                .first()
-            )
-            if exists:
-                continue
-            db.add(
-                ContentMedia(
-                    content_id=content.id,
-                    media_type=str(media_type),
-                    source_url=str(source_url),
-                    thumbnail_url=normalized.get("thumbnail_url") if str(media_type).upper().startswith("VIDEO") else None,
-                    duration_seconds=self._as_int(item.get("duration_seconds") or normalized.get("duration_seconds")),
-                )
-            )
+            result.append({
+                "media_type": str(media_type),
+                "source_url": str(source_url),
+                "thumbnail_url": normalized.get("thumbnail_url") if str(media_type).upper().startswith("VIDEO") else None,
+                "duration_seconds": self._as_int(item.get("duration_seconds") or normalized.get("duration_seconds")),
+            })
+        return result
 
-    def _create_episode_if_needed(self, db: Session, content: ContentItem, story: Story, normalized: dict) -> None:
+    def _apply_episode(self, content: ContentItem, story: Story, normalized: dict) -> None:
+        content.story_id = story.id
+
         episodes = normalized.get("episodes") if isinstance(normalized.get("episodes"), list) else []
         if episodes:
-            seen_episode_keys: set[tuple[int | None, str]] = set()
             for index, episode in enumerate(episodes, start=1):
                 if not isinstance(episode, dict):
                     continue
                 episode_number = self._as_int(episode.get("episode_index")) or index
-                episode_title = str(episode.get("title") or content.canonical_title or "").strip()
-                episode_key = (episode_number, episode_title)
-                if episode_key in seen_episode_keys:
-                    continue
-                seen_episode_keys.add(episode_key)
-                if self._episode_exists(db, story, episode_number, episode_title):
-                    continue
-                db.add(
-                    Episode(
-                        content_id=content.id,
-                        story_id=story.id,
-                        episode_number=episode_number,
-                        sequence_order=episode_number,
-                        episode_title=episode_title,
-                        duration_seconds=self._as_int(episode.get("duration_seconds")),
-                    )
-                )
-            return
+                content.episode_order = episode_number
+                return
 
-        if content.content_type not in {"VIDEO", "EPISODE", "PLAYLIST", "STORY"}:
-            return
-        episode_number = extract_episode_number(normalized.get("title") or "")
-        if self._episode_exists(db, story, episode_number, content.canonical_title):
-            return
-        db.add(
-            Episode(
-                content_id=content.id,
-                story_id=story.id,
-                episode_number=episode_number,
-                sequence_order=episode_number,
-                episode_title=content.canonical_title,
-                duration_seconds=content.duration_seconds,
-            )
-        )
-
-    def _episode_exists(self, db: Session, story: Story, episode_number: int | None, episode_title: str | None) -> bool:
-        query = db.query(Episode).filter(Episode.story_id == story.id)
-        if episode_number:
-            query = query.filter(Episode.episode_number == episode_number)
-        elif episode_title:
-            query = query.filter(Episode.episode_title == episode_title)
-        else:
-            return False
-        return db.query(query.exists()).scalar()
+        if content.content_type in {"VIDEO", "EPISODE", "PLAYLIST", "STORY"}:
+            content.episode_order = extract_episode_number(normalized.get("title") or "")
 
     def _as_int(self, value) -> int | None:
         if value in (None, ""):

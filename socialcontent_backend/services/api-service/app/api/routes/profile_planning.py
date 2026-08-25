@@ -55,8 +55,7 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
             .all()
         )
         if not workflows:
-            plan = _series_plan(db, series)
-            workflows = [plan] if plan else []
+            workflows = []
         result.append(
             {
                 "series": _serialize_series(series),
@@ -71,7 +70,6 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
     for plan in standalone_workflows:
         mock_series = {
             "id": plan.id,
-            "content_plan_id": plan.id,
             "profile_id": plan.profile_id,
             "title": plan.title or "Standalone Video",
             "description": (plan.metadata_json or {}).get("content_angle") or "Kịch bản độc lập",
@@ -98,21 +96,9 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
     return result
 
 
-def _series_plan(db: Session, series: ContentSeries) -> MediaWorkflow | None:
-    plan_id = (series.metadata_json or {}).get("content_plan_id")
-    if not plan_id:
-        return None
-    try:
-        return db.get(MediaWorkflow, uuid.UUID(str(plan_id)))
-    except ValueError:
-        return None
-
-
 def _serialize_series(series: ContentSeries) -> dict:
-    metadata = series.metadata_json or {}
     return {
         "id": series.id,
-        "content_plan_id": uuid.UUID(str(metadata["content_plan_id"])) if metadata.get("content_plan_id") else series.id,
         "profile_id": series.profile_id,
         "title": series.title,
         "description": series.description,
@@ -159,65 +145,4 @@ def _serialize_source_content(content: ContentItem) -> dict:
         "updated_at": content.updated_at,
         "sources": sources,
         "media": media,
-    }
-def _serialize_source_content(content: ContentItem, source: ContentSource | None, sources: list[ContentSource], media: list[ContentMedia]) -> dict:
-    return {
-        "id": content.id,
-        "content_type": content.content_type,
-        "canonical_title": content.canonical_title,
-        "summary": content.summary,
-        "full_text": _load_content_full_text(sources) or content.summary,
-        "language": content.language,
-        "status": content.status,
-        "canonical_url": content.canonical_url,
-        "source_type": source.source_type if source else None,
-        "source_url": source.source_url if source else None,
-        "source_author": source.source_author if source else None,
-        "source_published_at": source.source_published_at if source else None,
-        "quality_score": float(content.quality_score or 0),
-        "published_at": content.published_at,
-        "created_at": content.created_at,
-        "updated_at": content.updated_at,
-        "sources": [_serialize_content_source(item) for item in sources],
-        "media": [_serialize_content_media(item) for item in media],
-    }
-
-
-def _serialize_content_source(source: ContentSource) -> dict:
-    meta = dict(source.metadata_json or {})
-    meta.pop("processed_document_id", None)
-    return {
-        "id": source.id,
-        "content_id": source.content_id,
-        "source_type": source.source_type,
-        "source_external_id": source.source_external_id,
-        "source_url": source.source_url,
-        "raw_document_id": source.raw_document_id,
-        "processed_document_id": source.processed_document_id,
-        "source_title": source.source_title,
-        "source_author": source.source_author,
-        "source_published_at": source.source_published_at,
-        "first_seen_at": source.first_seen_at,
-        "last_seen_at": source.last_seen_at,
-        "is_primary": source.is_primary,
-        "metadata": meta,
-        "created_at": source.created_at,
-        "updated_at": source.updated_at,
-    }
-
-
-def _serialize_content_media(item: ContentMedia) -> dict:
-    return {
-        "id": item.id,
-        "content_id": item.content_id,
-        "media_type": item.media_type,
-        "source_url": item.source_url,
-        "storage_url": item.storage_url,
-        "thumbnail_url": item.thumbnail_url,
-        "mime_type": item.mime_type,
-        "width": item.width,
-        "height": item.height,
-        "duration_seconds": item.duration_seconds,
-        "checksum": item.checksum,
-        "created_at": item.created_at,
     }

@@ -260,6 +260,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   const handleStartPendingQr = async () => {
+    if (addingProfile) return
     const profileName = newProfileName.trim() || 'TikTok account'
     setAddingProfile(true)
     setMessage('')

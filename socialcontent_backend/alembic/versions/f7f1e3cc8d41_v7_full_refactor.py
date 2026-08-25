@@ -1,8 +1,8 @@
-"""v7_full_refactor_init
+"""v7_full_refactor
 
-Revision ID: fc50f98f3307
+Revision ID: f7f1e3cc8d41
 Revises: 
-Create Date: 2026-08-23 23:36:04.384921
+Create Date: 2026-08-23 23:57:02.914657
 """
 
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = 'fc50f98f3307'
+revision = 'f7f1e3cc8d41'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -60,6 +60,7 @@ def upgrade() -> None:
     sa.Column('language', sa.String(length=12), nullable=False),
     sa.Column('content_scope', sa.String(length=40), nullable=False),
     sa.Column('owner_user_id', sa.UUID(), nullable=True),
+    sa.Column('crawl_job_id', sa.UUID(), nullable=True),
     sa.Column('created_by_type', sa.String(length=40), nullable=False),
     sa.Column('status', sa.String(length=40), nullable=False),
     sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
@@ -68,8 +69,6 @@ def upgrade() -> None:
     sa.Column('content_hash', sa.String(length=128), nullable=True),
     sa.Column('transcript_hash', sa.String(length=128), nullable=True),
     sa.Column('quality_score', sa.Numeric(precision=5, scale=2), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('mongo_raw_id', sa.String(length=64), nullable=True),
     sa.Column('mongo_normalized_id', sa.String(length=64), nullable=True),
     sa.Column('sources_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
@@ -77,11 +76,15 @@ def upgrade() -> None:
     sa.Column('duplicate_count', sa.Integer(), nullable=False),
     sa.Column('story_id', sa.UUID(), nullable=True),
     sa.Column('episode_order', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['crawl_job_id'], ['crawl_jobs.id'], name='fk_content_item_crawl_job_id', ondelete='SET NULL', use_alter=True),
     sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['story_id'], ['stories.id'], ondelete='SET NULL', use_alter=True),
+    sa.ForeignKeyConstraint(['story_id'], ['stories.id'], name='fk_content_item_story_id', ondelete='SET NULL', use_alter=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_content_items_content_hash'), 'content_items', ['content_hash'], unique=False)
+    op.create_index(op.f('ix_content_items_crawl_job_id'), 'content_items', ['crawl_job_id'], unique=False)
     op.create_index(op.f('ix_content_items_content_scope'), 'content_items', ['content_scope'], unique=False)
     op.create_index(op.f('ix_content_items_content_type'), 'content_items', ['content_type'], unique=False)
     op.create_index(op.f('ix_content_items_mongo_normalized_id'), 'content_items', ['mongo_normalized_id'], unique=False)
@@ -260,25 +263,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_kafka_tasks_reference_id'), 'kafka_tasks', ['reference_id'], unique=False)
     op.create_index(op.f('ix_kafka_tasks_status'), 'kafka_tasks', ['status'], unique=False)
     op.create_index(op.f('ix_kafka_tasks_task_type'), 'kafka_tasks', ['task_type'], unique=False)
-    op.create_table('planning_runs',
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('profile_id', sa.UUID(), nullable=False),
-    sa.Column('crawl_job_id', sa.UUID(), nullable=True),
-    sa.Column('triggered_by', sa.String(length=40), nullable=False),
-    sa.Column('status', sa.String(length=40), nullable=False),
-    sa.Column('total_evaluated', sa.Integer(), nullable=False),
-    sa.Column('total_selected', sa.Integer(), nullable=False),
-    sa.Column('total_rejected', sa.Integer(), nullable=False),
-    sa.Column('error_message', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.ForeignKeyConstraint(['crawl_job_id'], ['crawl_jobs.id'], ),
-    sa.ForeignKeyConstraint(['profile_id'], ['social_profiles.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_planning_runs_crawl_job_id'), 'planning_runs', ['crawl_job_id'], unique=False)
-    op.create_index(op.f('ix_planning_runs_profile_id'), 'planning_runs', ['profile_id'], unique=False)
-    op.create_index(op.f('ix_planning_runs_status'), 'planning_runs', ['status'], unique=False)
     op.create_table('publishing_queue_items',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
@@ -339,7 +323,6 @@ def upgrade() -> None:
     sa.Column('require_video', sa.Boolean(), nullable=False),
     sa.Column('receive_system_content', sa.Boolean(), nullable=False),
     sa.Column('auto_project_queue_enabled', sa.Boolean(), nullable=False),
-    sa.Column('auto_planning_enabled', sa.Boolean(), nullable=False),
     sa.Column('video_render_mode', sa.String(length=40), nullable=False),
     sa.Column('max_system_recommendations', sa.Integer(), nullable=False),
     sa.Column('auto_queue_enabled', sa.Boolean(), nullable=False),
@@ -381,9 +364,9 @@ def upgrade() -> None:
     sa.Column('current_stage', sa.String(length=80), nullable=True),
     sa.Column('progress_percent', sa.Numeric(precision=5, scale=2), nullable=False),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('draft_json', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('artifacts_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('inputs_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.Column('draft_json', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['primary_content_id'], ['content_items.id'], ondelete='SET NULL'),
@@ -398,6 +381,55 @@ def upgrade() -> None:
     op.create_index(op.f('ix_media_workflow_series_id'), 'media_workflow', ['series_id'], unique=False)
     op.create_index(op.f('ix_media_workflow_status'), 'media_workflow', ['status'], unique=False)
     op.create_index(op.f('ix_media_workflow_user_id'), 'media_workflow', ['user_id'], unique=False)
+    op.create_table('planning_runs',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
+    sa.Column('profile_id', sa.UUID(), nullable=False),
+    sa.Column('workflow_id', sa.UUID(), nullable=False),
+    sa.Column('crawl_job_id', sa.UUID(), nullable=True),
+    sa.Column('planning_mode', sa.String(length=40), nullable=False),
+    sa.Column('status', sa.String(length=40), nullable=False),
+    sa.Column('input_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('output_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('reason_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['crawl_job_id'], ['crawl_jobs.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['profile_id'], ['social_profiles.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['workflow_id'], ['media_workflow.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_planning_runs_crawl_job_id'), 'planning_runs', ['crawl_job_id'], unique=False)
+    op.create_index(op.f('ix_planning_runs_planning_mode'), 'planning_runs', ['planning_mode'], unique=False)
+    op.create_index(op.f('ix_planning_runs_profile_id'), 'planning_runs', ['profile_id'], unique=False)
+    op.create_index(op.f('ix_planning_runs_status'), 'planning_runs', ['status'], unique=False)
+    op.create_index(op.f('ix_planning_runs_user_id'), 'planning_runs', ['user_id'], unique=False)
+    op.create_index(op.f('ix_planning_runs_workflow_id'), 'planning_runs', ['workflow_id'], unique=False)
+    op.create_table('planning_candidates',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('planning_run_id', sa.UUID(), nullable=False),
+    sa.Column('workflow_id', sa.UUID(), nullable=False),
+    sa.Column('content_id', sa.UUID(), nullable=True),
+    sa.Column('rank_order', sa.Integer(), nullable=True),
+    sa.Column('score', sa.Numeric(precision=5, scale=2), nullable=False),
+    sa.Column('selected', sa.Boolean(), nullable=False),
+    sa.Column('eligible', sa.Boolean(), nullable=False),
+    sa.Column('reason_jsonb', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['content_id'], ['content_items.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['planning_run_id'], ['planning_runs.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['workflow_id'], ['media_workflow.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_planning_candidates_content_id'), 'planning_candidates', ['content_id'], unique=False)
+    op.create_index(op.f('ix_planning_candidates_planning_run_id'), 'planning_candidates', ['planning_run_id'], unique=False)
+    op.create_index(op.f('ix_planning_candidates_selected'), 'planning_candidates', ['selected'], unique=False)
+    op.create_index(op.f('ix_planning_candidates_workflow_id'), 'planning_candidates', ['workflow_id'], unique=False)
     op.create_table('profile_content_links',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
@@ -443,26 +475,6 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_social_post_metrics_captured_at'), 'social_post_metrics', ['captured_at'], unique=False)
     op.create_index(op.f('ix_social_post_metrics_post_id'), 'social_post_metrics', ['post_id'], unique=False)
-    op.create_table('planning_candidates',
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('planning_run_id', sa.UUID(), nullable=False),
-    sa.Column('content_id', sa.UUID(), nullable=False),
-    sa.Column('cosine_score', sa.Numeric(precision=5, scale=4), nullable=True),
-    sa.Column('ai_score', sa.Numeric(precision=5, scale=2), nullable=True),
-    sa.Column('final_score', sa.Numeric(precision=5, scale=2), nullable=True),
-    sa.Column('status', sa.String(length=40), nullable=False),
-    sa.Column('reason', sa.Text(), nullable=True),
-    sa.Column('media_workflow_id', sa.UUID(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['content_id'], ['content_items.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['media_workflow_id'], ['media_workflow.id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['planning_run_id'], ['planning_runs.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_planning_candidates_content_id'), 'planning_candidates', ['content_id'], unique=False)
-    op.create_index(op.f('ix_planning_candidates_media_workflow_id'), 'planning_candidates', ['media_workflow_id'], unique=False)
-    op.create_index(op.f('ix_planning_candidates_planning_run_id'), 'planning_candidates', ['planning_run_id'], unique=False)
-    op.create_index(op.f('ix_planning_candidates_status'), 'planning_candidates', ['status'], unique=False)
     op.create_table('planning_feedback',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('media_workflow_id', sa.UUID(), nullable=False),
@@ -475,18 +487,31 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_planning_feedback_media_workflow_id'), 'planning_feedback', ['media_workflow_id'], unique=False)
+    op.create_foreign_key(
+        'fk_content_item_crawl_job_id',
+        'content_items',
+        'crawl_jobs',
+        ['crawl_job_id'],
+        ['id'],
+        ondelete='SET NULL',
+    )
+    op.create_foreign_key(
+        'fk_content_item_story_id',
+        'content_items',
+        'stories',
+        ['story_id'],
+        ['id'],
+        ondelete='SET NULL',
+    )
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_constraint('fk_content_item_story_id', 'content_items', type_='foreignkey')
+    op.drop_constraint('fk_content_item_crawl_job_id', 'content_items', type_='foreignkey')
     op.drop_index(op.f('ix_planning_feedback_media_workflow_id'), table_name='planning_feedback')
     op.drop_table('planning_feedback')
-    op.drop_index(op.f('ix_planning_candidates_status'), table_name='planning_candidates')
-    op.drop_index(op.f('ix_planning_candidates_planning_run_id'), table_name='planning_candidates')
-    op.drop_index(op.f('ix_planning_candidates_media_workflow_id'), table_name='planning_candidates')
-    op.drop_index(op.f('ix_planning_candidates_content_id'), table_name='planning_candidates')
-    op.drop_table('planning_candidates')
     op.drop_index(op.f('ix_social_post_metrics_post_id'), table_name='social_post_metrics')
     op.drop_index(op.f('ix_social_post_metrics_captured_at'), table_name='social_post_metrics')
     op.drop_table('social_post_metrics')
@@ -501,6 +526,18 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_profile_content_links_content_id'), table_name='profile_content_links')
     op.drop_table('profile_content_links')
     op.drop_index(op.f('ix_media_workflow_user_id'), table_name='media_workflow')
+    op.drop_index(op.f('ix_planning_candidates_workflow_id'), table_name='planning_candidates')
+    op.drop_index(op.f('ix_planning_candidates_selected'), table_name='planning_candidates')
+    op.drop_index(op.f('ix_planning_candidates_planning_run_id'), table_name='planning_candidates')
+    op.drop_index(op.f('ix_planning_candidates_content_id'), table_name='planning_candidates')
+    op.drop_table('planning_candidates')
+    op.drop_index(op.f('ix_planning_runs_workflow_id'), table_name='planning_runs')
+    op.drop_index(op.f('ix_planning_runs_user_id'), table_name='planning_runs')
+    op.drop_index(op.f('ix_planning_runs_status'), table_name='planning_runs')
+    op.drop_index(op.f('ix_planning_runs_profile_id'), table_name='planning_runs')
+    op.drop_index(op.f('ix_planning_runs_planning_mode'), table_name='planning_runs')
+    op.drop_index(op.f('ix_planning_runs_crawl_job_id'), table_name='planning_runs')
+    op.drop_table('planning_runs')
     op.drop_index(op.f('ix_media_workflow_status'), table_name='media_workflow')
     op.drop_index(op.f('ix_media_workflow_series_id'), table_name='media_workflow')
     op.drop_index(op.f('ix_media_workflow_profile_id'), table_name='media_workflow')
@@ -521,10 +558,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_publishing_queue_items_profile_id'), table_name='publishing_queue_items')
     op.drop_index(op.f('ix_publishing_queue_items_content_id'), table_name='publishing_queue_items')
     op.drop_table('publishing_queue_items')
-    op.drop_index(op.f('ix_planning_runs_status'), table_name='planning_runs')
-    op.drop_index(op.f('ix_planning_runs_profile_id'), table_name='planning_runs')
-    op.drop_index(op.f('ix_planning_runs_crawl_job_id'), table_name='planning_runs')
-    op.drop_table('planning_runs')
     op.drop_index(op.f('ix_kafka_tasks_task_type'), table_name='kafka_tasks')
     op.drop_index(op.f('ix_kafka_tasks_status'), table_name='kafka_tasks')
     op.drop_index(op.f('ix_kafka_tasks_reference_id'), table_name='kafka_tasks')
@@ -564,6 +597,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_content_items_mongo_normalized_id'), table_name='content_items')
     op.drop_index(op.f('ix_content_items_content_type'), table_name='content_items')
     op.drop_index(op.f('ix_content_items_content_scope'), table_name='content_items')
+    op.drop_index(op.f('ix_content_items_crawl_job_id'), table_name='content_items')
     op.drop_index(op.f('ix_content_items_content_hash'), table_name='content_items')
     op.drop_table('content_items')
     op.drop_index(op.f('ix_audit_logs_actor_id'), table_name='audit_logs')

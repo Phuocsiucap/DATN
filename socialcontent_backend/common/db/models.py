@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    
     Boolean,
     Column,
     DateTime,
@@ -120,7 +119,7 @@ class CrawlJob(Base):
 
     requester = relationship("User", back_populates="crawl_jobs")
     sources = relationship("CrawlJobSource", back_populates="job", cascade="all, delete-orphan")
-    tasks = relationship("CrawlTask", back_populates="job", cascade="all, delete-orphan")
+    content_items = relationship("ContentItem", back_populates="crawl_job")
 
 
 class CrawlJobSource(Base):
@@ -137,29 +136,48 @@ class CrawlJobSource(Base):
     updated_at = updated_col()
 
     job = relationship("CrawlJob", back_populates="sources")
-    tasks = relationship("CrawlTask", back_populates="job_source")
 
 
-class CrawlTask(Base):
-    __tablename__ = "crawl_tasks"
+class KafkaTask(Base):
+    __tablename__ = "kafka_tasks"
 
-    id = uuid_pk()
-    job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
-    job_source_id = Column(UUID(as_uuid=True), ForeignKey("crawl_job_sources.id", ondelete="CASCADE"), nullable=False)
-    task_type = Column(String(60), nullable=False)
-    external_reference = Column(String(255), nullable=True, index=True)
-    status = Column(String(40), nullable=False, default="PENDING", index=True)
-    attempt_count = Column(Integer, default=0, nullable=False)
-    max_attempts = Column(Integer, default=4, nullable=False)
-    error_code = Column(String(120), nullable=True)
-    error_message = Column(Text, nullable=True)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = now_col()
-    updated_at = updated_col()
+    id               = uuid_pk()
+    task_type        = Column(String(60), nullable=False, index=True)
+    # CRAWL_URL | NORMALIZE | GENERATE_VIDEO_SCRIPT | GENERATE_VIDEO_RENDER
 
-    job = relationship("CrawlJob", back_populates="tasks")
-    job_source = relationship("CrawlJobSource", back_populates="tasks")
+    status           = Column(String(40), nullable=False, default="PENDING", index=True)
+    # PENDING | RUNNING | COMPLETED | FAILED | CANCELLED
+
+    # Job lifecycle
+    current_stage       = Column(String(80), nullable=True)
+    progress_percent    = Column(Numeric(5,2), default=0, nullable=False)
+    idempotency_key     = Column(String(255), unique=True, nullable=True)
+    cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
+    locked_by           = Column(String(120), nullable=True)   # worker instance ID
+    locked_until        = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at        = Column(DateTime(timezone=True), nullable=True)
+    scheduled_at        = Column(DateTime(timezone=True), nullable=True)
+    parent_task_id      = Column(UUID(as_uuid=True), ForeignKey("kafka_tasks.id"), nullable=True)
+
+    # Reference đến object liên quan (không FK cứng)
+    reference_id        = Column(UUID(as_uuid=True), nullable=True, index=True)
+    reference_type      = Column(String(40), nullable=True)
+    # "crawl_job" | "media_workflow"
+
+    profile_id          = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id"), nullable=True)
+
+    # Payload
+    payload_jsonb       = Column(JSONB, nullable=False, default=dict)
+    result_jsonb        = Column(JSONB, nullable=False, default=dict)
+
+    # Retry
+    attempt_count       = Column(Integer, default=0, nullable=False)
+    max_attempts        = Column(Integer, default=3, nullable=False)
+    error_message       = Column(Text, nullable=True)
+
+    created_at          = now_col()
+    started_at          = Column(DateTime(timezone=True), nullable=True)
+    completed_at        = Column(DateTime(timezone=True), nullable=True)
 
 
 class ContentItem(Base):
@@ -173,6 +191,12 @@ class ContentItem(Base):
     language = Column(String(12), default="vi", nullable=False)
     content_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    crawl_job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("crawl_jobs.id", name="fk_content_item_crawl_job_id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+        index=True,
+    )
     created_by_type = Column(String(40), default="SYSTEM", nullable=False)
     status = Column(String(40), default="NEEDS_REVIEW", nullable=False, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
@@ -181,33 +205,19 @@ class ContentItem(Base):
     content_hash = Column(String(128), nullable=True, index=True)
     transcript_hash = Column(String(128), nullable=True, index=True)
     quality_score = Column(Numeric(5, 2), default=0, nullable=False)
+
+    mongo_raw_id = Column(String(64), nullable=True, index=True)
+    mongo_normalized_id = Column(String(64), nullable=True, index=True)
+    sources_jsonb = Column(JSONB, nullable=False, default=list)
+    media_jsonb = Column(JSONB, nullable=False, default=list)
+    duplicate_count = Column(Integer, default=0, nullable=False)
+    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL", use_alter=True, name="fk_content_item_story_id"), nullable=True, index=True)
+    episode_order = Column(Integer, nullable=True)
+
     created_at = now_col()
     updated_at = updated_col()
 
-    sources = relationship("ContentSource", back_populates="content", cascade="all, delete-orphan")
-
-
-class ContentSource(Base):
-    __tablename__ = "content_sources"
-
-    id = uuid_pk()
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_type = Column(String(40), nullable=False, index=True)
-    source_external_id = Column(String(255), nullable=False, index=True)
-    source_url = Column(Text, nullable=True)
-    raw_document_id = Column(String(64), nullable=True)
-    processed_document_id = Column(String(64), nullable=True)
-    source_title = Column(Text, nullable=True)
-    source_author = Column(String(255), nullable=True)
-    source_published_at = Column(DateTime(timezone=True), nullable=True)
-    first_seen_at = now_col()
-    last_seen_at = updated_col()
-    is_primary = Column(Boolean, default=True, nullable=False)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    content = relationship("ContentItem", back_populates="sources")
+    crawl_job = relationship("CrawlJob", back_populates="content_items")
 
 
 class Story(Base):
@@ -225,57 +235,6 @@ class Story(Base):
     created_at = now_col()
     updated_at = updated_col()
 
-    episodes = relationship("Episode", back_populates="story", cascade="all, delete-orphan")
-
-
-class Episode(Base):
-    __tablename__ = "episodes"
-
-    id = uuid_pk()
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True)
-    episode_number = Column(Integer, nullable=True, index=True)
-    chapter_number = Column(Integer, nullable=True)
-    season_number = Column(Integer, nullable=True)
-    sequence_order = Column(Integer, nullable=True)
-    episode_title = Column(Text, nullable=True)
-    duration_seconds = Column(Integer, nullable=True)
-    is_missing = Column(Boolean, default=False, nullable=False)
-    created_at = now_col()
-    updated_at = updated_col()
-
-    story = relationship("Story", back_populates="episodes")
-
-
-class ContentMedia(Base):
-    __tablename__ = "content_media"
-
-    id = uuid_pk()
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    media_type = Column(String(40), nullable=False)
-    source_url = Column(Text, nullable=True)
-    storage_url = Column(Text, nullable=True)
-    thumbnail_url = Column(Text, nullable=True)
-    mime_type = Column(String(120), nullable=True)
-    width = Column(Integer, nullable=True)
-    height = Column(Integer, nullable=True)
-    duration_seconds = Column(Integer, nullable=True)
-    checksum = Column(String(128), nullable=True, index=True)
-    created_at = now_col()
-
-
-class ContentDuplicate(Base):
-    __tablename__ = "content_duplicates"
-
-    id = uuid_pk()
-    primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False)
-    duplicate_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False)
-    match_type = Column(String(60), nullable=False)
-    similarity_score = Column(Numeric(5, 2), default=0, nullable=False)
-    decision = Column(String(60), default="PENDING", nullable=False)
-    decision_reason = Column(Text, nullable=True)
-    created_at = now_col()
-
 
 class ContentEmbedding(Base):
     __tablename__ = "content_embeddings"
@@ -285,38 +244,10 @@ class ContentEmbedding(Base):
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     embedding = Column(JSONB, nullable=False)
     embedding_text = Column(Text, nullable=False)
-    embedding_text_hash = Column(String(128), nullable=False, index=True)
     model_name = Column(String(120), nullable=False, index=True)
-    model_version = Column(String(80), nullable=True)
     embedding_dim = Column(Integer, nullable=False)
-    source_language = Column(String(12), nullable=True)
     created_at = now_col()
     updated_at = updated_col()
-
-
-class ProcessingRun(Base):
-    __tablename__ = "processing_runs"
-
-    id = uuid_pk()
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
-    processing_type = Column(String(80), nullable=False)
-    status = Column(String(40), nullable=False)
-    processor_version = Column(String(80), nullable=True)
-    input_reference = Column(String(255), nullable=True)
-    output_reference = Column(String(255), nullable=True)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    error_message = Column(Text, nullable=True)
-    created_at = now_col()
-
-
-class ProcessedEvent(Base):
-    __tablename__ = "processed_events"
-
-    event_id = Column(UUID(as_uuid=True), primary_key=True)
-    consumer_name = Column(String(120), primary_key=True)
-    processed_at = now_col()
 
 
 class SocialProfile(Base):
@@ -362,7 +293,6 @@ class SocialProfileStrategy(Base):
     require_video = Column(Boolean, default=False, nullable=False)
     receive_system_content = Column(Boolean, default=True, nullable=False)
     auto_project_queue_enabled = Column(Boolean, default=False, nullable=False)
-    auto_planning_enabled = Column(Boolean, default=False, nullable=False)
     video_render_mode = Column(String(40), default="manual", nullable=False)
     max_system_recommendations = Column(Integer, default=20, nullable=False)
     auto_queue_enabled = Column(Boolean, default=True, nullable=False)
@@ -453,7 +383,7 @@ class PlanningFeedback(Base):
     __tablename__ = "planning_feedback"
 
     id = uuid_pk()
-    media_workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
+    media_workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
     feedback_type = Column(String(60), nullable=False)
     feedback_text = Column(Text, nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -467,7 +397,8 @@ class PromptRun(Base):
 
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    workflow_run_id = Column(UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_type = Column(String(60), nullable=False, index=True)
+    reference_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     step_name = Column(String(80), nullable=False)
     model_provider = Column(String(80), nullable=True)
     model_name = Column(String(120), nullable=True)
@@ -484,7 +415,6 @@ class PromptRun(Base):
     created_at = now_col()
 
     user = relationship("User", foreign_keys=[user_id])
-    workflow_run = relationship("WorkflowRun", foreign_keys=[workflow_run_id], back_populates="prompt_runs")
 
 
 class ContentSeries(Base):
@@ -507,20 +437,8 @@ class ContentSeries(Base):
     projects = relationship("MediaWorkflow", back_populates="series")
 
 
-class VideoDraft(Base):
-    __tablename__ = "video_drafts"
-
-    id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(Text, nullable=False)
-    draft_json = Column(JSONB, nullable=False, default=dict)
-    updated_at = updated_col()
-
-    user = relationship("User")
-
-
 class MediaWorkflow(Base):
-    __tablename__ = "media_workflows"
+    __tablename__ = "media_workflow"
 
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -530,200 +448,124 @@ class MediaWorkflow(Base):
     status = Column(String(40), default="DRAFT", nullable=False, index=True)
     planning_mode = Column(String(40), nullable=True, index=True)
     primary_content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    primary_story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    video_draft_id = Column(UUID(as_uuid=True), ForeignKey("video_drafts.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     current_stage = Column(String(80), nullable=True)
     progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    draft_json = Column(JSONB, nullable=False, default=dict)
+    artifacts_jsonb = Column(JSONB, nullable=False, default=list)
+    inputs_jsonb = Column(JSONB, nullable=False, default=list)
     created_at = now_col()
     updated_at = updated_col()
 
     profile = relationship("SocialProfile", back_populates="content_plans")
     user = relationship("User")
     feedback = relationship("PlanningFeedback", back_populates="media_workflow", cascade="all, delete-orphan")
-    sources = relationship("WorkflowSource", back_populates="project", cascade="all, delete-orphan")
-    candidates = relationship("WorkflowCandidate", back_populates="project", cascade="all, delete-orphan")
-    runs = relationship("WorkflowRun", back_populates="project", cascade="all, delete-orphan")
-    artifacts = relationship("WorkflowArtifact", back_populates="project", cascade="all, delete-orphan")
     series = relationship("ContentSeries", back_populates="projects")
-    video_draft = relationship("VideoDraft")
-    draft_json = Column(JSONB, nullable=False, default=dict)
 
 
-class WorkflowSource(Base):
-    __tablename__ = "workflow_sources"
-    __table_args__ = (UniqueConstraint("workflow_id", "source_type", "source_id", name="uq_workflow_source_ref"),)
+class PlanningRun(Base):
+    __tablename__ = "planning_runs"
 
     id = uuid_pk()
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_type = Column(String(40), nullable=False, index=True)
-    source_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
-    role = Column(String(60), default="PRIMARY", nullable=False, index=True)
-    status = Column(String(40), default="ACTIVE", nullable=False, index=True)
-    score = Column(Numeric(5, 2), default=0, nullable=False)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
-    created_at = now_col()
-
-    project = relationship("MediaWorkflow", back_populates="sources")
-
-
-class WorkflowCandidate(Base):
-    __tablename__ = "workflow_candidates"
-
-    id = uuid_pk()
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
-    story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True, index=True)
-    episode_id = Column(UUID(as_uuid=True), ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True, index=True)
-    rank_order = Column(Integer, nullable=True)
-    score = Column(Numeric(5, 2), default=0, nullable=False)
-    eligible = Column(Boolean, default=True, nullable=False)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
-    created_at = now_col()
-
-    project = relationship("MediaWorkflow", back_populates="candidates")
-    content = relationship("ContentItem")
-    story = relationship("Story")
-    episode = relationship("Episode")
-
-    @property
-    def candidate_score(self) -> float:
-        return float(self.score or 0)
-
-    @candidate_score.setter
-    def candidate_score(self, value) -> None:
-        self.score = value or 0
-
-    @property
-    def score_breakdown(self) -> dict:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("score_breakdown") or {}
-
-    @score_breakdown.setter
-    def score_breakdown(self, value) -> None:
-        metadata = dict(self.metadata_json or {})
-        metadata["score_breakdown"] = value or {}
-        self.metadata_json = metadata
-
-    @property
-    def selection_reasons(self) -> list:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("selection_reasons") or []
-
-    @selection_reasons.setter
-    def selection_reasons(self, value) -> None:
-        metadata = dict(self.metadata_json or {})
-        metadata["selection_reasons"] = value or []
-        self.metadata_json = metadata
-
-    @property
-    def rejection_reasons(self) -> list:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("rejection_reasons") or []
-
-    @rejection_reasons.setter
-    def rejection_reasons(self, value) -> None:
-        metadata = dict(self.metadata_json or {})
-        metadata["rejection_reasons"] = value or []
-        self.metadata_json = metadata
-
-    @property
-    def content_title(self) -> str | None:
-        return self.content.canonical_title if getattr(self, "content", None) else None
-
-    @property
-    def content_url(self) -> str | None:
-        return self.content.canonical_url if getattr(self, "content", None) else None
-
-
-class WorkflowRun(Base):
-    __tablename__ = "workflow_runs"
-
-    id = uuid_pk()
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    run_type = Column(String(60), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    crawl_job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    planning_mode = Column(String(40), default="AUTO", nullable=False, index=True)
     status = Column(String(40), default="PENDING", nullable=False, index=True)
-    current_stage = Column(String(80), nullable=True)
-    progress_percent = Column(Numeric(5, 2), default=0, nullable=False)
-    error_message = Column(Text, nullable=True)
+    input_jsonb = Column(JSONB, nullable=False, default=dict)
+    output_jsonb = Column(JSONB, nullable=False, default=dict)
+    reason_jsonb = Column(JSONB, nullable=False, default=dict)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = now_col()
     updated_at = updated_col()
 
-    project = relationship("MediaWorkflow", back_populates="runs")
-    prompt_runs = relationship("PromptRun", foreign_keys="PromptRun.workflow_run_id", back_populates="workflow_run")
+    workflow = relationship("MediaWorkflow")
+    profile = relationship("SocialProfile")
+    candidates = relationship("PlanningCandidate", back_populates="planning_run", cascade="all, delete-orphan")
 
     @property
-    def user_id(self):
-        return self.project.user_id if self.project else None
+    def current_stage(self) -> str:
+        return "COMPLETED" if self.status in {"SUCCEEDED", "FAILED", "CANCELLED", "WAITING_REVIEW"} else "SELECTING_CANDIDATES"
 
     @property
-    def profile_id(self):
-        return self.project.profile_id if self.project else None
-
-    @property
-    def planning_mode(self) -> str:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("planning_mode") or (self.project.planning_mode if self.project else None) or "SERIES"
+    def progress_percent(self) -> float:
+        return 100.0 if self.status in {"SUCCEEDED", "FAILED", "CANCELLED", "WAITING_REVIEW"} else 5.0
 
     @property
     def target_duration_seconds(self) -> int | None:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("target_duration_seconds")
+        return (self.metadata_json or {}).get("target_duration_seconds") if isinstance(self.metadata_json, dict) else None
 
     @property
     def preferred_part_count(self) -> int | None:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("preferred_part_count")
+        return (self.metadata_json or {}).get("preferred_part_count") if isinstance(self.metadata_json, dict) else None
 
     @property
     def language(self) -> str:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("language") or "vi"
+        return ((self.metadata_json or {}).get("language") if isinstance(self.metadata_json, dict) else None) or "vi"
 
     @property
     def instructions(self) -> str | None:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("instructions")
+        return (self.metadata_json or {}).get("instructions") if isinstance(self.metadata_json, dict) else None
 
     @property
     def attempt_count(self) -> int:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return int(metadata.get("attempt_count") or 1)
-
-    @attempt_count.setter
-    def attempt_count(self, value: int) -> None:
-        metadata = dict(self.metadata_json or {})
-        metadata["attempt_count"] = int(value or 1)
-        self.metadata_json = metadata
+        return int((self.metadata_json or {}).get("attempt_count") or 1) if isinstance(self.metadata_json, dict) else 1
 
     @property
     def error_code(self) -> str | None:
-        metadata = self.metadata_json if isinstance(self.metadata_json, dict) else {}
-        return metadata.get("error_code")
+        return (self.metadata_json or {}).get("error_code") if isinstance(self.metadata_json, dict) else None
 
-    @error_code.setter
-    def error_code(self, value: str | None) -> None:
-        metadata = dict(self.metadata_json or {})
-        metadata["error_code"] = value
-        self.metadata_json = metadata
+    @property
+    def error_message(self) -> str | None:
+        return (self.metadata_json or {}).get("error_message") if isinstance(self.metadata_json, dict) else None
 
 
-class WorkflowArtifact(Base):
-    __tablename__ = "workflow_artifacts"
+class PlanningCandidate(Base):
+    __tablename__ = "planning_candidates"
 
     id = uuid_pk()
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    artifact_type = Column(String(60), nullable=False, index=True)
-    uri = Column(Text, nullable=True)
-    status = Column(String(40), default="READY", nullable=False, index=True)
+    planning_run_id = Column(UUID(as_uuid=True), ForeignKey("planning_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    rank_order = Column(Integer, nullable=True)
+    score = Column(Numeric(5, 2), default=0, nullable=False)
+    selected = Column(Boolean, default=False, nullable=False, index=True)
+    eligible = Column(Boolean, default=True, nullable=False)
+    reason_jsonb = Column(JSONB, nullable=False, default=dict)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
-    updated_at = updated_col()
 
-    project = relationship("MediaWorkflow", back_populates="artifacts")
+    planning_run = relationship("PlanningRun", back_populates="candidates")
+    workflow = relationship("MediaWorkflow")
+    content = relationship("ContentItem")
+
+    @property
+    def workflow_run_id(self):
+        return self.planning_run_id
+
+    @property
+    def story_id(self):
+        return None
+
+    @property
+    def episode_id(self):
+        return None
+
+    @property
+    def candidate_score(self) -> float:
+        return float(self.score or 0)
+
+    @property
+    def score_breakdown(self) -> dict:
+        return (self.metadata_json or {}).get("score_breakdown") or {}
+
+    @property
+    def selection_reasons(self) -> list:
+        return (self.reason_jsonb or {}).get("selection_reasons") or []
+
+    @property
+    def rejection_reasons(self) -> list:
+        return (self.reason_jsonb or {}).get("rejection_reasons") or []

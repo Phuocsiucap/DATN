@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, ArrowRight, CheckCircle, Loader2, Square } from 'lucide-react'
 import { fetchContentDetailApi } from '@/commons/apis/module1'
-import { createMediaWorkflowFromSourcesApi, createWorkflowRunApi, type PlanningProfile } from '@/commons/apis/planning'
+import { createDirectScriptApi } from '@/commons/apis/generateVideo'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
@@ -16,7 +16,7 @@ type ContentDetailDialogProps = {
 export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: ContentDetailDialogProps) {
   const [contentDetail, setContentDetail] = useState<any | null>(null)
   const [loading, setLoading] = useState(false)
-  const [profiles, setProfiles] = useState<PlanningProfile[]>([])
+  const [profiles, setProfiles] = useState<Array<{ id: string; profile_name: string; username?: string | null; platform: string }>>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [creatingScript, setCreatingScript] = useState(false)
   const [scriptResult, setScriptResult] = useState<{ success: boolean; message: string } | null>(null)
@@ -49,34 +49,14 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
     setCreatingScript(true)
     setScriptResult(null)
     try {
-      const project = await createMediaWorkflowFromSourcesApi({
+      const result = await createDirectScriptApi({
         profile_id: selectedProfileId,
-        content_ids: [contentDetail.id],
-        story_ids: [],
-        episode_ids: [],
-        selection_mode: 'MANUAL',
-        candidate_limit: 1,
-        title: contentDetail.canonical_title || contentDetail.normalized_title || 'Content project',
-        note: `Tạo kịch bản trực tiếp từ kho: "${contentDetail.canonical_title || contentDetail.normalized_title || contentDetail.id}"`,
-        filters: {
-          manual_direct_script: true,
-          bypass_scoring: true,
-          source: 'content_store',
-          content_ids: [contentDetail.id],
-        },
-      })
-      const job = await createWorkflowRunApi({
-        profile_id: selectedProfileId,
-        workflow_id: project.id,
-        planning_mode: 'SINGLE',
+        content_id: contentDetail.id,
+        title: contentDetail.canonical_title || contentDetail.normalized_title || undefined,
         target_duration_seconds: 60,
-        preferred_part_count: 1,
-        language: 'vi',
-        skip_ai_evaluation: true,
-        instructions: 'manual_direct_script: true. Bỏ qua chấm điểm và lọc phù hợp; tạo luôn kịch bản video đơn lẻ từ đúng bài người dùng đã chọn.',
       })
-      setScriptResult({ success: true, message: 'Đã tạo job kịch bản trực tiếp trong Module 2.' })
-      onOpenModule2?.(job.id)
+      setScriptResult({ success: true, message: 'Đã tạo job kịch bản. Vào Generate Video để xem tiến độ.' })
+      onOpenModule2?.((result.workflow as any)?.id || (result.job as any)?.id)
     } catch (error: any) {
       setScriptResult({ success: false, message: error?.response?.data?.detail || error?.message || 'Không tạo được kịch bản trực tiếp' })
     } finally {
@@ -85,6 +65,8 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
   }
 
   if (!contentId) return null
+  const detailSources = contentDetail?.sources_jsonb || contentDetail?.sources || []
+  const detailMedia = contentDetail?.media_jsonb || contentDetail?.media || []
 
   const dialogContent = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6" style={{ backgroundColor: 'rgba(9,20,38,0.5)' }}>
@@ -161,7 +143,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                 <div className="grid grid-cols-2 gap-3">
                   <div className="border rounded-lg p-3">
                     <div className="text-[10px] uppercase text-slate-500 font-bold mb-1">Nguồn</div>
-                    <div className="text-sm font-semibold">{contentDetail.sources?.[0]?.source_type || '-'}</div>
+                    <div className="text-sm font-semibold">{detailSources[0]?.source_type || '-'}</div>
                   </div>
                   <div className="border rounded-lg p-3">
                     <div className="text-[10px] uppercase text-slate-500 font-bold mb-1">Trạng thái</div>
@@ -179,13 +161,20 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                   </a>
                 )}
                 
-                {contentDetail.media?.length > 0 && (
+                {detailMedia.length > 0 && (
                   <div>
-                    <div className="text-xs uppercase text-slate-500 font-bold mb-2">Media đính kèm ({contentDetail.media.length})</div>
+                    <div className="text-xs uppercase text-slate-500 font-bold mb-2">Media đính kèm ({detailMedia.length})</div>
                     <div className="grid grid-cols-2 gap-2">
-                      {contentDetail.media.map((m: any) => (
-                        <div key={m.id} className="aspect-video bg-black rounded overflow-hidden">
-                          <img src={m.storage_url || m.thumbnail_url || m.source_url} alt="Media" className="w-full h-full object-cover" />
+                      {detailMedia.map((m: any, index: number) => (
+                        <div key={m.id || m.source_url || index} className="aspect-video bg-black rounded overflow-hidden">
+                          <img
+                            src={mediaUrl(m)}
+                            alt="Media"
+                            className="w-full h-full object-cover"
+                            onError={(event) => {
+                              event.currentTarget.src = 'https://placehold.co/640x360?text=No+Preview'
+                            }}
+                          />
                         </div>
                       ))}
                     </div>
@@ -204,6 +193,13 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
   )
 
   return createPortal(dialogContent, document.body)
+}
+
+function mediaUrl(item: any) {
+  const value = String(item?.storage_url || item?.thumbnail_url || item?.source_url || '')
+  const markdownMatch = value.match(/\]\((https?:\/\/.+)\)$/)
+  if (markdownMatch?.[1]) return markdownMatch[1]
+  return value
 }
 
 function Badge({ value }: { value: string }) {

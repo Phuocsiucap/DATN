@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   Newspaper,
   Settings,
-  HelpCircle,
   Workflow,
   Sparkles,
   FileCheck2,
@@ -11,34 +10,12 @@ import {
   CalendarDays,
   UsersRound,
 } from 'lucide-react'
-
-export type Tab =
-  | 'dashboard'
-  | 'crawl'
-  | 'content'
-  | 'planning'
-  | 'generateVideo'
-  | 'approvals'
-  | 'schedule'
-  | 'users'
-  | 'settings'
+import type { Tab } from './navigation'
 
 interface SidebarProps {
   activeTab: Tab
   onTabChange: (tab: Tab) => void
   isSystemUser?: boolean
-}
-
-export const TAB_PATHS: Record<Tab, string> = {
-  dashboard: '/',
-  crawl: '/crawl',
-  content: '/content',
-  planning: '/planning',
-  generateVideo: '/generate-video',
-  approvals: '/approvals',
-  schedule: '/schedule',
-  users: '/users',
-  settings: '/settings',
 }
 
 interface NavSection {
@@ -61,12 +38,6 @@ const getAdminSections = (): NavSection[] => [
     items: [
       { key: 'crawl', label: 'Global Crawl Jobs', icon: <Workflow size={15} /> },
       { key: 'content', label: 'Kho Dữ liệu Global', icon: <Newspaper size={15} /> },
-    ],
-  },
-  {
-    title: 'VẬN HÀNH & GIÁM SÁT',
-    items: [
-      { key: 'settings', label: 'Logs & System Config', icon: <Settings size={15} /> },
     ],
   },
   {
@@ -149,7 +120,7 @@ export default function Sidebar({
               ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
               : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
           }`}>
-            {isSystemUser ? '⚡ System Admin Workspace' : '🎨 Content Creator Workspace'}
+            {isSystemUser ? 'System Admin Workspace' : 'Content Creator Workspace'}
           </div>
         </div>
 
@@ -206,10 +177,6 @@ export default function Sidebar({
           >
             <Settings size={15} />
             <span>{isSystemUser ? 'Cài đặt System & Logs' : 'Kênh & Strategy'}</span>
-          </button>
-          <button className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-xs transition-colors" style={{ color: 'rgba(255,255,255,0.7)', borderLeft: '3px solid transparent' }}>
-            <HelpCircle size={15} />
-            <span>Hướng dẫn Vận hành</span>
           </button>
         </div>
       </aside>

@@ -34,7 +34,7 @@ class TikTokLoginSession:
     last_error: str | None = None
 
     async def capture_qr(self) -> str:
-        await asyncio.sleep(2)
+        await self.page.wait_for_timeout(700)
         qr_selectors = [
             "canvas",
             "img[alt*='QR' i]",
@@ -47,7 +47,7 @@ class TikTokLoginSession:
         for selector in qr_selectors:
             locator = self.page.locator(selector).first
             try:
-                if await locator.count() > 0 and await locator.is_visible(timeout=1500):
+                if await locator.count() > 0 and await locator.is_visible(timeout=500):
                     screenshot = await locator.screenshot()
                     break
             except Exception:
@@ -181,7 +181,7 @@ async def start_tiktok_qr_session(session_id: str, folder_path: str, user_id: uu
     settings = get_settings()
     pw, context, page = await _launch_persistent_context(profile_dir)
     try:
-        await page.goto(settings.tiktok_qr_login_url, wait_until="domcontentloaded")
+        await page.goto(settings.tiktok_qr_login_url, wait_until="domcontentloaded", timeout=10_000)
     except Exception as e:
         logger.warning("Page goto failed or timed out: %s", e)
 

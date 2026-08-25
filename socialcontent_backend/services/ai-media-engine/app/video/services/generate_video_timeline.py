@@ -25,7 +25,6 @@ def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
         "audio": normalized.get("audio"),
         "timeline": normalized.get("timeline") or {},
         "video_artifacts": normalized.get("video_artifacts") or {},
-        "source": normalized.get("source") or {},
     }
 
 
@@ -35,7 +34,11 @@ def sanitize_story_subtitles(story: dict[str, Any]) -> None:
     text_clips = timeline.get("text") if isinstance(timeline.get("text"), list) else []
     for clip in text_clips:
         if isinstance(clip, dict) and clip.get("text") is not None:
-            clip["text"] = strip_voice_tags(str(clip.get("text") or ""))
+            text = strip_voice_tags(str(clip.get("text") or ""))
+            if "manual_direct_script" in text or "bypass_ai_selection" in text or text.startswith("{'") or text.startswith("{\""):
+                clip["text"] = ""
+            else:
+                clip["text"] = text
 
 
 
@@ -70,8 +73,27 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
     }
     if timeline_metadata:
         story["timeline"]["metadata"] = timeline_metadata
+
+    scenes = []
+    count = max(len(text_clips), len(video_clips))
+    for idx in range(count):
+        t_clip = text_clips[idx] if idx < len(text_clips) else {}
+        v_clip = video_clips[idx] if idx < len(video_clips) else {}
+        text_str = str(t_clip.get("text") or "").strip()
+        if not text_str and not v_clip.get("src"):
+            continue
+        scenes.append({
+            "subtitle": text_str,
+            "voice_text": t_clip.get("voice_text") or text_str,
+            "image": v_clip.get("src") or "",
+            "effect": v_clip.get("effect") or "slow-zoom",
+            "fit": v_clip.get("fit") or "contain",
+            "duration": t_clip.get("duration") or v_clip.get("duration") or 4,
+            "subtitle_start": t_clip.get("start"),
+            "subtitle_duration": t_clip.get("duration"),
+        })
+    story["story_data"] = scenes
     story.pop("scenes", None)
-    story.pop("story_data", None)
 
 
 

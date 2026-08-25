@@ -6,19 +6,9 @@ from sqlalchemy.orm import Session
 
 from common.db.models import (
     ContentItem,
-    ContentMedia,
-    
-    ContentSource,
     MediaWorkflow,
-    Episode,
-    WorkflowArtifact,
-    WorkflowCandidate,
-    WorkflowRun,
     ContentSeries,
-    WorkflowSource,
-    SocialProfile,
     Story,
-    VideoDraft,
 )
 
 
@@ -30,46 +20,25 @@ DEFAULT_STORY_IMAGES = [
 DEFAULT_STORY_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
 
 
-def sync_workflow_from_plan(db: Session, plan: MediaWorkflow) -> MediaWorkflow:
-    workflow = db.get(MediaWorkflow, plan.workflow_id) if plan.workflow_id else None
-    if not workflow:
-        workflow = _find_workflow(db, content_plan_id=plan.id, user_id=_profile_user_id(db, plan.profile_id), profile_id=plan.profile_id)
-    plan.workflow_id = workflow.id
-    workflow.content_plan_id = plan.id
-    workflow.profile_id = plan.profile_id
-    workflow.planning_mode = plan.planning_mode
-    workflow.primary_content_id = plan.primary_content_id
-    workflow.primary_story_id = plan.primary_story_id
-    workflow.title = plan.title or workflow.title
-    workflow.status = _status_from_plan(plan.status)
-    workflow.metadata_json = {
-        **(workflow.metadata_json or {}),
-        "content_angle": plan.content_angle,
-        "target_audience": plan.target_audience,
-        "tone": plan.tone,
-        "format": plan.format,
-        "risk_level": plan.risk_level,
-        "confidence_score": float(plan.confidence_score or 0),
-        "production_requirements": plan.production_requirements or {},
-    }
-    db.add(workflow)
-    db.flush()
-    return workflow
-
-
 def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> dict[str, Any]:
-    final_artifact = next((item for item in workflow.artifacts if item.artifact_type == "FINAL_VIDEO" and item.uri), None)
+    artifacts = workflow.artifacts_jsonb if isinstance(workflow.artifacts_jsonb, list) else []
+    final_artifact = next(
+        (
+            item
+            for item in artifacts
+            if getattr(item, "get", lambda x: None)("uri")
+            and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
+        ),
+        None,
+    )
+
     source_context = _workflow_source_context(workflow, db) if db else {"source_content": None, "media": [], "images": []}
     draft_json = _normalized_workflow_draft_json(workflow)
     metadata = workflow.metadata_json or {}
     raw_meta = workflow.metadata_json or {}
     story_data = _serialize_story_data(draft_json, workflow)
     draft_json["story_data"] = story_data
-    story = None
-    if db and getattr(workflow, "video_draft_id", None):
-        draft_obj = db.get(VideoDraft, workflow.video_draft_id)
-        if draft_obj and isinstance(draft_obj.draft_json, dict):
-            story = draft_obj.draft_json
+    story = draft_json if draft_json else None
 
     return {
         "id": str(workflow.id),
@@ -80,23 +49,20 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         "status": workflow.status,
         "planning_mode": workflow.planning_mode or "SINGLE",
         "primary_content_id": str(workflow.primary_content_id) if workflow.primary_content_id else None,
-        "primary_story_id": str(workflow.primary_story_id) if workflow.primary_story_id else None,
-        "content_plan_id": str(workflow.id),
-        "video_draft_id": str(getattr(workflow, "video_draft_id", None)) if getattr(workflow, "video_draft_id", None) else None,
         "current_stage": workflow.current_stage,
         "progress_percent": float(workflow.progress_percent or 0),
         "timeline_duration": raw_meta.get("timeline_duration"),
-        "rendered_video": final_artifact.uri if final_artifact else None,
+        "rendered_video": final_artifact.get("uri") if final_artifact else None,
         "metadata": metadata,
         "source_content": source_context["source_content"],
         "media": source_context["media"],
         "images": source_context["images"],
         "series": serialize_content_series(workflow.series) if getattr(workflow, "series", None) else None,
         "story_data": story_data,
-        "artifacts": [_serialize_artifact(item) for item in getattr(workflow, "artifacts", [])],
+        "artifacts": artifacts,
+        "inputs": workflow.inputs_jsonb if isinstance(workflow.inputs_jsonb, list) else [],
         "created_at": workflow.created_at,
         "updated_at": workflow.updated_at or workflow.created_at,
-        # Required fields from metadata for MediaWorkflowResponse
         "content_angle": raw_meta.get("content_angle"),
         "target_audience": raw_meta.get("target_audience"),
         "tone": raw_meta.get("tone"),
@@ -113,9 +79,6 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         "approved_at": raw_meta.get("approved_at") or (workflow.updated_at if workflow.status == "APPROVED" else None),
     }
 
-# Backward compatibility alias
-
-
 
 def _workflow_source_context(workflow: MediaWorkflow, db: Session) -> dict[str, Any]:
     content_ids = _workflow_content_ids(workflow, db)
@@ -123,20 +86,13 @@ def _workflow_source_context(workflow: MediaWorkflow, db: Session) -> dict[str, 
         return {"source_content": None, "media": [], "images": []}
 
     contents = db.query(ContentItem).filter(ContentItem.id.in_(content_ids)).all()
-    sources = (
-        db.query(ContentSource)
-        .filter(ContentSource.content_id.in_(content_ids))
-        .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
-        .all()
-    )
-    media_rows = (
-        db.query(ContentMedia)
-        .filter(ContentMedia.content_id.in_(content_ids))
-        .order_by(ContentMedia.created_at.asc())
-        .all()
-    )
-    media = [_serialize_content_media(item) for item in media_rows]
-    source_content = _serialize_source_content(_primary_workflow_content(workflow, contents), sources, media)
+    primary = _primary_workflow_content(workflow, contents)
+
+    media = []
+    if primary and isinstance(primary.media_jsonb, list):
+        media = primary.media_jsonb
+
+    source_content = _serialize_source_content(primary)
     images = _image_urls(media)
     return {"source_content": source_content, "media": media, "images": images}
 
@@ -152,35 +108,17 @@ def _workflow_content_ids(workflow: MediaWorkflow, db: Session) -> list[Any]:
         if not story_id:
             return
         story = db.get(Story, story_id)
-        if story and story.content_id:
+        if story and getattr(story, "content_id", None):
             add(story.content_id)
 
-    def add_episode(episode_id: Any) -> None:
-        if not episode_id:
-            return
-        episode = db.get(Episode, episode_id)
-        if episode and episode.content_id:
-            add(episode.content_id)
-
     add(workflow.primary_content_id)
-    add_story(workflow.primary_story_id)
 
-    plan_id = getattr(workflow, "content_plan_id", None)
-    if plan_id:
-        plan = db.get(MediaWorkflow, plan_id)
-        if plan:
-            add(plan.primary_content_id)
-            add_story(plan.primary_story_id)
-
-    for source in workflow.sources:
-        add(source.content_id)
-        add_story(source.story_id)
-        add_episode(source.episode_id)
-
-    for candidate in workflow.candidates:
-        add(candidate.content_id)
-        add_story(candidate.story_id)
-        add_episode(candidate.episode_id)
+    if isinstance(workflow.inputs_jsonb, list):
+        for inp in workflow.inputs_jsonb:
+            if isinstance(inp, dict) and inp.get("type") == "content" and inp.get("id"):
+                add(inp.get("id"))
+            elif isinstance(inp, dict) and inp.get("type") == "story" and inp.get("id"):
+                add_story(inp.get("id"))
 
     draft = _workflow_draft_json(workflow)
     for scene in (draft.get("story_data") or draft.get("scenes") or []):
@@ -191,7 +129,6 @@ def _workflow_content_ids(workflow: MediaWorkflow, db: Session) -> list[Any]:
                 continue
             add(ref.get("content_id"))
             add_story(ref.get("story_id"))
-            add_episode(ref.get("episode_id"))
 
     return ids
 
@@ -218,15 +155,14 @@ def _source_refs_from_payload(payload: dict[str, Any]) -> list[Any]:
     return []
 
 
-_primary_workflow_content = _primary_workflow_content
-
-
-def _serialize_source_content(content: ContentItem | None, sources: list[ContentSource], media: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _serialize_source_content(content: ContentItem | None) -> dict[str, Any] | None:
     if not content:
         return None
-    content_sources = [source for source in sources if source.content_id == content.id]
-    primary_source = next((source for source in content_sources if source.is_primary), None) or (content_sources[0] if content_sources else None)
-    full_text = _load_content_full_text(content_sources)
+
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary_source = sources[0] if sources else {}
+    full_text = _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id)
+
     return {
         "id": str(content.id),
         "content_type": content.content_type,
@@ -236,10 +172,10 @@ def _serialize_source_content(content: ContentItem | None, sources: list[Content
         "language": content.language,
         "status": content.status,
         "canonical_url": content.canonical_url,
-        "source_type": primary_source.source_type if primary_source else None,
-        "source_url": primary_source.source_url if primary_source else content.canonical_url,
-        "source_author": primary_source.source_author if primary_source else None,
-        "source_published_at": primary_source.source_published_at.isoformat() if primary_source and primary_source.source_published_at else None,
+        "source_type": primary_source.get("source_type"),
+        "source_url": primary_source.get("source_url") or content.canonical_url,
+        "source_author": primary_source.get("source_author"),
+        "source_published_at": primary_source.get("source_published_at"),
         "quality_score": float(content.quality_score or 0),
         "published_at": content.published_at.isoformat() if content.published_at else None,
         "created_at": content.created_at.isoformat() if content.created_at else None,
@@ -247,79 +183,37 @@ def _serialize_source_content(content: ContentItem | None, sources: list[Content
     }
 
 
-def _load_content_full_text(sources: list[ContentSource]) -> str | None:
+def _load_content_full_text(mongo_normalized_id: str | None, mongo_raw_id: str | None) -> str | None:
     try:
         from bson import ObjectId
         from common.db.mongo import processed_documents, raw_documents
 
-        proc_coll = processed_documents()
-        raw_coll = raw_documents()
-        for source in sources:
-            metadata = dict(source.metadata_json or {})
-            proc_id_str = source.processed_document_id or metadata.get("processed_document_id")
-            if proc_id_str:
-                try:
-                    proc_doc = proc_coll.find_one({"_id": ObjectId(proc_id_str)})
-                    normalized = proc_doc.get("normalized") if isinstance(proc_doc, dict) else None
-                    if isinstance(normalized, dict):
-                        full_text = normalized.get("content") or normalized.get("description")
-                        if full_text:
-                            return str(full_text)
-                except Exception:
-                    pass
-            if source.raw_document_id:
-                try:
-                    raw_doc = raw_coll.find_one({"_id": ObjectId(source.raw_document_id)})
-                    raw = raw_doc.get("raw") if isinstance(raw_doc, dict) else None
-                    if isinstance(raw, dict):
-                        full_text = raw.get("text") or raw.get("raw_text")
-                        if full_text:
-                            return str(full_text)
-                except Exception:
-                    pass
+        if mongo_normalized_id:
+            proc_coll = processed_documents()
+            try:
+                proc_doc = proc_coll.find_one({"_id": ObjectId(mongo_normalized_id)})
+                normalized = proc_doc.get("normalized") if isinstance(proc_doc, dict) else None
+                if isinstance(normalized, dict):
+                    full_text = normalized.get("content") or normalized.get("description")
+                    if full_text:
+                        return str(full_text)
+            except Exception:
+                pass
+
+        if mongo_raw_id:
+            raw_coll = raw_documents()
+            try:
+                raw_doc = raw_coll.find_one({"_id": ObjectId(mongo_raw_id)})
+                raw = raw_doc.get("raw") if isinstance(raw_doc, dict) else None
+                if isinstance(raw, dict):
+                    full_text = raw.get("text") or raw.get("raw_text")
+                    if full_text:
+                        return str(full_text)
+            except Exception:
+                pass
     except Exception as exc:
         print("Error fetching full text for content workflow:", exc)
     return None
-
-
-def _serialize_content_source(source: ContentSource) -> dict[str, Any]:
-    meta = dict(source.metadata_json or {})
-    meta.pop("processed_document_id", None)
-    return {
-        "id": str(source.id),
-        "content_id": str(source.content_id),
-        "source_type": source.source_type,
-        "source_external_id": source.source_external_id,
-        "source_url": source.source_url,
-        "raw_document_id": source.raw_document_id,
-        "processed_document_id": source.processed_document_id,
-        "source_title": source.source_title,
-        "source_author": source.source_author,
-        "source_published_at": source.source_published_at.isoformat() if source.source_published_at else None,
-        "first_seen_at": source.first_seen_at.isoformat() if source.first_seen_at else None,
-        "last_seen_at": source.last_seen_at.isoformat() if source.last_seen_at else None,
-        "is_primary": source.is_primary,
-        "metadata": meta,
-        "created_at": source.created_at.isoformat() if source.created_at else None,
-        "updated_at": source.updated_at.isoformat() if source.updated_at else None,
-    }
-
-
-def _serialize_content_media(item: ContentMedia) -> dict[str, Any]:
-    return {
-        "id": str(item.id),
-        "content_id": str(item.content_id),
-        "media_type": item.media_type,
-        "source_url": item.source_url,
-        "storage_url": item.storage_url,
-        "thumbnail_url": item.thumbnail_url,
-        "mime_type": item.mime_type,
-        "width": item.width,
-        "height": item.height,
-        "duration_seconds": item.duration_seconds,
-        "checksum": item.checksum,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-    }
 
 
 def _image_urls(media: list[dict[str, Any]]) -> list[str]:
@@ -349,83 +243,6 @@ def serialize_content_series(series: ContentSeries) -> dict[str, Any]:
         "metadata": series.metadata_json or {},
         "created_at": series.created_at,
         "updated_at": series.updated_at,
-    }
-
-
-def _find_workflow(db: Session, *, user_id, profile_id, **refs) -> MediaWorkflow:
-    for field, value in refs.items():
-        if value is None:
-            continue
-        workflow = db.query(MediaWorkflow).filter(getattr(MediaWorkflow, field) == value).first()
-        if workflow:
-            return workflow
-    workflow = MediaWorkflow(
-        user_id=user_id,
-        profile_id=profile_id,
-        title="Untitled workflow",
-        status="DRAFT",
-    )
-    db.add(workflow)
-    db.flush()
-    return workflow
-
-
-def _profile_user_id(db: Session, profile_id):
-    profile = db.get(SocialProfile, profile_id)
-    return profile.user_id if profile else None
-
-
-def _upsert_artifact(db: Session, workflow: MediaWorkflow, *, artifact_type: str, uri: str, status: str) -> WorkflowArtifact:
-    artifact = db.query(WorkflowArtifact).filter(WorkflowArtifact.workflow_id == workflow.id, WorkflowArtifact.artifact_type == artifact_type, WorkflowArtifact.uri == uri).first()
-    if not artifact:
-        artifact = WorkflowArtifact(workflow_id=workflow.id, artifact_type=artifact_type, uri=uri)
-        db.add(artifact)
-    artifact.status = status
-    return artifact
-
-
-def _merge_status(current: str | None, next_status: str) -> str:
-    order = ["DRAFT", "SOURCES_SELECTED", "PLANNING_RUNNING", "PLAN_READY", "APPROVED", "PRODUCTION_READY", "EDITING", "VOICE_READY", "RENDERING", "RENDERED", "PUBLISHED"]
-    if current == "FAILED":
-        return next_status
-    if current not in order:
-        return next_status
-    return next_status if order.index(next_status) >= order.index(current) else current
-
-
-def _status_from_plan(status: str) -> str:
-    if status == "APPROVED":
-        return "APPROVED"
-    if status in {"REJECTED", "SUPERSEDED"}:
-        return status
-    return "PLAN_READY"
-
-
-def _serialize_source(source: WorkflowSource) -> dict[str, Any]:
-    return {
-        "id": str(source.id),
-        "source_type": source.source_type,
-        "source_id": str(source.source_id) if source.source_id else None,
-        "content_id": str(source.content_id) if source.content_id else None,
-        "story_id": str(source.story_id) if source.story_id else None,
-        "episode_id": str(source.episode_id) if source.episode_id else None,
-        "role": source.role,
-        "status": source.status,
-        "score": float(source.score or 0),
-        "metadata": source.metadata_json or {},
-    }
-
-
-def _serialize_candidate(candidate: WorkflowCandidate) -> dict[str, Any]:
-    return {
-        "id": str(candidate.id),
-        "content_id": str(candidate.content_id) if candidate.content_id else None,
-        "story_id": str(candidate.story_id) if candidate.story_id else None,
-        "episode_id": str(candidate.episode_id) if candidate.episode_id else None,
-        "rank_order": candidate.rank_order,
-        "score": float(candidate.score or 0),
-        "eligible": candidate.eligible,
-        "metadata": candidate.metadata_json or {},
     }
 
 
@@ -500,22 +317,121 @@ def _compact_scene_text(text: str, limit: int) -> str:
     return value[: max(0, limit - 1)].rstrip() + "..."
 
 
+def sanitize_instruction_text(text: str) -> str:
+    """Removes leaked internal instruction lines and JSON-like system strings."""
+    if not text:
+        return ""
+    val = str(text).strip()
+    if "manual_direct_script" not in val and "bypass_ai_selection" not in val and not val.startswith("{'") and not val.startswith('{"'):
+        return val
+
+    for marker in ("{'instructions'", '{"instructions"', "manual_direct_script", "bypass_ai_selection"):
+        if marker in val:
+            val = val.split(marker)[0].strip()
+
+    lines = []
+    for line in val.splitlines():
+        l = line.strip()
+        if not l or "manual_direct_script" in l or "bypass_ai_selection" in l or l.startswith("{") or l.endswith("}"):
+            continue
+        lines.append(l)
+    clean = " ".join(lines).strip().rstrip("',\" ")
+    return clean
+
+
+def _sanitize_draft_json(draft_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(draft_json, dict):
+        return {}
+    import json
+    clean_draft = json.loads(json.dumps(draft_json, ensure_ascii=False))
+
+    source_summary = ""
+    source = clean_draft.get("source")
+    if isinstance(source, dict):
+        source_summary = source.get("summary") or source.get("title") or ""
+        source.pop("instructions", None)
+        if isinstance(source.get("content"), dict):
+            source["content"].pop("instructions", None)
+        raw_art = source.get("raw_article")
+        if isinstance(raw_art, dict) and isinstance(raw_art.get("source_content"), dict):
+            sc = raw_art["source_content"]
+            if "media" in sc and (source.get("media") or source.get("images")):
+                sc["media"] = []
+        clean_draft.pop("source", None)
+
+    # 1. Clean timeline text clips
+    timeline = clean_draft.get("timeline")
+    if isinstance(timeline, dict):
+        text_clips = timeline.get("text")
+        if isinstance(text_clips, list):
+            for clip in text_clips:
+                if isinstance(clip, dict):
+                    if "text" in clip:
+                        txt = sanitize_instruction_text(clip.get("text") or "")
+                        if not txt and source_summary:
+                            txt = _compact_scene_text(source_summary, 120)
+                        clip["text"] = txt
+                    if "voice_text" in clip:
+                        vtxt = sanitize_instruction_text(clip.get("voice_text") or "")
+                        if not vtxt:
+                            vtxt = clip.get("text") or ""
+                        clip["voice_text"] = vtxt
+
+    return clean_draft
+
+
 def _serialize_story_data(draft_json: dict[str, Any], workflow: MediaWorkflow) -> list[dict[str, Any]]:
-    raw_scenes = draft_json.get("story_data")
+    clean_draft = _sanitize_draft_json(draft_json)
+    raw_scenes = clean_draft.get("story_data")
     if not isinstance(raw_scenes, list):
-        raw_scenes = draft_json.get("scenes") if isinstance(draft_json.get("scenes"), list) else []
+        raw_scenes = clean_draft.get("scenes") if isinstance(clean_draft.get("scenes"), list) else []
+
+    if not raw_scenes and isinstance(clean_draft.get("timeline"), dict):
+        timeline = clean_draft["timeline"]
+        text_clips = timeline.get("text") if isinstance(timeline.get("text"), list) else []
+        video_clips = timeline.get("video") if isinstance(timeline.get("video"), list) else []
+        count = max(len(text_clips), len(video_clips))
+        raw_scenes = []
+        for idx in range(count):
+            t_clip = text_clips[idx] if idx < len(text_clips) else {}
+            v_clip = video_clips[idx] if idx < len(video_clips) else {}
+            text_str = sanitize_instruction_text(str(t_clip.get("text") or "").strip())
+            voice_str = sanitize_instruction_text(str(t_clip.get("voice_text") or text_str).strip())
+
+            # If text_str is empty due to prompt instruction scrub, provide a clean fallback if video clip exists
+            if not text_str and v_clip.get("src"):
+                text_str = _compact_scene_text(workflow.title, 120)
+                voice_str = text_str
+
+            if not text_str and not v_clip.get("src"):
+                continue
+            raw_scenes.append({
+                "subtitle": text_str,
+                "voice_text": voice_str,
+                "image": v_clip.get("src") or "",
+                "effect": v_clip.get("effect") or "slow-zoom",
+                "fit": v_clip.get("fit") or "contain",
+                "duration": t_clip.get("duration") or v_clip.get("duration") or 4,
+                "subtitle_start": t_clip.get("start"),
+                "subtitle_duration": t_clip.get("duration"),
+            })
 
     result: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_scenes, start=1):
         if not isinstance(raw, dict):
             continue
-        result.append(_normalize_story_scene(raw, index))
+        result.append(_normalize_story_scene(raw, index, fallback_text=workflow.title if not raw.get("subtitle") else ""))
     return result
 
 
-def _normalize_story_scene(raw: dict[str, Any], index: int) -> dict[str, Any]:
-    subtitle = str(raw.get("subtitle") or raw.get("text") or raw.get("voice_text") or raw.get("voiceover") or "").strip()
-    voice_text = str(raw.get("voice_text") or raw.get("voiceover") or "").strip()
+def _normalize_story_scene(raw: dict[str, Any], index: int, fallback_text: str = "") -> dict[str, Any]:
+    subtitle = sanitize_instruction_text(str(raw.get("subtitle") or raw.get("text") or raw.get("voice_text") or raw.get("voiceover") or "").strip())
+    voice_text = sanitize_instruction_text(str(raw.get("voice_text") or raw.get("voiceover") or "").strip())
+
+    if not subtitle and fallback_text:
+        subtitle = fallback_text
+    if not voice_text:
+        voice_text = subtitle
     try:
         duration = float(raw.get("duration") if raw.get("duration") is not None else raw.get("duration_seconds") or 4)
     except (TypeError, ValueError):
@@ -529,9 +445,8 @@ def _normalize_story_scene(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "effect": DEFAULT_STORY_EFFECTS[(index - 1) % len(DEFAULT_STORY_EFFECTS)],
         "fit": "cover" if str(raw.get("fit") or "cover").lower() == "cover" else "contain",
         "subtitle": _compact_scene_text(subtitle, 140),
+        "voice_text": _compact_scene_text(voice_text, 250),
     }
-    if voice_text and voice_text != scene["subtitle"]:
-        scene["voice_text"] = voice_text
     for key in ("media_type", "scale", "opacity", "position_x", "position_y", "rotation", "subtitle_start", "subtitle_duration"):
         if raw.get(key) is not None:
             scene[key] = raw[key]
@@ -542,36 +457,3 @@ def _normalize_story_scene(raw: dict[str, Any], index: int) -> dict[str, Any]:
     if isinstance(raw.get("timing"), dict):
         scene["timing"] = raw["timing"]
     return scene
-
-
-def _serialize_run(run: WorkflowRun) -> dict[str, Any]:
-    status = run.status
-    current_stage = run.current_stage
-    if run.run_type == "PLANNING" and status == "WAITING_REVIEW" and getattr(getattr(run, "workflow", None), "status", None) == "APPROVED":
-        status = "SUCCEEDED"
-        current_stage = "APPROVED"
-    return {
-        "id": str(run.id),
-        "run_type": run.run_type,
-        "status": status,
-        "current_stage": current_stage,
-        "progress_percent": float(run.progress_percent or 0),
-        "error_message": run.error_message,
-        "metadata": run.metadata_json or {},
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
-        "updated_at": run.updated_at.isoformat() if run.updated_at else None,
-    }
-
-
-def _serialize_artifact(artifact: WorkflowArtifact) -> dict[str, Any]:
-    return {
-        "id": str(artifact.id),
-        "artifact_type": artifact.artifact_type,
-        "uri": artifact.uri,
-        "status": artifact.status,
-        "metadata": artifact.metadata_json or {},
-        "created_at": artifact.created_at.isoformat() if artifact.created_at else None,
-        "updated_at": artifact.updated_at.isoformat() if artifact.updated_at else None,
-    }

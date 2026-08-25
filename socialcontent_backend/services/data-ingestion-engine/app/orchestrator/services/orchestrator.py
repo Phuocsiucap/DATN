@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log
 from common.db.idempotency import claim_event
-from common.db.models import CrawlJob, CrawlTask
+from common.db.models import CrawlJob, KafkaTask
 from app.orchestrator.producers.tasks import CrawlTaskProducer
 
 logger = logging.getLogger(__name__)
@@ -43,14 +43,23 @@ class CrawlOrchestrator:
             )
             db.commit()
             return
-        if job.tasks:
+        existing_task_count = (
+            db.query(KafkaTask)
+            .filter(
+                KafkaTask.reference_id == job.id,
+                KafkaTask.reference_type == "crawl_job",
+                KafkaTask.task_type == "CRAWL_URL",
+            )
+            .count()
+        )
+        if existing_task_count:
             add_crawl_log(
                 db,
                 job_id=job.id,
                 stage="DISCOVERING",
                 level="INFO",
                 message="Crawl job already has tasks; duplicate creation event ignored",
-                metadata={"task_count": len(job.tasks)},
+                metadata={"task_count": existing_task_count},
             )
             db.commit()
             return
@@ -70,13 +79,16 @@ class CrawlOrchestrator:
         )
 
         for source in job.sources:
-            task = CrawlTask(
-                job_id=job.id,
-                job_source_id=source.id,
-                task_type="DISCOVERY_FETCH",
-                external_reference=source.source_url or ",".join(source.keywords),
+            task = KafkaTask(
+                reference_id=job.id,
+                reference_type="crawl_job",
+                task_type="CRAWL_URL",
                 status="QUEUED",
                 max_attempts=max(int((source.configuration or {}).get("max_attempts", 4)), 1),
+                payload_jsonb={
+                    "job_source_id": str(source.id),
+                    "external_reference": source.source_url or ",".join(source.keywords)
+                }
             )
             db.add(task)
             db.flush()

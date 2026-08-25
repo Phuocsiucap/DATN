@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentDuplicate, ContentItem
+from common.db.models import ContentItem
 
 
 def find_duplicate_content(
@@ -38,17 +38,10 @@ def find_or_mark_duplicate(db: Session, content: ContentItem) -> bool:
     if not existing or existing.id == content.id:
         return False
 
-    db.add(
-        ContentDuplicate(
-            primary_content_id=existing.id,
-            duplicate_content_id=content.id,
-            match_type=match_type or "CONTENT_HASH",
-            similarity_score=100,
-            decision="DUPLICATE",
-            decision_reason=reason or "Same content hash",
-        )
-    )
+    existing.duplicate_count = (existing.duplicate_count or 0) + 1
     content.status = "DUPLICATE"
+    db.add(existing)
+    db.add(content)
     return True
 
 

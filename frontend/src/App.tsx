@@ -3,7 +3,7 @@ import { Provider } from 'react-redux'
 import { store } from '@/commons/store'
 import { useWebSocket } from '@/commons/hooks/useWebSocket'
 import Sidebar from '@/commons/component/Sidebar'
-import { TAB_PATHS, type Tab } from '@/commons/component/Sidebar'
+import { TAB_PATHS, type Tab } from '@/commons/component/navigation'
 import TopNavBar from '@/commons/component/TopNavBar'
 
 // Features
@@ -17,6 +17,8 @@ import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
 import UsersPage from '@/features/users/UsersPage'
 import SettingsPage from '@/features/settings/SettingsPage'
+import TermsPage from '@/features/legal/TermsPage'
+import PrivacyPage from '@/features/legal/PrivacyPage'
 
 import AuthPage from '@/features/auth/AuthPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
@@ -172,7 +174,7 @@ function AppContent() {
         }>
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
           {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
-          {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
+          {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenGenerateVideo} />}
           {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
           {tab === 'generateVideo' && (effectiveGenerateVideoProjectId ? (
             <VideoProductionWorkspace workflowId={effectiveGenerateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
@@ -190,6 +192,10 @@ function AppContent() {
 }
 
 export default function App() {
+  const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (normalizedPath === '/terms') return <TermsPage />
+  if (normalizedPath === '/privacy') return <PrivacyPage />
+
   return (
     <Provider store={store}>
       <AppContent />

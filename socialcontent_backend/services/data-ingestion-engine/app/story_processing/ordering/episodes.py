@@ -1,9 +1,17 @@
-from common.db.models import Episode, Story
+from sqlalchemy.orm import object_session
+
+from common.db.models import ContentItem, Story
 
 
 def update_story_completion(story: Story) -> None:
-    real_episodes = [episode for episode in story.episodes if not episode.is_missing and episode.episode_number]
-    numbers = sorted({episode.episode_number for episode in real_episodes if episode.episode_number})
+    session = object_session(story)
+    if not session:
+        story.total_episodes = 0
+        story.completion_status = "UNKNOWN"
+        return
+
+    items = session.query(ContentItem).filter(ContentItem.story_id == story.id).all()
+    numbers = sorted({item.episode_order for item in items if item.episode_order})
     if not numbers:
         story.total_episodes = 0
         story.completion_status = "UNKNOWN"
@@ -13,8 +21,8 @@ def update_story_completion(story: Story) -> None:
     story.completion_status = "COMPLETE" if not missing else "MISSING_EPISODES"
 
 
-def missing_episode_numbers(episodes: list[Episode]) -> list[int]:
-    numbers = sorted({episode.episode_number for episode in episodes if episode.episode_number and not episode.is_missing})
+def missing_episode_numbers(items: list[ContentItem]) -> list[int]:
+    numbers = sorted({item.episode_order for item in items if item.episode_order})
     if not numbers:
         return []
     return [number for number in range(1, max(numbers) + 1) if number not in numbers]

@@ -50,8 +50,9 @@ def list_contents(
         query = query.filter(ContentItem.status == status.upper())
     if language:
         query = query.filter(ContentItem.language == language)
-        
-    # We ignore crawl_job_id and source_type for now as they require jsonb queries that might be slow
+    if crawl_job_id:
+        query = query.filter(ContentItem.crawl_job_id == crawl_job_id)
+
     return query.order_by(ContentItem.created_at.desc()).limit(100).all()
 
 
@@ -77,6 +78,8 @@ def final_content_view(
             )
     elif content_scope:
         query = query.filter(ContentItem.content_scope == content_scope.upper())
+    if crawl_job_id:
+        query = query.filter(ContentItem.crawl_job_id == crawl_job_id)
 
     contents = query.order_by(ContentItem.created_at.desc()).limit(200).all()
     
@@ -105,18 +108,9 @@ def final_content_view(
             "published_at": content.published_at,
             "source_type": primary_source.get("source_type"),
             "source_url": primary_source.get("source_url") or content.canonical_url,
-            "media": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
-            "episode_id": None,
-            "episode_number": content.episode_order,
-            "sequence_order": content.episode_order,
-            "episode_title": None,
-            "series": {
-                "id": story.id,
-                "canonical_name": story.canonical_name,
-                "completion_status": story.completion_status,
-                "total_episodes": story.total_episodes,
-                "grouping_confidence": story.grouping_confidence,
-            } if story else None,
+            "media_jsonb": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
+            "story_id": story.id if story else None,
+            "episode_order": content.episode_order,
         }
         if story:
             series_items.append(row)
@@ -136,7 +130,7 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
     content = _get_visible_content(db, content_id, user)
     sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
     
-    full_text = _load_content_full_text(content.mongo_raw_id, content.mongo_normalized_id) or content.summary
+    full_text = _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id) or content.summary
     
     return {
         "id": content.id,
@@ -155,9 +149,10 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
         "quality_score": content.quality_score,
         "created_at": content.created_at,
         "updated_at": content.updated_at,
-        "sources": sources,
-        "media": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
-        "processing_runs": [],
+        "sources_jsonb": sources,
+        "media_jsonb": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
+        "story_id": content.story_id,
+        "episode_order": content.episode_order,
     }
 
 
@@ -196,7 +191,7 @@ def reprocess_content(content_id: uuid.UUID, _: User = Depends(require_admin), d
         reference_id=str(content.id),
         task_type="AI_NORMALIZATION",
         status="PENDING",
-        payload_json={"content_id": str(content.id)}
+        payload_jsonb={"content_id": str(content.id)}
     )
     db.add(task)
     db.commit()

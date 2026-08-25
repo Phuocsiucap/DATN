@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log, finalize_job_if_ready
 from common.db.idempotency import claim_event
-from common.db.models import CrawlJob, CrawlTask
+from common.db.models import CrawlJob, KafkaTask
 from app.crawler.crawlers.bilibili import BilibiliCrawler
 from app.crawler.crawlers.vnexpress import VNExpressCrawler
 from app.crawler.producers.content_events import CrawlerEventProducer
@@ -43,9 +43,9 @@ class CrawlerRunner:
         source_type = payload.get("source_type", "BILIBILI").upper()
         logger.info(f"[CrawlerRunner] Executing task {task_id} for job {job_id} ({source_type})")
 
-        task = db.get(CrawlTask, task_id)
+        task = db.get(KafkaTask, task_id)
         job = db.get(CrawlJob, job_id)
-        if not task or not job:
+        if not task or not job or task.task_type != "CRAWL_URL":
             return
         if job.status == "CANCELLED":
             task.status = "CANCELLED"
@@ -133,7 +133,6 @@ class CrawlerRunner:
                 self.producer.job_completed(job_id=job.id, status=job.status)
         except Exception as exc:
             task.error_message = str(exc)
-            task.error_code = exc.__class__.__name__
             if task.attempt_count < task.max_attempts:
                 task.status = "RETRYING"
                 retry_delay = self.retry_delay_seconds(task, payload.get("configuration") or {})
@@ -172,7 +171,7 @@ class CrawlerRunner:
             if finalized:
                 self.producer.job_completed(job_id=job.id, status=job.status)
 
-    def retry_delay_seconds(self, task: CrawlTask, configuration: dict) -> int:
+    def retry_delay_seconds(self, task: KafkaTask, configuration: dict) -> int:
         if "retry_backoff_seconds" in configuration:
             return max(0, min(int(configuration["retry_backoff_seconds"]), 300))
         return min(2 ** max(task.attempt_count - 1, 0) * 2, 30)

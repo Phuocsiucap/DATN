@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.services import generate_video as pipeline
@@ -17,10 +17,7 @@ from common.db.models import (
     KafkaTask,
     PublishingQueueItem,
     SocialProfile,
-    SocialProfileStrategy,
-    Story,
     User,
-    
 )
 from common.db.session import get_db
 from common.events.envelope import build_event
@@ -30,10 +27,11 @@ from common.events.topics import (
     GENERATE_VIDEO_RENDER_REQUESTED,
     GENERATE_VIDEO_REVIEW_REQUESTED,
     GENERATE_VIDEO_SCRIPT_REQUESTED,
+    GENERATE_VIDEO_VOICE_REQUESTED,
 )
 
-
 router = APIRouter()
+DEFAULT_AUTO_VOICE_PROVIDER = "edge_tts_namminh"
 
 DEFAULT_SHARED_VOICE = {
     "voice_id": "pNInz6obpgDQGcFmaJgB",
@@ -44,43 +42,43 @@ DEFAULT_SHARED_VOICE = {
 }
 
 
-class CreateStoryRequest(BaseModel):
-    source: dict
-
-
 class StoryRequest(BaseModel):
-    story: dict | None = None
-    workflow_id: uuid.UUID | None = None
+    story: dict
+    workflow_id: uuid.UUID
 
 
 class EditStoryRequest(BaseModel):
-    story: dict | None = None
-    workflow_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID
     prompt: str
 
 
 class ReviewStoryRequest(BaseModel):
-    story: dict | None = None
-    workflow_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID
     instructions: str | None = None
 
 
-class VoiceRequest(BaseModel):
-    story: dict | None = None
-    workflow_id: uuid.UUID | None = None
+class ProjectVoiceRequest(BaseModel):
     voice_id: str | None = None
-    voice_speed: float = 1.0
+    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     voice_provider: str | None = None
 
 
 class GenerateVideoRequest(BaseModel):
-    story: dict | None = None
-    workflow_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID
 
 
 class AudioUploadRequest(BaseModel):
     filename: str
     content_base64: str
+
+
+class DirectScriptRequest(BaseModel):
+    profile_id: uuid.UUID
+    content_id: uuid.UUID
+    title: str | None = None
+    instructions: str | None = None
+    target_duration_seconds: int = 60
+    note: str | None = None
 
 
 class QueueRenderedVideoRequest(BaseModel):
@@ -128,15 +126,6 @@ def list_elevenlabs_shared_voices(
         }
 
 
-@router.post("/create-story")
-def create_story(payload: CreateStoryRequest):
-    try:
-        story = pipeline.create_story_from_raw(payload.source)
-        return _story_script_preview(story)
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
-
-
 @router.post("/projects/{workflow_id}/create-story")
 def create_story_from_project(
     workflow_id: uuid.UUID,
@@ -145,15 +134,22 @@ def create_story_from_project(
 ):
     project = _get_owned_project(db, workflow_id, user)
     try:
-        source = _build_project_story_source(
-            db,
-            project,
-            db.get( project.content_plan_id) if project.content_plan_id else None,
-            project.metadata_json if isinstance(project.metadata_json, dict) else {},
+        if not project.primary_content_id:
+            raise HTTPException(status_code=400, detail="Workflow chưa có ContentItem chính để sinh kịch bản")
+        content = db.get(ContentItem, project.primary_content_id)
+        if not content or not _can_use_content(content, user):
+            raise HTTPException(status_code=404, detail="ContentItem chính không tồn tại hoặc không thuộc quyền truy cập")
+
+        project_meta = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+        task_payload = _script_task_payload(
+            project.primary_content_id,
+            trigger="project_create_story",
+            target_duration_seconds=project_meta.get("target_duration_seconds"),
+            instructions=project_meta.get("instructions"),
         )
         existing = (
             db.query(KafkaTask)
-            .filter(WorkflowRun.workflow_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_SCRIPT", KafkaTask.status.in_(["PENDING", "PROCESSING"]))
+            .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_SCRIPT", KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]))
             .order_by(KafkaTask.created_at.desc())
             .first()
         )
@@ -161,12 +157,17 @@ def create_story_from_project(
             return {"job": _serialize_workflow_run(db, existing)}
 
         job = KafkaTask(
-            workflow_id=project.id,
+            reference_id=project.id,
+            reference_type="media_workflow",
             task_type="GENERATE_VIDEO_SCRIPT",
             status="PENDING",
-            payload_json={"source": source},
+            current_stage="QUEUED_SCRIPT",
+            progress_percent=0,
+            payload_jsonb=task_payload,
         )
         project.status = "SCRIPTING"
+        project.current_stage = "QUEUED_SCRIPT"
+        project.progress_percent = 0
         db.add_all([job, project])
         db.commit()
         db.refresh(job)
@@ -191,194 +192,11 @@ def _public_story(story: dict) -> dict:
     return pipeline.public_story_payload(story)
 
 
-def _story_script_preview(story: dict) -> dict:
-    public_story = pipeline.public_story_payload(story)
-    return {
-        "meta": public_story.get("meta") or {},
-        "video": public_story.get("video"),
-        "audio": public_story.get("audio"),
-        "timeline": public_story.get("timeline") or {},
-    }
-
-
 def _get_owned_project(db: Session, workflow_id: uuid.UUID, user: User) -> MediaWorkflow:
     project = db.get(MediaWorkflow, workflow_id)
-    if not project or project.user_id != user.id:
+    if not project or (not user.is_system_admin and project.user_id != user.id):
         raise HTTPException(status_code=404, detail="Content project not found")
     return project
-
-
-def _create_story_from_workflow_source(db: Session, project: MediaWorkflow) -> dict:
-    plan = db.get( project.content_plan_id) if project.content_plan_id else None
-    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
-    return pipeline.create_story_from_raw(_build_project_story_source(db, project, plan, metadata))
-
-
-def _build_project_story_source(db: Session, project: MediaWorkflow, plan: MediaWorkflow | None, metadata: dict) -> dict:
-    parts = sorted(project.parts, key=lambda item: item.part_number)
-    content_ids = _project_content_ids(db, project, plan, parts)
-    contents = db.query(ContentItem).filter(ContentItem.id.in_(content_ids)).all() if content_ids else []
-    media = (
-        db.query(ContentMedia)
-        .filter(ContentMedia.content_id.in_(content_ids))
-        .order_by(ContentMedia.created_at.asc())
-        .all()
-        if content_ids
-        else []
-    )
-    sources = (
-        db.query(ContentSource)
-        .filter(ContentSource.content_id.in_(content_ids))
-        .order_by(ContentSource.is_primary.desc(), ContentSource.first_seen_at.desc())
-        .all()
-        if content_ids
-        else []
-    )
-    media_payload = [_serialize_content_media(item) for item in media]
-    image_urls = _merge_unique(
-        [
-            str(item.get("storage_url") or item.get("source_url") or item.get("thumbnail_url") or "")
-            for item in media_payload
-            if str(item.get("media_type") or "").upper() in {"IMAGE", "THUMBNAIL"} or not item.get("media_type")
-        ]
-    )
-    primary_content = _primary_project_content(project, plan, contents)
-    source_content = _serialize_source_content(primary_content, sources, media_payload) if primary_content else None
-    return {
-        "title": (plan.title if plan else None) or project.title,
-        "summary": (plan.content_angle if plan else None) or metadata.get("content_angle") or metadata.get("summary") or (primary_content.summary if primary_content else ""),
-        "content": metadata,
-        "plan": _serialize_project_plan(plan, metadata),
-        "target_duration_seconds": plan.target_duration_seconds if plan else metadata.get("target_duration_seconds"),
-        "parts": [_serialize_workflow_part(part) for part in parts],
-        "images": image_urls,
-        "media": media_payload,
-        "raw_article": {
-            "source_content": source_content,
-        },
-    }
-
-
-def _project_content_ids(db: Session, project: MediaWorkflow, plan: MediaWorkflow | None, parts: list) -> list[uuid.UUID]:
-    content_ids: list[uuid.UUID] = []
-    for value in [project.primary_content_id, plan.primary_content_id if plan else None]:
-        if value:
-            content_ids.append(value)
-    for part in parts:
-        payload = part.payload if isinstance(part.payload, dict) else {}
-        for ref in payload.get("source_refs") or []:
-            if not isinstance(ref, dict):
-                continue
-            if ref.get("content_id"):
-                content_ids.append(uuid.UUID(str(ref["content_id"])))
-            if ref.get("episode_id"):
-                episode = db.get(uuid.UUID(str(ref["episode_id"])))
-                if episode and episode.content_id:
-                    content_ids.append(episode.content_id)
-            if ref.get("story_id"):
-                story = db.get(Story, uuid.UUID(str(ref["story_id"])))
-                if story and story.content_id:
-                    content_ids.append(story.content_id)
-    return list(dict.fromkeys(content_ids))
-
-
-def _serialize_project_plan(plan: MediaWorkflow | None, metadata: dict) -> dict:
-    if not plan:
-        return {
-            "content_angle": metadata.get("content_angle"),
-            "target_audience": metadata.get("target_audience"),
-            "tone": metadata.get("tone"),
-            "format": metadata.get("format"),
-            "risk_level": metadata.get("risk_level"),
-            "production_requirements": metadata.get("production_requirements") or {},
-            "target_duration_seconds": metadata.get("target_duration_seconds"),
-        }
-    return {
-        "id": str(plan.id),
-        "title": plan.title,
-        "content_angle": plan.content_angle,
-        "target_audience": plan.target_audience,
-        "tone": plan.tone,
-        "format": plan.format,
-        "planning_mode": plan.planning_mode,
-        "target_duration_seconds": plan.target_duration_seconds,
-        "recommended_part_count": plan.recommended_part_count,
-        "production_requirements": plan.production_requirements or {},
-        "ai_reasoning": plan.ai_reasoning or [],
-        "risk_level": plan.risk_level,
-    }
-
-
-def _serialize_workflow_part(part) -> dict:
-    payload = part.payload if isinstance(part.payload, dict) else {}
-    return {
-        **payload,
-        "id": str(part.id),
-        "series_id": str(part.series_id) if part.series_id else None,
-        "part_number": part.part_number,
-        "title": part.title,
-        "target_duration_seconds": part.target_duration_seconds if part.target_duration_seconds is not None else payload.get("target_duration_seconds"),
-        "status": part.status,
-    }
-
-
-def _primary_project_content(project: MediaWorkflow, plan: MediaWorkflow | None, contents: list[ContentItem]) -> ContentItem | None:
-    by_id = {item.id: item for item in contents}
-    for content_id in [project.primary_content_id, plan.primary_content_id if plan else None]:
-        if content_id and content_id in by_id:
-            return by_id[content_id]
-    return contents[0] if contents else None
-
-
-def _serialize_source_content(content: ContentItem, sources: list[ContentSource], media: list[dict]) -> dict:
-    content_sources = [source for source in sources if source.content_id == content.id]
-    primary_source = next((source for source in content_sources if source.is_primary), None) or (content_sources[0] if content_sources else None)
-    return {
-        "id": str(content.id),
-        "content_type": content.content_type,
-        "canonical_title": content.canonical_title,
-        "summary": content.summary,
-        "full_text": _load_content_full_text(content_sources),
-        "language": content.language,
-        "status": content.status,
-        "canonical_url": content.canonical_url,
-        "source_url": primary_source.source_url if primary_source else content.canonical_url,
-        "quality_score": float(content.quality_score or 0),
-        "published_at": content.published_at,
-        "created_at": content.created_at.isoformat() if content.created_at else None,
-        "updated_at": content.updated_at.isoformat() if content.updated_at else None,
-        "media": [item for item in media if item.get("content_id") == str(content.id)],
-    }
-
-
-def _load_content_full_text(sources: list[ContentSource]) -> str | None:
-    for source in sources:
-        metadata = dict(source.metadata_json or {})
-        full_text = metadata.get("full_text")
-        if full_text:
-            return str(full_text)
-    return None
-
-
-def _serialize_content_media(item: ContentMedia) -> dict:
-    return {
-        "id": str(item.id),
-        "content_id": str(item.content_id),
-        "media_type": item.media_type,
-        "source_url": item.source_url,
-        "storage_url": item.storage_url,
-        "thumbnail_url": item.thumbnail_url,
-        "mime_type": item.mime_type,
-        "width": item.width,
-        "height": item.height,
-        "duration_seconds": item.duration_seconds,
-        "checksum": item.checksum,
-        "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
-    }
-
-
-def _merge_unique(values: list) -> list[str]:
-    return list(dict.fromkeys(str(item).strip() for item in values if str(item or "").strip()))
 
 
 def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, status: str | None = None) -> None:
@@ -386,46 +204,111 @@ def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, sta
     public_story.setdefault("meta", {})
     public_story["meta"]["workflow_id"] = str(project.id)
     public_story["project_status"] = _project_status(public_story)
-    draft = _upsert_project_video_draft(db, project, public_story)
-    project.video_draft_id = draft.id
+
+    project.draft_json = public_story
     project.status = status or _project_status(public_story)
     db.add(project)
     db.commit()
 
 
-def _profile_strategy(db: Session, project: MediaWorkflow) -> SocialProfileStrategy | None:
-    profile = db.get(SocialProfile, project.profile_id)
-    return profile.strategy if profile else None
-
-
-def _maybe_enqueue_auto_project_render(db: Session, project: MediaWorkflow, story: dict, *, trigger: str) -> WorkflowRun | None:
-    strategy = _profile_strategy(db, project)
-    if getattr(strategy, "video_render_mode", "manual") != "auto":
-        return None
-    return _enqueue_project_render_job(db, project, story, trigger=trigger, mode="auto")
-
-
-def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> WorkflowRun:
+def _enqueue_project_voice_job(
+    db: Session,
+    project: MediaWorkflow,
+    *,
+    trigger: str,
+    voice_id: str | None = None,
+    voice_speed: float = 1.0,
+    voice_provider: str | None = None,
+) -> KafkaTask:
     existing = (
         db.query(KafkaTask)
-        .filter(WorkflowRun.workflow_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_RENDER", KafkaTask.status.in_(["PENDING", "PROCESSING"]))
+        .filter(
+            KafkaTask.reference_id == project.id,
+            KafkaTask.task_type == "GENERATE_VIDEO_VOICE",
+            KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
+        )
         .order_by(KafkaTask.created_at.desc())
         .first()
     )
     if existing:
         return existing
 
-    render_story = _public_story(story)
-    render_story.setdefault("meta", {})
-    render_story["meta"]["workflow_id"] = str(project.id)
     job = KafkaTask(
-        workflow_id=project.id,
+        reference_id=project.id,
+        reference_type="media_workflow",
+        task_type="GENERATE_VIDEO_VOICE",
+        status="PENDING",
+        current_stage="QUEUED_VOICE",
+        payload_jsonb={
+            "trigger": trigger,
+            "voice_id": voice_id,
+            "voice_provider": voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
+            "voice_speed": voice_speed,
+        },
+    )
+    project.status = "EDITING"
+    project.current_stage = "QUEUED_VOICE"
+    project.progress_percent = 0
+    db.add_all([job, project])
+    db.commit()
+
+
+def _script_task_payload(
+    content_id: uuid.UUID,
+    *,
+    trigger: str,
+    target_duration_seconds: int | None = None,
+    instructions: str | None = None,
+) -> dict:
+    payload = {"content_id": str(content_id), "trigger": trigger}
+    if target_duration_seconds:
+        payload["target_duration_seconds"] = target_duration_seconds
+    if instructions and instructions.strip():
+        payload["instructions"] = instructions.strip()
+    return payload
+    db.refresh(job)
+    publish(
+        GENERATE_VIDEO_VOICE_REQUESTED,
+        build_event(
+            event_type=GENERATE_VIDEO_VOICE_REQUESTED,
+            source="api-service",
+            job_id=job.id,
+            payload={
+                "workflow_id": str(project.id),
+                "run_type": job.task_type,
+                "task_id": str(job.id),
+                "trigger": trigger,
+                "voice_provider": voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
+            },
+            correlation_id=project.id,
+        ),
+    )
+    return job
+
+
+def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> KafkaTask:
+    existing = (
+        db.query(KafkaTask)
+        .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_RENDER", KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]))
+        .order_by(KafkaTask.created_at.desc())
+        .first()
+    )
+    if existing:
+        return existing
+
+    job = KafkaTask(
+        reference_id=project.id,
+        reference_type="media_workflow",
         task_type="GENERATE_VIDEO_RENDER",
         status="PENDING",
-        payload_json={"story": render_story, "trigger": trigger, "video_render_mode": mode},
+        current_stage="QUEUED_RENDER",
+        progress_percent=0,
+        payload_jsonb={"trigger": trigger, "video_render_mode": mode},
     )
     db.add(job)
     project.status = "RENDERING"
+    project.current_stage = "QUEUED_RENDER"
+    project.progress_percent = 0
     db.add(project)
     db.commit()
     db.refresh(job)
@@ -442,18 +325,12 @@ def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict
     return job
 
 
-def _preserve_saved_source(db: Session, project: MediaWorkflow, story: dict) -> dict:
-    if not isinstance(story, dict):
-        return story
-    if isinstance(story.get("source"), dict) and story["source"]:
-        return story
-    saved_story = _find_video_draft_for_project(db, project)
-    saved_source = saved_story.get("source") if isinstance(saved_story, dict) and isinstance(saved_story.get("source"), dict) else None
-    if not saved_source:
-        return story
-    next_story = dict(story)
-    next_story["source"] = saved_source
-    return next_story
+def _can_use_content(content: ContentItem, user: User) -> bool:
+    return (
+        user.is_system_admin
+        or content.content_scope == "GLOBAL"
+        or (content.content_scope == "PRIVATE" and content.owner_user_id == user.id)
+    )
 
 
 def _project_status(story: dict) -> str:
@@ -476,7 +353,7 @@ def approve_project_video(
     db: Session = Depends(get_db),
 ):
     project = _get_owned_project(db, workflow_id, user)
-    story = _find_video_draft_for_project(db, project)
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
     rendered_video = _rendered_video_uri(project, story)
     if not rendered_video:
         raise HTTPException(status_code=400, detail="Project chưa có MP4 để duyệt")
@@ -505,7 +382,7 @@ def queue_project_video_for_posting(
     if not profile or profile.user_id != user.id:
         raise HTTPException(status_code=404, detail="Social profile not found")
 
-    story = _find_video_draft_for_project(db, project)
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
     rendered_video = _rendered_video_uri(project, story)
     if not rendered_video:
         raise HTTPException(status_code=400, detail="Project chưa có MP4 để đưa vào queue")
@@ -558,28 +435,29 @@ def queue_project_video_for_posting(
             "scheduled_at": item.scheduled_at,
             "published_at": item.published_at,
             "error": item.error,
-            "created_at": item.get("created_at"),
+            "created_at": item.created_at,
             "updated_at": item.updated_at,
         },
     }
 
 
 def _rendered_video_uri(project: MediaWorkflow, story: dict | None) -> str | None:
+    artifacts = project.artifacts_jsonb if isinstance(project.artifacts_jsonb, list) else []
     artifact = next(
         (
             item
-            for item in sorted(project.artifacts or [], key=lambda value: value.created_at, reverse=True)
-            if item.get("type") == "FINAL_VIDEO" and item.get("uri")
+            for item in sorted(artifacts, key=lambda value: value.get("created_at", ""), reverse=True)
+            if item.get("uri") and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
         ),
         None,
     )
     if artifact:
-        return artifact.uri
+        return artifact.get("uri")
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
     if metadata.get("rendered_video"):
         return str(metadata["rendered_video"])
-    artifacts = story.get("video_artifacts") if isinstance(story, dict) and isinstance(story.get("video_artifacts"), dict) else {}
-    return str(artifacts.get("final")) if artifacts.get("final") else None
+    story_artifacts = story.get("video_artifacts") if isinstance(story, dict) and isinstance(story.get("video_artifacts"), dict) else {}
+    return str(story_artifacts.get("final")) if story_artifacts.get("final") else None
 
 
 def _default_scheduled_at(profile: SocialProfile) -> datetime:
@@ -609,39 +487,18 @@ def _default_video_caption(project: MediaWorkflow, story: dict | None) -> str:
     return title or "Video mới đã sẵn sàng đăng"
 
 
-@router.get("/projects/{workflow_id}/story")
-def get_saved_project_story(
-    workflow_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    project = _get_owned_project(db, workflow_id, user)
-    video_project = _find_video_draft_for_project(db, project)
-    if video_project:
-        return _public_story(video_project)
-    raise HTTPException(status_code=404, detail="Story not found for content project")
-
-
 @router.post("/save-story")
 def save_story(
     payload: StoryRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if payload.story is None:
-        raise HTTPException(status_code=400, detail="Missing story")
-    project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-    payload.story = _preserve_saved_source(db, project, payload.story)
+    project = _get_owned_project(db, payload.workflow_id, user)
     payload.story.setdefault("meta", {})
     payload.story["meta"]["workflow_id"] = str(project.id)
-    payload.story = pipeline.review_story_with_ai(payload.story)
     saved_story = pipeline.normalize_story_for_project(payload.story)
     _persist_project_story(db, project, saved_story)
-    auto_render_job = _maybe_enqueue_auto_project_render(db, project, saved_story, trigger="save_story")
-    return {
-        "story": _public_story(saved_story),
-        "auto_render_job": _serialize_workflow_run(db, auto_render_job) if auto_render_job else None,
-    }
+    return {"story": _public_story(saved_story)}
 
 
 @router.post("/edit-story")
@@ -653,17 +510,18 @@ def edit_story(
     if not payload.prompt.strip():
         raise HTTPException(status_code=400, detail="Missing edit prompt")
     try:
-        project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-        story = payload.story or _find_video_draft_for_project(db, project)
+        project = _get_owned_project(db, payload.workflow_id, user)
+        story = project.draft_json if isinstance(project.draft_json, dict) else {}
         if not story:
             raise HTTPException(status_code=404, detail="Story not found for content project")
-        story = _preserve_saved_source(db, project, story)
+        story = _public_story(story)
+        _persist_project_story(db, project, story, status="EDITING")
         existing = (
             db.query(KafkaTask)
             .filter(
-                WorkflowRun.workflow_id == project.id,
+                KafkaTask.reference_id == project.id,
                 KafkaTask.task_type == "GENERATE_VIDEO_EDIT",
-                KafkaTask.status.in_(["PENDING", "PROCESSING"]),
+                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
             )
             .order_by(KafkaTask.created_at.desc())
             .first()
@@ -672,12 +530,17 @@ def edit_story(
             return {"job": _serialize_workflow_run(db, existing)}
 
         job = KafkaTask(
-            workflow_id=project.id,
+            reference_id=project.id,
+            reference_type="media_workflow",
             task_type="GENERATE_VIDEO_EDIT",
             status="PENDING",
-            payload_json={"story": story, "prompt": payload.prompt},
+            current_stage="QUEUED_EDIT",
+            progress_percent=0,
+            payload_jsonb={"prompt": payload.prompt, "trigger": "manual_edit"},
         )
         project.status = "EDITING"
+        project.current_stage = "QUEUED_EDIT"
+        project.progress_percent = 0
         db.add_all([job, project])
         db.commit()
         db.refresh(job)
@@ -705,19 +568,20 @@ def review_story(
     db: Session = Depends(get_db),
 ):
     try:
-        project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-        story = payload.story or _find_video_draft_for_project(db, project)
+        project = _get_owned_project(db, payload.workflow_id, user)
+        story = project.draft_json if isinstance(project.draft_json, dict) else {}
         if not story:
             raise HTTPException(status_code=404, detail="Story not found for content project")
-        story = _preserve_saved_source(db, project, story)
+        story = _public_story(story)
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
+        _persist_project_story(db, project, story, status="REVIEWING")
         existing = (
             db.query(KafkaTask)
             .filter(
-                WorkflowRun.workflow_id == project.id,
+                KafkaTask.reference_id == project.id,
                 KafkaTask.task_type == "GENERATE_VIDEO_REVIEW",
-                KafkaTask.status.in_(["PENDING", "PROCESSING"]),
+                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
             )
             .order_by(KafkaTask.created_at.desc())
             .first()
@@ -726,12 +590,17 @@ def review_story(
             return {"job": _serialize_workflow_run(db, existing)}
 
         job = KafkaTask(
-            workflow_id=project.id,
+            reference_id=project.id,
+            reference_type="media_workflow",
             task_type="GENERATE_VIDEO_REVIEW",
             status="PENDING",
-            payload_json={"story": story, "instructions": payload.instructions},
+            current_stage="QUEUED_REVIEW",
+            progress_percent=0,
+            payload_jsonb={"instructions": payload.instructions, "trigger": "manual_review"},
         )
         project.status = "REVIEWING"
+        project.current_stage = "QUEUED_REVIEW"
+        project.progress_percent = 0
         db.add_all([job, project])
         db.commit()
         db.refresh(job)
@@ -759,11 +628,10 @@ def generate_video(
     db: Session = Depends(get_db),
 ):
     try:
-        project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-        story = payload.story or _find_video_draft_for_project(db, project)
+        project = _get_owned_project(db, payload.workflow_id, user)
+        story = project.draft_json if isinstance(project.draft_json, dict) else {}
         if not story:
             raise HTTPException(status_code=404, detail="Story not found for content project")
-        story = _preserve_saved_source(db, project, story)
         story = pipeline.normalize_story_for_project(story)
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
@@ -783,164 +651,42 @@ def get_render_job(
     db: Session = Depends(get_db),
 ):
     job = db.get(KafkaTask, job_id)
-    if not job or job.project.user_id != user.id or job.task_type not in {"GENERATE_VIDEO_RENDER", "GENERATE_VIDEO_SCRIPT", "GENERATE_VIDEO_EDIT", "GENERATE_VIDEO_REVIEW"}:
+    if not job or job.task_type not in {
+        "GENERATE_VIDEO_RENDER",
+        "GENERATE_VIDEO_SCRIPT",
+        "GENERATE_VIDEO_EDIT",
+        "GENERATE_VIDEO_REVIEW",
+        "GENERATE_VIDEO_VOICE",
+    }:
         raise HTTPException(status_code=404, detail="Render job not found")
+
+    project = db.get(MediaWorkflow, job.reference_id)
+    if not project or (not user.is_system_admin and project.user_id != user.id):
+        raise HTTPException(status_code=404, detail="Render job not found")
+
+    job.project = project
     return {"job": _serialize_workflow_run(db, job)}
 
 
 def _serialize_workflow_run(db: Session, job: KafkaTask) -> dict:
-    story = _find_video_draft_for_project(db, job.project) or {}
-    metadata = job.payload_json if isinstance(job.payload_json, dict) else {}
-    output_path = metadata.get("output_path")
+    metadata = job.payload_jsonb if isinstance(job.payload_jsonb, dict) else {}
+    result = job.result_jsonb if isinstance(job.result_jsonb, dict) else {}
+    output_path = result.get("output_path") or metadata.get("output_path")
     return {
         "id": str(job.id),
-        "workflow_id": str(job.workflow_id),
+        "workflow_id": str(job.reference_id),
         "run_type": job.task_type,
         "status": job.status,
-        "progress_percent": 0.0,
+        "progress_percent": float(job.progress_percent or 0),
+        "current_stage": job.current_stage,
         "output_path": output_path,
         "video_url": f"/api/v1/generate-video/output/{str(output_path).replace('out/', '')}" if output_path else None,
-        "error_message": job.error_detail,
-        "story": _public_story(story) if story else None,
+        "error_message": job.error_message,
         "created_at": job.created_at,
-        "updated_at": job.updated_at,
+        "updated_at": getattr(job, "updated_at", job.created_at),
         "started_at": job.started_at,
         "completed_at": job.completed_at,
     }
-
-
-def _project_from_payload(db: Session, user: User, workflow_id: uuid.UUID | None, story: dict | None) -> MediaWorkflow:
-    candidate_id = workflow_id or ((story.get("meta") or {}).get("workflow_id") if isinstance(story, dict) else None)
-    if not candidate_id:
-        raise HTTPException(status_code=400, detail="Missing workflow_id")
-    return _get_owned_project(db, uuid.UUID(str(candidate_id)), user)
-
-
-def _draft_workflow_id(draft_json: dict | None) -> str:
-    meta = draft_json.get("meta") if isinstance(draft_json, dict) and isinstance(draft_json.get("meta"), dict) else {}
-    return str(meta.get("workflow_id") or "")
-
-
-def _find_video_draft_for_project(db: Session | None, project: MediaWorkflow) -> dict | None:
-    if db is None:
-        return None
-    if project.video_draft_id:
-        draft = db.get( project.video_draft_id)
-        if draft and draft.user_id == project.user_id and isinstance(draft.draft_json, dict):
-            return draft.draft_json
-    drafts = (
-        db.query(MediaWorkflow)
-        .filter(MediaWorkflow.user_id == project.user_id)
-        .order_by(MediaWorkflow.updated_at.desc())
-        .limit(100)
-        .all()
-    )
-    workflow_id = str(project.id)
-    for draft in drafts:
-        draft_json = draft.draft_json if isinstance(draft.draft_json, dict) else {}
-        if _draft_workflow_id(draft_json) == workflow_id:
-            return draft_json
-    return None
-
-
-def _upsert_project_video_draft(db: Session, project: MediaWorkflow, story: dict) -> MediaWorkflow:
-    story.setdefault("meta", {})
-    story["meta"]["workflow_id"] = str(project.id)
-    title = str(story.get("meta", {}).get("title") or project.title or f"Video {str(project.id)[:8]}")
-    draft = db.get( project.video_draft_id) if project.video_draft_id else None
-    if draft and draft.user_id == project.user_id:
-        draft.title = title
-        draft.draft_json = story
-        db.add(draft)
-        return draft
-    drafts = (
-        db.query(MediaWorkflow)
-        .filter(MediaWorkflow.user_id == project.user_id)
-        .order_by(MediaWorkflow.updated_at.desc())
-        .limit(100)
-        .all()
-    )
-    draft = next((item for item in drafts if _draft_workflow_id(item.draft_json if isinstance(item.draft_json, dict) else {}) == str(project.id)), None)
-    if draft:
-        draft.title = title
-        draft.draft_json = story
-        db.add(draft)
-        return draft
-    draft = MediaWorkflow(user_id=project.user_id, title=title, draft_json=story)
-    db.add(draft)
-    db.flush()
-    return draft
-
-
-@router.post("/emotion-voice")
-def emotion_voice(
-    payload: VoiceRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    try:
-        project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-        story = payload.story or _find_video_draft_for_project(db, project)
-        if not story:
-            raise HTTPException(status_code=404, detail="Story not found for content project")
-        story = _preserve_saved_source(db, project, story)
-        story = pipeline.review_story_with_ai(story, "Duyệt story lần cuối trước khi tạo voice.")
-        result = pipeline.enhance_emotion_and_generate_voice(story, payload.voice_id, payload.voice_speed, payload.voice_provider)
-        result_story = result.get("story") or {}
-        fit_debug = None
-        fit_error = None
-        try:
-            fit_result = pipeline.fit_frames_with_whisper(result_story)
-            result_story = fit_result.get("story") or result_story
-            fit_debug = fit_result.get("debug")
-        except Exception as error:
-            fit_error = str(error)
-        _persist_project_story(db, project, result_story)
-        auto_render_job = _maybe_enqueue_auto_project_render(db, project, result_story, trigger="emotion_voice")
-        return {
-            "meta": result_story.get("meta") or {},
-            "audio": result_story.get("audio") or {},
-            "timeline": result_story.get("timeline") or {},
-            "voice_id": result.get("voice_id"),
-            "voice_provider": result.get("voice_provider"),
-            "voice_speed": result.get("voice_speed"),
-            "voice_text": result.get("voice_text"),
-            "audio_url": result.get("audio_url"),
-            "debug": fit_debug,
-            "fit_frame_error": fit_error,
-            "auto_render_job": _serialize_workflow_run(db, auto_render_job) if auto_render_job else None,
-        }
-    except HTTPException:
-        raise
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
-
-
-@router.post("/fit-frames")
-def fit_frames(
-    payload: StoryRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    try:
-        project = _project_from_payload(db, user, payload.workflow_id, payload.story)
-        story = payload.story or _find_video_draft_for_project(db, project)
-        if not story:
-            raise HTTPException(status_code=404, detail="Story not found for content project")
-        story = _preserve_saved_source(db, project, story)
-        result = pipeline.fit_frames_with_whisper(story)
-        result_story = result.get("story") or {}
-        _persist_project_story(db, project, result_story)
-        return {
-            "meta": result_story.get("meta") or {},
-            "audio": result_story.get("audio") or {},
-            "timeline": result_story.get("timeline") or {},
-            "debug": result.get("debug"),
-        }
-    except HTTPException:
-        raise
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
 @router.post("/audio/upload")
@@ -971,3 +717,118 @@ def output(output_path: str):
         media_type="video/mp4",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+@router.post("/projects/{workflow_id}/voice")
+def generate_project_voice(
+    workflow_id: uuid.UUID,
+    payload: ProjectVoiceRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = _get_owned_project(db, workflow_id, user)
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
+    if not story:
+        raise HTTPException(status_code=400, detail="Workflow chưa có draft để tạo voice")
+    job = _enqueue_project_voice_job(
+        db,
+        project,
+        trigger="manual_voice",
+        voice_id=payload.voice_id,
+        voice_speed=payload.voice_speed,
+        voice_provider=payload.voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
+    )
+    return {"job": _serialize_workflow_run(db, job)}
+
+
+@router.post("/direct-script")
+def create_direct_script(
+    payload: DirectScriptRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Tạo MediaWorkflow trực tiếp từ một ContentItem,
+    sau đó ngay lập tức enqueue KafkaTask GENERATE_VIDEO_SCRIPT.
+    Bỏ qua toàn bộ phần AI chọn lọc / đánh giá điểm.
+    """
+    # Validate profile
+    profile = db.get(SocialProfile, payload.profile_id)
+    if not profile or profile.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    content = db.get(ContentItem, payload.content_id)
+    if not content or not _can_use_content(content, user):
+        raise HTTPException(status_code=404, detail="ContentItem không tồn tại hoặc không thuộc quyền truy cập")
+
+    # Resolve title từ content nếu không truyền
+    title = payload.title
+    if not title:
+        title = content.canonical_title or content.normalized_title
+    title = title or payload.note or "Direct script"
+
+    # Tạo MediaWorkflow
+    workflow = MediaWorkflow(
+        user_id=user.id,
+        profile_id=profile.id,
+        title=title,
+        status="SCRIPTING",
+        planning_mode=None,
+        metadata_json={
+            "selection_mode": "MANUAL",
+            "target_duration_seconds": payload.target_duration_seconds,
+            "note": payload.note,
+        },
+    )
+    db.add(workflow)
+    db.flush()
+
+    workflow.primary_content_id = content.id
+    workflow.inputs_jsonb = [{"type": "content", "id": str(content.id), "role": "primary"}]
+    db.flush()
+
+    task_payload = _script_task_payload(
+        workflow.primary_content_id,
+        trigger="direct_script",
+        target_duration_seconds=payload.target_duration_seconds,
+        instructions=payload.instructions,
+    )
+
+
+    job = KafkaTask(
+        reference_id=workflow.id,
+        reference_type="media_workflow",
+        task_type="GENERATE_VIDEO_SCRIPT",
+        status="PENDING",
+        current_stage="QUEUED_SCRIPT",
+        progress_percent=0,
+        payload_jsonb=task_payload,
+    )
+    workflow.current_stage = "QUEUED_SCRIPT"
+    workflow.progress_percent = 0
+    db.add(job)
+    db.commit()
+    db.refresh(workflow)
+    db.refresh(job)
+
+    publish(
+        GENERATE_VIDEO_SCRIPT_REQUESTED,
+        build_event(
+            event_type=GENERATE_VIDEO_SCRIPT_REQUESTED,
+            source="api-service",
+            job_id=job.id,
+            payload={"workflow_id": str(workflow.id), "run_type": job.task_type},
+            correlation_id=workflow.id,
+        ),
+    )
+
+    return {
+        "workflow": {
+            "id": str(workflow.id),
+            "title": workflow.title,
+            "status": workflow.status,
+            "profile_id": str(workflow.profile_id),
+            "primary_content_id": str(workflow.primary_content_id),
+        },
+        "job": _serialize_workflow_run(db, job),
+    }

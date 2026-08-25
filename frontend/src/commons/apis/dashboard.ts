@@ -1,14 +1,4 @@
-import { api, assertLegacyGatewayApiBase, isSocialContentApiBase } from './client'
-
-export const publishBilibiliJobToTikTokApi = async (jobId: number, payload: {
-  profile_ids: number[]
-  caption: string
-  segment_indexes?: number[]
-}) => {
-  assertLegacyGatewayApiBase('Publish Bilibili to TikTok')
-  const { data } = await api.post(`/publish/bilibili/jobs/${jobId}/tiktok`, payload)
-  return data
-}
+import { api, isSocialContentApiBase } from './client'
 
 export const triggerCrawlApi = async () => {
   if (isSocialContentApiBase()) {
@@ -26,11 +16,11 @@ export const fetchSchedulerStatusApi = async () => {
   return data
 }
 
-export const startSchedulerApi = async (interval_minutes: number = 30) => {
+export const startSchedulerApi = async (intervalMinutes = 30) => {
   if (isSocialContentApiBase()) {
-    return { status: 'stopped', supported: false, interval_minutes }
+    return { status: 'stopped', supported: false, interval_minutes: intervalMinutes }
   }
-  const { data } = await api.post('/publish/scheduler/start', { interval_minutes })
+  const { data } = await api.post('/publish/scheduler/start', { interval_minutes: intervalMinutes })
   return data
 }
 

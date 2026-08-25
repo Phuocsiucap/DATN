@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     disable_kafka: bool = False
     enable_workers: bool = True
-    jwt_secret_key: str = "change-me"
+    jwt_secret_key: str = "replace-with-at-least-32-random-bytes"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     system_bootstrap_token: str = "change-me-bootstrap-token"

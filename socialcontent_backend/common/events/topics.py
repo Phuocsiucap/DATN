@@ -39,10 +39,6 @@ PLANNING_CANDIDATES_REQUESTED = "planning.candidates.requested"
 PLANNING_CANDIDATES_SELECTED = "planning.candidates.selected"
 PLANNING_CANDIDATES_FAILED = "planning.candidates.failed"
 
-PLANNING_AI_REQUESTED = "planning.ai.requested"
-PLANNING_AI_COMPLETED = "planning.ai.completed"
-PLANNING_AI_FAILED = "planning.ai.failed"
-
 PLANNING_SERIES_REQUESTED = "planning.series.requested"
 PLANNING_SERIES_COMPLETED = "planning.series.completed"
 PLANNING_SERIES_FAILED = "planning.series.failed"
