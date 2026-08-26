@@ -34,6 +34,11 @@ export const updatePublishingQueueItemApi = async (queueItemId: string | number,
   return data
 }
 
+export const publishPublishingQueueItemApi = async (queueItemId: string | number) => {
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/publish`)
+  return data
+}
+
 export const createSocialProfileApi = async (payload: any) => {
   const { data } = await api.post('/social-profiles', payload)
   return data

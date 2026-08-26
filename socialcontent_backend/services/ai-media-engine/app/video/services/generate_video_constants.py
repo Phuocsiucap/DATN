@@ -8,7 +8,6 @@ RENDER_WORKSPACE_ROOT = PROJECT_ROOT / "data_demo" / "video_gen_demo"
 PUBLIC_DIR = RENDER_WORKSPACE_ROOT / "public"
 AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_OUT_DIR = RENDER_WORKSPACE_ROOT / "out"
-RENDER_JOB_DIR = RENDER_WORKSPACE_ROOT / "render_jobs"
 
 DEFAULT_IMAGES = [
     "assets/images/001-signal-room.png",

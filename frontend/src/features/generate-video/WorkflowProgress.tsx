@@ -34,6 +34,8 @@ const stageLabels: Record<string, string> = {
   SAVING_VOICE: 'Đang lưu voice và timing',
   VOICE_READY: 'Voice đã sẵn sàng',
   QUEUED_RENDER: 'Đang chờ render video',
+  QUEUED_RENDER_AFTER_VOICE: 'Render sẽ chạy sau khi voice hoàn tất',
+  QUEUED_RENDER_AFTER_DRAFT: 'Render sẽ chạy sau khi draft hoàn tất',
   PREPARING_RENDER: 'Đang chuẩn bị composition',
   RENDERING_VIDEO: 'Remotion đang render MP4',
   SAVING_VIDEO: 'Đang lưu video và artifact',
@@ -42,10 +44,11 @@ const stageLabels: Record<string, string> = {
 }
 
 const activeTaskStatuses = new Set(['PENDING', 'RUNNING', 'PROCESSING'])
+const activeTaskStatusPriority: Record<string, number> = { RUNNING: 3, PROCESSING: 2, PENDING: 1 }
 
 export default function WorkflowProgress({ progress, compact = false }: WorkflowProgressProps) {
   if (!progress) return null
-  const activeTask = progress.tasks.find((item) => activeTaskStatuses.has(item.status)) || null
+  const activeTask = selectActiveTask(progress.tasks)
   const task = activeTask || progress.tasks[0] || null
   const running = Boolean(activeTask)
   const failed = task?.status === 'FAILED' || progress.status === 'FAILED'
@@ -123,6 +126,17 @@ export default function WorkflowProgress({ progress, compact = false }: Workflow
       )}
     </section>
   )
+}
+
+function selectActiveTask(tasks: VideoWorkflowTask[]) {
+  const active = tasks.filter((item) => activeTaskStatuses.has(item.status))
+  if (!active.length) return null
+  return active.reduce((best, item) => {
+    const bestScore = activeTaskStatusPriority[best.status] || 0
+    const itemScore = activeTaskStatusPriority[item.status] || 0
+    if (itemScore !== bestScore) return itemScore > bestScore ? item : best
+    return new Date(item.created_at).getTime() > new Date(best.created_at).getTime() ? item : best
+  })
 }
 
 function resolvePhase(task: VideoWorkflowTask | null, workflowStatus: string) {

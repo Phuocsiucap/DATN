@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,9 @@ from app.api.routes import (
     stories,
     users,
 )
+from app.services.publish_scheduler import start_publish_queue_scheduler, stop_publish_queue_scheduler
+
+logging.basicConfig(level=logging.INFO)
 
 
 @asynccontextmanager
@@ -34,7 +38,9 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         ensure_schema_compatibility(db)
         ensure_roles(db)
+    await start_publish_queue_scheduler()
     yield
+    await stop_publish_queue_scheduler()
 
 
 app = FastAPI(title="SocialContent API Service", lifespan=lifespan)

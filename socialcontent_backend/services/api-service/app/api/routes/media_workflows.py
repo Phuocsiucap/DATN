@@ -38,6 +38,7 @@ VIDEO_RUN_TYPES = {
 }
 
 ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PROCESSING"}
+ACTIVE_TASK_STATUS_PRIORITY = {"RUNNING": 3, "PROCESSING": 2, "PENDING": 1}
 WORKSPACE_METADATA_KEYS = {
     "selection_mode",
     "note",
@@ -214,7 +215,7 @@ def get_video_workspace(
     source = _workspace_source_content(db, workflow.primary_content_id)
     draft = workflow.draft_json if isinstance(workflow.draft_json, dict) else {}
     tasks = _workflow_tasks(db, workflow.id, limit=20)
-    active_task = next((task for task in tasks if task["status"] in ACTIVE_TASK_STATUSES), None)
+    active_task = _select_active_task(tasks)
     latest_task = tasks[0] if tasks else None
     artifacts = workflow.artifacts_jsonb if isinstance(workflow.artifacts_jsonb, list) else []
     metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
@@ -283,7 +284,7 @@ def get_video_workflow_progress(
     if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
         raise HTTPException(status_code=404, detail="Video workflow not found")
     tasks = _workflow_tasks(db, workflow.id, limit=12)
-    active_task = next((task for task in tasks if task["status"] in ACTIVE_TASK_STATUSES), None)
+    active_task = _select_active_task(tasks)
     latest_task = tasks[0] if tasks else None
     effective_task = active_task or latest_task
     return {
@@ -548,8 +549,10 @@ def _latest_tasks_by_workflow(db: Session, workflow_ids: list[uuid.UUID]) -> dic
         payload = _serialize_task_row(row)
         if row.reference_id not in latest:
             latest[row.reference_id] = payload
-        if payload["status"] in ACTIVE_TASK_STATUSES and row.reference_id not in active:
-            active[row.reference_id] = payload
+        if payload["status"] in ACTIVE_TASK_STATUSES:
+            current = active.get(row.reference_id)
+            if current is None or _active_task_sort_key(payload) > _active_task_sort_key(current):
+                active[row.reference_id] = payload
     return {workflow_id: active.get(workflow_id) or latest_task for workflow_id, latest_task in latest.items()}
 
 
@@ -577,6 +580,20 @@ def _workflow_tasks(db: Session, workflow_id: uuid.UUID, *, limit: int) -> list[
         .all()
     )
     return [_serialize_task_row(row) for row in rows]
+
+
+def _select_active_task(tasks: list[dict]) -> dict | None:
+    active = [task for task in tasks if task["status"] in ACTIVE_TASK_STATUSES]
+    if not active:
+        return None
+    return max(active, key=_active_task_sort_key)
+
+
+def _active_task_sort_key(task: dict) -> tuple[int, datetime]:
+    created_at = task.get("created_at")
+    if not isinstance(created_at, datetime):
+        created_at = datetime.min
+    return (ACTIVE_TASK_STATUS_PRIORITY.get(str(task.get("status") or ""), 0), created_at)
 
 
 def _serialize_task_row(row) -> dict:

@@ -2544,6 +2544,8 @@ function ProCutTimelinePanel({
   onUpdateSubtitleTiming: (index: number, start: number, duration: number) => void
 }) {
   const fps = story.video?.fps || 30
+  const visualScenes = collapseVisualScenes(scenes)
+  const textScenes = collapseTextScenes(scenes)
   return (
     <section className={`${isFullscreen ? "min-h-[260px]" : "min-h-[220px]"} flex-1 overflow-y-auto overflow-x-hidden border-t border-[#2d2d37] bg-[#111115]`}>
       <div className="relative min-h-full">
@@ -2592,22 +2594,23 @@ function ProCutTimelinePanel({
           </ProCutTrack>
           <ProCutTrack label="Video 1" icon={<FigmaIcon name="film" size={14} />} locked>
             <div ref={timelineRef} className="relative h-12 overflow-hidden border border-[#2d2d37] bg-[#141419]">
-              {scenes.map((scene, index) => {
-                const start = getSceneStart(scenes, index)
-                const end = getSceneEnd(scenes, index)
+              {visualScenes.map((scene, index) => {
+                const sourceIndex = findSceneIndexForVisual(scenes, scene, index)
+                const start = Number(scene.start || 0)
+                const end = typeof scene.end === 'number' ? scene.end : start + Number(scene.duration || 0)
                 const left = videoDuration ? (start / videoDuration) * 100 : 0
                 const width = videoDuration ? Math.max(2, ((end - start) / videoDuration) * 100) : 0
                 const mediaType = getSceneMediaType(scene)
                 return (
                   <div
-                    key={`${scene.image}-${index}`}
-                    className={`absolute inset-y-0 border-r border-[#111115] bg-[#ff6200] ${index === sceneIndex ? 'ring-2 ring-inset ring-white' : ''}`}
+                    key={`${scene.video_id || scene.image}-${index}`}
+                    className={`absolute inset-y-0 border-r border-[#111115] bg-[#ff6200] ${sourceIndex === sceneIndex ? 'ring-2 ring-inset ring-white' : ''}`}
                     style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
                   >
                     <button
                       onClick={() => {
-                        onSelect(index)
-                        onSeek(getSceneStart(scenes, index))
+                        onSelect(sourceIndex)
+                        onSeek(start)
                       }}
                       className="h-full w-full overflow-hidden text-left"
                     >
@@ -2615,7 +2618,7 @@ function ProCutTimelinePanel({
                       <span className="absolute left-12 top-1 max-w-[calc(100%-54px)] truncate text-[10px] font-semibold text-white">{fileNameFromPath(scene.image || `${mediaType}_clip`)}</span>
                       <span className="absolute bottom-1 left-12 text-[9px] font-semibold text-white/80">{Number(scene.duration || 0).toFixed(2)}s · {mediaType}</span>
                     </button>
-                    {index < scenes.length - 1 && (
+                    {visualScenes.length === scenes.length && index < scenes.length - 1 && (
                       <button
                         data-no-seek="true"
                         onPointerDown={(event) => {
@@ -2642,10 +2645,11 @@ function ProCutTimelinePanel({
 
           <ProCutTrack label="Text 1" icon={<FigmaIcon name="type" size={14} />} locked>
             <div className="relative h-12 overflow-hidden border border-[#2d2d37] bg-[#141419]">
-              {scenes.map((scene, index) => {
-                const subtitleStart = getSubtitleStart(scenes, index)
-                const subtitleDuration = getSubtitleDuration(scenes, index)
-                const left = videoDuration ? (subtitleStart / videoDuration) * 100 : 0
+              {textScenes.map((scene, index) => {
+                const sourceIndex = findSceneIndexForText(scenes, scene, index)
+                const textStart = getSubtitleStart(textScenes, index)
+                const subtitleDuration = getSubtitleDuration(textScenes, index)
+                const left = videoDuration ? (textStart / videoDuration) * 100 : 0
                 const width = videoDuration ? Math.max(4, (subtitleDuration / videoDuration) * 100) : 0
                 if (!String(scene.subtitle || '').trim()) return null
                 return (
@@ -2660,7 +2664,7 @@ function ProCutTimelinePanel({
                       onPointerDown={(event) => {
                         event.stopPropagation()
                         event.currentTarget.setPointerCapture(event.pointerId)
-                        subtitleDragRef.current = { index, mode: 'trim-start', startX: event.clientX, start: subtitleStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                        subtitleDragRef.current = { index: sourceIndex, mode: 'trim-start', startX: event.clientX, start: textStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
                       }}
                       onPointerMove={(event) => {
                         if (!subtitleDragRef.current) return
@@ -2678,7 +2682,7 @@ function ProCutTimelinePanel({
                       onPointerDown={(event) => {
                         event.stopPropagation()
                         event.currentTarget.setPointerCapture(event.pointerId)
-                        subtitleDragRef.current = { index, mode: 'move', startX: event.clientX, start: subtitleStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                        subtitleDragRef.current = { index: sourceIndex, mode: 'move', startX: event.clientX, start: textStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
                       }}
                       onPointerMove={(event) => {
                         if (!subtitleDragRef.current) return
@@ -2695,8 +2699,8 @@ function ProCutTimelinePanel({
                       data-no-seek="true"
                       value={scene.subtitle || ''}
                       onFocus={() => {
-                        onSelect(index)
-                        onSeek(subtitleStart)
+                        onSelect(sourceIndex)
+                        onSeek(textStart)
                       }}
                       onChange={(event) => updateSceneAt(story, scenes, index, { subtitle: event.target.value }, onChange)}
                       title={scene.subtitle || `Scene ${index + 1}`}
@@ -2708,7 +2712,7 @@ function ProCutTimelinePanel({
                       onPointerDown={(event) => {
                         event.stopPropagation()
                         event.currentTarget.setPointerCapture(event.pointerId)
-                        subtitleDragRef.current = { index, mode: 'trim-end', startX: event.clientX, start: subtitleStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                        subtitleDragRef.current = { index: sourceIndex, mode: 'trim-end', startX: event.clientX, start: textStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
                       }}
                       onPointerMove={(event) => {
                         if (!subtitleDragRef.current) return
@@ -3467,18 +3471,67 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
   if (!video.length && (story.story_data?.length || story.scenes?.length)) {
     return story.story_data?.length ? story.story_data : story.scenes || []
   }
-  return video.map((clip, index) => {
+  if (!video.length) {
+    return text.map((textClip) => {
+      const start = Number(textClip.start || 0)
+      const end = typeof textClip.end === 'number' ? Number(textClip.end) : start + Number(textClip.duration || 4)
+      const duration = Math.max(0.1, end - start)
+      return {
+        scene_index: typeof textClip.scene_index === 'number' ? textClip.scene_index : undefined,
+        text_id: textClip.id,
+        video_id: textClip.video_id,
+        video_ids: Array.isArray(textClip.video_ids) ? textClip.video_ids : textClip.video_id ? [textClip.video_id] : undefined,
+        start,
+        end,
+        duration,
+        image: defaultMediaForType('image'),
+        media_type: 'image',
+        effect: 'slow-zoom',
+        fit: 'contain',
+        subtitle: String(textClip.text || ''),
+        voice_text: textClip.voice_text,
+        subtitle_start: start,
+        subtitle_duration: duration,
+        text_style: textClip.style || {},
+        timing: textClip.timing,
+      }
+    })
+  }
+  const count = Math.max(video.length, text.length)
+  return Array.from({ length: count }, (_, index) => {
+    const textClip = text[index]
+    const textStart = typeof textClip?.start === 'number' ? textClip.start : undefined
+    const textEnd = typeof textClip?.end === 'number' ? textClip.end : undefined
+    const clip = video[index] || video.find((item) => {
+      if (textStart === undefined || textEnd === undefined) return false
+      const overlap = Math.min(Number(item.end || 0), textEnd) - Math.max(Number(item.start || 0), textStart)
+      return overlap > 0
+    }) || [...video].reverse().find((item) => Number(item.start || 0) <= Number(textStart ?? 0)) || video[video.length - 1]
     const mediaType = normalizeSceneMediaType(clip.type, String(clip.src || ''))
-    const textClip = text[index] || text.find((item) => {
+    const matchedTextClip = textClip || text.find((item) => {
       const overlap = Math.min(Number(item.end || 0), Number(clip.end || 0)) - Math.max(Number(item.start || 0), Number(clip.start || 0))
       return overlap > 0
     })
-    const duration = Math.max(0.1, Number(clip.duration || Number(clip.end || 0) - Number(clip.start || 0) || 4))
-    const start = Number(clip.start || 0)
-    const end = typeof clip.end === 'number' ? clip.end : start + duration
-    const textStart = typeof textClip?.start === 'number' ? textClip.start : Number(clip.start || 0)
-    const textEnd = typeof textClip?.end === 'number' ? textClip.end : textStart + duration
+    const start = typeof video[index]?.start === 'number'
+      ? Number(video[index].start)
+      : typeof matchedTextClip?.start === 'number'
+        ? Number(matchedTextClip.start)
+        : Number(clip.start || 0)
+    const fallbackDuration = Number(clip.duration || Number(clip.end || 0) - Number(clip.start || 0) || 4)
+    const end = typeof video[index]?.end === 'number'
+      ? Number(video[index].end)
+      : typeof matchedTextClip?.end === 'number'
+        ? Number(matchedTextClip.end)
+        : start + fallbackDuration
+    const duration = Math.max(0.1, end - start)
+    const subtitleStart = typeof matchedTextClip?.start === 'number' ? Number(matchedTextClip.start) : start
+    const subtitleEnd = typeof matchedTextClip?.end === 'number' ? Number(matchedTextClip.end) : subtitleStart + duration
     return {
+      scene_index: typeof clip.scene_index === 'number' ? clip.scene_index : typeof matchedTextClip?.scene_index === 'number' ? matchedTextClip.scene_index : index,
+      video_id: clip.id,
+      text_id: matchedTextClip?.id,
+      video_ids: Array.isArray(matchedTextClip?.video_ids) ? matchedTextClip.video_ids : matchedTextClip?.video_id ? [matchedTextClip.video_id] : undefined,
+      text_ids: Array.isArray(clip.text_ids) ? clip.text_ids : clip.text_id ? [clip.text_id] : undefined,
       start,
       end,
       duration,
@@ -3491,12 +3544,12 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
       position_x: typeof clip.position_x === 'number' ? clip.position_x : undefined,
       position_y: typeof clip.position_y === 'number' ? clip.position_y : undefined,
       rotation: typeof clip.rotation === 'number' ? clip.rotation : undefined,
-      subtitle: String(textClip?.text || ''),
-      voice_text: textClip?.voice_text,
-      subtitle_start: textStart,
-      subtitle_duration: Math.max(0.1, textEnd - textStart),
-      text_style: textClip?.style || {},
-      timing: textClip?.timing,
+      subtitle: String(matchedTextClip?.text || ''),
+      voice_text: matchedTextClip?.voice_text,
+      subtitle_start: subtitleStart,
+      subtitle_duration: Math.max(0.1, subtitleEnd - subtitleStart),
+      text_style: matchedTextClip?.style || {},
+      timing: matchedTextClip?.timing,
     }
   })
 }
@@ -3702,14 +3755,17 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
   const fps = story.video?.fps || 30
   let cursor = 0
   let previousTextEnd = 0
-  const video = scenes.map((scene, index) => {
+  const visualScenes = collapseVisualScenes(scenes)
+  const video = visualScenes.map((scene, index) => {
     const duration = Math.max(1 / fps, Number(scene.duration || 4))
     const start = roundToFrame(typeof scene.start === 'number' ? Math.max(0, scene.start) : cursor, fps)
     const clipEnd = roundToFrame(start + duration, fps)
     cursor = Math.max(cursor, clipEnd)
     const mediaType = getSceneMediaType(scene)
     return {
-      id: story.timeline?.video?.[index]?.id || `video-${index + 1}`,
+      id: scene.video_id || story.timeline?.video?.[index]?.id || `video-${index + 1}`,
+      ...(typeof scene.scene_index === 'number' ? { scene_index: scene.scene_index } : { scene_index: index }),
+      ...(scene.text_ids?.length ? { text_ids: scene.text_ids, text_id: scene.text_ids[0] } : {}),
       type: mediaType,
       start,
       end: clipEnd,
@@ -3724,19 +3780,27 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
       ...(typeof scene.rotation === 'number' ? { rotation: scene.rotation } : {}),
     }
   })
+  const emittedTextIds = new Set<string>()
   const text = scenes.flatMap((scene, index) => {
     const subtitle = String(scene.subtitle || '').trim()
     if (!subtitle) return []
-    const fallbackStart = video[index]?.start ?? 0
-    const sceneEnd = video[index]?.end ?? fallbackStart + Number(scene.duration || 1)
+    const textKey = scene.text_id || `text-${index + 1}`
+    if (emittedTextIds.has(textKey)) return []
+    emittedTextIds.add(textKey)
+    const linkedVideos = findLinkedVideoClips(video, scene, index)
+    const fallbackStart = linkedVideos.length ? Math.min(...linkedVideos.map((clip) => Number(clip.start || 0))) : 0
+    const sceneEnd = linkedVideos.length ? Math.max(...linkedVideos.map((clip) => Number(clip.end || 0))) : fallbackStart + Number(scene.duration || 1)
     const fallbackDuration = Math.max(1 / fps, sceneEnd - fallbackStart)
     const rawStart = typeof scene.subtitle_start === 'number' ? scene.subtitle_start : fallbackStart
     const rawDuration = typeof scene.subtitle_duration === 'number' ? scene.subtitle_duration : fallbackDuration
     const start = roundToFrame(clampNumber(Math.max(previousTextEnd, rawStart), fallbackStart, Math.max(fallbackStart, sceneEnd - 1 / fps)), fps)
     const end = roundToFrame(clampNumber(start + rawDuration, start + 1 / fps, sceneEnd), fps)
     previousTextEnd = end
+    const videoIds = linkedVideos.map((clip) => clip.id).filter(Boolean)
     return [{
-      id: story.timeline?.text?.[index]?.id || `text-${index + 1}`,
+      id: textKey || story.timeline?.text?.[index]?.id || `text-${index + 1}`,
+      ...(typeof scene.scene_index === 'number' ? { scene_index: scene.scene_index } : {}),
+      ...(videoIds.length ? { video_ids: videoIds, video_id: videoIds[0] } : {}),
       type: 'subtitle',
       start,
       end,
@@ -3764,6 +3828,114 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
       audio,
     },
   }
+}
+
+function collapseVisualScenes(scenes: GenerateVideoScene[]) {
+  const groups = new Map<string, GenerateVideoScene>()
+  const order: string[] = []
+  scenes.forEach((scene, index) => {
+    const key = scene.video_id || (typeof scene.scene_index === 'number' ? `scene-${scene.scene_index}` : `row-${index}`)
+    const start = getSceneStart(scenes, index)
+    const end = getSceneEnd(scenes, index)
+    const textIds = scene.text_id ? [scene.text_id] : []
+    const existing = groups.get(key)
+    if (!existing) {
+      order.push(key)
+      groups.set(key, {
+        ...scene,
+        video_id: scene.video_id,
+        start,
+        end,
+        duration: Math.max(0.1, end - start),
+        text_ids: [...(scene.text_ids || []), ...textIds],
+      })
+      return
+    }
+    const nextStart = Math.min(Number(existing.start || start), start)
+    const nextEnd = Math.max(Number(existing.end || end), end)
+    groups.set(key, {
+      ...existing,
+      start: nextStart,
+      end: nextEnd,
+      duration: Math.max(0.1, nextEnd - nextStart),
+      text_ids: listUnique([...(existing.text_ids || []), ...(scene.text_ids || []), ...textIds]),
+    })
+  })
+  return order.map((key) => groups.get(key)!).filter(Boolean)
+}
+
+function collapseTextScenes(scenes: GenerateVideoScene[]) {
+  const groups = new Map<string, GenerateVideoScene>()
+  const order: string[] = []
+  scenes.forEach((scene, index) => {
+    const subtitle = String(scene.subtitle || '').trim()
+    if (!subtitle) return
+    const key = scene.text_id || `row-${index}`
+    const start = getSubtitleStart(scenes, index)
+    const end = start + getSubtitleDuration(scenes, index)
+    const videoIds = scene.video_id ? [scene.video_id] : []
+    const existing = groups.get(key)
+    if (!existing) {
+      order.push(key)
+      groups.set(key, {
+        ...scene,
+        start,
+        end,
+        duration: Math.max(0.1, end - start),
+        subtitle_start: start,
+        subtitle_duration: Math.max(0.1, end - start),
+        video_ids: listUnique([...(scene.video_ids || []), ...videoIds]),
+      })
+      return
+    }
+    const nextStart = Math.min(Number(existing.subtitle_start ?? existing.start ?? start), start)
+    const nextEnd = Math.max(Number(existing.end || end), end)
+    groups.set(key, {
+      ...existing,
+      start: nextStart,
+      end: nextEnd,
+      duration: Math.max(0.1, nextEnd - nextStart),
+      subtitle_start: nextStart,
+      subtitle_duration: Math.max(0.1, nextEnd - nextStart),
+      video_ids: listUnique([...(existing.video_ids || []), ...(scene.video_ids || []), ...videoIds]),
+    })
+  })
+  return order.map((key) => groups.get(key)!).filter(Boolean)
+}
+
+function findLinkedVideoClips(
+  video: NonNullable<NonNullable<GenerateVideoStory['timeline']>['video']>,
+  scene: GenerateVideoScene,
+  fallbackIndex: number,
+) {
+  const ids = listUnique([...(scene.video_ids || []), ...(scene.video_id ? [scene.video_id] : [])])
+  const byIds = ids.length ? video.filter((clip) => ids.includes(clip.id)) : []
+  if (byIds.length) return byIds
+  const byScene = typeof scene.scene_index === 'number' ? video.filter((clip) => clip.scene_index === scene.scene_index) : []
+  if (byScene.length) return byScene
+  return video[fallbackIndex] ? [video[fallbackIndex]] : []
+}
+
+function findSceneIndexForVisual(scenes: GenerateVideoScene[], visual: GenerateVideoScene, fallbackIndex: number) {
+  const index = scenes.findIndex((scene) => {
+    if (visual.video_id && scene.video_id === visual.video_id) return true
+    if (typeof visual.scene_index === 'number' && scene.scene_index === visual.scene_index) return true
+    return false
+  })
+  return index >= 0 ? index : Math.min(fallbackIndex, Math.max(0, scenes.length - 1))
+}
+
+function findSceneIndexForText(scenes: GenerateVideoScene[], textScene: GenerateVideoScene, fallbackIndex: number) {
+  const index = scenes.findIndex((scene) => {
+    if (textScene.text_id && scene.text_id === textScene.text_id) return true
+    if (typeof textScene.scene_index === 'number' && scene.scene_index === textScene.scene_index) return true
+    return false
+  })
+  return index >= 0 ? index : Math.min(fallbackIndex, Math.max(0, scenes.length - 1))
+}
+
+function listUnique<T>(items: T[]) {
+  return Array.from(new Set(items.filter(Boolean)))
 }
 
 function sceneStartTime(scenes: GenerateVideoScene[], index: number) {

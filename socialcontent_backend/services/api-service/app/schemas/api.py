@@ -23,6 +23,7 @@ from app.schemas.social_profiles import (
     SocialProfileCreateRequest,
     SocialProfileResponse,
     SocialProfileStrategyRequest,
+    SchedulerSettingsRequest,
     TikTokQrStartRequest,
 )
 from app.schemas.users import AdminUserCreateRequest, UserResponse, UserUpdateRequest
@@ -60,6 +61,7 @@ __all__ = [
     "SocialProfileCreateRequest",
     "SocialProfileResponse",
     "SocialProfileStrategyRequest",
+    "SchedulerSettingsRequest",
     "TikTokQrStartRequest",
     "StoryResponse",
     "TokenResponse",

@@ -9,25 +9,21 @@ export const triggerCrawlApi = async () => {
 }
 
 export const fetchSchedulerStatusApi = async () => {
-  if (isSocialContentApiBase()) {
-    return { status: 'stopped', supported: false }
-  }
-  const { data } = await api.get('/publish/scheduler/status')
+  const { data } = await api.get('/admin/settings/scheduler')
   return data
 }
 
 export const startSchedulerApi = async (intervalMinutes = 30) => {
-  if (isSocialContentApiBase()) {
-    return { status: 'stopped', supported: false, interval_minutes: intervalMinutes }
-  }
-  const { data } = await api.post('/publish/scheduler/start', { interval_minutes: intervalMinutes })
+  await api.put('/admin/settings/scheduler', {
+    vnexpress_interval_minutes: intervalMinutes,
+    bilibili_interval_minutes: intervalMinutes,
+    publish_queue_interval_minutes: intervalMinutes,
+  })
+  const { data } = await api.post('/admin/settings/scheduler/start')
   return data
 }
 
 export const stopSchedulerApi = async () => {
-  if (isSocialContentApiBase()) {
-    return { status: 'stopped', supported: false }
-  }
-  const { data } = await api.post('/publish/scheduler/stop')
+  const { data } = await api.post('/admin/settings/scheduler/stop')
   return data
 }

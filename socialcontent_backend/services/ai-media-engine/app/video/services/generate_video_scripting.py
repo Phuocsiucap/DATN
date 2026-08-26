@@ -66,6 +66,8 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
             "title": title,
             "source": "manual",
             "target_duration_seconds": target_duration,
+            "llm_calls": 1,
+            "draft_generation_mode": "single_pass_script_and_timeline",
         },
         "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
         "audio": {"voiceVolume": 1, "musicVolume": 0},
@@ -74,8 +76,7 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
     }
     if series_decision:
         story["meta"]["series_decision"] = series_decision
-    story = review_story_with_ai(story)
-    return story
+    return normalize_story_for_project(story)
 
 
 def _timeline_series_decision(timeline: dict[str, Any]) -> dict[str, Any] | None:
@@ -638,6 +639,14 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "timeline": {
                 "version": 1,
                 "duration": "number seconds",
+                "metadata": {
+                    "script_outline": {
+                        "hook": "Vietnamese hook direction",
+                        "main_beats": ["Vietnamese beat 1", "Vietnamese beat 2"],
+                        "ending": "Vietnamese ending/CTA direction",
+                    },
+                    "full_script": "Full Vietnamese narration assembled from all voice_text values",
+                },
                 "video": [
                     {
                         "id": "video-1",
@@ -663,6 +672,7 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
         },
         "rules": [
             "Return only valid JSON object, no markdown.",
+            "Generate the script and the production draft in this same response. Do not require a separate review or script call.",
             "Create text clips from hook_direction, each main_beats item, and ending_direction in that order.",
             "Do not drop any non-empty script beat.",
             "Use the raw article/full_text/source_content only to ground facts. Do not invent facts outside it.",
@@ -675,6 +685,7 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "Text clips must not overlap. Each clip must have start < end.",
             "Each subtitle should stay under 140 characters when possible.",
             "Use voice_text when the spoken narration should be longer than the on-screen subtitle.",
+            "timeline.metadata.full_script must equal the intended spoken script, assembled from text[].voice_text in order.",
             "Use available_images in order when possible; otherwise use default_images.",
             "Use allowed_effects only.",
             "Do not output scenes or story_data.",
@@ -731,8 +742,8 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
                 {
                     "role": "system",
                     "content": (
-                        "You are a Vietnamese short-video editor. "
-                        "You output production-ready timeline JSON matching the exact schema."
+                        "You are a Vietnamese short-video editor and scriptwriter. "
+                        "You output one production-ready JSON object containing both script metadata and timeline JSON."
                     ),
                 },
                 {"role": "user", "content": json.dumps(prompt_payload, ensure_ascii=False)},
@@ -956,7 +967,11 @@ def normalize_ai_timeline(value: Any, image_urls: list[str]) -> dict[str, Any]:
         ),
         fps,
     )
-    return {"version": 1, "duration": duration, "video": video, "text": text, "audio": audio}
+    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+    result = {"version": 1, "duration": duration, "video": video, "text": text, "audio": audio}
+    if metadata:
+        result["metadata"] = metadata
+    return result
 
 
 

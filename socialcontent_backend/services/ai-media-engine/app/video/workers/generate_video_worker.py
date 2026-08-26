@@ -4,7 +4,15 @@ from app.video.consumers.generate_video_requested import run_generate_video_requ
 
 
 def main() -> None:
-    run_generate_video_requested_consumer()
+    run_generate_video_requested_consumer(
+        task_types={
+            "GENERATE_VIDEO_SCRIPT",
+            "GENERATE_VIDEO_EDIT",
+            "GENERATE_VIDEO_REVIEW",
+            "GENERATE_VIDEO_VOICE",
+        },
+        group_id="generate-video-workers",
+    )
 
 
 if __name__ == "__main__":

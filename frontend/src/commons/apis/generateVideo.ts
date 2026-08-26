@@ -1,6 +1,11 @@
 import { api } from './client'
 
 export type GenerateVideoScene = {
+  scene_index?: number
+  video_id?: string
+  video_ids?: string[]
+  text_id?: string
+  text_ids?: string[]
   start?: number
   end?: number
   duration: number
@@ -25,8 +30,8 @@ export type GenerateVideoScene = {
 export type GenerateVideoTimeline = {
   version?: number
   duration?: number
-  video?: Array<{ id: string; scene_index?: number; type: string; start: number; end: number; duration?: number; src?: string; effect?: string; fit?: 'cover' | 'contain' | string; scale?: number; opacity?: number; position_x?: number; position_y?: number; rotation?: number }>
-  text?: Array<{ id: string; scene_index?: number; type: string; start: number; end: number; duration?: number; text: string; voice_text?: string; style?: Record<string, unknown>; timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number } }>
+  video?: Array<{ id: string; scene_index?: number; text_id?: string; text_ids?: string[]; type: string; start: number; end: number; duration?: number; src?: string; effect?: string; fit?: 'cover' | 'contain' | string; scale?: number; opacity?: number; position_x?: number; position_y?: number; rotation?: number }>
+  text?: Array<{ id: string; scene_index?: number; video_id?: string; video_ids?: string[]; type: string; start: number; end: number; duration?: number; text: string; voice_text?: string; style?: Record<string, unknown>; timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number } }>
   audio?: Array<{ id: string; type: 'voice' | 'music' | 'sfx' | 'audio' | string; start: number; end?: number | null; src?: string; volume?: number }>
 }
 

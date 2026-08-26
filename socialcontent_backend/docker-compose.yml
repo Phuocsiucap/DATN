@@ -129,7 +129,28 @@ services:
       BROWSER_HEADLESS: "true"
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ./data_demo/video_gen_demo:/app/data_demo/video_gen_demo
+      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
+
+  remotion-worker:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/remotion-worker/Dockerfile
+    working_dir: /app
+    command: node src/worker.mjs
+    depends_on:
+      - postgres
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/socialcontent
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CHROME_BIN: /usr/bin/chromium
+      REMOTION_PUBLIC_DIR: /app/data_demo/video_gen_demo/public
+      REMOTION_OUT_DIR: /app/data_demo/video_gen_demo/out
+    volumes:
+      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
+      - ./data_demo/video_gen_demo/out:/app/data_demo/video_gen_demo/out
 
 volumes:
   socialcontent_postgres:

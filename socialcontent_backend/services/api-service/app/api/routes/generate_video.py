@@ -32,6 +32,13 @@ from common.events.topics import (
 
 router = APIRouter()
 DEFAULT_AUTO_VOICE_PROVIDER = "edge_tts_namminh"
+ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PROCESSING"}
+PRE_RENDER_TASK_TYPES = {
+    "GENERATE_VIDEO_SCRIPT",
+    "GENERATE_VIDEO_EDIT",
+    "GENERATE_VIDEO_REVIEW",
+    "GENERATE_VIDEO_VOICE",
+}
 
 DEFAULT_SHARED_VOICE = {
     "voice_id": "pNInz6obpgDQGcFmaJgB",
@@ -251,21 +258,6 @@ def _enqueue_project_voice_job(
     project.progress_percent = 0
     db.add_all([job, project])
     db.commit()
-
-
-def _script_task_payload(
-    content_id: uuid.UUID,
-    *,
-    trigger: str,
-    target_duration_seconds: int | None = None,
-    instructions: str | None = None,
-) -> dict:
-    payload = {"content_id": str(content_id), "trigger": trigger}
-    if target_duration_seconds:
-        payload["target_duration_seconds"] = target_duration_seconds
-    if instructions and instructions.strip():
-        payload["instructions"] = instructions.strip()
-    return payload
     db.refresh(job)
     publish(
         GENERATE_VIDEO_VOICE_REQUESTED,
@@ -286,10 +278,37 @@ def _script_task_payload(
     return job
 
 
+def _script_task_payload(
+    content_id: uuid.UUID,
+    *,
+    trigger: str,
+    target_duration_seconds: int | None = None,
+    instructions: str | None = None,
+) -> dict:
+    payload = {"content_id": str(content_id), "trigger": trigger}
+    if target_duration_seconds:
+        payload["target_duration_seconds"] = target_duration_seconds
+    if instructions and instructions.strip():
+        payload["instructions"] = instructions.strip()
+    return payload
+
+
 def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> KafkaTask:
+    blocking = _active_pre_render_task(db, project)
+    if blocking:
+        label = {
+            "GENERATE_VIDEO_SCRIPT": "tạo draft",
+            "GENERATE_VIDEO_EDIT": "chỉnh draft",
+            "GENERATE_VIDEO_REVIEW": "review draft",
+            "GENERATE_VIDEO_VOICE": "tạo voice/căn timeline",
+        }.get(blocking.task_type, blocking.task_type)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chưa thể render vì workflow vẫn đang {label}. Hãy đợi task hiện tại hoàn tất rồi render lại.",
+        )
     existing = (
         db.query(KafkaTask)
-        .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_RENDER", KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]))
+        .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == "GENERATE_VIDEO_RENDER", KafkaTask.status.in_(ACTIVE_TASK_STATUSES))
         .order_by(KafkaTask.created_at.desc())
         .first()
     )
@@ -323,6 +342,22 @@ def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict
         ),
     )
     return job
+
+
+def _active_pre_render_task(db: Session, project: MediaWorkflow) -> KafkaTask | None:
+    return (
+        db.query(KafkaTask)
+        .filter(
+            KafkaTask.reference_id == project.id,
+            KafkaTask.task_type.in_(PRE_RENDER_TASK_TYPES),
+            KafkaTask.status.in_(ACTIVE_TASK_STATUSES),
+        )
+        .order_by(
+            KafkaTask.status.desc(),
+            KafkaTask.created_at.desc(),
+        )
+        .first()
+    )
 
 
 def _can_use_content(content: ContentItem, user: User) -> bool:
@@ -362,12 +397,36 @@ def approve_project_video(
     metadata["video_approved"] = True
     metadata["video_approved_at"] = datetime.utcnow().isoformat()
     metadata["video_approved_by"] = str(user.id)
+    metadata["module4_review"] = {
+        "decision": "approved",
+        "mode": "manual",
+        "reviewed_by": str(user.id),
+        "reviewed_at": metadata["video_approved_at"],
+    }
     project.metadata_json = metadata
     project.status = "VIDEO_APPROVED"
     db.add(project)
+    queue_item = None
+    profile = db.get(SocialProfile, project.profile_id)
+    strategy = getattr(profile, "strategy", None) if profile else None
+    if profile and getattr(strategy, "auto_queue_enabled", False):
+        queue_item = _queue_project_video(
+            db,
+            project,
+            profile,
+            story,
+            metadata,
+            requested_status="approved",
+            reason="Module 4 auto queue sau khi reviewer duyệt video",
+        )
     db.commit()
     db.refresh(project)
-    return {"workflow_id": project.id, "status": project.status, "rendered_video": rendered_video}
+    return {
+        "workflow_id": project.id,
+        "status": project.status,
+        "rendered_video": rendered_video,
+        "queue_item": _serialize_queue_item(queue_item, profile) if queue_item and profile else None,
+    }
 
 
 @router.post("/projects/{workflow_id}/queue-post")
@@ -395,27 +454,17 @@ def queue_project_video_for_posting(
     if requested_status not in {"queued", "needs_approval", "approved"}:
         raise HTTPException(status_code=400, detail="Trạng thái queue không hợp lệ")
 
-    scheduled_at = (payload.scheduled_at if payload else None) or _default_scheduled_at(profile)
-    caption = (payload.caption if payload else None) or _default_video_caption(project, story)
-    item = PublishingQueueItem(
-        user_id=user.id,
-        profile_id=profile.id,
-        content_id=project.primary_content_id,
-        article_link=rendered_video,
-        article_title=project.title,
-        platform=profile.platform,
-        generated_content=caption,
-        ai_reason="Queued from approved Generate Video render",
-        status=requested_status,
-        scheduled_at=scheduled_at,
+    item = _queue_project_video(
+        db,
+        project,
+        profile,
+        story,
+        metadata,
+        requested_status=requested_status,
+        scheduled_at=payload.scheduled_at if payload else None,
+        caption=payload.caption if payload else None,
+        reason="Module 4 manual queue từ video đã duyệt",
     )
-    db.add(item)
-    db.flush()
-    metadata["queued_post_id"] = str(item.id)
-    metadata["queued_at"] = datetime.utcnow().isoformat()
-    project.metadata_json = metadata
-    project.status = "QUEUED_FOR_PUBLISHING"
-    db.add(project)
     db.commit()
     db.refresh(item)
     db.refresh(project)
@@ -423,20 +472,7 @@ def queue_project_video_for_posting(
         "workflow_id": project.id,
         "status": project.status,
         "queue_item": {
-            "id": item.id,
-            "profile_id": item.profile_id,
-            "profile_name": profile.profile_name,
-            "article_link": item.article_link,
-            "article_title": item.article_title,
-            "platform": item.platform,
-            "generated_content": item.generated_content,
-            "ai_reason": item.ai_reason,
-            "status": item.status,
-            "scheduled_at": item.scheduled_at,
-            "published_at": item.published_at,
-            "error": item.error,
-            "created_at": item.created_at,
-            "updated_at": item.updated_at,
+            **_serialize_queue_item(item, profile),
         },
     }
 
@@ -464,12 +500,19 @@ def _default_scheduled_at(profile: SocialProfile) -> datetime:
     strategy = profile.strategy
     if not strategy:
         return datetime.utcnow() + timedelta(hours=1)
+    days = {
+        int(item)
+        for item in str(strategy.schedule_days or "0,1,2,3,4,5,6").split(",")
+        if item.strip().isdigit()
+    }
     times = [item.strip() for item in str(strategy.schedule_times or "").split(",") if item.strip()]
     now = datetime.utcnow()
     if not times:
         return now + timedelta(hours=1)
     for day_offset in range(0, 8):
         candidate_day = now + timedelta(days=day_offset)
+        if days and candidate_day.weekday() not in days:
+            continue
         for value in times:
             try:
                 hour, minute = [int(part) for part in value.split(":", 1)]
@@ -479,6 +522,81 @@ def _default_scheduled_at(profile: SocialProfile) -> datetime:
             if candidate > now:
                 return candidate
     return now + timedelta(hours=1)
+
+
+def _queue_project_video(
+    db: Session,
+    project: MediaWorkflow,
+    profile: SocialProfile,
+    story: dict | None,
+    metadata: dict,
+    *,
+    requested_status: str,
+    scheduled_at: datetime | None = None,
+    caption: str | None = None,
+    reason: str,
+) -> PublishingQueueItem:
+    rendered_video = _rendered_video_uri(project, story)
+    if not rendered_video:
+        raise HTTPException(status_code=400, detail="Project chưa có MP4 để đưa vào queue")
+
+    existing_id = metadata.get("queued_post_id")
+    item = None
+    if existing_id:
+        try:
+            item = db.get(PublishingQueueItem, uuid.UUID(str(existing_id)))
+        except ValueError:
+            item = None
+    if item and item.profile_id != profile.id:
+        item = None
+    if item is None:
+        item = PublishingQueueItem(
+            user_id=project.user_id,
+            profile_id=profile.id,
+            content_id=project.primary_content_id,
+            platform=profile.platform,
+        )
+        db.add(item)
+
+    item.article_link = rendered_video
+    item.article_title = project.title
+    item.generated_content = caption or item.generated_content or _default_video_caption(project, story)
+    item.ai_reason = reason
+    item.status = requested_status
+    item.scheduled_at = scheduled_at or item.scheduled_at or _default_scheduled_at(profile)
+    item.error = None
+    db.flush()
+
+    metadata["queued_post_id"] = str(item.id)
+    metadata["queued_at"] = datetime.utcnow().isoformat()
+    metadata["module4_queue"] = {
+        "status": item.status,
+        "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
+        "reason": reason,
+    }
+    project.metadata_json = metadata
+    project.status = "QUEUED_FOR_PUBLISHING"
+    db.add(project)
+    return item
+
+
+def _serialize_queue_item(item: PublishingQueueItem, profile: SocialProfile) -> dict:
+    return {
+        "id": item.id,
+        "profile_id": item.profile_id,
+        "profile_name": profile.profile_name,
+        "article_link": item.article_link,
+        "article_title": item.article_title,
+        "platform": item.platform,
+        "generated_content": item.generated_content,
+        "ai_reason": item.ai_reason,
+        "status": item.status,
+        "scheduled_at": item.scheduled_at,
+        "published_at": item.published_at,
+        "error": item.error,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
 
 
 def _default_video_caption(project: MediaWorkflow, story: dict | None) -> str:
@@ -635,6 +753,18 @@ def generate_video(
         story = pipeline.normalize_story_for_project(story)
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
+        blocking = _active_pre_render_task(db, project)
+        if blocking:
+            label = {
+                "GENERATE_VIDEO_SCRIPT": "tạo draft",
+                "GENERATE_VIDEO_EDIT": "chỉnh draft",
+                "GENERATE_VIDEO_REVIEW": "review draft",
+                "GENERATE_VIDEO_VOICE": "tạo voice/căn timeline",
+            }.get(blocking.task_type, blocking.task_type)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Chưa thể render vì workflow vẫn đang {label}. Hãy đợi task hiện tại hoàn tất rồi render lại.",
+            )
         _persist_project_story(db, project, story, status="RENDERING")
         job = _enqueue_project_render_job(db, project, story, trigger="manual_generate_video", mode="manual")
         return {"job": _serialize_workflow_run(db, job)}

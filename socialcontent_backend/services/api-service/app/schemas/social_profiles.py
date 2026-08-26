@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SocialProfileCreateRequest(BaseModel):
@@ -40,6 +41,12 @@ class SocialProfileStrategyRequest(BaseModel):
     auto_publish_enabled: bool | None = None
 
 
+class SchedulerSettingsRequest(BaseModel):
+    vnexpress_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    bilibili_interval_minutes: int = Field(default=30, ge=1, le=1440)
+    publish_queue_interval_minutes: int = Field(default=5, ge=1, le=1440)
+
+
 class QueueStatusRequest(BaseModel):
     status: str
 
@@ -66,7 +73,13 @@ class SocialProfileResponse(BaseModel):
     platform: str
     profile_name: str
     username: str | None
+    external_id: str | None = None
+    avatar_url: str | None = None
     folder_path: str
     status: str
+    scopes: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    token_expires_at: datetime | None = None
+    refresh_expires_at: datetime | None = None
     created_at: datetime
     strategy: dict | None = None

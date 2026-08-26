@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, RefreshCw, SkipForward, Wand2 } from 'lucide-react'
-import { fetchPublishingQueueApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { CalendarClock, CheckCircle2, RefreshCw, Send, SkipForward, Wand2 } from 'lucide-react'
+import { fetchPublishingQueueApi, publishPublishingQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 
 type PublishingQueueItem = {
   id: string
@@ -22,6 +22,7 @@ const statusOptions = [
   { value: 'needs_approval', label: 'Cần duyệt' },
   { value: 'queued', label: 'Đã xếp hàng' },
   { value: 'approved', label: 'Đã duyệt' },
+  { value: 'publishing', label: 'Đang gửi' },
   { value: 'published', label: 'Đã đăng' },
   { value: 'skipped', label: 'Đã bỏ qua' },
   { value: 'failed', label: 'Lỗi' },
@@ -65,9 +66,24 @@ export default function ApprovalsPage() {
     try {
       await updatePublishingQueueItemApi(queueItemId, nextStatus)
       await loadQueue()
-      setMessage(nextStatus === 'approved' ? 'Đã duyệt bài. Scheduler sẽ đăng khi đến giờ.' : 'Đã cập nhật bài.')
+      setMessage(nextStatus === 'approved' ? 'Đã duyệt bài. Bạn có thể gửi video lên TikTok bằng API.' : 'Đã cập nhật bài.')
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không thể cập nhật bài')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePublish = async (queueItemId: string) => {
+    setLoading(true)
+    setMessage('')
+    try {
+      await publishPublishingQueueItemApi(queueItemId)
+      await loadQueue()
+      setMessage('Đã gửi video lên TikTok. Creator sẽ nhận thông báo trong inbox TikTok để hoàn tất đăng.')
+    } catch (error: any) {
+      setMessage(error?.response?.data?.detail || 'Không gửi được video lên TikTok')
+      await loadQueue()
     } finally {
       setLoading(false)
     }
@@ -177,7 +193,18 @@ export default function ApprovalsPage() {
                       Duyệt
                     </button>
                   )}
-                  {item.status !== 'published' && item.status !== 'skipped' && (
+                  {['queued', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (
+                    <button
+                      onClick={() => void handlePublish(item.id)}
+                      disabled={loading}
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                      style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
+                    >
+                      <Send size={15} />
+                      Gửi TikTok
+                    </button>
+                  )}
+                  {item.status !== 'published' && item.status !== 'skipped' && item.status !== 'publishing' && (
                     <button
                       onClick={() => void handleStatus(item.id, 'skipped')}
                       disabled={loading}

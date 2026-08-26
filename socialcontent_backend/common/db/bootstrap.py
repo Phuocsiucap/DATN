@@ -59,6 +59,38 @@ def ensure_schema_compatibility(db: Session) -> None:
                     ON content_items (crawl_job_id);
                 END IF;
 
+                IF to_regclass('social_profiles') IS NOT NULL THEN
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS external_id VARCHAR(255);
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS access_token TEXT;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS refresh_expires_at TIMESTAMPTZ;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS scopes_jsonb JSONB DEFAULT '[]'::jsonb NOT NULL;
+
+                    ALTER TABLE social_profiles
+                    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+                    CREATE INDEX IF NOT EXISTS ix_social_profiles_external_id
+                    ON social_profiles (external_id);
+
+                    CREATE INDEX IF NOT EXISTS ix_social_profiles_user_platform_external_id
+                    ON social_profiles (user_id, platform, external_id);
+                END IF;
+
                 IF to_regclass('media_workflow') IS NOT NULL THEN
                     CREATE TABLE IF NOT EXISTS planning_runs (
                         id UUID PRIMARY KEY,

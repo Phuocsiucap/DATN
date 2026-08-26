@@ -20,3 +20,4 @@ runtime/
 bilibili_crawler.zip
 .agents
 data_demo/
+node_modules/

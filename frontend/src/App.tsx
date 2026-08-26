@@ -19,6 +19,7 @@ import UsersPage from '@/features/users/UsersPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 import TermsPage from '@/features/legal/TermsPage'
 import PrivacyPage from '@/features/legal/PrivacyPage'
+import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
 
 import AuthPage from '@/features/auth/AuthPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
@@ -195,6 +196,7 @@ export default function App() {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
   if (normalizedPath === '/terms') return <TermsPage />
   if (normalizedPath === '/privacy') return <PrivacyPage />
+  if (normalizedPath === '/auth/tiktok/callback') return <TikTokCallbackPage />
 
   return (
     <Provider store={store}>

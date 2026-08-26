@@ -40,6 +40,7 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
         task.error_message = None
         _update_task_progress(db, task, project, "LOADING_SOURCE", 10, project_status="SCRIPTING")
 
@@ -386,6 +387,7 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
         task.error_message = None
         _update_task_progress(db, task, project, "LOADING_DRAFT", 10, project_status="EDITING")
 
@@ -453,6 +455,7 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
         task.error_message = None
         _update_task_progress(db, task, project, "LOADING_DRAFT", 10, project_status="REVIEWING")
 
@@ -528,6 +531,7 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
         task.error_message = None
         _update_task_progress(db, task, project, "PREPARING_VOICE", 10, project_status="EDITING")
 
@@ -737,8 +741,33 @@ def _project_render_worker(task_id: str) -> None:
         if not project:
             return
 
+        blocking_task = (
+            db.query(KafkaTask)
+            .filter(
+                KafkaTask.reference_id == project.id,
+                KafkaTask.task_type.in_(
+                    [
+                        "GENERATE_VIDEO_SCRIPT",
+                        "GENERATE_VIDEO_EDIT",
+                        "GENERATE_VIDEO_REVIEW",
+                        "GENERATE_VIDEO_VOICE",
+                    ]
+                ),
+                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
+            )
+            .order_by(KafkaTask.created_at.desc())
+            .first()
+        )
+        if blocking_task:
+            task.current_stage = "QUEUED_RENDER_AFTER_VOICE" if blocking_task.task_type == "GENERATE_VIDEO_VOICE" else "QUEUED_RENDER_AFTER_DRAFT"
+            task.progress_percent = 0
+            db.add(task)
+            db.commit()
+            return
+
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
         task.error_message = None
         _update_task_progress(db, task, project, "PREPARING_RENDER", 10, project_status="RENDERING")
 
@@ -783,6 +812,7 @@ def _project_render_worker(task_id: str) -> None:
         project.status = "RENDERED"
         project.current_stage = "RENDERED"
         project.progress_percent = 100
+        _apply_module4_policy_after_render(db, project, artifact_path, public_story)
         db.add_all([task, project])
         db.commit()
     except Exception as error:
@@ -803,6 +833,126 @@ def _project_render_worker(task_id: str) -> None:
             db.commit()
     finally:
         db.close()
+
+
+def _apply_module4_policy_after_render(db, project, rendered_video: str, story: dict[str, Any]) -> None:
+    from datetime import timedelta
+
+    from common.db.models import PublishingQueueItem, SocialProfile
+
+    profile = db.get(SocialProfile, project.profile_id)
+    strategy = getattr(profile, "strategy", None) if profile else None
+    metadata = dict(project.metadata_json or {})
+    metadata["module4_quality"] = {
+        "status": "passed_basic_render_check",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checks": ["final_video_exists", "render_task_completed"],
+    }
+
+    if not strategy or getattr(strategy, "approval_mode", "manual") != "auto":
+        metadata["module4_review"] = {
+            "decision": "waiting_human_review",
+            "mode": "manual",
+            "reason": "Social profile strategy requires manual approval",
+        }
+        project.metadata_json = metadata
+        project.status = "RENDERED"
+        project.current_stage = "WAITING_HUMAN_REVIEW"
+        return
+
+    metadata["video_approved"] = True
+    metadata["video_approved_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["module4_review"] = {
+        "decision": "approved",
+        "mode": "auto",
+        "reason": "Social profile strategy approval_mode=auto",
+    }
+
+    if not getattr(strategy, "auto_queue_enabled", True):
+        project.metadata_json = metadata
+        project.status = "VIDEO_APPROVED"
+        project.current_stage = "AUTO_APPROVED"
+        return
+
+    queued_status = "approved"
+    queued_reason = "Module 4 auto queue từ video render đã được duyệt tự động"
+    existing_id = metadata.get("queued_post_id")
+    item = None
+    if existing_id:
+        try:
+            item = db.get(PublishingQueueItem, uuid.UUID(str(existing_id)))
+        except ValueError:
+            item = None
+    if item is None:
+        item = PublishingQueueItem(
+            user_id=project.user_id,
+            profile_id=project.profile_id,
+            content_id=project.primary_content_id,
+            article_link=rendered_video,
+            article_title=project.title,
+            platform=profile.platform if profile else "tiktok",
+            generated_content=_default_module4_caption(project, story),
+            ai_reason=queued_reason,
+            status=queued_status,
+            scheduled_at=_next_strategy_scheduled_at(strategy) if strategy else datetime.utcnow() + timedelta(hours=1),
+        )
+        db.add(item)
+        db.flush()
+    else:
+        item.article_link = rendered_video
+        item.article_title = project.title
+        item.generated_content = item.generated_content or _default_module4_caption(project, story)
+        item.ai_reason = queued_reason
+        item.status = queued_status
+        item.scheduled_at = item.scheduled_at or (_next_strategy_scheduled_at(strategy) if strategy else datetime.utcnow() + timedelta(hours=1))
+        item.error = None
+        db.add(item)
+        db.flush()
+
+    metadata["queued_post_id"] = str(item.id)
+    metadata["queued_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["module4_queue"] = {
+        "status": item.status,
+        "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
+        "auto_publish_enabled": bool(getattr(strategy, "auto_publish_enabled", False)),
+        "reason": queued_reason,
+    }
+    project.metadata_json = metadata
+    project.status = "QUEUED_FOR_PUBLISHING"
+    project.current_stage = "QUEUED_FOR_PUBLISHING"
+
+
+def _next_strategy_scheduled_at(strategy) -> datetime:
+    from datetime import timedelta
+
+    now = datetime.utcnow()
+    times = [item.strip() for item in str(getattr(strategy, "schedule_times", "") or "").split(",") if item.strip()]
+    days = {
+        int(item)
+        for item in str(getattr(strategy, "schedule_days", "0,1,2,3,4,5,6") or "").split(",")
+        if item.strip().isdigit()
+    }
+    if not getattr(strategy, "schedule_enabled", True) or not times:
+        return now + timedelta(hours=1)
+    for day_offset in range(0, 8):
+        candidate_day = now + timedelta(days=day_offset)
+        if days and candidate_day.weekday() not in days:
+            continue
+        for value in times:
+            try:
+                hour, minute = [int(part) for part in value.split(":", 1)]
+            except ValueError:
+                continue
+            candidate = candidate_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if candidate > now:
+                return candidate
+    return now + timedelta(hours=1)
+
+
+def _default_module4_caption(project, story: dict[str, Any]) -> str:
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    title = str(meta.get("title") or project.title or "").strip()
+    return title or "Video mới đã sẵn sàng đăng"
 
 
 def _upsert_project_rendered_draft(project, story: dict[str, Any]) -> None:

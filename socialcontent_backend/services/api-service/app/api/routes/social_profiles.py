@@ -71,6 +71,12 @@ def update_queue_item_status(
     return service.serialize_queue_item(item)
 
 
+@router.post("/queue/items/{queue_item_id}/publish")
+def publish_queue_item_to_tiktok(queue_item_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    service = SocialProfileService()
+    return service.publish_queue_item_to_tiktok(db, queue_item_id, current_user)
+
+
 @router.post("/post-items/{post_id}/metrics")
 def create_social_post_metric(
     post_id: uuid.UUID,

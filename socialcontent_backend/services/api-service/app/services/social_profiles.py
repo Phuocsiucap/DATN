@@ -15,12 +15,17 @@ from app.services.tiktok_qr import (
     BACKEND_SOCIAL_PROFILE_ROOT,
     SOCIAL_PROFILE_ROOT,
     WORKSPACE_ROOT,
-    get_tiktok_qr_session,
-    qr_image_data_url,
-    refresh_tiktok_qr_session,
-    start_tiktok_qr_session,
     stop_tiktok_qr_session,
 )
+from app.services.tiktok_oauth import (
+    build_tiktok_token_metadata,
+    granted_scopes,
+    poll_tiktok_oauth_qr_session,
+    start_tiktok_oauth_qr_session,
+    stop_tiktok_oauth_qr_session,
+)
+from app.services import generate_video as video_pipeline
+from app.services.tiktok_posting import upload_video_to_tiktok_inbox
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,7 @@ class SocialProfileService:
 
     async def delete_profile(self, db: Session, profile: SocialProfile) -> None:
         await stop_tiktok_qr_session(str(profile.id), profile.user_id)
+        await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
         self.delete_profile_folder(profile.folder_path)
         db.delete(profile)
         db.commit()
@@ -70,21 +76,26 @@ class SocialProfileService:
     async def start_pending_tiktok_qr_login(self, user: User, payload: schemas.TikTokQrStartRequest) -> dict:
         session_id = uuid.uuid4().hex
         profile_name = (payload.profile_name or "TikTok account").strip() or "TikTok account"
-        folder_path = self.build_profile_path(user.id, "tiktok", profile_name)
-        session = await start_tiktok_qr_session(session_id, folder_path, user.id)
-        is_auth = await session.is_authenticated()
+        session = await start_tiktok_oauth_qr_session(
+            session_id=session_id,
+            user_id=user.id,
+            profile_name=profile_name,
+            username=payload.username,
+        )
         logger.info(
-            "Started pending TikTok QR login session_id=%s user_id=%s folder_path=%s authenticated=%s",
+            "Started pending TikTok OAuth QR session_id=%s user_id=%s profile_name=%s",
             session_id,
             user.id,
-            folder_path,
-            is_auth,
+            profile_name,
         )
         return {
             "session_id": session_id,
-            "authenticated": is_auth,
-            "qr_image": qr_image_data_url(session),
-            "page_url": session.page_url(),
+            "authenticated": False,
+            "session_active": True,
+            "status": session.last_status,
+            "qr_image": session.qr_image,
+            "qr_url": session.qr_url,
+            "page_url": session.qr_url,
         }
 
     async def get_pending_tiktok_qr_status(
@@ -95,126 +106,166 @@ class SocialProfileService:
         profile_name: str | None = None,
         username: str | None = None,
     ) -> dict:
-        session = get_tiktok_qr_session(session_id, user.id)
-        if not session:
+        result = await poll_tiktok_oauth_qr_session(session_id, user.id)
+        if not result.get("session_active") and not result.get("authenticated"):
             logger.info("Pending TikTok QR status session missing session_id=%s user_id=%s", session_id, user.id)
-            return {"session_active": False, "authenticated": False, "profile": None}
+            return result
 
-        authenticated = await session.is_authenticated()
-        cookie_names = await session.cookie_names()
-        logger.info(
-            "Pending TikTok QR status session_id=%s user_id=%s authenticated=%s page_url=%s cookies=%s",
-            session_id,
-            user.id,
-            authenticated,
-            session.page_url(),
-            cookie_names,
+        if not result.get("authenticated"):
+            return result
+
+        session = result["session"]
+        profile = self.upsert_tiktok_oauth_profile(
+            db=db,
+            user=user,
+            token_data=result["token_data"],
+            user_info=result["user_info"],
+            fallback_profile_name=profile_name or session.profile_name,
+            fallback_username=username or session.username,
         )
-        try:
-            refreshed_session = await refresh_tiktok_qr_session(session_id, user.id)
-            qr_image = qr_image_data_url(refreshed_session)
-        except RuntimeError:
-            qr_image = None
-
-        if not authenticated:
-            return {
-                "session_active": True,
-                "authenticated": False,
-                "profile": None,
-                "page_url": session.page_url(),
-                "qr_image": qr_image or qr_image_data_url(session),
-            }
-
-        final_profile_name = (profile_name or "TikTok account").strip() or "TikTok account"
-        profile = SocialProfile(
-            user_id=user.id,
-            platform="tiktok",
-            profile_name=final_profile_name,
-            username=username.strip() if username else None,
-            folder_path=self.to_runtime_folder_path(session.profile_dir),
-            status="active",
-        )
-        db.add(profile)
-        db.commit()
-        db.refresh(profile)
-        page_url = session.page_url()
         logger.info(
-            "Created TikTok profile from QR session_id=%s user_id=%s profile_id=%s folder_path=%s",
+            "Stored TikTok OAuth profile from QR session_id=%s user_id=%s profile_id=%s open_id=%s",
             session_id,
             user.id,
             profile.id,
-            profile.folder_path,
+            profile.external_id,
         )
-        await stop_tiktok_qr_session(session_id, user.id)
+        await stop_tiktok_oauth_qr_session(session_id, user.id)
         return {
             "session_active": False,
             "authenticated": True,
             "profile": self.serialize_profile(profile),
-            "page_url": page_url,
-            "qr_image": qr_image or qr_image_data_url(session),
+            "status": "confirmed",
+            "page_url": session.qr_url,
+            "qr_url": session.qr_url,
+            "qr_image": session.qr_image,
         }
 
     async def stop_pending_tiktok_qr_login(self, user: User, session_id: str) -> dict:
+        await stop_tiktok_oauth_qr_session(session_id, user.id)
         await stop_tiktok_qr_session(session_id, user.id)
         return {"message": "Đã đóng phiên QR TikTok"}
 
     async def start_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
-        session = await start_tiktok_qr_session(str(profile.id), profile.folder_path, profile.user_id)
+        session = await start_tiktok_oauth_qr_session(
+            session_id=str(profile.id),
+            user_id=profile.user_id,
+            profile_name=profile.profile_name,
+            username=profile.username,
+            target_profile_id=profile.id,
+        )
         profile.status = "qr_pending"
         db.commit()
         db.refresh(profile)
         return {
             "profile": self.serialize_profile(profile),
-            "authenticated": await session.is_authenticated(),
-            "qr_image": qr_image_data_url(session),
-            "page_url": session.page_url(),
+            "authenticated": False,
+            "session_active": True,
+            "status": session.last_status,
+            "qr_image": session.qr_image,
+            "qr_url": session.qr_url,
+            "page_url": session.qr_url,
         }
 
     async def get_tiktok_qr_status(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
-        session = get_tiktok_qr_session(str(profile.id), profile.user_id)
-        if not session:
-            return {"profile": self.serialize_profile(profile), "session_active": False, "authenticated": False}
+        result = await poll_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
+        if not result.get("authenticated"):
+            return {**result, "profile": self.serialize_profile(profile)}
 
-        authenticated = await session.is_authenticated()
-        if authenticated and profile.status != "active":
-            profile.status = "active"
-            db.commit()
-            db.refresh(profile)
-        if authenticated:
-            page_url = session.page_url()
-            await stop_tiktok_qr_session(str(profile.id), profile.user_id)
-            return {
-                "profile": self.serialize_profile(profile),
-                "session_active": False,
-                "authenticated": True,
-                "page_url": page_url,
-                "qr_image": None,
-            }
-
-        try:
-            refreshed_session = await refresh_tiktok_qr_session(str(profile.id), profile.user_id)
-            qr_image = qr_image_data_url(refreshed_session)
-        except RuntimeError:
-            qr_image = None
-
+        session = result["session"]
+        updated_profile = self.upsert_tiktok_oauth_profile(
+            db=db,
+            user=profile.user,
+            token_data=result["token_data"],
+            user_info=result["user_info"],
+            fallback_profile_name=profile.profile_name,
+            fallback_username=profile.username,
+            target_profile=profile,
+        )
+        await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
         return {
-            "profile": self.serialize_profile(profile),
-            "session_active": True,
-            "authenticated": authenticated,
-            "page_url": session.page_url(),
-            "qr_image": qr_image or qr_image_data_url(session),
+            "profile": self.serialize_profile(updated_profile),
+            "session_active": False,
+            "authenticated": True,
+            "status": "confirmed",
+            "page_url": session.qr_url,
+            "qr_url": session.qr_url,
+            "qr_image": session.qr_image,
         }
 
     async def stop_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
+        await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
         await stop_tiktok_qr_session(str(profile.id), profile.user_id)
         if profile.status == "qr_pending":
             profile.status = "inactive"
             db.commit()
             db.refresh(profile)
         return {"message": "Đã đóng phiên QR", "profile": self.serialize_profile(profile)}
+
+    def upsert_tiktok_oauth_profile(
+        self,
+        db: Session,
+        user: User,
+        token_data: dict,
+        user_info: dict,
+        fallback_profile_name: str | None = None,
+        fallback_username: str | None = None,
+        target_profile: SocialProfile | None = None,
+    ) -> SocialProfile:
+        open_id = user_info.get("open_id") or token_data.get("open_id")
+        if not open_id:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="TikTok không trả về open_id")
+
+        profile = target_profile
+        if profile is None:
+            profile = (
+                db.query(SocialProfile)
+                .filter(
+                    SocialProfile.user_id == user.id,
+                    SocialProfile.platform == "tiktok",
+                    SocialProfile.external_id == open_id,
+                )
+                .first()
+            )
+
+        display_name = (user_info.get("display_name") or "").strip()
+        tiktok_username = (user_info.get("username") or fallback_username or "").strip() or None
+        profile_name = display_name or (fallback_profile_name or "").strip() or tiktok_username or "TikTok account"
+        scope_values = granted_scopes(token_data)
+        now = datetime.utcnow()
+        expires_in = int(token_data.get("expires_in") or 0)
+        refresh_expires_in = int(token_data.get("refresh_expires_in") or 0)
+
+        if profile is None:
+            profile = SocialProfile(
+                user_id=user.id,
+                platform="tiktok",
+                profile_name=profile_name,
+                username=tiktok_username,
+                folder_path=self.build_profile_path(user.id, "tiktok", profile_name),
+                status="active",
+            )
+            db.add(profile)
+        else:
+            profile.profile_name = profile_name
+            profile.username = tiktok_username
+            profile.status = "active"
+
+        profile.external_id = open_id
+        profile.avatar_url = user_info.get("avatar_large_url") or user_info.get("avatar_url_100") or user_info.get("avatar_url")
+        profile.access_token = token_data.get("access_token")
+        profile.refresh_token = token_data.get("refresh_token")
+        profile.token_expires_at = now + timedelta(seconds=expires_in) if expires_in else None
+        profile.refresh_expires_at = now + timedelta(seconds=refresh_expires_in) if refresh_expires_in else None
+        profile.scopes_jsonb = scope_values
+        profile.metadata_json = build_tiktok_token_metadata(token_data, user_info)
+
+        db.commit()
+        db.refresh(profile)
+        return profile
 
     def get_or_create_strategy(self, db: Session, profile: SocialProfile) -> SocialProfileStrategy:
         if profile.strategy:
@@ -246,8 +297,6 @@ class SocialProfileService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="risk_level phải là low, medium hoặc high")
             setattr(strategy, field, value)
 
-        if strategy.approval_mode != "auto":
-            strategy.auto_publish_enabled = False
         db.commit()
         db.refresh(strategy)
         return strategy
@@ -263,7 +312,7 @@ class SocialProfileService:
         if not self.is_system_user(user):
             query = query.filter(SocialProfile.user_id == user.id)
         if queue_status == "upcoming":
-            query = query.filter(PublishingQueueItem.status.in_(["queued", "approved"]))
+            query = query.filter(PublishingQueueItem.status.in_(["queued", "approved", "publishing"]))
         elif queue_status:
             query = query.filter(PublishingQueueItem.status == queue_status)
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
@@ -285,6 +334,78 @@ class SocialProfileService:
         db.commit()
         db.refresh(item)
         return item
+
+    def publish_queue_item_to_tiktok(self, db: Session, queue_item_id: uuid.UUID, user: User, source: str = "manual") -> dict:
+        item = (
+            db.query(PublishingQueueItem)
+            .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+            .filter(PublishingQueueItem.id == queue_item_id)
+            .first()
+        )
+        if item and not self.is_system_user(user) and item.profile.user_id != user.id:
+            item = None
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
+        if item.status in {"published", "skipped"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc")
+        if item.status not in {"queued", "approved", "publishing", "failed"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item chưa sẵn sàng để đăng")
+
+        profile = item.profile
+        self.ensure_tiktok_profile(profile)
+        video_path = self.resolve_rendered_video_path(item.article_link)
+        item.status = "publishing"
+        item.error = None
+        item.ai_reason = f"Đang gửi TikTok bằng API ({source})."
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        try:
+            result = upload_video_to_tiktok_inbox(profile, video_path)
+        except HTTPException as error:
+            item.status = "failed"
+            item.error = str(error.detail)
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            raise
+        except Exception as error:
+            item.status = "failed"
+            item.error = str(error)
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+        publish_id = result["publish_id"]
+        status_data = result.get("status") or {}
+        now = datetime.utcnow()
+        post = SocialPost(
+            profile_id=profile.id,
+            title=item.article_title,
+            post_url=item.article_link,
+            platform_post_id=publish_id,
+            caption=item.generated_content,
+            status="sent_to_tiktok_inbox",
+            published_at=now,
+        )
+        item.status = "published"
+        item.published_at = now
+        item.error = None
+        item.ai_reason = f"TikTok upload sent to creator inbox ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
+        db.add_all([profile, item, post])
+        db.commit()
+        db.refresh(item)
+        db.refresh(post)
+        return {
+            "queue_item": self.serialize_queue_item(item),
+            "post": self.serialize_post(post),
+            "tiktok": {
+                "publish_id": publish_id,
+                "status": status_data,
+                "video_size": result.get("video_size"),
+            },
+        }
 
     def list_posts(self, db: Session, profile: SocialProfile) -> list[SocialPost]:
         return db.query(SocialPost).filter(SocialPost.profile_id == profile.id).order_by(SocialPost.published_at.desc(), SocialPost.created_at.desc()).all()
@@ -400,8 +521,14 @@ class SocialProfileService:
             "platform": profile.platform,
             "profile_name": profile.profile_name,
             "username": profile.username,
+            "external_id": getattr(profile, "external_id", None),
+            "avatar_url": getattr(profile, "avatar_url", None),
             "folder_path": profile.folder_path,
             "status": profile.status,
+            "scopes": getattr(profile, "scopes_jsonb", None) or [],
+            "metadata": getattr(profile, "metadata_json", None) or {},
+            "token_expires_at": getattr(profile, "token_expires_at", None),
+            "refresh_expires_at": getattr(profile, "refresh_expires_at", None),
             "created_at": profile.created_at,
         }
         if profile.strategy:
@@ -482,6 +609,31 @@ class SocialProfileService:
             "growth": {"views_1h": growth_since(timedelta(hours=1)), "views_24h": growth_since(timedelta(days=1)), "views_7d": growth_since(timedelta(days=7))},
             "metrics": [self.serialize_metric(metric) for metric in metrics],
         }
+
+    def resolve_rendered_video_path(self, value: str | None) -> Path:
+        raw = (value or "").strip()
+        if not raw:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item chưa có video để đăng")
+
+        output_prefix = "/api/v1/generate-video/output/"
+        if raw.startswith(output_prefix):
+            raw = raw[len(output_prefix):]
+        if raw.startswith("out/") or raw.startswith("out\\"):
+            raw = raw[4:]
+
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+        else:
+            resolved = (video_pipeline.VIDEO_OUT_DIR / raw).resolve()
+
+        output_root = video_pipeline.VIDEO_OUT_DIR.resolve()
+        workspace_root = video_pipeline.RENDER_WORKSPACE_ROOT.resolve()
+        if not (resolved.is_relative_to(output_root) or resolved.is_relative_to(workspace_root)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Đường dẫn video không hợp lệ")
+        if not resolved.exists() or not resolved.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy file video để đăng")
+        return resolved
 
     def serialize_metric(self, metric: SocialPostMetric) -> dict:
         return {

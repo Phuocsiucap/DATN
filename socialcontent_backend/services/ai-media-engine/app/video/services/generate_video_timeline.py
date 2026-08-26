@@ -50,6 +50,7 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
 
     video_clips = normalize_video_clips(timeline.get("video"), fps)
     text_clips = prevent_timeline_text_overlap(normalize_text_clips(timeline.get("text"), fps), fps)
+    link_timeline_visual_text(video_clips, text_clips)
     audio_clips = normalize_audio_clips(timeline.get("audio"), fps)
     timeline_metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
     if not audio_clips:
@@ -110,15 +111,19 @@ def timeline_from_legacy_scenes(story: dict[str, Any], fps: int) -> dict[str, An
         duration = max(1 / max(1, fps), float(scene.get("duration") or 4))
         start = round_to_frame(cursor, fps)
         end = round_to_frame(cursor + duration, fps)
+        scene_index = _clip_scene_index(scene, index)
+        text_id = str(scene.get("text_id") or f"text-{index + 1}")
         video.append(
             {
                 "id": str(scene.get("id") or f"video-{index + 1}"),
+                "scene_index": scene_index,
                 "type": "image",
                 "start": start,
                 "end": end,
                 "src": scene.get("image") or DEFAULT_IMAGES[index % len(DEFAULT_IMAGES)],
                 "effect": scene.get("effect") or DEFAULT_EFFECTS[0],
                 "fit": normalize_media_fit(scene.get("fit")),
+                **({"text_ids": [text_id], "text_id": text_id} if strip_voice_tags(str(scene.get("subtitle") or "")) else {}),
             }
         )
         subtitle = strip_voice_tags(str(scene.get("subtitle") or ""))
@@ -127,7 +132,9 @@ def timeline_from_legacy_scenes(story: dict[str, Any], fps: int) -> dict[str, An
             text_duration = scene.get("subtitle_duration") if scene.get("subtitle_duration") is not None else duration
             text.append(
                 {
-                    "id": str(scene.get("text_id") or f"text-{index + 1}"),
+                    "id": text_id,
+                    "scene_index": scene_index,
+                    "video_id": str(scene.get("id") or f"video-{index + 1}"),
                     "type": "subtitle",
                     "start": round_to_frame(float(text_start), fps),
                     "end": round_to_frame(float(text_start) + float(text_duration), fps),
@@ -159,6 +166,11 @@ def normalize_video_clips(value: Any, fps: int) -> list[dict[str, Any]]:
             "effect": item.get("effect") or DEFAULT_EFFECTS[0],
             "fit": normalize_media_fit(item.get("fit")),
         }
+        clip["scene_index"] = _clip_scene_index(item, index)
+        text_ids = _clip_text_ids(item)
+        if text_ids:
+            clip["text_ids"] = text_ids
+            clip["text_id"] = text_ids[0]
         if item.get("scene_number") is not None:
             clip["scene_number"] = item.get("scene_number")
         if item.get("visual_direction"):
@@ -170,6 +182,114 @@ def normalize_video_clips(value: Any, fps: int) -> list[dict[str, Any]]:
 
 def normalize_media_fit(value: Any) -> str:
     return "cover" if str(value or "").lower() == "cover" else "contain"
+
+
+def _clip_scene_index(item: dict[str, Any], fallback: int) -> int:
+    for key in ("scene_index", "sceneIndex"):
+        try:
+            value = int(float(item.get(key)))
+        except (TypeError, ValueError):
+            continue
+        return max(0, value)
+    for key in ("scene_number", "sceneNumber"):
+        try:
+            value = int(float(item.get(key)))
+        except (TypeError, ValueError):
+            continue
+        return max(0, value - 1)
+    return max(0, fallback)
+
+
+def _clip_text_ids(item: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    raw_list = item.get("text_ids") if item.get("text_ids") is not None else item.get("textIds")
+    if isinstance(raw_list, list):
+        values.extend(raw_list)
+    raw_single = item.get("text_id") if item.get("text_id") is not None else item.get("textId")
+    if raw_single is not None:
+        values.append(raw_single)
+    return list(dict.fromkeys(str(value) for value in values if str(value or "").strip()))
+
+
+def _clip_video_ids(item: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    raw_list = item.get("video_ids") if item.get("video_ids") is not None else item.get("videoIds")
+    if isinstance(raw_list, list):
+        values.extend(raw_list)
+    raw_single = item.get("video_id") if item.get("video_id") is not None else item.get("videoId")
+    if raw_single is not None:
+        values.append(raw_single)
+    return list(dict.fromkeys(str(value) for value in values if str(value or "").strip()))
+
+
+def link_timeline_visual_text(video_clips: list[dict[str, Any]], text_clips: list[dict[str, Any]]) -> None:
+    if not video_clips or not text_clips:
+        return
+
+    text_by_id = {str(clip.get("id")): clip for clip in text_clips if clip.get("id")}
+    text_by_scene: dict[int, list[dict[str, Any]]] = {}
+    for index, text_clip in enumerate(text_clips):
+        scene_index = _clip_scene_index(text_clip, index)
+        text_clip["scene_index"] = scene_index
+        text_by_scene.setdefault(scene_index, []).append(text_clip)
+
+    claimed_ids: set[str] = set()
+    for index, video_clip in enumerate(video_clips):
+        scene_index = _clip_scene_index(video_clip, index)
+        video_clip["scene_index"] = scene_index
+        linked = [text_by_id[text_id] for text_id in _clip_text_ids(video_clip) if text_id in text_by_id]
+        if not linked:
+            linked = text_by_scene.get(scene_index, [])
+        if not linked:
+            linked = [
+                text_clip
+                for text_clip in text_clips
+                if _clip_overlap_seconds(video_clip, text_clip) > 0
+            ]
+        if not linked and index < len(text_clips):
+            linked = [text_clips[index]]
+        text_ids = [str(text_clip.get("id")) for text_clip in linked if text_clip.get("id")]
+        if not text_ids:
+            continue
+        video_clip["text_ids"] = list(dict.fromkeys(text_ids))
+        video_clip["text_id"] = video_clip["text_ids"][0]
+        for text_clip in linked:
+            text_clip["scene_index"] = scene_index
+            video_ids = _clip_video_ids(text_clip)
+            video_ids.append(str(video_clip.get("id")))
+            text_clip["video_ids"] = list(dict.fromkeys(video_ids))
+            text_clip["video_id"] = text_clip["video_ids"][0]
+            if text_clip.get("id"):
+                claimed_ids.add(str(text_clip["id"]))
+
+    if claimed_ids == {str(clip.get("id")) for clip in text_clips if clip.get("id")}:
+        return
+
+    last_video = video_clips[-1]
+    last_scene_index = _clip_scene_index(last_video, len(video_clips) - 1)
+    last_ids = list(last_video.get("text_ids") or [])
+    for text_clip in text_clips:
+        text_id = str(text_clip.get("id") or "")
+        if not text_id or text_id in claimed_ids:
+            continue
+        text_clip["scene_index"] = last_scene_index
+        video_ids = _clip_video_ids(text_clip)
+        video_ids.append(str(last_video.get("id")))
+        text_clip["video_ids"] = list(dict.fromkeys(video_ids))
+        text_clip["video_id"] = text_clip["video_ids"][0]
+        last_ids.append(text_id)
+    if last_ids:
+        last_video["text_ids"] = list(dict.fromkeys(str(item) for item in last_ids if str(item or "").strip()))
+        last_video["text_id"] = last_video["text_ids"][0]
+
+
+def _clip_overlap_seconds(left: dict[str, Any], right: dict[str, Any]) -> float:
+    try:
+        start = max(float(left.get("start") or 0), float(right.get("start") or 0))
+        end = min(float(left.get("end") or 0), float(right.get("end") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, end - start)
 
 
 
@@ -187,6 +307,7 @@ def normalize_text_clips(value: Any, fps: int) -> list[dict[str, Any]]:
         end = round_to_frame(max(start + 1 / max(1, fps), float(item.get("end") or start + float(item.get("duration") or 2))), fps)
         clip = {
             "id": str(item.get("id") or f"text-{index + 1}"),
+            "scene_index": _clip_scene_index(item, index),
             "type": "subtitle",
             "start": start,
             "end": end,
@@ -194,6 +315,12 @@ def normalize_text_clips(value: Any, fps: int) -> list[dict[str, Any]]:
             "text": text,
             "style": item.get("style") if isinstance(item.get("style"), dict) else {},
         }
+        if item.get("video_id"):
+            clip["video_id"] = str(item.get("video_id"))
+        video_ids = _clip_video_ids(item)
+        if video_ids:
+            clip["video_ids"] = video_ids
+            clip["video_id"] = video_ids[0]
         if item.get("voice_text"):
             clip["voice_text"] = str(item.get("voice_text"))
         if item.get("scene_number") is not None:
@@ -390,20 +517,87 @@ def fit_video_clips_to_text(video_value: Any, text_clips: list[dict[str, Any]], 
     if not video_clips or not text_clips:
         return video_clips
 
+    link_timeline_visual_text(video_clips, text_clips)
+    text_by_id = {str(clip.get("id")): clip for clip in text_clips if clip.get("id")}
+    videos_by_text_id: dict[str, list[dict[str, Any]]] = {}
+    for video_clip in video_clips:
+        for text_id in _clip_text_ids(video_clip):
+            videos_by_text_id.setdefault(text_id, []).append(video_clip)
+
     fitted: list[dict[str, Any]] = []
     last_end = 0.0
     for index, clip in enumerate(video_clips):
-        text_clip = text_clips[index] if index < len(text_clips) else None
-        if not text_clip:
+        linked_texts = [text_by_id[text_id] for text_id in _clip_text_ids(clip) if text_id in text_by_id]
+        if not linked_texts:
+            linked_texts = [
+                text_clip
+                for text_clip in text_clips
+                if str(text_clip.get("video_id") or "") == str(clip.get("id") or "")
+                or _clip_scene_index(text_clip, index) == _clip_scene_index(clip, index)
+            ]
+        if not linked_texts:
             fitted.append(clip)
             continue
-        start = round_to_frame(max(last_end, float(text_clip.get("start") or clip.get("start") or 0.0)), fps)
-        end = round_to_frame(max(start + 1 / max(1, fps), float(text_clip.get("end") or clip.get("end") or start + 1)), fps)
-        next_clip = {**clip, "start": start, "end": end, "duration": round_to_frame(end - start, fps)}
+        start, end = _fit_video_range_for_linked_texts(clip, linked_texts, videos_by_text_id, last_end, fps)
+        text_ids = [str(text_clip.get("id")) for text_clip in linked_texts if text_clip.get("id")]
+        next_clip = {
+            **clip,
+            "id": str(clip.get("id") or f"video-{index + 1}"),
+            "start": start,
+            "end": end,
+            "duration": round_to_frame(end - start, fps),
+            "text_ids": list(dict.fromkeys(text_ids)),
+        }
+        if next_clip["text_ids"]:
+            next_clip["text_id"] = next_clip["text_ids"][0]
         fitted.append(next_clip)
         last_end = end
 
     return fitted
+
+
+def _fit_video_range_for_linked_texts(
+    video_clip: dict[str, Any],
+    linked_texts: list[dict[str, Any]],
+    videos_by_text_id: dict[str, list[dict[str, Any]]],
+    last_end: float,
+    fps: int,
+) -> tuple[float, float]:
+    if len(linked_texts) == 1:
+        text_clip = linked_texts[0]
+        sibling_videos = videos_by_text_id.get(str(text_clip.get("id") or ""), [])
+        if len(sibling_videos) > 1:
+            return _partition_text_range_for_video(video_clip, text_clip, sibling_videos, last_end, fps)
+
+    start = round_to_frame(max(last_end, min(float(text_clip.get("start") or 0.0) for text_clip in linked_texts)), fps)
+    end = round_to_frame(max(start + 1 / max(1, fps), max(float(text_clip.get("end") or start + 1) for text_clip in linked_texts)), fps)
+    return start, end
+
+
+def _partition_text_range_for_video(
+    video_clip: dict[str, Any],
+    text_clip: dict[str, Any],
+    sibling_videos: list[dict[str, Any]],
+    last_end: float,
+    fps: int,
+) -> tuple[float, float]:
+    ordered = sorted(sibling_videos, key=lambda clip: (float(clip.get("start") or 0.0), float(clip.get("end") or 0.0), str(clip.get("id") or "")))
+    text_start = float(text_clip.get("start") or 0.0)
+    text_end = max(text_start + 1 / max(1, fps), float(text_clip.get("end") or text_start + 1.0))
+    total_text_duration = text_end - text_start
+    weights = [max(1 / max(1, fps), float(clip.get("duration") or 0.0) or float(clip.get("end") or 0.0) - float(clip.get("start") or 0.0)) for clip in ordered]
+    total_weight = sum(weights) or len(ordered)
+    cursor = text_start
+    for index, clip in enumerate(ordered):
+        duration = total_text_duration * (weights[index] / total_weight)
+        next_end = text_end if index == len(ordered) - 1 else cursor + duration
+        if clip is video_clip or str(clip.get("id") or "") == str(video_clip.get("id") or ""):
+            start = round_to_frame(max(last_end, cursor), fps)
+            end = round_to_frame(max(start + 1 / max(1, fps), next_end), fps)
+            return start, end
+        cursor = next_end
+    start = round_to_frame(max(last_end, text_start), fps)
+    return start, round_to_frame(max(start + 1 / max(1, fps), text_end), fps)
 
 
 

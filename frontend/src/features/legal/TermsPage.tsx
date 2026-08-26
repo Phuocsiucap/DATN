@@ -53,25 +53,25 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-[var(--surface)] px-4 py-8 text-[var(--on-surface)] sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-3xl">
-        <header className="mb-6 border-b border-[var(--outline-variant)] pb-5">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-[var(--outline-variant)] bg-white px-3 py-1 text-xs font-semibold text-[var(--accent-strong)]">
+    <main className="min-h-screen bg-[var(--surface)] px-4 py-12 text-[var(--on-surface)] sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-4xl">
+        <header className="mb-10">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-md bg-[var(--surface-variant)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-strong)]">
             <FileText size={14} />
             <span>Legal</span>
           </div>
-          <h1 className="text-2xl font-extrabold text-[var(--on-surface)]">SocialContentHub Terms of Service</h1>
-          <p className="mt-2 text-sm leading-6 text-[var(--on-surface-variant)]">
+          <h1 className="text-3xl font-extrabold text-[var(--on-surface)] sm:text-4xl">SocialContentHub Terms of Service</h1>
+          <p className="mt-4 text-lg leading-7 text-[var(--on-surface-variant)]">
             Rules for using SocialContentHub and connected content workflows.
           </p>
-          <p className="mt-3 text-xs font-medium text-[var(--on-surface-variant)]">Last updated: August 25, 2026</p>
+          <p className="mt-2 text-sm font-medium text-[var(--on-surface-variant)]">Last updated: August 25, 2026</p>
         </header>
 
-        <div className="space-y-4">
+        <div className="space-y-10">
           {sections.map((section) => (
-            <section key={section.title} className="rounded-md border border-[var(--outline-variant)] bg-white p-5 shadow-sm">
-              <h2 className="text-base font-bold text-[var(--on-surface)]">{section.title}</h2>
-              <div className="mt-3 space-y-3 text-sm leading-6 text-[var(--on-surface-variant)]">
+            <section key={section.title}>
+              <h2 className="text-xl font-bold text-[var(--on-surface)]">{section.title}</h2>
+              <div className="mt-4 space-y-4 text-base leading-7 text-[var(--on-surface-variant)]">
                 {section.body.map((paragraph) => (
                   <p key={paragraph}>{paragraph}</p>
                 ))}
@@ -80,9 +80,9 @@ export default function TermsPage() {
           ))}
         </div>
 
-        <footer className="mt-8 border-t border-[var(--outline-variant)] pt-4 text-xs text-[var(--on-surface-variant)]">
+        <footer className="mt-16 pt-8 text-sm text-[var(--on-surface-variant)]">
           <p>SocialContentHub is a social media content management and automation workspace.</p>
-          <div className="mt-3 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap gap-4">
             <a className="font-semibold text-[var(--accent-strong)] hover:underline" href="/terms">
               Terms
             </a>

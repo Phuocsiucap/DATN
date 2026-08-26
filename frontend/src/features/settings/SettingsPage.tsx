@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 
-import { CircleUserRound, ShieldCheck, QrCode, Settings, Trash2, PlusCircle, RefreshCw, X, Save, CheckCircle2 } from 'lucide-react'
+import { CircleUserRound, ShieldCheck, QrCode, Settings, Trash2, PlusCircle, RefreshCw, X, Save, CheckCircle2, ExternalLink } from 'lucide-react'
 import {
   fetchSocialProfilesApi,
   createSocialProfileApi,
@@ -12,6 +13,9 @@ import {
   stopTikTokQrLoginApi,
   deleteSocialProfileApi,
   fetchAdminSchedulerSettingsApi,
+  runPublishQueueSchedulerOnceApi,
+  startAdminSchedulerApi,
+  stopAdminSchedulerApi,
   updateAdminSchedulerSettingsApi,
   fetchSocialProfileStrategyApi,
   updateSocialProfileStrategyApi,
@@ -31,6 +35,9 @@ type SocialProfile = {
   platform: string
   profile_name: string
   username?: string | null
+  external_id?: string | null
+  avatar_url?: string | null
+  scopes?: string[]
   status: string
 }
 
@@ -41,6 +48,42 @@ const DEFAULT_SETTINGS: SchedulerSettings = {
   vnexpress_interval_minutes: 30,
   bilibili_interval_minutes: 30,
   publish_queue_interval_minutes: 5,
+}
+const TIKTOK_QR_SIZE = 232
+const TIKTOK_QR_WARMUP_MS = 5000
+
+const resolveTikTokQrStatus = (data: any) => {
+  if (data?.authenticated) return 'authenticated'
+  if (typeof data?.status === 'string' && data.status) return data.status
+  return data?.session_active ? 'waiting_for_scan' : 'stopped'
+}
+
+const isTikTokQrProcessingStatus = (status: string) => ['scanned', 'confirmed'].includes(status)
+
+const getTikTokQrHelpText = (status: string, createsProfile: boolean) => {
+  if (status === 'scanned') {
+    return createsProfile
+      ? 'Đã quét mã thành công. Hãy bấm Cho phép trên TikTok, hệ thống sẽ tự tạo profile.'
+      : 'Đã quét mã thành công. Hãy bấm Cho phép trên TikTok để hoàn tất kết nối.'
+  }
+  if (status === 'confirmed') {
+    return createsProfile ? 'TikTok đã xác nhận. Đang tạo và lưu profile...' : 'TikTok đã xác nhận. Đang lưu kết nối...'
+  }
+  return createsProfile ? 'Sau khi TikTok xác thực, profile sẽ được tạo tự động.' : 'Sử dụng ứng dụng TikTok trên điện thoại để quét mã này.'
+}
+
+const getTikTokQrStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    authenticated: 'Hoàn tất',
+    confirmed: 'Đang lưu kết nối',
+    scanned: 'Đã quét mã',
+    waiting_for_scan: 'Đang chờ quét',
+    new: 'Đang chờ quét',
+    expired: 'QR đã hết hạn',
+    stopped: 'Đã dừng',
+    preparing_qr: 'Đang chuẩn bị QR',
+  }
+  return labels[status] || status
 }
 
 export default function SettingsPage({ currentUser }: { currentUser: CurrentUser | null }) {
@@ -60,6 +103,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   // QR Session state
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null)
   const [qrImage, setQrImage] = useState<string | null>(null)
+  const [qrUrl, setQrUrl] = useState<string | null>(null)
+  const [qrReady, setQrReady] = useState(false)
   const [sessionStatus, setSessionStatus] = useState<string>('idle')
 
   // Add profile state
@@ -68,6 +113,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [newProfileUsername, setNewProfileUsername] = useState('')
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null)
   const [pendingQrImage, setPendingQrImage] = useState<string | null>(null)
+  const [pendingQrUrl, setPendingQrUrl] = useState<string | null>(null)
+  const [pendingQrReady, setPendingQrReady] = useState(false)
   const [addingProfile, setAddingProfile] = useState(false)
 
   // Scheduler state
@@ -82,11 +129,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     avoid_topics: '',
     tone: 'Professional & Authoritative',
     target_audience: '',
+    approval_mode: 'manual',
+    schedule_enabled: true,
+    schedule_days: '0,1,2,3,4,5,6',
+    schedule_times: '08:30,20:30',
+    schedule_timezone: 'Asia/Bangkok',
     min_score: 75,
     max_system_recommendations: 15,
     auto_project_queue_enabled: false,
-    auto_planning_enabled: false,
     video_render_mode: 'manual',
+    auto_queue_enabled: true,
+    auto_publish_enabled: false,
     receive_system_content: true,
     relevance_weight: 1.5,
     freshness_decay: 0.8,
@@ -140,21 +193,36 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       try {
         const data = await getTikTokQrLoginStatusApi(activeProfileId)
         if (data.qr_image) setQrImage(data.qr_image)
-        setSessionStatus(data.authenticated ? 'authenticated' : data.session_active ? 'waiting_for_scan' : 'stopped')
+        if (data.qr_url) setQrUrl(data.qr_url)
+        setSessionStatus(resolveTikTokQrStatus(data))
         
         if (data.authenticated) {
           setActiveProfileId(null)
           setQrImage(null)
+          setQrUrl(null)
+          setQrReady(false)
           await loadProfiles()
           setMessage('Đăng nhập TikTok thành công.')
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(error)
+        setMessage(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
       }
     }, 4000)
 
     return () => clearInterval(timer)
   }, [activeProfileId])
+
+  useEffect(() => {
+    if (!activeProfileId || (!qrImage && !qrUrl)) {
+      setQrReady(false)
+      return
+    }
+
+    setQrReady(false)
+    const timer = window.setTimeout(() => setQrReady(true), TIKTOK_QR_WARMUP_MS)
+    return () => window.clearTimeout(timer)
+  }, [activeProfileId, qrImage, qrUrl])
 
   useEffect(() => {
     if (!pendingSessionId) return
@@ -166,24 +234,39 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           username: newProfileUsername || undefined,
         })
         if (data.qr_image) setPendingQrImage(data.qr_image)
-        setSessionStatus(data.authenticated ? 'authenticated' : data.session_active ? 'waiting_for_scan' : 'stopped')
+        if (data.qr_url) setPendingQrUrl(data.qr_url)
+        setSessionStatus(resolveTikTokQrStatus(data))
 
         if (data.authenticated) {
           setPendingSessionId(null)
           setPendingQrImage(null)
+          setPendingQrUrl(null)
+          setPendingQrReady(false)
           setAddProfileOpen(false)
           setNewProfileName('')
           setNewProfileUsername('')
           await loadProfiles()
           setMessage('Đã thêm và đăng nhập TikTok profile thành công.')
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(error)
+        setMessage(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
       }
     }, 4000)
 
     return () => clearInterval(timer)
   }, [pendingSessionId, newProfileName, newProfileUsername])
+
+  useEffect(() => {
+    if (!pendingSessionId || (!pendingQrImage && !pendingQrUrl)) {
+      setPendingQrReady(false)
+      return
+    }
+
+    setPendingQrReady(false)
+    const timer = window.setTimeout(() => setPendingQrReady(true), TIKTOK_QR_WARMUP_MS)
+    return () => window.clearTimeout(timer)
+  }, [pendingSessionId, pendingQrImage, pendingQrUrl])
 
   const openStrategyModal = async (profile: SocialProfile) => {
     setActiveStrategyProfile(profile)
@@ -230,6 +313,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setAddProfileOpen(false)
     setPendingSessionId(null)
     setPendingQrImage(null)
+    setPendingQrUrl(null)
+    setPendingQrReady(false)
     setSessionStatus('idle')
   }
 
@@ -271,8 +356,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       })
       setPendingSessionId(data.session_id)
       setPendingQrImage(data.qr_image)
-      setSessionStatus(data.authenticated ? 'authenticated' : 'waiting_for_scan')
-      setMessage('Đã mở QR để thêm TikTok profile. Hãy quét bằng app TikTok trên điện thoại.')
+      setPendingQrUrl(data.qr_url)
+      setPendingQrReady(false)
+      setSessionStatus(resolveTikTokQrStatus(data))
+      setMessage('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không thể mở QR thêm profile')
     } finally {
@@ -287,8 +374,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       const data = await startTikTokQrLoginApi(profileId)
       setActiveProfileId(profileId)
       setQrImage(data.qr_image)
-      setSessionStatus(data.authenticated ? 'authenticated' : 'waiting_for_scan')
-      setMessage('Đã mở QR login TikTok. Hãy quét bằng app TikTok trên điện thoại.')
+      setQrUrl(data.qr_url)
+      setQrReady(false)
+      setSessionStatus(resolveTikTokQrStatus(data))
+      setMessage('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không thể mở QR login')
     } finally {
@@ -301,6 +390,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     if (activeProfileId === profileId) {
       setActiveProfileId(null)
       setQrImage(null)
+      setQrUrl(null)
+      setQrReady(false)
       setSessionStatus('stopped')
     }
     await loadProfiles()
@@ -314,6 +405,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       if (activeProfileId === profileId) {
         setActiveProfileId(null)
         setQrImage(null)
+        setQrUrl(null)
+        setQrReady(false)
         setSessionStatus('idle')
       }
       await loadProfiles()
@@ -343,6 +436,48 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setMessage('Đã lưu cấu hình scheduler')
     } catch (err: any) {
       setMessage(err?.response?.data?.detail || 'Không lưu được')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const startScheduler = async () => {
+    setLoading(true)
+    setMessage('')
+    try {
+      const data = await startAdminSchedulerApi()
+      setSchedulerStatus(data)
+      setMessage('Đã bật scheduler publish queue.')
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Không bật được scheduler')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const stopScheduler = async () => {
+    setLoading(true)
+    setMessage('')
+    try {
+      const data = await stopAdminSchedulerApi()
+      setSchedulerStatus(data)
+      setMessage('Đã dừng scheduler publish queue.')
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Không dừng được scheduler')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const runPublishQueueOnce = async () => {
+    setLoading(true)
+    setMessage('')
+    try {
+      const data = await runPublishQueueSchedulerOnceApi()
+      setSchedulerStatus(data)
+      setMessage('Đã chạy publish queue scheduler một lượt.')
+    } catch (err: any) {
+      setMessage(err?.response?.data?.detail || 'Không chạy được publish queue')
     } finally {
       setLoading(false)
     }
@@ -404,9 +539,21 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               {profiles.length === 0 && <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">Chưa kết nối tài khoản nào</div>}
               {profiles.map(profile => (
                 <div key={profile.id} className="flex flex-col justify-between gap-3 rounded-md border border-[#eef2f7] p-3 md:flex-row md:items-center">
-                  <div>
-                    <div className="font-bold text-[#0f172a]">{profile.profile_name}</div>
-                    <div className="text-xs text-[#64748b] mt-1">{profile.username || '—'} | {profile.status}</div>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {profile.avatar_url ? (
+                      <img src={profile.avatar_url} alt="" className="h-10 w-10 rounded-full border border-[#eef2f7] object-cover" />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                        <CircleUserRound size={20} />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate font-bold text-[#0f172a]">{profile.profile_name}</div>
+                      <div className="mt-1 truncate text-xs text-[#64748b]">{profile.username || 'Chưa có username'} | {profile.status}</div>
+                      {profile.scopes && profile.scopes.length > 0 && (
+                        <div className="mt-1 truncate text-[11px] text-slate-400">{profile.scopes.join(', ')}</div>
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => openStrategyModal(profile)} className="inline-flex h-8 items-center gap-1 rounded-md border border-[#d9e0ea] bg-slate-100 px-3 text-xs font-bold text-[#091426] hover:bg-slate-200"><Settings size={14}/> Config</button>
@@ -421,13 +568,29 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             {activeProfileId && (
               <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-6 flex flex-col items-center justify-center text-center">
                 <h4 className="font-bold text-blue-900 mb-2">Mã QR Đăng Nhập</h4>
-                <p className="text-xs text-blue-800 mb-4">Sử dụng ứng dụng TikTok trên điện thoại để quét mã này.</p>
-                {qrImage ? (
-                  <img src={qrImage} alt="QR Code" className="w-48 h-48 rounded-xl border-2 border-white shadow-sm" />
+                <p className="text-xs text-blue-800 mb-4">
+                  {qrReady ? getTikTokQrHelpText(sessionStatus, false) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
+                </p>
+                {!qrReady ? (
+                  <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
+                ) : qrImage ? (
+                  <img src={qrImage} alt="QR Code" className="h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
+                ) : qrUrl ? (
+                  <div className="rounded-xl border-2 border-white bg-white p-2 shadow-sm">
+                    <QRCodeSVG value={qrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
+                  </div>
                 ) : (
-                  <div className="w-48 h-48 rounded-xl bg-blue-100 animate-pulse flex items-center justify-center">Đang tải...</div>
+                  <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100">Đang tải...</div>
                 )}
-                <div className="mt-4 text-xs font-bold uppercase tracking-wider text-blue-700">Trạng thái: {sessionStatus}</div>
+                {qrReady && qrUrl && (
+                  <a href={qrUrl} className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                    <ExternalLink size={14} /> Mở link QR
+                  </a>
+                )}
+                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
+                  {qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
+                  Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}
+                </div>
               </div>
             )}
           </div>
@@ -461,9 +624,20 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             </label>
           </div>
 
-          <button onClick={() => void saveSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)]">
-            <Save size={14} /> Lưu cấu hình
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => void saveSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-60">
+              <Save size={14} /> Lưu cấu hình
+            </button>
+            <button onClick={() => void startScheduler()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60">
+              <RefreshCw size={14} /> Bật scheduler
+            </button>
+            <button onClick={() => void stopScheduler()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50 disabled:opacity-60">
+              Dừng scheduler
+            </button>
+            <button onClick={() => void runPublishQueueOnce()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60">
+              Chạy publish queue
+            </button>
+          </div>
         </div>
       )}
 
@@ -504,13 +678,29 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               {pendingSessionId && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
                   <h4 className="font-bold text-blue-900">Quét QR để hoàn tất</h4>
-                  <p className="mb-4 mt-1 text-xs text-blue-800">Sau khi TikTok xác thực, profile sẽ được tạo tự động.</p>
-                  {pendingQrImage ? (
-                    <img src={pendingQrImage} alt="QR Code" className="mx-auto h-48 w-48 rounded-xl border-2 border-white shadow-sm" />
+                  <p className="mb-4 mt-1 text-xs text-blue-800">
+                    {pendingQrReady ? getTikTokQrHelpText(sessionStatus, true) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
+                  </p>
+                  {!pendingQrReady ? (
+                    <div className="mx-auto flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
+                  ) : pendingQrImage ? (
+                    <img src={pendingQrImage} alt="QR Code" className="mx-auto h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
+                  ) : pendingQrUrl ? (
+                    <div className="mx-auto inline-flex rounded-xl border-2 border-white bg-white p-2 shadow-sm">
+                      <QRCodeSVG value={pendingQrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
+                    </div>
                   ) : (
-                    <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>
+                    <div className="mx-auto flex h-64 w-64 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>
                   )}
-                  <div className="mt-4 text-xs font-bold uppercase tracking-wider text-blue-700">Trạng thái: {sessionStatus}</div>
+                  {pendingQrReady && pendingQrUrl && (
+                    <a href={pendingQrUrl} className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                      <ExternalLink size={14} /> Mở link QR
+                    </a>
+                  )}
+                  <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
+                    {pendingQrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
+                    Trạng thái: {getTikTokQrStatusLabel(pendingQrReady ? sessionStatus : 'preparing_qr')}
+                  </div>
                 </div>
               )}
             </div>
@@ -659,8 +849,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                             <span className="text-[11px] text-[#64748b]">Opt-in to global AI suggestions</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
-                            <input 
-                              type="checkbox" className="sr-only peer" 
+                            <input
+                              type="checkbox" className="sr-only peer"
                               checked={strategyForm.receive_system_content ?? true}
                               onChange={e => handleUpdateStrategyField('receive_system_content', e.target.checked)}
                             />
@@ -697,14 +887,26 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                     <section className="bg-white rounded-xl border border-[#d9e0ea] p-5 shadow-sm">
                       <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-[#eef2f7] pb-2">Automation</h4>
                       <div className="space-y-4">
+                        <div>
+                          <label className="font-semibold text-sm text-[#0f172a] block mb-1">Review Mode</label>
+                          <select
+                            className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
+                            value={strategyForm.approval_mode || 'manual'}
+                            onChange={e => handleUpdateStrategyField('approval_mode', e.target.value)}
+                          >
+                            <option value="manual">Manual: reviewer phải duyệt video</option>
+                            <option value="auto">Auto: hệ thống tự duyệt sau khi render</option>
+                          </select>
+                        </div>
+
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
                             <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Workflow</label>
                             <span className="text-[11px] text-[#64748b]">Tự động phác thảo bài viết & kịch bản từ nội dung điểm cao.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input 
-                              type="checkbox" className="sr-only peer" 
+                            <input
+                              type="checkbox" className="sr-only peer"
                               checked={strategyForm.auto_project_queue_enabled || false}
                               onChange={e => handleUpdateStrategyField('auto_project_queue_enabled', e.target.checked)}
                             />
@@ -716,14 +918,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                         
                         <div className="flex items-start justify-between">
                           <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Planning Job</label>
-                            <span className="text-[11px] text-[#64748b]">Tự động đưa kịch bản đã duyệt vào hàng chờ sản xuất.</span>
+                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Queue After Approval</label>
+                            <span className="text-[11px] text-[#64748b]">Sau khi video được duyệt, tự đưa vào Publishing Queue.</span>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input 
-                              type="checkbox" className="sr-only peer" 
-                              checked={strategyForm.auto_planning_job_enabled || false}
-                              onChange={e => handleUpdateStrategyField('auto_planning_job_enabled', e.target.checked)}
+                            <input
+                              type="checkbox" className="sr-only peer"
+                              checked={strategyForm.auto_queue_enabled ?? true}
+                              onChange={e => handleUpdateStrategyField('auto_queue_enabled', e.target.checked)}
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
                           </label>
@@ -742,6 +944,58 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                             <option value="auto">Auto render ngay khi script sẵn sàng</option>
                           </select>
                           <span className="mt-1 block text-[11px] text-[#64748b]">Auto sẽ enqueue render job sau bước create/save/review/edit story hoặc tạo voice.</span>
+                        </div>
+
+                        <div className="h-px bg-[#eef2f7] w-full"></div>
+
+                        <div className="flex items-start justify-between">
+                          <div className="pr-2">
+                            <label className="font-semibold text-sm text-[#0f172a] block">Schedule Enabled</label>
+                            <span className="text-[11px] text-[#64748b]">Dùng khung ngày giờ bên dưới cho Publishing Queue.</span>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
+                            <input
+                              type="checkbox" className="sr-only peer"
+                              checked={strategyForm.schedule_enabled ?? true}
+                              onChange={e => handleUpdateStrategyField('schedule_enabled', e.target.checked)}
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
+                          </label>
+                        </div>
+
+                        <div className="flex items-start justify-between">
+                          <div className="pr-2">
+                            <label className="font-semibold text-sm text-[#0f172a] block">Scheduler Auto Publish</label>
+                            <span className="text-[11px] text-[#64748b]">Khi tới lịch, scheduler tự gửi video đã duyệt lên TikTok bằng API.</span>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
+                            <input
+                              type="checkbox" className="sr-only peer"
+                              checked={strategyForm.auto_publish_enabled || false}
+                              onChange={e => handleUpdateStrategyField('auto_publish_enabled', e.target.checked)}
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="space-y-1 text-xs font-semibold text-[#0f172a]">
+                            <span>Ngày chạy scheduler</span>
+                            <input
+                              value={strategyForm.schedule_days || '0,1,2,3,4,5,6'}
+                              onChange={e => handleUpdateStrategyField('schedule_days', e.target.value)}
+                              className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm font-normal outline-none focus:border-[#3525cd]"
+                            />
+                          </label>
+                          <label className="space-y-1 text-xs font-semibold text-[#0f172a]">
+                            <span>Giờ đăng</span>
+                            <input
+                              value={strategyForm.schedule_times || ''}
+                              onChange={e => handleUpdateStrategyField('schedule_times', e.target.value)}
+                              placeholder="08:30,20:30"
+                              className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm font-normal outline-none focus:border-[#3525cd]"
+                            />
+                          </label>
                         </div>
                       </div>
                     </section>

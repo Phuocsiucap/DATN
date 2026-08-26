@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     system_bootstrap_token: str = "change-me-bootstrap-token"
     tiktok_qr_login_url: str = "https://www.tiktok.com/login/qrcode"
+    tiktok_client_key: str = Field(default="", validation_alias=AliasChoices("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_ID"))
+    tiktok_client_secret: str = Field(default="", validation_alias=AliasChoices("TIKTOK_CLIENT_SECRET"))
+    tiktok_redirect_uri: str = Field(default="", validation_alias=AliasChoices("TIKTOK_REDIRECT_URI"))
+    tiktok_oauth_scopes: str = Field(
+        default="user.info.basic,video.upload",
+        validation_alias=AliasChoices("TIKTOK_OAUTH_SCOPES", "TIKTOK_SCOPES"),
+    )
     browser_channel: str = Field(
         default="chrome",
         validation_alias=AliasChoices("BROWSER_CHANNEL", "TIKTOK_QR_BROWSER_CHANNEL"),
@@ -43,6 +50,14 @@ class Settings(BaseSettings):
     deepseek_api_key: str = Field(default="", validation_alias=AliasChoices("ACD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"))
     deepseek_base_url: str = Field(default="https://api.deepseek.com", validation_alias=AliasChoices("ACD_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"))
     elevenlabs_api_key: str = Field(default="", validation_alias=AliasChoices("ELEVENLABS_API_KEY"))
+    generate_video_npm_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("GENERATE_VIDEO_NPM_PATH", "NPM_BINARY", "NPM_PATH"),
+    )
+    generate_video_node_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("GENERATE_VIDEO_NODE_PATH", "NODE_BINARY", "NODE_PATH"),
+    )
 
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), env_file_encoding="utf-8", extra="ignore")
 
