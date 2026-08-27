@@ -28,10 +28,57 @@ export type ContentItem = {
   canonical_url?: string | null
   quality_score: number
   created_at: string
+  source_metadata?: Record<string, unknown>
+  article_id?: string | null
+  category_id?: string | null
+  category?: string | null
+  site_id?: string | null
+  articleId?: string | null
+  categoryId?: string | null
+  siteId?: string | null
+  title?: string | null
+  lead?: string | null
+  publishedAt?: string | null
+  content?: string | null
+  images?: Array<Record<string, unknown>>
+  videos?: Array<Record<string, unknown>>
+  url?: string | null
+  normalized?: NormalizedArticle
+}
+
+export type NormalizedArticle = {
+  articleId?: string | null
+  categoryId?: string | null
+  siteId?: string | null
+  title: string
+  lead: string
+  publishedAt?: string | null
+  content: string
+  images: Array<{
+    src?: string | null
+    alt?: string | null
+    caption?: string | null
+  }>
+  videos: Array<{
+    url?: string | null
+    kind?: string | null
+    mimeType?: string | null
+    embedUrl?: string | null
+    provider?: string | null
+    title?: string | null
+    description?: string | null
+    thumbnail?: string | null
+    uploadDate?: string | null
+    duration?: string | null
+    qualities?: string[]
+    maxQuality?: string | null
+    extractionSource?: string | null
+  }>
+  url?: string | null
 }
 
 export type ContentSourceDetail = {
-  id: string
+  id?: string
   source_type: string
   source_external_id: string
   source_url?: string | null
@@ -40,20 +87,33 @@ export type ContentSourceDetail = {
   source_title?: string | null
   source_author?: string | null
   source_published_at?: string | null
-  metadata_json: Record<string, unknown>
-  first_seen_at: string
-  last_seen_at: string
+  metadata_json?: Record<string, unknown>
+  first_seen_at?: string
+  last_seen_at?: string
 }
 
 export type ContentMediaDetail = {
-  id: string
+  id?: string
   media_type: string
   source_url?: string | null
   storage_url?: string | null
   thumbnail_url?: string | null
   mime_type?: string | null
+  format?: string | null
+  embed_url?: string | null
+  provider?: string | null
+  title?: string | null
+  description?: string | null
+  upload_date?: string | null
+  duration?: string | null
+  qualities?: string[]
+  max_quality?: string | null
+  extraction_source?: string | null
+  alt?: string | null
+  caption?: string | null
+  role?: string | null
   duration_seconds?: number | null
-  created_at: string
+  created_at?: string
 }
 
 export type ProcessingRunDetail = {
@@ -73,8 +133,10 @@ export type ContentDetail = ContentItem & {
   full_text?: string | null
   published_at?: string | null
   duration_seconds?: number | null
-  content_hash?: string | null
-  transcript_hash?: string | null
+  source_type?: string | null
+  source_url?: string | null
+  source_author?: string | null
+  source_published_at?: string | null
   updated_at: string
   sources?: ContentSourceDetail[]
   sources_jsonb?: ContentSourceDetail[]
@@ -101,6 +163,8 @@ export type FinalContentItem = ContentItem & {
   episode_number?: number | null
   sequence_order?: number | null
   episode_title?: string | null
+  story_id?: string | null
+  episode_order?: number | null
   series?: FinalSeriesInfo | null
 }
 

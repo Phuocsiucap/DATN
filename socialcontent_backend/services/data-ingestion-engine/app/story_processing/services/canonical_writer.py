@@ -13,6 +13,7 @@ from app.story_processing.deduplication.rules import find_duplicate_content
 from app.story_processing.grouping.rules import extract_episode_number, grouping_key, normalize_story_text
 from app.story_processing.ordering.episodes import update_story_completion
 from app.story_processing.producers.story_events import StoryEventProducer
+from app.story_processing.services.embeddings import ContentEmbeddingWriter
 from app.story_processing.repositories.processed_documents import ProcessedDocumentRepository
 
 logger = logging.getLogger(__name__)
@@ -31,9 +32,11 @@ class CanonicalWriter:
         self,
         repository: ProcessedDocumentRepository | None = None,
         producer: StoryEventProducer | None = None,
+        embedding_writer: ContentEmbeddingWriter | None = None,
     ) -> None:
         self.repository = repository or ProcessedDocumentRepository()
         self.producer = producer or StoryEventProducer()
+        self.embedding_writer = embedding_writer or ContentEmbeddingWriter()
 
     def handle_content_normalized(self, db: Session, message: dict) -> None:
         event_id = message.get("event_id")
@@ -107,7 +110,7 @@ class CanonicalWriter:
         normalized = doc["normalized"]
         quality = doc["quality"]
         source_type = doc.get("source_type") or "BILIBILI"
-        source_external_id = normalized.get("source_external_id") or normalized.get("source_url") or doc.get("raw_document_id") or processed_document_id
+        source_external_id = normalized.get("source_external_id") or normalized.get("source_url") or processed_document_id
         self._lock_source_identity(db, source_type, str(source_external_id))
         job = db.get(CrawlJob, job_id) if job_id else None
 
@@ -140,7 +143,6 @@ class CanonicalWriter:
                 source_external_id=str(source_external_id),
                 normalized=normalized,
                 quality=quality,
-                raw_document_id=doc.get("raw_document_id"),
                 processed_document_id=processed_document_id,
                 job_id=job_id,
             )
@@ -149,7 +151,6 @@ class CanonicalWriter:
             "source_type": source_type,
             "source_external_id": str(source_external_id),
             "source_url": normalized.get("source_url"),
-            "raw_document_id": doc.get("raw_document_id"),
             "processed_document_id": processed_document_id,
             "source_title": normalized.get("title"),
             "source_author": normalized.get("author"),
@@ -177,7 +178,7 @@ class CanonicalWriter:
             content_hash=content_hash,
             transcript_hash=transcript_hash,
             quality_score=quality.get("score", 0),
-            mongo_raw_id=doc.get("raw_document_id"),
+            mongo_raw_id=None,
             mongo_normalized_id=processed_document_id,
             sources_jsonb=sources_jsonb,
             media_jsonb=media_jsonb,
@@ -208,9 +209,11 @@ class CanonicalWriter:
                 db.add(link)
             db.flush()
 
+        self._upsert_embedding(db, content, normalized, job)
+
         story = None
         if self._should_group_as_story(source_type, normalized):
-            story = self._find_or_create_story(db, content, normalized)
+            story = self._find_or_create_story(db, content, normalized, source_type)
             self._apply_episode(content, story, normalized)
             db.flush()
             db.refresh(story)
@@ -267,7 +270,6 @@ class CanonicalWriter:
         source_external_id: str,
         normalized: dict,
         quality: dict,
-        raw_document_id: str | None,
         processed_document_id: str,
         job_id: str | None,
     ):
@@ -275,7 +277,6 @@ class CanonicalWriter:
             "source_type": source_type,
             "source_external_id": str(source_external_id),
             "source_url": normalized.get("source_url"),
-            "raw_document_id": raw_document_id,
             "processed_document_id": processed_document_id,
             "source_title": normalized.get("title"),
             "source_author": normalized.get("author"),
@@ -303,10 +304,11 @@ class CanonicalWriter:
         existing_content.media_jsonb = media
         existing_content.duplicate_count = (existing_content.duplicate_count or 0) + 1
         db.add(existing_content)
+        self._upsert_embedding(db, existing_content, normalized, job_id)
 
         story = None
         if self._should_group_as_story(source_type, normalized):
-            story = self._find_existing_story(db, existing_content) or self._find_or_create_story(db, existing_content, normalized)
+            story = self._find_existing_story(db, existing_content) or self._find_or_create_story(db, existing_content, normalized, source_type)
             self._apply_episode(existing_content, story, normalized)
             db.flush()
             if story:
@@ -350,6 +352,22 @@ class CanonicalWriter:
         finalized = finalize_job_if_ready(db, job)
         return existing_content, story, True, finalized, job.status if job else None
 
+    def _upsert_embedding(self, db: Session, content: ContentItem, normalized: dict, job_or_id) -> None:
+        try:
+            self.embedding_writer.upsert_for_content(db, content, normalized)
+        except Exception as exc:
+            logger.warning("Content embedding skipped for content_id=%s: %s", content.id, exc)
+            job = job_or_id if isinstance(job_or_id, CrawlJob) else db.get(CrawlJob, job_or_id) if job_or_id else None
+            if job:
+                add_crawl_log(
+                    db,
+                    job_id=job.id,
+                    stage="EMBEDDING",
+                    level="WARNING",
+                    message="Content embedding skipped",
+                    metadata={"content_id": str(content.id), "error": str(exc)},
+                )
+
     def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:
         key_bytes = hashlib.sha256(f"{source_type}:{source_external_id}".encode("utf-8")).digest()[:8]
         lock_key = int.from_bytes(key_bytes, byteorder="big", signed=True)
@@ -370,6 +388,14 @@ class CanonicalWriter:
     def _source_metadata(self, normalized: dict, processed_document_id: str) -> dict:
         return {
             "processed_document_id": processed_document_id,
+            "article_id": normalized.get("article_id"),
+            "category_id": normalized.get("category_id"),
+            "site_id": normalized.get("site_id"),
+            "category": normalized.get("category"),
+            "published_at": normalized.get("published_at"),
+            "tags": normalized.get("tags") or [],
+            "image_count": len(normalized.get("images") or []),
+            "video_count": len(normalized.get("videos") or []),
             "metadata_only": normalized.get("metadata_only"),
             "thumbnail_url": normalized.get("thumbnail_url"),
             "embed_url": normalized.get("embed_url"),
@@ -386,7 +412,7 @@ class CanonicalWriter:
             "related_count": len(normalized.get("related") or []),
         }
 
-    def _find_or_create_story(self, db: Session, content: ContentItem, normalized: dict) -> Story:
+    def _find_or_create_story(self, db: Session, content: ContentItem, normalized: dict, source_type: str | None = None) -> Story:
         title = normalized.get("season_title") or normalized.get("series_title") or normalized.get("title") or ""
         key = grouping_key(title, normalized.get("author"), normalized.get("language") or "vi")
         story = db.query(Story).filter(Story.normalized_name == key).first()
@@ -431,11 +457,26 @@ class CanonicalWriter:
             if media_key in seen:
                 continue
             seen.add(media_key)
+            is_video = str(media_type).upper().startswith("VIDEO")
             result.append({
                 "media_type": str(media_type),
                 "source_url": str(source_url),
-                "thumbnail_url": normalized.get("thumbnail_url") if str(media_type).upper().startswith("VIDEO") else None,
+                "role": item.get("role"),
+                "thumbnail_url": item.get("thumbnail_url") or (normalized.get("thumbnail_url") if is_video else None),
                 "duration_seconds": self._as_int(item.get("duration_seconds") or normalized.get("duration_seconds")),
+                "format": item.get("format"),
+                "mime_type": item.get("mime_type"),
+                "embed_url": item.get("embed_url"),
+                "provider": item.get("provider"),
+                "title": item.get("title"),
+                "description": item.get("description"),
+                "upload_date": item.get("upload_date"),
+                "duration": item.get("duration"),
+                "qualities": item.get("qualities") if isinstance(item.get("qualities"), list) else [],
+                "max_quality": item.get("max_quality"),
+                "extraction_source": item.get("extraction_source"),
+                "alt": item.get("alt"),
+                "caption": item.get("caption"),
             })
         return result
 

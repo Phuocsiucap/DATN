@@ -5,6 +5,7 @@ import {
   type FinalContentItem,
   type FinalContentView,
 } from '@/commons/apis/module1'
+import { MediaAssetPreview } from '@/commons/media'
 
 import { ContentDetailDialog } from './ContentDetailDialog'
 
@@ -87,16 +88,17 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
         <div className="grid gap-4">
           <div className="bento-card table-scroll flex min-h-[620px] flex-col overflow-hidden">
             <div className="data-grid flex min-h-[620px] flex-col">
-              <TableHeader columns={activeTab === 'normal' ? ['Preview', 'Tiêu đề & Tóm tắt', 'Nguồn', 'Trạng thái', 'Ngày lưu'] : ['Preview', 'Tên Series', 'Tập số', 'Trạng thái', 'Độ tin cậy', 'Ngày lưu']} />
+              <TableHeader columns={activeTab === 'normal' ? ['Preview', 'Tiêu đề & Tóm tắt', 'Nguồn', 'Category ID', 'Trạng thái', 'Ngày lưu'] : ['Preview', 'Tên Series', 'Nguồn', 'Category ID', 'Trạng thái', 'Ngày lưu']} />
               <div className="flex-1 overflow-y-auto">
                 {contents.length === 0 ? <div className="empty-state m-3">Chưa có dữ liệu.</div> : contents.map((item) => (
-                  <div key={item.id} onClick={() => setSelectedContent(item)} className={`grid cursor-pointer grid-cols-[84px_2fr_0.8fr_0.9fr_1fr] items-center gap-3 border-b border-[var(--outline-variant)] px-4 py-3 text-xs transition-colors ${selectedContent?.id === item.id ? 'bg-[var(--secondary-container)]/40' : 'bg-white hover:bg-[var(--surface-container-low)]'}`}>
-                    <MediaPreview media={item.media_jsonb || item.media} compact />
+                  <div key={item.id} onClick={() => setSelectedContent(item)} className={`grid cursor-pointer grid-cols-[84px_2fr_0.8fr_0.9fr_0.9fr_1fr] items-center gap-3 border-b border-[var(--outline-variant)] px-4 py-3 text-xs transition-colors ${selectedContent?.id === item.id ? 'bg-[var(--secondary-container)]/40' : 'bg-white hover:bg-[var(--surface-container-low)]'}`}>
+                    <MediaAssetPreview item={(item.media_jsonb || item.media)?.[0]} compact />
                     <div className="min-w-0">
                       <div className="truncate font-bold text-[var(--on-surface)]">{activeTab === 'series' ? item.series?.canonical_name || item.canonical_title : item.canonical_title}</div>
-                      <div className="truncate text-xs text-[var(--on-surface-variant)] mt-0.5">{activeTab === 'series' ? (item.episode_title || item.canonical_title) : (item.summary || item.canonical_url || shortId(item.id))}</div>
+                      <div className="truncate text-xs text-[var(--on-surface-variant)] mt-0.5">{activeTab === 'series' ? (item.category || item.episode_title || item.canonical_title) : (item.summary || item.canonical_url || shortId(item.id))}</div>
                     </div>
-                    <div className="text-[var(--on-surface-variant)] font-medium">{activeTab === 'series' ? item.source_type || 'SERIES' : item.source_type || item.content_type}</div>
+                    <div className="text-[var(--on-surface-variant)] font-medium">{item.category || (activeTab === 'series' ? item.source_type || 'SERIES' : item.source_type || item.content_type)}</div>
+                    <div className="truncate font-mono text-xs font-bold text-[var(--on-surface-variant)]">{itemCategoryId(item) || '-'}</div>
                     <Badge value={item.status} />
                     <div className="text-xs text-[var(--on-surface-variant)]">{formatDate(item.created_at)}</div>
                   </div>
@@ -120,10 +122,15 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
 
 function TableHeader({ columns }: { columns: string[] }) {
   return (
-    <div className={`grid grid-cols-[84px_2fr_0.8fr_0.9fr_1fr] gap-3 bg-[#f8fafc] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[#64748b] border-b border-[#eef2f7]`}>
+    <div className={`grid grid-cols-[84px_2fr_0.8fr_0.9fr_0.9fr_1fr] gap-3 bg-[#f8fafc] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[#64748b] border-b border-[#eef2f7]`}>
       {columns.map(c => <div key={c}>{c}</div>)}
     </div>
   )
+}
+
+function itemCategoryId(item: FinalContentItem): string {
+  const metadata = item.source_metadata || {}
+  return String(item.categoryId || item.category_id || item.normalized?.categoryId || metadata.categoryId || metadata.category_id || '')
 }
 
 function Badge({ value }: { value: string }) {
@@ -133,15 +140,4 @@ function Badge({ value }: { value: string }) {
   if (['RUNNING', 'PENDING', 'PROCESSING'].includes(value)) color = 'bg-blue-100 text-blue-800'
   if (['NEEDS_REVIEW'].includes(value)) color = 'bg-amber-100 text-amber-800'
   return <span className={`px-2 py-1 inline-flex items-center justify-center rounded-md text-[10px] font-bold uppercase tracking-wider ${color}`}>{value}</span>
-}
-
-function MediaPreview({ media, compact = false }: { media?: any[]; compact?: boolean }) {
-  const first = media?.[0]
-  if (!first) return <div className={`${compact ? 'h-12 w-[72px]' : 'h-32 w-full'} rounded-md border border-dashed border-[#d9e0ea] bg-[#fbfcfd] text-[11px] text-[#94a3b8] flex items-center justify-center`}>No media</div>
-  const url = first.storage_url || first.source_url || first.thumbnail_url
-  return (
-    <div className={`${compact ? 'h-12 w-[72px]' : 'h-48 w-full'} rounded-md overflow-hidden bg-black relative`}>
-      <img src={url} alt="Media preview" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.src = 'https://placehold.co/400x300?text=No+Preview' }} />
-    </div>
-  )
 }

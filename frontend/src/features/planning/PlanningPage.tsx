@@ -16,6 +16,7 @@ import {
   type StoryScene,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
+import { MediaAssetPreview, mediaPlaybackUrl, mediaPreviewUrl, isImageMedia, isVideoMedia } from '@/commons/media'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
@@ -307,10 +308,11 @@ export default function PlanningPage({
 
                     <div className="table-scroll rounded-lg border border-[#eef2f7] bg-white">
                       <div className="data-grid-lg">
-                        <div className="grid grid-cols-[96px_2fr_0.8fr_0.8fr_0.8fr_1.4fr] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#64748b]">
+                        <div className="grid grid-cols-[96px_2fr_0.75fr_0.85fr_0.7fr_0.8fr_1.35fr] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#64748b]">
                           <div>Preview</div>
                           <div>Bài báo gốc</div>
                           <div>Nguồn</div>
+                          <div>Category ID</div>
                           <div>Quality</div>
                           <div>Kịch bản</div>
                           <div className="text-right">Thao tác</div>
@@ -321,7 +323,7 @@ export default function PlanningPage({
                         <div
                           key={article.plan?.id || `${item.series.id}-${articleIndex}`}
                           onClick={() => setSelectedReviewArticle({ article, seriesTitle: item.series.title })}
-                          className="grid cursor-pointer grid-cols-[96px_2fr_0.8fr_0.8fr_0.8fr_1.4fr] items-center gap-3 border-t border-[#eef2f7] px-4 py-3 text-sm transition-colors hover:bg-slate-50"
+                          className="grid cursor-pointer grid-cols-[96px_2fr_0.75fr_0.85fr_0.7fr_0.8fr_1.35fr] items-center gap-3 border-t border-[#eef2f7] px-4 py-3 text-sm transition-colors hover:bg-slate-50"
                         >
                           <ContentItemPreview media={article.source_content?.media} />
                           <div className="min-w-0">
@@ -333,6 +335,7 @@ export default function PlanningPage({
                             </div>
                           </div>
                           <div className="font-medium text-[#64748b]">{article.source_content?.source_type || article.source_content?.content_type || '-'}</div>
+                          <div className="truncate font-mono text-xs font-bold text-[#475569]">{sourceCategoryId(article.source_content) || '-'}</div>
                           <div className="font-bold text-[#0f172a]">{article.source_content ? Number(article.source_content.quality_score || 0).toFixed(1) : '-'}</div>
                           <div className="flex items-center gap-2">
                             <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
@@ -617,6 +620,12 @@ function getArticleStoryData(article: ProfileSeriesReview['articles'][number]): 
   return article.story_data || article.plan?.story_data || article.plan?.draft_json?.story_data || []
 }
 
+function sourceCategoryId(source?: ReviewSourceContent | null): string {
+  if (!source) return ''
+  const metadata = source.source_metadata || {}
+  return String(source.categoryId || source.category_id || source.normalized?.categoryId || metadata.categoryId || metadata.category_id || '')
+}
+
 function ReviewMediaPreview({
   source,
   onOpen,
@@ -641,11 +650,6 @@ function ReviewMediaPreview({
       </div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         {mediaItems.map((item) => {
-          const mediaUrl = item.storage_url || item.source_url
-          const thumbUrl = item.thumbnail_url || mediaUrl
-          const isVideo = item.media_type?.toUpperCase().includes('VIDEO') || item.mime_type?.startsWith('video/')
-          const isImage = item.media_type?.toUpperCase().includes('IMAGE') || item.mime_type?.startsWith('image/')
-
           return (
             <button
               key={item.id}
@@ -653,18 +657,7 @@ function ReviewMediaPreview({
               onClick={onOpen}
               className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left hover:border-blue-300"
             >
-              {mediaUrl && isVideo ? (
-                <div className="relative">
-                  <video src={mediaUrl} poster={item.thumbnail_url || undefined} muted preload="metadata" className="aspect-video w-full bg-black object-cover opacity-90" />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                    <span className="rounded-full bg-white/90 px-3 py-1 text-[10px] font-black uppercase text-slate-800">Video</span>
-                  </div>
-                </div>
-              ) : thumbUrl && isImage ? (
-                <img src={thumbUrl} alt="" className="aspect-video w-full object-cover transition-transform group-hover:scale-[1.02]" loading="lazy" />
-              ) : (
-                <div className="flex aspect-video items-center justify-center text-xs font-bold text-slate-500">{item.media_type}</div>
-              )}
+              <MediaAssetPreview item={item} compact={false} />
             </button>
           )
         })}
@@ -691,9 +684,9 @@ function ContentItemPreview({ media }: { media?: ReviewSourceContent['media'] })
       </div>
     )
   }
-  const mediaUrl = first.storage_url || first.source_url
-  const previewUrl = first.thumbnail_url || mediaUrl
-  const isVideo = first.media_type?.toUpperCase().includes('VIDEO') || first.mime_type?.startsWith('video/')
+  const mediaUrl = mediaPlaybackUrl(first)
+  const previewUrl = mediaPreviewUrl(first)
+  const isVideo = isVideoMedia(first)
 
   if (!previewUrl && !mediaUrl) {
     return (
@@ -706,10 +699,7 @@ function ContentItemPreview({ media }: { media?: ReviewSourceContent['media'] })
   return (
     <div className="relative h-14 w-20 overflow-hidden rounded-md bg-black">
       {isVideo && mediaUrl ? (
-        <>
-          <video src={mediaUrl} poster={first.thumbnail_url || undefined} muted preload="metadata" className="h-full w-full object-cover opacity-90" />
-          <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-black uppercase text-white">Video</span>
-        </>
+        <MediaAssetPreview item={first} compact className="h-14 w-20" />
       ) : (
         <img
           src={previewUrl || ''}
@@ -738,6 +728,7 @@ function SourceContentSheet({
   const publishedAt = source.source_published_at || source.published_at
   const mediaItems = source.media || []
   const sources = source.sources || []
+  const categoryId = sourceCategoryId(source)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -752,6 +743,7 @@ function SourceContentSheet({
             <h2 className="text-xl font-black leading-tight text-[#0f172a]">{source.canonical_title}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-semibold text-[#64748b]">
               {source.source_type && <span>{source.source_type}</span>}
+              {categoryId && <span>Category {categoryId}</span>}
               {source.source_author && <span>{source.source_author}</span>}
               <span>Quality {Number(source.quality_score || 0).toFixed(0)}</span>
               <span>{formatDate(publishedAt || source.created_at)}</span>
@@ -785,15 +777,15 @@ function SourceContentSheet({
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     {mediaItems.map((item) => {
-                      const mediaUrl = item.storage_url || item.source_url
-                      const thumbUrl = item.thumbnail_url || mediaUrl
-                      const isVideo = item.media_type?.toUpperCase().includes('VIDEO') || item.mime_type?.startsWith('video/')
-                      const isImage = item.media_type?.toUpperCase().includes('IMAGE') || item.mime_type?.startsWith('image/')
+                      const mediaUrl = mediaPlaybackUrl(item)
+                      const thumbUrl = mediaPreviewUrl(item)
+                      const isVideo = isVideoMedia(item)
+                      const isImage = isImageMedia(item)
 
                       return (
                         <div key={item.id} className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                           {mediaUrl && isVideo ? (
-                            <video src={mediaUrl} poster={item.thumbnail_url || undefined} controls className="aspect-video w-full bg-black object-contain" />
+                            <MediaAssetPreview item={item} controls />
                           ) : thumbUrl && isImage ? (
                             <img src={thumbUrl} alt="" className="aspect-video w-full bg-slate-100 object-cover" loading="lazy" />
                           ) : thumbUrl ? (

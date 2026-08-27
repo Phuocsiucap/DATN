@@ -36,14 +36,23 @@ const PATH_TABS = Object.fromEntries(
   Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab]),
 ) as Record<string, Tab>
 
-const getTabFromPath = (): Tab => {
+const LEGACY_PATHS: Record<string, string> = {
+  '/planningRequest': TAB_PATHS.planning,
+}
+
+const getNormalizedPath = () => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
+  return LEGACY_PATHS[normalizedPath] || normalizedPath
+}
+
+const getTabFromPath = (): Tab => {
+  const normalizedPath = getNormalizedPath()
   if (normalizedPath.startsWith('/generate-video')) return 'generateVideo'
   return PATH_TABS[normalizedPath] ?? 'dashboard'
 }
 
 const getGenerateVideoProjectIdFromPath = () => {
-  const normalizedPath = window.location.pathname.replace(/\/+$/, '')
+  const normalizedPath = getNormalizedPath()
   const match = normalizedPath.match(/^\/generate-video\/([^/?#]+)/)
   if (match?.[1]) return decodeURIComponent(match[1])
   return ''
@@ -103,6 +112,13 @@ function AppContent() {
 
   useEffect(() => {
     void loadCurrentUser()
+  }, [])
+
+  useEffect(() => {
+    const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
+    const nextPath = LEGACY_PATHS[normalizedPath]
+    if (!nextPath) return
+    window.history.replaceState(window.history.state, '', `${nextPath}${window.location.search}${window.location.hash}`)
   }, [])
 
   useEffect(() => {

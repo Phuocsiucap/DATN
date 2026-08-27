@@ -51,6 +51,17 @@ class QueueStatusRequest(BaseModel):
     status: str
 
 
+class TikTokPublishRequest(BaseModel):
+    mode: str = "inbox"
+    privacy_level: str | None = None
+    disable_comment: bool = False
+    disable_duet: bool = False
+    disable_stitch: bool = False
+    is_aigc: bool = True
+    brand_content_toggle: bool = False
+    brand_organic_toggle: bool = False
+
+
 class SocialPostCreateRequest(BaseModel):
     title: str
     post_url: str | None = None
@@ -75,7 +86,6 @@ class SocialProfileResponse(BaseModel):
     username: str | None
     external_id: str | None = None
     avatar_url: str | None = None
-    folder_path: str
     status: str
     scopes: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

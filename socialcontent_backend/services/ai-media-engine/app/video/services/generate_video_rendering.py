@@ -102,7 +102,7 @@ def run_remotion_render(output_path: Path, props: dict[str, Any] | None = None) 
         input=json.dumps({"props": props or {}}, ensure_ascii=False, separators=(",", ":")),
         capture_output=True,
         text=True,
-        timeout=int(os.getenv("GENERATE_VIDEO_REMOTION_TIMEOUT_SECONDS") or "600"),
+        timeout=int(os.getenv("GENERATE_VIDEO_REMOTION_TIMEOUT_SECONDS") or "1800"),
         env=env,
     )
     if completed.returncode != 0:

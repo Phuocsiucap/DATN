@@ -10,7 +10,6 @@ from common.workers import run_thread_worker_forever
 from app.orchestrator.consumers.job_created import run_job_created_consumer
 from app.orchestrator.scheduler.periodic_sources import run_periodic_source_scheduler
 from app.crawler.consumers.task_requested import run_task_requested_consumer
-from app.normalization.consumers.raw_created import run_raw_created_consumer
 from app.story_processing.consumers.content_normalized import run_content_normalized_consumer
 
 @asynccontextmanager
@@ -32,10 +31,7 @@ async def lifespan(app: FastAPI):
         # 2. Crawler
         tasks.append(asyncio.create_task(run_thread_worker_forever("crawler:task-requested", run_task_requested_consumer)))
         
-        # 3. Normalization
-        tasks.append(asyncio.create_task(run_thread_worker_forever("normalization:raw-created", run_raw_created_consumer)))
-        
-        # 4. Story Processing
+        # 3. Story Processing
         tasks.append(asyncio.create_task(run_thread_worker_forever("story-processing:content-normalized", run_content_normalized_consumer)))
         
     yield

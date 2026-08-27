@@ -16,10 +16,6 @@ def get_mongo_db():
     return get_mongo_client()[settings.mongo_db]
 
 
-def raw_documents():
-    return get_mongo_db()["raw_documents"]
-
-
 def processed_documents():
     return get_mongo_db()["processed_documents"]
 

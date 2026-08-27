@@ -12,8 +12,9 @@ import {
   type CrawlLog,
 } from '@/commons/apis/module1'
 import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
+import { MediaAssetPreview } from '@/commons/media'
 
-const stageSteps = ['API', 'ORCHESTRATOR', 'CRAWLER', 'RAW', 'NORMALIZE', 'STORY', 'CANONICAL']
+const stageSteps = ['API', 'ORCHESTRATOR', 'CRAWLER', 'NORMALIZE', 'STORY', 'CANONICAL']
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
@@ -404,8 +405,8 @@ function JobLogsSheet(props: any) {
                       {contents.map((item: any) => (
                         <div key={item.id} onClick={() => setSelectedContentId(item.id)} className="flex cursor-pointer gap-3 rounded-md border bg-white p-3 transition-colors hover:bg-slate-50">
                           <div className="h-12 w-[72px] shrink-0 overflow-hidden rounded bg-black">
-                            {item.media?.[0] ? (
-                              <img src={item.media[0].storage_url || item.media[0].thumbnail_url || item.media[0].source_url} className="w-full h-full object-cover" alt="Preview"/>
+                            {(item.media_jsonb || item.media)?.[0] ? (
+                              <MediaAssetPreview item={(item.media_jsonb || item.media)[0]} compact className="h-12 w-[72px]" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-[10px] text-white/50">No media</div>
                             )}

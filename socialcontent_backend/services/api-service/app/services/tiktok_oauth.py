@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ FULL_USER_FIELDS = (
     "follower_count,following_count,likes_count,video_count"
 )
 BASIC_USER_FIELDS = "open_id,union_id,avatar_url,avatar_url_100,avatar_large_url,display_name"
+REQUIRED_TIKTOK_SCOPES = ("user.info.basic", "video.upload", "video.publish")
 
 
 @dataclass
@@ -57,7 +59,7 @@ def _require_tiktok_config() -> tuple[str, str, str, str]:
     client_key = settings.tiktok_client_key.strip()
     client_secret = settings.tiktok_client_secret.strip()
     redirect_uri = settings.tiktok_redirect_uri.strip()
-    scopes = ",".join(scope.strip() for scope in settings.tiktok_oauth_scopes.split(",") if scope.strip())
+    scopes = ",".join(_merge_required_scopes(_scope_list(settings.tiktok_oauth_scopes)))
     missing = [
         name
         for name, value in {
@@ -72,8 +74,6 @@ def _require_tiktok_config() -> tuple[str, str, str, str]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Thiếu cấu hình TikTok OAuth: {', '.join(missing)}",
         )
-    if not scopes:
-        scopes = "user.info.basic"
     return client_key, client_secret, redirect_uri, scopes
 
 
@@ -149,7 +149,25 @@ def _extract_code(redirect_uri: str | None, explicit_code: str | None = None) ->
 def _scope_list(scope: str | None) -> list[str]:
     if not scope:
         return []
-    return [item.strip() for item in scope.split(",") if item.strip()]
+    values: list[str] = []
+    for item in re.split(r"[\s,]+", str(scope)):
+        normalized = item.strip()
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return values
+
+
+def _merge_required_scopes(scopes: list[str]) -> list[str]:
+    merged = list(scopes)
+    for scope in REQUIRED_TIKTOK_SCOPES:
+        if scope not in merged:
+            merged.append(scope)
+    return merged
+
+
+def requested_tiktok_scopes() -> list[str]:
+    _client_key, _client_secret, _redirect_uri, scopes = _require_tiktok_config()
+    return scopes.split(",")
 
 
 async def start_tiktok_oauth_qr_session(
@@ -344,6 +362,7 @@ def build_tiktok_token_metadata(token_data: dict[str, Any], user_info: dict[str,
         "provider": "tiktok",
         "token_type": token_data.get("token_type"),
         "scope": token_data.get("scope"),
+        "granted_scopes": granted_scopes(token_data),
         "user": user_info,
     }
 

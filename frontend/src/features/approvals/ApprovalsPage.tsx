@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, CheckCircle2, RefreshCw, Send, SkipForward, Wand2 } from 'lucide-react'
+import { CalendarClock, CheckCircle2, Eye, RefreshCw, Rocket, Send, SkipForward, Wand2 } from 'lucide-react'
 import { fetchPublishingQueueApi, publishPublishingQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
 
 type PublishingQueueItem = {
   id: string
   profile_id: string
   profile_name?: string | null
-  article_link: string
+  profile_scopes?: string[]
+  content_id?: string | null
+  article_link?: string | null
   article_title: string
   platform: string
   generated_content?: string | null
@@ -28,11 +31,16 @@ const statusOptions = [
   { value: 'failed', label: 'Lỗi' },
 ]
 
+const hasTikTokScope = (item: PublishingQueueItem, scope: string) => {
+  return (item.profile_scopes || []).includes(scope)
+}
+
 export default function ApprovalsPage() {
   const [items, setItems] = useState<PublishingQueueItem[]>([])
   const [statusFilter, setStatusFilter] = useState('upcoming')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [selectedItem, setSelectedItem] = useState<PublishingQueueItem | null>(null)
 
   const title = useMemo(() => {
     return statusOptions.find((item) => item.value === statusFilter)?.label ?? 'Tất cả'
@@ -48,6 +56,7 @@ export default function ApprovalsPage() {
         return left - right
       })
       setItems(sorted)
+      setSelectedItem((current) => current ? (sorted.find((item) => item.id === current.id) || current) : null)
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không thể tải danh sách cần duyệt')
       setItems([])
@@ -74,19 +83,31 @@ export default function ApprovalsPage() {
     }
   }
 
-  const handlePublish = async (queueItemId: string) => {
+  const handlePublish = async (queueItemId: string, mode: 'inbox' | 'direct') => {
     setLoading(true)
     setMessage('')
     try {
-      await publishPublishingQueueItemApi(queueItemId)
+      await publishPublishingQueueItemApi(queueItemId, {
+        mode,
+        privacy_level: mode === 'direct' ? 'SELF_ONLY' : undefined,
+        is_aigc: true,
+      })
       await loadQueue()
-      setMessage('Đã gửi video lên TikTok. Creator sẽ nhận thông báo trong inbox TikTok để hoàn tất đăng.')
+      setMessage(
+        mode === 'direct'
+          ? 'Đã gửi Direct Post lên TikTok. Nếu app TikTok chưa audit, bài có thể bị đặt ở chế độ riêng tư.'
+          : 'Đã gửi video lên TikTok. Creator sẽ nhận thông báo trong inbox TikTok để hoàn tất đăng.',
+      )
     } catch (error: any) {
       setMessage(error?.response?.data?.detail || 'Không gửi được video lên TikTok')
       await loadQueue()
     } finally {
       setLoading(false)
     }
+  }
+
+  const handlePublishItem = (item: PublishingQueueDetailItem, mode: 'inbox' | 'direct') => {
+    void handlePublish(item.id, mode)
   }
 
   return (
@@ -182,6 +203,14 @@ export default function ApprovalsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setSelectedItem(item)}
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium border"
+                    style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+                  >
+                    <Eye size={15} />
+                    Xem chi tiết
+                  </button>
                   {item.status === 'needs_approval' && (
                     <button
                       onClick={() => void handleStatus(item.id, 'approved')}
@@ -193,15 +222,26 @@ export default function ApprovalsPage() {
                       Duyệt
                     </button>
                   )}
-                  {['queued', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (
+                  {['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && hasTikTokScope(item, 'video.publish') && (
                     <button
-                      onClick={() => void handlePublish(item.id)}
+                      onClick={() => void handlePublish(item.id, 'direct')}
                       disabled={loading}
                       className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                       style={{ backgroundColor: '#0f766e', color: '#ffffff' }}
                     >
+                      <Rocket size={15} />
+                      Đăng luôn TikTok
+                    </button>
+                  )}
+                  {['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && hasTikTokScope(item, 'video.upload') && (
+                    <button
+                      onClick={() => void handlePublish(item.id, 'inbox')}
+                      disabled={loading}
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium border disabled:opacity-50"
+                      style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+                    >
                       <Send size={15} />
-                      Gửi TikTok
+                      Gửi inbox
                     </button>
                   )}
                   {item.status !== 'published' && item.status !== 'skipped' && item.status !== 'publishing' && (
@@ -231,6 +271,15 @@ export default function ApprovalsPage() {
           ))}
         </div>
       </div>
+
+      <PublishingQueueDetailDialog
+        item={selectedItem}
+        loading={loading}
+        onClose={() => setSelectedItem(null)}
+        onApprove={(queueItemId) => void handleStatus(queueItemId, 'approved')}
+        onSkip={(queueItemId) => void handleStatus(queueItemId, 'skipped')}
+        onPublish={handlePublishItem}
+      />
     </div>
   )
 }

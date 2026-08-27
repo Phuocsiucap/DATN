@@ -73,6 +73,15 @@ def log_prompt_run(
             except (ValueError, TypeError):
                 pass
 
+        if not parsed_user_id and parsed_ref_id:
+            try:
+                from common.db.models import MediaWorkflow
+                workflow = db.get(MediaWorkflow, parsed_ref_id)
+                if workflow and workflow.user_id:
+                    parsed_user_id = workflow.user_id
+            except Exception:
+                pass
+
         run = PromptRun(
             user_id=parsed_user_id,
             run_type=run_type,

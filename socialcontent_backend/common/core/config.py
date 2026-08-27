@@ -22,21 +22,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     system_bootstrap_token: str = "change-me-bootstrap-token"
-    tiktok_qr_login_url: str = "https://www.tiktok.com/login/qrcode"
     tiktok_client_key: str = Field(default="", validation_alias=AliasChoices("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_ID"))
     tiktok_client_secret: str = Field(default="", validation_alias=AliasChoices("TIKTOK_CLIENT_SECRET"))
     tiktok_redirect_uri: str = Field(default="", validation_alias=AliasChoices("TIKTOK_REDIRECT_URI"))
     tiktok_oauth_scopes: str = Field(
-        default="user.info.basic,video.upload",
+        default="user.info.basic,video.upload,video.publish",
         validation_alias=AliasChoices("TIKTOK_OAUTH_SCOPES", "TIKTOK_SCOPES"),
-    )
-    browser_channel: str = Field(
-        default="chrome",
-        validation_alias=AliasChoices("BROWSER_CHANNEL", "TIKTOK_QR_BROWSER_CHANNEL"),
-    )
-    browser_headless: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("BROWSER_HEADLESS", "TIKTOK_QR_HEADLESS"),
     )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True

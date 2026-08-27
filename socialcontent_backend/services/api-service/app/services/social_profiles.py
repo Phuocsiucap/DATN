@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import logging
-import shutil
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,23 +11,34 @@ from sqlalchemy.orm import Session
 
 from common.db.models import PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileStrategy, User
 from app.schemas import api as schemas
-from app.services.tiktok_qr import (
-    BACKEND_SOCIAL_PROFILE_ROOT,
-    SOCIAL_PROFILE_ROOT,
-    WORKSPACE_ROOT,
-    stop_tiktok_qr_session,
-)
 from app.services.tiktok_oauth import (
     build_tiktok_token_metadata,
     granted_scopes,
     poll_tiktok_oauth_qr_session,
+    requested_tiktok_scopes,
     start_tiktok_oauth_qr_session,
     stop_tiktok_oauth_qr_session,
 )
 from app.services import generate_video as video_pipeline
-from app.services.tiktok_posting import upload_video_to_tiktok_inbox
+from app.services.tiktok_posting import direct_post_video_to_tiktok, upload_video_to_tiktok_inbox
 
 logger = logging.getLogger(__name__)
+
+
+def _scope_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, list):
+        raw_values = [str(item) for item in value]
+    else:
+        raw_values = []
+    scopes: list[str] = []
+    for item in raw_values:
+        for part in re.split(r"[\s,]+", item):
+            scope = part.strip()
+            if scope and scope not in scopes:
+                scopes.append(scope)
+    return scopes
 
 
 class SocialProfileService:
@@ -49,7 +60,7 @@ class SocialProfileService:
             platform=platform,
             profile_name=profile_name,
             username=payload.username.strip() if payload.username else None,
-            folder_path=self.build_profile_path(user.id, platform, profile_name),
+            folder_path=self.build_profile_identifier(user.id, platform, profile_name),
             status="qr_pending" if platform == "tiktok" else "inactive",
         )
         db.add(profile)
@@ -67,9 +78,7 @@ class SocialProfileService:
         return profile
 
     async def delete_profile(self, db: Session, profile: SocialProfile) -> None:
-        await stop_tiktok_qr_session(str(profile.id), profile.user_id)
         await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
-        self.delete_profile_folder(profile.folder_path)
         db.delete(profile)
         db.commit()
 
@@ -93,6 +102,7 @@ class SocialProfileService:
             "authenticated": False,
             "session_active": True,
             "status": session.last_status,
+            "requested_scopes": requested_tiktok_scopes(),
             "qr_image": session.qr_image,
             "qr_url": session.qr_url,
             "page_url": session.qr_url,
@@ -109,10 +119,10 @@ class SocialProfileService:
         result = await poll_tiktok_oauth_qr_session(session_id, user.id)
         if not result.get("session_active") and not result.get("authenticated"):
             logger.info("Pending TikTok QR status session missing session_id=%s user_id=%s", session_id, user.id)
-            return result
+            return {**result, "requested_scopes": requested_tiktok_scopes()}
 
         if not result.get("authenticated"):
-            return result
+            return {**result, "requested_scopes": requested_tiktok_scopes()}
 
         session = result["session"]
         profile = self.upsert_tiktok_oauth_profile(
@@ -134,6 +144,8 @@ class SocialProfileService:
         return {
             "session_active": False,
             "authenticated": True,
+            "requested_scopes": requested_tiktok_scopes(),
+            "granted_scopes": _scope_list(getattr(profile, "scopes_jsonb", None)),
             "profile": self.serialize_profile(profile),
             "status": "confirmed",
             "page_url": session.qr_url,
@@ -143,7 +155,6 @@ class SocialProfileService:
 
     async def stop_pending_tiktok_qr_login(self, user: User, session_id: str) -> dict:
         await stop_tiktok_oauth_qr_session(session_id, user.id)
-        await stop_tiktok_qr_session(session_id, user.id)
         return {"message": "Đã đóng phiên QR TikTok"}
 
     async def start_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
@@ -163,6 +174,7 @@ class SocialProfileService:
             "authenticated": False,
             "session_active": True,
             "status": session.last_status,
+            "requested_scopes": requested_tiktok_scopes(),
             "qr_image": session.qr_image,
             "qr_url": session.qr_url,
             "page_url": session.qr_url,
@@ -172,7 +184,7 @@ class SocialProfileService:
         self.ensure_tiktok_profile(profile)
         result = await poll_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
         if not result.get("authenticated"):
-            return {**result, "profile": self.serialize_profile(profile)}
+            return {**result, "requested_scopes": requested_tiktok_scopes(), "profile": self.serialize_profile(profile)}
 
         session = result["session"]
         updated_profile = self.upsert_tiktok_oauth_profile(
@@ -189,6 +201,8 @@ class SocialProfileService:
             "profile": self.serialize_profile(updated_profile),
             "session_active": False,
             "authenticated": True,
+            "requested_scopes": requested_tiktok_scopes(),
+            "granted_scopes": _scope_list(getattr(updated_profile, "scopes_jsonb", None)),
             "status": "confirmed",
             "page_url": session.qr_url,
             "qr_url": session.qr_url,
@@ -198,7 +212,6 @@ class SocialProfileService:
     async def stop_tiktok_qr_login(self, db: Session, profile: SocialProfile) -> dict:
         self.ensure_tiktok_profile(profile)
         await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
-        await stop_tiktok_qr_session(str(profile.id), profile.user_id)
         if profile.status == "qr_pending":
             profile.status = "inactive"
             db.commit()
@@ -234,7 +247,7 @@ class SocialProfileService:
         display_name = (user_info.get("display_name") or "").strip()
         tiktok_username = (user_info.get("username") or fallback_username or "").strip() or None
         profile_name = display_name or (fallback_profile_name or "").strip() or tiktok_username or "TikTok account"
-        scope_values = granted_scopes(token_data)
+        scope_values = _scope_list(granted_scopes(token_data))
         now = datetime.utcnow()
         expires_in = int(token_data.get("expires_in") or 0)
         refresh_expires_in = int(token_data.get("refresh_expires_in") or 0)
@@ -245,7 +258,7 @@ class SocialProfileService:
                 platform="tiktok",
                 profile_name=profile_name,
                 username=tiktok_username,
-                folder_path=self.build_profile_path(user.id, "tiktok", profile_name),
+                folder_path=self.build_profile_identifier(user.id, "tiktok", profile_name),
                 status="active",
             )
             db.add(profile)
@@ -335,7 +348,23 @@ class SocialProfileService:
         db.refresh(item)
         return item
 
-    def publish_queue_item_to_tiktok(self, db: Session, queue_item_id: uuid.UUID, user: User, source: str = "manual") -> dict:
+    def publish_queue_item_to_tiktok(
+        self,
+        db: Session,
+        queue_item_id: uuid.UUID,
+        user: User,
+        source: str = "manual",
+        mode: str = "inbox",
+        privacy_level: str | None = None,
+        disable_comment: bool = False,
+        disable_duet: bool = False,
+        disable_stitch: bool = False,
+        is_aigc: bool = True,
+        brand_content_toggle: bool = False,
+        brand_organic_toggle: bool = False,
+    ) -> dict:
+        if mode not in {"inbox", "direct"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode phải là inbox hoặc direct")
         item = (
             db.query(PublishingQueueItem)
             .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
@@ -348,20 +377,39 @@ class SocialProfileService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
         if item.status in {"published", "skipped"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc")
-        if item.status not in {"queued", "approved", "publishing", "failed"}:
+        allowed_statuses = {"queued", "approved", "publishing", "failed"}
+        if source == "manual":
+            allowed_statuses.add("needs_approval")
+        if item.status not in allowed_statuses:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item chưa sẵn sàng để đăng")
 
         profile = item.profile
         self.ensure_tiktok_profile(profile)
+        mode = self.resolve_tiktok_publish_mode(profile, mode)
         video_path = self.resolve_rendered_video_path(item.article_link)
+        action_label = "đăng trực tiếp" if mode == "direct" else "gửi inbox"
         item.status = "publishing"
         item.error = None
-        item.ai_reason = f"Đang gửi TikTok bằng API ({source})."
+        item.ai_reason = f"Đang {action_label} TikTok bằng API ({source})."
         db.add(item)
         db.commit()
         db.refresh(item)
         try:
-            result = upload_video_to_tiktok_inbox(profile, video_path)
+            if mode == "direct":
+                result = direct_post_video_to_tiktok(
+                    profile,
+                    video_path,
+                    caption=item.generated_content,
+                    privacy_level=privacy_level,
+                    disable_comment=disable_comment,
+                    disable_duet=disable_duet,
+                    disable_stitch=disable_stitch,
+                    is_aigc=is_aigc,
+                    brand_content_toggle=brand_content_toggle,
+                    brand_organic_toggle=brand_organic_toggle,
+                )
+            else:
+                result = upload_video_to_tiktok_inbox(profile, video_path)
         except HTTPException as error:
             item.status = "failed"
             item.error = str(error.detail)
@@ -386,13 +434,16 @@ class SocialProfileService:
             post_url=item.article_link,
             platform_post_id=publish_id,
             caption=item.generated_content,
-            status="sent_to_tiktok_inbox",
+            status="published_to_tiktok" if mode == "direct" else "sent_to_tiktok_inbox",
             published_at=now,
         )
         item.status = "published"
         item.published_at = now
         item.error = None
-        item.ai_reason = f"TikTok upload sent to creator inbox ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
+        if mode == "direct":
+            item.ai_reason = f"TikTok Direct Post đã gửi ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
+        else:
+            item.ai_reason = f"TikTok upload sent to creator inbox ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
         db.add_all([profile, item, post])
         db.commit()
         db.refresh(item)
@@ -402,6 +453,8 @@ class SocialProfileService:
             "post": self.serialize_post(post),
             "tiktok": {
                 "publish_id": publish_id,
+                "mode": mode,
+                "privacy_level": result.get("privacy_level"),
                 "status": status_data,
                 "video_size": result.get("video_size"),
             },
@@ -523,9 +576,8 @@ class SocialProfileService:
             "username": profile.username,
             "external_id": getattr(profile, "external_id", None),
             "avatar_url": getattr(profile, "avatar_url", None),
-            "folder_path": profile.folder_path,
             "status": profile.status,
-            "scopes": getattr(profile, "scopes_jsonb", None) or [],
+            "scopes": _scope_list(getattr(profile, "scopes_jsonb", None)),
             "metadata": getattr(profile, "metadata_json", None) or {},
             "token_expires_at": getattr(profile, "token_expires_at", None),
             "refresh_expires_at": getattr(profile, "refresh_expires_at", None),
@@ -567,6 +619,8 @@ class SocialProfileService:
             "id": item.id,
             "profile_id": item.profile_id,
             "profile_name": item.profile.profile_name if item.profile else None,
+            "profile_scopes": _scope_list(getattr(item.profile, "scopes_jsonb", None)) if item.profile else [],
+            "content_id": item.content_id,
             "article_link": item.article_link,
             "article_title": item.article_title,
             "platform": item.platform,
@@ -645,40 +699,34 @@ class SocialProfileService:
             "captured_at": metric.captured_at,
         }
 
-    def build_profile_path(self, user_id: uuid.UUID, platform: str, profile_name: str) -> str:
+    def build_profile_identifier(self, user_id: uuid.UUID, platform: str, profile_name: str) -> str:
         profile_key = f"{self.slugify(profile_name)}-{uuid.uuid4().hex[:8]}"
-        return str(Path("social_profile") / "accounts" / f"user_{user_id}" / platform / profile_key)
-
-    def to_runtime_folder_path(self, profile_dir: Path) -> str:
-        try:
-            return str(profile_dir.resolve().relative_to(WORKSPACE_ROOT.resolve()))
-        except ValueError:
-            return str(profile_dir)
+        return f"api-profiles/user_{user_id}/{platform}/{profile_key}"
 
     def ensure_tiktok_profile(self, profile: SocialProfile) -> None:
         if profile.platform != "tiktok":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Profile này không phải TikTok")
 
-    def delete_profile_folder(self, folder_path: str) -> None:
-        folder = Path(folder_path)
-        candidates = [folder.resolve()] if folder.is_absolute() else [
-            (WORKSPACE_ROOT / folder).resolve(),
-            (Path(__file__).resolve().parents[4] / folder).resolve(),
-        ]
-        allowed_roots = [SOCIAL_PROFILE_ROOT.resolve(), BACKEND_SOCIAL_PROFILE_ROOT.resolve()]
-        target_dir = next(
-            (
-                candidate
-                for candidate in candidates
-                for allowed_root in allowed_roots
-                if candidate.is_relative_to(allowed_root)
-            ),
-            None,
-        )
-        if not target_dir:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Đường dẫn profile không hợp lệ")
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
+    def resolve_tiktok_publish_mode(self, profile: SocialProfile, requested_mode: str) -> str:
+        scopes = set(_scope_list(getattr(profile, "scopes_jsonb", None)))
+        profile_name = getattr(profile, "profile_name", None) or "này"
+        if requested_mode == "direct" and "video.publish" not in scopes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"TikTok profile {profile_name} chưa có scope video.publish trong token hiện tại. "
+                    "Hãy quét QR/kết nối lại tài khoản để cấp quyền Direct Post."
+                ),
+            )
+        if requested_mode == "inbox" and "video.upload" not in scopes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"TikTok profile {profile_name} chưa có scope video.upload trong token hiện tại. "
+                    "Hãy quét QR/kết nối lại tài khoản để cấp quyền upload inbox."
+                ),
+            )
+        return requested_mode
 
     def slugify(self, value: str) -> str:
         slug = "".join(character.lower() if character.isalnum() else "-" for character in value).strip("-")

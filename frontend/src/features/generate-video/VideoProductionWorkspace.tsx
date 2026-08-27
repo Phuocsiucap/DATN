@@ -4,16 +4,19 @@ import {
   ArrowLeft,
   ArrowUp,
   ArrowUpRight,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   Circle,
   Clapperboard,
   Download,
+  ExternalLink,
   Eye,
   FastForward,
   FileText,
   Film,
   Clock,
+  Globe,
   Image as ImageIcon,
   Lock,
   Maximize2,
@@ -200,7 +203,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const [exportedVideoUrl, setExportedVideoUrl] = useState('')
   const [activeStep, setActiveStep] = useState<StepId>('story')
   const [voiceId] = useState(defaultVoiceId)
-  const [voiceSpeed] = useState(1)
+  const [voiceSpeed] = useState(1.2)
   const [voiceProvider, setVoiceProvider] = useState<GenerateVideoVoiceProvider>('edge_tts_namminh')
   const [workflowProgress, setWorkflowProgress] = useState<VideoWorkflowProgress | null>(null)
   const [status, setStatus] = useState('Sẵn sàng')
@@ -541,10 +544,15 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     if (!beginAction('queue-video')) return
     setBusy('queue-video')
     try {
-      await queueGenerateVideoProjectApi(selectedId)
+      const result = await queueGenerateVideoProjectApi(selectedId)
       await loadProjectById(selectedId)
       setActiveStep('preview')
-      setStatus('Đã đưa video vào queue đăng bài. Kiểm tra ở Duyệt Queue hoặc Lịch đăng.')
+      const queueStatus = String(result.queue_item?.status || '')
+      setStatus(
+        queueStatus === 'needs_approval'
+          ? 'Đã đưa video vào queue và cần duyệt trước khi scheduler đăng. Kiểm tra ở Duyệt Queue hoặc Lịch đăng.'
+          : 'Đã đưa video vào queue đăng bài. Kiểm tra ở Duyệt Queue hoặc Lịch đăng.',
+      )
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'Không đưa được video vào queue')
     } finally {
@@ -673,6 +681,9 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
               </button>
               <button disabled={!hasStoryInput || actionsLocked} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
                 <Save size={14} /> Lưu kịch bản
+              </button>
+              <button disabled={!hasStoryInput || actionsLocked} onClick={() => { setActiveStep('video'); void generateVoice() }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                <Mic2 size={14} /> Tạo Voice AI
               </button>
             </div>
             <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
@@ -994,62 +1005,140 @@ function PlanEditor({
 }
 
 function SourceContentPreview({ source }: { source: Record<string, any> }) {
-  const mediaItems = Array.isArray(source.media)
-    ? source.media.filter((item): item is Record<string, any> => Boolean(item) && typeof item === 'object')
-    : []
+  const [activeTab, setActiveTab] = useState<'content' | 'media'>('content')
+
+  const mediaItems = useMemo(() => {
+    return Array.isArray(source.media)
+      ? source.media.filter((item): item is Record<string, any> => Boolean(item) && typeof item === 'object')
+      : []
+  }, [source.media])
+
   const sourceUrl = typeof source.source_url === 'string'
     ? source.source_url
     : typeof source.canonical_url === 'string'
       ? source.canonical_url
       : ''
+
+  const sourceDomain = useMemo(() => {
+    if (!sourceUrl) return ''
+    try {
+      return new URL(sourceUrl).hostname.replace(/^www\./, '')
+    } catch {
+      return sourceUrl
+    }
+  }, [sourceUrl])
+
   const sourceTitle = typeof source.canonical_title === 'string'
     ? source.canonical_title
     : typeof source.title === 'string'
       ? source.title
       : 'Chưa có tiêu đề'
+
   const text = typeof source.full_text === 'string'
     ? source.full_text
     : typeof source.summary === 'string'
       ? source.summary
       : ''
 
+  const paragraphs = useMemo(() => text ? text.split(/\n+/).filter(Boolean) : [], [text])
+  const wordCount = useMemo(() => text.split(/\s+/).filter(Boolean).length, [text])
+
   return (
-    <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <div>
-        <div className="text-xs font-black uppercase tracking-wider text-slate-500">Bài gốc</div>
-        <div className="mt-1 text-sm font-black leading-snug text-[#0f172a]">{sourceTitle}</div>
+    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-xs">
+            <BookOpen size={17} strokeWidth={2.2} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Nguồn bài viết</span>
+              {sourceDomain && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                  <Globe size={10} />
+                  {sourceDomain}
+                </span>
+              )}
+            </div>
+            <h3 className="mt-0.5 truncate text-sm font-black text-slate-900" title={sourceTitle}>
+              {sourceTitle}
+            </h3>
+          </div>
+        </div>
+
         {sourceUrl && (
-          <a href={sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-xs font-bold text-[#2563eb]">
-            {sourceUrl}
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <ExternalLink size={13} />
+            Mở bài gốc
           </a>
         )}
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-xs font-black uppercase tracking-wider text-slate-500">Media ({mediaItems.length})</div>
+      {/* Segmented Tab Controls */}
+      <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-100/80 p-1">
+        <div className="grid flex-1 grid-cols-2 gap-1">
+          <button
+            onClick={() => setActiveTab('content')}
+            className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition-all ${
+              activeTab === 'content'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FileText size={14} />
+            Nội dung ({wordCount} từ)
+          </button>
+          <button
+            onClick={() => setActiveTab('media')}
+            className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition-all ${
+              activeTab === 'media'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ImageIcon size={14} />
+            Media ({mediaItems.length})
+          </button>
         </div>
-        {mediaItems.length === 0 ? (
-          <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm font-semibold text-slate-400">
-            Không có ảnh/video trong bài
-          </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {mediaItems.map((item, index) => (
-              <SourceMediaItem key={item.id || index} item={item} index={index} />
-            ))}
-          </div>
-        )}
       </div>
 
-      <div>
-        <div className="mb-2 text-xs font-black uppercase tracking-wider text-slate-500">Nội dung</div>
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
-          {text ? text.split(/\n+/).filter(Boolean).slice(0, 12).map((paragraph: string, index: number) => (
-            <p key={index} className="mb-2 last:mb-0">{paragraph}</p>
-          )) : <span className="text-slate-400">Chưa có nội dung text.</span>}
+      {/* Tab Body */}
+      {activeTab === 'content' ? (
+        <div className="max-h-[360px] overflow-y-auto rounded-xl border border-slate-200/80 bg-slate-50/60 p-3.5 text-xs leading-6 text-slate-700 space-y-2.5 font-normal">
+          {paragraphs.length > 0 ? (
+            paragraphs.slice(0, 15).map((paragraph: string, index: number) => (
+              <p key={index} className="text-slate-700 leading-relaxed">
+                {paragraph}
+              </p>
+            ))
+          ) : (
+            <div className="flex h-28 items-center justify-center text-slate-400 font-semibold">
+              Chưa có nội dung văn bản cho bài gốc.
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="max-h-[360px] overflow-y-auto pr-0.5">
+          {mediaItems.length === 0 ? (
+            <div className="flex h-32 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-4 text-center">
+              <ImageIcon size={24} className="text-slate-300" />
+              <span className="mt-2 text-xs font-bold text-slate-500">Bài gốc không đính kèm ảnh/video</span>
+            </div>
+          ) : (
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              {mediaItems.map((item, index) => (
+                <SourceMediaItem key={item.id || index} item={item} index={index} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1063,23 +1152,45 @@ function SourceMediaItem({ item, index }: { item: Record<string, any>; index: nu
   const isImage = mediaType.toUpperCase().includes('IMAGE') || mimeType.startsWith('image/') || String(previewUrl || '').match(/\.(png|jpe?g|webp|gif|avif)(\?|$)/i)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      {mediaUrlValue && isVideo ? (
-        <video src={mediaUrlValue} poster={item.thumbnail_url || undefined} controls className="aspect-video w-full bg-black object-contain" />
-      ) : previewUrl && isImage ? (
-        <a href={mediaUrlValue || previewUrl} target="_blank" rel="noreferrer">
-          <img src={previewUrl} alt={`media-${index + 1}`} className="aspect-video w-full object-cover" />
-        </a>
-      ) : mediaUrlValue ? (
-        <a href={mediaUrlValue} target="_blank" rel="noreferrer" className="flex aspect-video items-center justify-center px-3 text-center text-xs font-bold text-[#2563eb]">
-          Mở media
-        </a>
-      ) : (
-        <div className="flex aspect-video items-center justify-center text-xs font-semibold text-slate-400">Không có URL media</div>
-      )}
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] font-bold text-slate-500">
-        <span className="uppercase">{mediaType || mimeType || 'MEDIA'}</span>
-        {mediaUrlValue && <a href={mediaUrlValue} target="_blank" rel="noreferrer" className="truncate text-[#2563eb]">Open</a>}
+    <div className="group relative overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-2xs transition-all hover:border-blue-300 hover:shadow-xs">
+      <div className="relative aspect-video w-full bg-slate-950 overflow-hidden">
+        {mediaUrlValue && isVideo ? (
+          <video src={mediaUrlValue} poster={item.thumbnail_url || undefined} controls className="h-full w-full object-contain" />
+        ) : previewUrl && isImage ? (
+          <a href={mediaUrlValue || previewUrl} target="_blank" rel="noreferrer" className="block h-full w-full">
+            <img
+              src={previewUrl}
+              alt={`media-${index + 1}`}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </a>
+        ) : mediaUrlValue ? (
+          <a href={mediaUrlValue} target="_blank" rel="noreferrer" className="flex h-full w-full items-center justify-center p-3 text-center text-xs font-bold text-blue-600">
+            <ExternalLink size={16} className="mr-1" /> Mở media
+          </a>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-slate-400">
+            Không có URL
+          </div>
+        )}
+
+        <span className="absolute left-2 top-2 rounded-md bg-slate-950/70 backdrop-blur-xs px-2 py-0.5 text-[9px] font-black uppercase text-white tracking-wider">
+          {isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'MEDIA'}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] font-bold text-slate-600 bg-slate-50/80">
+        <span className="truncate text-slate-500 font-mono text-[10px]">#{index + 1}</span>
+        {mediaUrlValue && (
+          <a
+            href={mediaUrlValue}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+          >
+            Mở tab mới <ExternalLink size={10} />
+          </a>
+        )}
       </div>
     </div>
   )
@@ -3512,14 +3623,14 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
       const overlap = Math.min(Number(item.end || 0), Number(clip.end || 0)) - Math.max(Number(item.start || 0), Number(clip.start || 0))
       return overlap > 0
     })
-    const start = typeof video[index]?.start === 'number'
-      ? Number(video[index].start)
+    const start = typeof clip?.start === 'number'
+      ? Number(clip.start)
       : typeof matchedTextClip?.start === 'number'
         ? Number(matchedTextClip.start)
-        : Number(clip.start || 0)
-    const fallbackDuration = Number(clip.duration || Number(clip.end || 0) - Number(clip.start || 0) || 4)
-    const end = typeof video[index]?.end === 'number'
-      ? Number(video[index].end)
+        : 0
+    const fallbackDuration = Number(clip?.duration || Number(clip?.end || 0) - Number(clip?.start || 0) || 4)
+    const end = typeof clip?.end === 'number'
+      ? Number(clip.end)
       : typeof matchedTextClip?.end === 'number'
         ? Number(matchedTextClip.end)
         : start + fallbackDuration

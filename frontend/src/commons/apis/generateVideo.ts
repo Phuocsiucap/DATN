@@ -120,7 +120,18 @@ export type VideoWorkspaceSummary = {
   id: string
   profile: { id: string; name: string; platform: string }
   series?: { id: string; title: string; status: string } | null
-  primary_content?: { id: string; title?: string | null; summary?: string | null } | null
+  primary_content?: {
+    id: string
+    title?: string | null
+    summary?: string | null
+    article_id?: string | null
+    articleId?: string | null
+    category_id?: string | null
+    categoryId?: string | null
+    category?: string | null
+    site_id?: string | null
+    siteId?: string | null
+  } | null
   title: string
   status: string
   current_stage?: string | null
@@ -300,7 +311,7 @@ export const fetchGenerateVideoJobApi = async (jobId: string) => {
   return request
 }
 
-export const generateVideoVoiceApi = async (workflowId: string, voiceId?: string, voiceSpeed = 1, voiceProvider: GenerateVideoVoiceProvider = 'edge_tts_namminh') => {
+export const generateVideoVoiceApi = async (workflowId: string, voiceId?: string, voiceSpeed = 1.2, voiceProvider: GenerateVideoVoiceProvider = 'edge_tts_namminh') => {
   const { data } = await api.post(`${basePath}/projects/${workflowId}/voice`, {
     voice_id: voiceId,
     voice_speed: voiceSpeed,

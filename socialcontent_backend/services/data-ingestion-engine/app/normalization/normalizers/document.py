@@ -46,7 +46,6 @@ def normalize_raw_document(raw_document: dict) -> dict:
     normalized["transcript_hash"] = hashlib.sha256(normalized["transcript"].encode("utf-8")).hexdigest() if normalized["transcript"] else None
     score, missing, warnings = score_quality(normalized)
     return {
-        "raw_document_id": str(raw_document.get("_id")),
         "job_id": raw_document.get("job_id"),
         "source_type": raw_document.get("source_type"),
         "normalizer_version": "1.0.0",

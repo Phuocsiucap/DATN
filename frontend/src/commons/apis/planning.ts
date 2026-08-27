@@ -104,6 +104,10 @@ export type ContentSeries = {
   current_part: number
   status: string
   context_version: number
+  category_id?: string | null
+  categoryId?: string | null
+  category?: string | null
+  metadata?: Record<string, unknown>
   created_at?: string
   updated_at?: string
 }
@@ -186,34 +190,62 @@ export type ReviewSourceContent = {
   source_url?: string | null
   source_author?: string | null
   source_published_at?: string | null
+  source_metadata?: Record<string, unknown>
+  article_id?: string | null
+  articleId?: string | null
+  category_id?: string | null
+  categoryId?: string | null
+  category?: string | null
+  site_id?: string | null
+  siteId?: string | null
+  normalized?: {
+    articleId?: string | null
+    categoryId?: string | null
+    siteId?: string | null
+    title: string
+    lead: string
+    publishedAt?: string | null
+    content: string
+    images: Array<Record<string, unknown>>
+    videos: Array<Record<string, unknown>>
+    url?: string | null
+  }
   quality_score: number
   published_at?: string | null
   created_at: string
   updated_at: string
   sources?: Array<{
-    id: string
+    id?: string
     source_type: string
     source_external_id: string
     source_url?: string | null
     raw_document_id?: string | null
+    processed_document_id?: string | null
     source_title?: string | null
     source_author?: string | null
     source_published_at?: string | null
     metadata_json?: Record<string, unknown>
-    first_seen_at: string
-    last_seen_at: string
+    first_seen_at?: string
+    last_seen_at?: string
   }>
   media?: Array<{
-    id: string
+    id?: string
     media_type: string
     source_url?: string | null
     storage_url?: string | null
     thumbnail_url?: string | null
     mime_type?: string | null
+    format?: string | null
+    embed_url?: string | null
+    provider?: string | null
+    title?: string | null
+    alt?: string | null
+    caption?: string | null
+    role?: string | null
     width?: number | null
     height?: number | null
     duration_seconds?: number | null
-    created_at: string
+    created_at?: string
   }>
 }
 

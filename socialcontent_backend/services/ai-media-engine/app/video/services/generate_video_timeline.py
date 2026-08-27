@@ -50,7 +50,7 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
 
     video_clips = normalize_video_clips(timeline.get("video"), fps)
     text_clips = prevent_timeline_text_overlap(normalize_text_clips(timeline.get("text"), fps), fps)
-    link_timeline_visual_text(video_clips, text_clips)
+    video_clips = fit_video_clips_to_text(video_clips, text_clips, fps)
     audio_clips = normalize_audio_clips(timeline.get("audio"), fps)
     timeline_metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
     if not audio_clips:

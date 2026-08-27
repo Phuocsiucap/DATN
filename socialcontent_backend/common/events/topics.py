@@ -3,10 +3,8 @@ CRAWL_TASK_REQUESTED = "crawl.task.requested"
 CRAWL_TASK_COMPLETED = "crawl.task.completed"
 CRAWL_TASK_FAILED = "crawl.task.failed"
 
-CONTENT_RAW_CREATED = "content.raw.created"
 CONTENT_NORMALIZATION_REQUESTED = "content.normalization.requested"
 CONTENT_NORMALIZED = "content.normalized"
-CONTENT_NORMALIZATION_FAILED = "content.normalization.failed"
 
 STORY_GROUPING_REQUESTED = "story.grouping.requested"
 STORY_GROUPED = "story.grouped"

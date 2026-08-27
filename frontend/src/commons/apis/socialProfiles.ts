@@ -34,8 +34,20 @@ export const updatePublishingQueueItemApi = async (queueItemId: string | number,
   return data
 }
 
-export const publishPublishingQueueItemApi = async (queueItemId: string | number) => {
-  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/publish`)
+export const publishPublishingQueueItemApi = async (
+  queueItemId: string | number,
+  payload: {
+    mode?: 'inbox' | 'direct'
+    privacy_level?: string | null
+    disable_comment?: boolean
+    disable_duet?: boolean
+    disable_stitch?: boolean
+    is_aigc?: boolean
+    brand_content_toggle?: boolean
+    brand_organic_toggle?: boolean
+  } = {},
+) => {
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/publish`, payload)
   return data
 }
 

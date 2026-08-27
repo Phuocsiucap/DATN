@@ -7,17 +7,22 @@ const compositionId = process.env.GENERATE_VIDEO_REMOTION_COMPOSITION_ID || 'Sto
 const publicDir = process.env.REMOTION_PUBLIC_DIR || '/app/data_demo/video_gen_demo/public';
 let bundledServeUrl;
 
-export async function renderStory({story, outputPath}) {
+export async function renderStory({story, outputPath, onProgress}) {
   if (!outputPath) {
     throw new Error('Missing output path for Remotion render');
   }
   const inputProps = {story: story || {}};
   const serveUrl = await getServeUrl();
+  const chromiumOptions = {
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  };
+
   const composition = await selectComposition({
     serveUrl,
     id: compositionId,
     inputProps,
     browserExecutable: browserExecutable(),
+    chromiumOptions,
   });
 
   await renderMedia({
@@ -27,10 +32,20 @@ export async function renderStory({story, outputPath}) {
     outputLocation: path.resolve(outputPath),
     inputProps,
     overwrite: true,
-    concurrency: optionalNumber(process.env.GENERATE_VIDEO_REMOTION_CONCURRENCY),
+    concurrency: optionalNumber(process.env.GENERATE_VIDEO_REMOTION_CONCURRENCY) ?? 1,
     crf: optionalNumber(process.env.GENERATE_VIDEO_REMOTION_CRF) ?? 23,
     x264Preset: process.env.GENERATE_VIDEO_REMOTION_X264_PRESET || 'veryfast',
     browserExecutable: browserExecutable(),
+    chromiumOptions,
+    onProgress: async (p) => {
+      if (typeof onProgress === 'function') {
+        try {
+          await onProgress(p);
+        } catch (err) {
+          console.warn(`[Render Progress Callback Warning] ${err.message}`);
+        }
+      }
+    },
   });
 }
 

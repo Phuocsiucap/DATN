@@ -13,6 +13,7 @@ from typing import Any
 
 from common.core.config import get_settings
 from common.core.llm import deepseek_chat_completion
+from common.db.prompt_runs import log_prompt_run
 from app.video.services.generate_video_constants import (
     AUDIO_DIR,
     DEFAULT_VOICE_ID,
@@ -30,10 +31,13 @@ from app.video.services.generate_video_timeline import (
 )
 
 
+DEFAULT_VOICE_SPEED = 1.2
+
+
 def enhance_emotion_and_generate_voice(
     story: dict[str, Any],
     voice_id: str | None = None,
-    voice_speed: float = 1.0,
+    voice_speed: float = DEFAULT_VOICE_SPEED,
     voice_provider: str | None = None,
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -60,7 +64,7 @@ def enhance_emotion_and_generate_voice(
     audio_path = AUDIO_DIR / audio_filename
     if selected_voice_provider in EDGE_TTS_VOICES:
         voice_text = build_edge_tts_voice_text(story)
-        generate_edge_tts_voice(voice_text, selected_voice_id, audio_path)
+        generate_edge_tts_voice(voice_text, selected_voice_id, selected_voice_speed, audio_path)
     else:
         generate_elevenlabs_voice(story, settings, selected_voice_id, selected_voice_speed, audio_path)
         voice_text = build_voice_text(story)
@@ -131,36 +135,59 @@ def tag_with_deepseek(story: dict[str, Any], settings) -> list[str]:
     if not settings.deepseek_api_key:
         raise RuntimeError("Missing ACD_DEEPSEEK_API_KEY or DEEPSEEK_API_KEY")
 
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    source = story.get("source") if isinstance(story.get("source"), dict) else {}
+    user_id = meta.get("user_id") or story.get("user_id") or source.get("user_id") or (source.get("content") or {}).get("user_id")
+    reference_id = meta.get("workflow_id") or story.get("workflow_id") or source.get("workflow_id") or source.get("id")
+
     lines = [strip_voice_tags(str(clip.get("text") or "")) for clip in timeline_text_clips(story)]
-    result = deepseek_chat_completion(
-        base_url=settings.deepseek_base_url,
-        api_key=settings.deepseek_api_key,
-        model="deepseek-v4-flash",
-        messages=[
-            {"role": "system", "content": "You prepare cinematic Vietnamese scripts for ElevenLabs v3."},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": "Add ElevenLabs v3 emotion tags.",
-                        "rules": [
-                            "Keep Vietnamese text unchanged.",
-                            "Return only JSON array of strings.",
-                            "Use tags like [whispers], [gasp], [serious], [confident], [sighs], [frustrated].",
-                        ],
-                        "lines": lines,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ],
-        temperature=0.4,
-        timeout=60,
-    )
-    tagged = result.parsed_json()
-    if not isinstance(tagged, list) or len(tagged) != len(lines):
-        raise RuntimeError(f"Unexpected DeepSeek response: {result.content}")
-    return [str(item) for item in tagged]
+    try:
+        result = deepseek_chat_completion(
+            base_url=settings.deepseek_base_url,
+            api_key=settings.deepseek_api_key,
+            model="deepseek-v4-flash",
+            messages=[
+                {"role": "system", "content": "You prepare cinematic Vietnamese scripts for ElevenLabs v3."},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "task": "Add ElevenLabs v3 emotion tags.",
+                            "rules": [
+                                "Keep Vietnamese text unchanged.",
+                                "Return only JSON array of strings.",
+                                "Use tags like [whispers], [gasp], [serious], [confident], [sighs], [frustrated].",
+                            ],
+                            "lines": lines,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            temperature=0.4,
+            timeout=60,
+        )
+        log_prompt_run(
+            user_id=user_id,
+            reference_id=reference_id,
+            run_type="GENERATE_VOICE_TAGS",
+            step_name="tag_with_deepseek",
+            result=result,
+        )
+        tagged = result.parsed_json()
+        if not isinstance(tagged, list) or len(tagged) != len(lines):
+            raise RuntimeError(f"Unexpected DeepSeek response: {result.content}")
+        return [str(item) for item in tagged]
+    except Exception as exc:
+        log_prompt_run(
+            user_id=user_id,
+            reference_id=reference_id,
+            run_type="GENERATE_VOICE_TAGS",
+            step_name="tag_with_deepseek",
+            status="FAILED",
+            error_message=str(exc),
+        )
+        raise
 
 
 
@@ -197,17 +224,19 @@ def generate_elevenlabs_voice(story: dict[str, Any], settings, voice_id: str, vo
 import time
 
 
-def generate_edge_tts_voice(text: str, voice: str, out_path: Path) -> None:
+def generate_edge_tts_voice(text: str, voice: str, voice_speed: float, out_path: Path) -> None:
     try:
         import edge_tts
     except ImportError as error:
         raise RuntimeError("Missing edge-tts package. Install requirements for generate-video-service again.") from error
 
+    rate = edge_tts_rate_for_speed(voice_speed)
+
     async def save_voice() -> None:
         communicate = edge_tts.Communicate(
             text=text,
             voice=voice,
-            rate="+0%",
+            rate=rate,
             pitch="-2Hz",
         )
         await communicate.save(str(out_path))
@@ -261,8 +290,14 @@ def clamp_voice_speed(value: float) -> float:
     try:
         speed = float(value)
     except (TypeError, ValueError):
-        speed = 1.0
+        speed = DEFAULT_VOICE_SPEED
     return max(0.7, min(1.2, speed))
+
+
+def edge_tts_rate_for_speed(voice_speed: float) -> str:
+    speed = clamp_voice_speed(voice_speed)
+    percent = round((speed - 1.0) * 100)
+    return f"{percent:+d}%"
 
 
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.services import generate_video as pipeline
 from app.api.deps import get_current_user
+from common.db.media_workflows import content_category_payload
 from common.db.models import (
     ContentItem,
     MediaWorkflow,
@@ -32,6 +33,7 @@ from common.events.topics import (
 
 router = APIRouter()
 DEFAULT_AUTO_VOICE_PROVIDER = "edge_tts_namminh"
+DEFAULT_VOICE_SPEED = 1.2
 ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PROCESSING"}
 PRE_RENDER_TASK_TYPES = {
     "GENERATE_VIDEO_SCRIPT",
@@ -66,7 +68,7 @@ class ReviewStoryRequest(BaseModel):
 
 class ProjectVoiceRequest(BaseModel):
     voice_id: str | None = None
-    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    voice_speed: float = Field(default=DEFAULT_VOICE_SPEED, ge=0.5, le=2.0)
     voice_provider: str | None = None
 
 
@@ -210,6 +212,7 @@ def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, sta
     public_story = _public_story(story)
     public_story.setdefault("meta", {})
     public_story["meta"]["workflow_id"] = str(project.id)
+    public_story["meta"]["user_id"] = str(project.user_id)
     public_story["project_status"] = _project_status(public_story)
 
     project.draft_json = public_story
@@ -224,7 +227,7 @@ def _enqueue_project_voice_job(
     *,
     trigger: str,
     voice_id: str | None = None,
-    voice_speed: float = 1.0,
+    voice_speed: float = DEFAULT_VOICE_SPEED,
     voice_provider: str | None = None,
 ) -> KafkaTask:
     existing = (
@@ -450,7 +453,9 @@ def queue_project_video_for_posting(
     if not metadata.get("video_approved"):
         raise HTTPException(status_code=400, detail="Video cần được duyệt trước khi đưa vào queue")
 
-    requested_status = (payload.status if payload else None) or "queued"
+    strategy = getattr(profile, "strategy", None)
+    default_queue_status = "approved" if strategy and strategy.approval_mode == "auto" else "needs_approval"
+    requested_status = (payload.status if payload else None) or default_queue_status
     if requested_status not in {"queued", "needs_approval", "approved"}:
         raise HTTPException(status_code=400, detail="Trạng thái queue không hợp lệ")
 
@@ -585,6 +590,8 @@ def _serialize_queue_item(item: PublishingQueueItem, profile: SocialProfile) -> 
         "id": item.id,
         "profile_id": item.profile_id,
         "profile_name": profile.profile_name,
+        "profile_scopes": getattr(profile, "scopes_jsonb", None) or [],
+        "content_id": item.content_id,
         "article_link": item.article_link,
         "article_title": item.article_title,
         "platform": item.platform,
@@ -898,6 +905,7 @@ def create_direct_script(
     title = title or payload.note or "Direct script"
 
     # Tạo MediaWorkflow
+    category_payload = content_category_payload(content)
     workflow = MediaWorkflow(
         user_id=user.id,
         profile_id=profile.id,
@@ -908,13 +916,14 @@ def create_direct_script(
             "selection_mode": "MANUAL",
             "target_duration_seconds": payload.target_duration_seconds,
             "note": payload.note,
+            **category_payload,
         },
     )
     db.add(workflow)
     db.flush()
 
     workflow.primary_content_id = content.id
-    workflow.inputs_jsonb = [{"type": "content", "id": str(content.id), "role": "primary"}]
+    workflow.inputs_jsonb = [{"type": "content", "id": str(content.id), "role": "primary", **category_payload}]
     db.flush()
 
     task_payload = _script_task_payload(

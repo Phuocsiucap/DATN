@@ -72,9 +72,26 @@ def update_queue_item_status(
 
 
 @router.post("/queue/items/{queue_item_id}/publish")
-def publish_queue_item_to_tiktok(queue_item_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def publish_queue_item_to_tiktok(
+    queue_item_id: uuid.UUID,
+    payload: schemas.TikTokPublishRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     service = SocialProfileService()
-    return service.publish_queue_item_to_tiktok(db, queue_item_id, current_user)
+    return service.publish_queue_item_to_tiktok(
+        db,
+        queue_item_id,
+        current_user,
+        mode=payload.mode if payload else "inbox",
+        privacy_level=payload.privacy_level if payload else None,
+        disable_comment=payload.disable_comment if payload else False,
+        disable_duet=payload.disable_duet if payload else False,
+        disable_stitch=payload.disable_stitch if payload else False,
+        is_aigc=payload.is_aigc if payload else True,
+        brand_content_toggle=payload.brand_content_toggle if payload else False,
+        brand_organic_toggle=payload.brand_organic_toggle if payload else False,
+    )
 
 
 @router.post("/post-items/{post_id}/metrics")

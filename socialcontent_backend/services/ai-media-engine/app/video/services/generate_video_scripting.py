@@ -61,6 +61,8 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
         images,
     )
     series_decision = _timeline_series_decision(timeline)
+    user_id = raw_article.get("user_id") or (raw_article.get("source") or {}).get("user_id") or (raw_article.get("content") or {}).get("user_id")
+    workflow_id = raw_article.get("workflow_id") or raw_article.get("id")
     story = {
         "meta": {
             "title": title,
@@ -68,6 +70,8 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
             "target_duration_seconds": target_duration,
             "llm_calls": 1,
             "draft_generation_mode": "single_pass_script_and_timeline",
+            "user_id": user_id,
+            "workflow_id": str(workflow_id) if workflow_id else None,
         },
         "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
         "audio": {"voiceVolume": 1, "musicVolume": 0},
@@ -343,9 +347,11 @@ def edit_story_with_ai(story: dict[str, Any], edit_prompt: str) -> dict[str, Any
         response_format={"type": "json_object"},
     )
     meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    user_id = meta.get("user_id") or story.get("user_id") or source.get("user_id") or (source.get("content") or {}).get("user_id") or (raw_article.get("source_content") or {}).get("user_id")
+    workflow_id = meta.get("workflow_id") or story.get("workflow_id") or source.get("workflow_id") or source.get("id")
     log_prompt_run(
-        user_id=meta.get("user_id"),
-        reference_id=meta.get("workflow_id"),
+        user_id=user_id,
+        reference_id=workflow_id,
         run_type="EDIT_VIDEO_TIMELINE",
         step_name="edit_story_timeline_with_ai",
         result=result,
@@ -462,9 +468,11 @@ def review_story_with_ai(story: dict[str, Any], review_instructions: str | None 
         timeout=45,
     )
     meta = next_story.get("meta") if isinstance(next_story.get("meta"), dict) else {}
+    user_id = meta.get("user_id") or next_story.get("user_id") or source.get("user_id") or (source.get("content") or {}).get("user_id")
+    workflow_id = meta.get("workflow_id") or next_story.get("workflow_id") or source.get("workflow_id") or source.get("id")
     log_prompt_run(
-        user_id=meta.get("user_id"),
-        reference_id=meta.get("workflow_id"),
+        user_id=user_id,
+        reference_id=workflow_id,
         run_type="GENERATE_VIDEO_SCRIPT",
         step_name="review_story_with_ai",
         result=result,
@@ -549,6 +557,9 @@ def compact_active_series_for_ai(value: Any) -> list[dict[str, Any]]:
                 "title": raw.get("title"),
                 "description": raw.get("description"),
                 "series_type": raw.get("series_type"),
+                "category_id": raw.get("category_id") or raw.get("categoryId"),
+                "categoryId": raw.get("categoryId") or raw.get("category_id"),
+                "category": raw.get("category"),
                 "current_part": raw.get("current_part"),
                 "total_parts": raw.get("total_parts"),
                 "recent_items": [
@@ -556,6 +567,9 @@ def compact_active_series_for_ai(value: Any) -> list[dict[str, Any]]:
                         "workflow_id": item.get("workflow_id"),
                         "title": item.get("title"),
                         "summary": truncate_text(str(item.get("summary") or ""), 500),
+                        "category_id": item.get("category_id") or item.get("categoryId"),
+                        "categoryId": item.get("categoryId") or item.get("category_id"),
+                        "category": item.get("category"),
                         "voice_text": truncate_text(str(item.get("voice_text") or ""), 900),
                         "status": item.get("status"),
                     }
@@ -690,6 +704,7 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "Use allowed_effects only.",
             "Do not output scenes or story_data.",
             "Also decide series in the same JSON response. Use active_series and their 5 recent_items.",
+            "Prefer an active series with the same categoryId/category_id before comparing title or story content.",
             "If the new content naturally continues one active series, set series_decision.action=USE_EXISTING and target_series_id to that exact id.",
             "If it does not match any active series but should become a reusable topic, set action=CREATE_NEW and choose a broad long-lived Vietnamese series_title.",
             "Do not create a series_title from the exact one-off article title.",
@@ -723,6 +738,13 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
                 "id": (raw_article.get("source_content") or {}).get("id") if isinstance(raw_article.get("source_content"), dict) else None,
                 "canonical_title": (raw_article.get("source_content") or {}).get("canonical_title") if isinstance(raw_article.get("source_content"), dict) else None,
                 "summary": (raw_article.get("source_content") or {}).get("summary") if isinstance(raw_article.get("source_content"), dict) else None,
+                "article_id": (raw_article.get("source_content") or {}).get("article_id") or (raw_article.get("source_content") or {}).get("articleId") if isinstance(raw_article.get("source_content"), dict) else None,
+                "articleId": (raw_article.get("source_content") or {}).get("articleId") or (raw_article.get("source_content") or {}).get("article_id") if isinstance(raw_article.get("source_content"), dict) else None,
+                "category_id": (raw_article.get("source_content") or {}).get("category_id") or (raw_article.get("source_content") or {}).get("categoryId") if isinstance(raw_article.get("source_content"), dict) else None,
+                "categoryId": (raw_article.get("source_content") or {}).get("categoryId") or (raw_article.get("source_content") or {}).get("category_id") if isinstance(raw_article.get("source_content"), dict) else None,
+                "category": (raw_article.get("source_content") or {}).get("category") if isinstance(raw_article.get("source_content"), dict) else None,
+                "site_id": (raw_article.get("source_content") or {}).get("site_id") or (raw_article.get("source_content") or {}).get("siteId") if isinstance(raw_article.get("source_content"), dict) else None,
+                "siteId": (raw_article.get("source_content") or {}).get("siteId") or (raw_article.get("source_content") or {}).get("site_id") if isinstance(raw_article.get("source_content"), dict) else None,
                 "full_text": truncate_text(str((raw_article.get("source_content") or {}).get("full_text") or source.get("full_text") or source.get("source_text") or ""), 3500) if isinstance(raw_article.get("source_content"), dict) else truncate_text(str(source.get("full_text") or source.get("source_text") or ""), 3500),
                 "source_url": (raw_article.get("source_content") or {}).get("source_url") if isinstance(raw_article.get("source_content"), dict) else None,
                 "canonical_url": (raw_article.get("source_content") or {}).get("canonical_url") if isinstance(raw_article.get("source_content"), dict) else None,
@@ -733,6 +755,8 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
         "default_images": DEFAULT_IMAGES,
         "allowed_effects": DEFAULT_EFFECTS,
     }
+    user_id = source.get("user_id") or (source.get("content") or {}).get("user_id") or (source.get("raw_article") or {}).get("user_id")
+    workflow_id = source.get("workflow_id") or source.get("id")
     try:
         result = deepseek_chat_completion(
             base_url=settings.deepseek_base_url,
@@ -753,8 +777,8 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             timeout=35,
         )
         log_prompt_run(
-            user_id=source.get("user_id") or (source.get("content") or {}).get("user_id"),
-            reference_id=source.get("workflow_id") or source.get("id"),
+            user_id=user_id,
+            reference_id=workflow_id,
             run_type="GENERATE_VIDEO_SCRIPT",
             step_name="generate_story_timeline_with_ai",
             result=result,
@@ -769,7 +793,15 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
                 metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
                 normalized["metadata"] = {**metadata, "series_decision": series_decision}
         return normalized or fallback
-    except Exception:
+    except Exception as exc:
+        log_prompt_run(
+            user_id=user_id,
+            reference_id=workflow_id,
+            run_type="GENERATE_VIDEO_SCRIPT",
+            step_name="generate_story_timeline_with_ai",
+            status="FAILED",
+            error_message=str(exc),
+        )
         return fallback
 
 

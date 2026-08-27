@@ -27,19 +27,34 @@ class ContentResponse(BaseModel):
     canonical_url: str | None
     quality_score: float
     created_at: datetime
-
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
+    article_id: str | None = None
+    category_id: str | None = None
+    category: str | None = None
+    site_id: str | None = None
+    articleId: str | None = None
+    categoryId: str | None = None
+    siteId: str | None = None
 
 class ContentDetailResponse(ContentResponse):
     full_text: str | None = None
-    published_at: datetime | None
-    duration_seconds: int | None
-    content_hash: str | None
-    transcript_hash: str | None
+    published_at: datetime | None = None
+    duration_seconds: int | None = None
     updated_at: datetime
-    sources_jsonb: list[Any] = Field(default_factory=list)
-    media_jsonb: list[Any] = Field(default_factory=list)
+    source_type: str | None = None
+    source_url: str | None = None
+    source_author: str | None = None
+    source_published_at: datetime | str | None = None
     story_id: uuid.UUID | None = None
     episode_order: int | None = None
+    title: str | None = None
+    lead: str | None = None
+    publishedAt: datetime | str | None = None
+    content: str | None = None
+    images: list[Any] = Field(default_factory=list)
+    videos: list[Any] = Field(default_factory=list)
+    url: str | None = None
+    normalized: dict[str, Any] = Field(default_factory=dict)
 
 
 class FinalSeriesInfoResponse(BaseModel):
@@ -57,6 +72,7 @@ class FinalContentItemResponse(ContentResponse):
     media_jsonb: list[Any] = Field(default_factory=list)
     story_id: uuid.UUID | None = None
     episode_order: int | None = None
+    series: FinalSeriesInfoResponse | None = None
 
 
 class FinalContentViewResponse(BaseModel):

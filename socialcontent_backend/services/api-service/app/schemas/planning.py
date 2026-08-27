@@ -71,6 +71,14 @@ class ProfileSeriesReviewSourceResponse(BaseModel):
     source_url: str | None = None
     source_author: str | None = None
     source_published_at: datetime | str | None = None
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
+    article_id: str | None = None
+    articleId: str | None = None
+    category_id: str | None = None
+    categoryId: str | None = None
+    category: str | None = None
+    site_id: str | None = None
+    siteId: str | None = None
     quality_score: float
     published_at: datetime | None = None
     created_at: datetime
@@ -109,6 +117,10 @@ class ContentSeriesResponse(BaseModel):
     current_part: int
     status: str
     context_version: int
+    category_id: str | None = None
+    categoryId: str | None = None
+    category: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

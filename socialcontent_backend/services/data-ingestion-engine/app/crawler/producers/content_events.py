@@ -2,17 +2,11 @@ from __future__ import annotations
 
 from common.events.envelope import build_event
 from common.events.kafka import publish
-from common.events.topics import CONTENT_RAW_CREATED, CRAWL_JOB_COMPLETED, CRAWL_TASK_COMPLETED, CRAWL_TASK_FAILED, CRAWL_TASK_REQUESTED, DEAD_LETTER_CONTENT
+from common.events.topics import CRAWL_JOB_COMPLETED, CRAWL_TASK_COMPLETED, CRAWL_TASK_FAILED, CRAWL_TASK_REQUESTED, DEAD_LETTER_CONTENT
 
 
 class CrawlerEventProducer:
     source = "crawler-service"
-
-    def raw_created(self, *, job_id, correlation_id: str | None, payload: dict) -> None:
-        publish(
-            CONTENT_RAW_CREATED,
-            build_event(event_type=CONTENT_RAW_CREATED, source=self.source, job_id=job_id, correlation_id=correlation_id, payload=payload),
-        )
 
     def task_completed(self, *, job_id, task_id: str) -> None:
         publish(

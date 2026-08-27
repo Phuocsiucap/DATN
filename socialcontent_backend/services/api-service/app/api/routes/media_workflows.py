@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from common.db.media_workflows import _load_content_full_text, serialize_workflow
+from common.db.media_workflows import _load_content_full_text, content_category_payload, serialize_workflow
 from common.db.models import ContentItem, ContentSeries, MediaWorkflow, CrawlJob, KafkaTask, SocialProfile, Story, User
 from common.db.session import get_db
 from app.api.deps import get_current_user
@@ -163,6 +163,7 @@ def list_video_workspace(
             ContentSeries.status.label("series_status"),
             ContentItem.canonical_title.label("content_title"),
             ContentItem.summary.label("content_summary"),
+            ContentItem.sources_jsonb.label("content_sources"),
         )
         .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
@@ -320,6 +321,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
 
     title = payload.title or _source_workflow_title(db, payload, user) or payload.note or "Content workflow"
 
+    primary_category_payload = content_category_payload(accessible_contents[payload.content_ids[0]]) if payload.content_ids else {}
     workflow = MediaWorkflow(
         user_id=user.id,
         profile_id=profile.id,
@@ -331,6 +333,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
             "note": payload.note,
             "filters": payload.filters,
             "crawl_job_id": str(payload.crawl_job_id) if payload.crawl_job_id else None,
+            **primary_category_payload,
         },
     )
     db.add(workflow)
@@ -338,14 +341,16 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
 
     inputs = []
     for content_id in payload.content_ids:
+        content = accessible_contents[content_id]
         role = "primary" if workflow.primary_content_id is None else "supporting"
-        inputs.append({"type": "content", "id": str(content_id), "role": role})
+        inputs.append({"type": "content", "id": str(content_id), "role": role, **content_category_payload(content)})
         if workflow.primary_content_id is None:
             workflow.primary_content_id = content_id
     for story_id in payload.story_ids:
         story = accessible_stories[story_id]
         role = "primary" if workflow.primary_content_id is None else "supporting"
-        inputs.append({"type": "story", "id": str(story_id), "role": role})
+        story_content = db.get(ContentItem, story.content_id) if story.content_id else None
+        inputs.append({"type": "story", "id": str(story_id), "role": role, **content_category_payload(story_content)})
         if workflow.primary_content_id is None and story.content_id:
             workflow.primary_content_id = story.content_id
 
@@ -473,6 +478,7 @@ def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, use
     if languages:
         query = query.filter(ContentItem.language.in_(languages))
     items = query.order_by(ContentItem.quality_score.desc(), ContentItem.updated_at.desc()).limit(payload.candidate_limit).all()
+    primary_category_payload = content_category_payload(items[0]) if items else {}
     workflow = MediaWorkflow(
         user_id=user.id,
         profile_id=profile.id,
@@ -483,13 +489,14 @@ def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, use
             "note": payload.note,
             "filters": payload.filters,
             "crawl_job_id": str(payload.crawl_job_id),
+            **primary_category_payload,
         },
     )
     db.add(workflow)
     db.flush()
     inputs = []
     for item in items:
-        inputs.append({"type": "content", "id": str(item.id), "score": float(item.quality_score or 0)})
+        inputs.append({"type": "content", "id": str(item.id), "score": float(item.quality_score or 0), **content_category_payload(item)})
         if not workflow.primary_content_id:
             workflow.primary_content_id = item.id
     workflow.inputs_jsonb = inputs
@@ -613,6 +620,12 @@ def _serialize_task_row(row) -> dict:
 
 def _serialize_workspace_summary(row, latest_task: dict | None) -> dict:
     artifacts = row.artifacts_jsonb if isinstance(row.artifacts_jsonb, list) else []
+    source_metadata = {}
+    sources = row.content_sources if isinstance(row.content_sources, list) else []
+    primary_source = sources[0] if sources else {}
+    if isinstance(primary_source, dict) and isinstance(primary_source.get("metadata_json"), dict):
+        source_metadata = primary_source["metadata_json"]
+    category_id = source_metadata.get("category_id")
     return {
         "id": str(row.id),
         "profile": {
@@ -629,6 +642,13 @@ def _serialize_workspace_summary(row, latest_task: dict | None) -> dict:
             "id": str(row.primary_content_id),
             "title": row.content_title,
             "summary": row.content_summary,
+            "article_id": source_metadata.get("article_id"),
+            "articleId": source_metadata.get("article_id"),
+            "category_id": category_id,
+            "categoryId": category_id,
+            "category": source_metadata.get("category"),
+            "site_id": source_metadata.get("site_id"),
+            "siteId": source_metadata.get("site_id"),
         } if row.primary_content_id else None,
         "title": row.title,
         "status": row.status,
@@ -658,6 +678,7 @@ def _workspace_source_content(db: Session, content_id: uuid.UUID | None) -> dict
             ContentItem.mongo_raw_id,
             ContentItem.sources_jsonb,
             ContentItem.media_jsonb,
+            ContentItem.published_at,
             ContentItem.created_at,
             ContentItem.updated_at,
         )
@@ -669,10 +690,17 @@ def _workspace_source_content(db: Session, content_id: uuid.UUID | None) -> dict
     sources = row.sources_jsonb if isinstance(row.sources_jsonb, list) else []
     media = row.media_jsonb if isinstance(row.media_jsonb, list) else []
     primary_source = sources[0] if sources else {}
+    source_metadata = primary_source.get("metadata_json") if isinstance(primary_source, dict) else {}
+    if not isinstance(source_metadata, dict):
+        source_metadata = {}
+    article_id = source_metadata.get("article_id")
+    category_id = source_metadata.get("category_id")
+    site_id = source_metadata.get("site_id")
     return {
         "id": str(row.id),
         "content_type": row.content_type,
         "title": row.canonical_title,
+        "canonical_title": row.canonical_title,
         "summary": row.summary,
         "full_text": _load_content_full_text(row.mongo_normalized_id, row.mongo_raw_id),
         "language": row.language,
@@ -681,8 +709,30 @@ def _workspace_source_content(db: Session, content_id: uuid.UUID | None) -> dict
         "source_type": primary_source.get("source_type"),
         "source_url": primary_source.get("source_url") or row.canonical_url,
         "source_author": primary_source.get("source_author"),
+        "source_published_at": primary_source.get("source_published_at"),
+        "source_metadata": source_metadata,
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": source_metadata.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
         "quality_score": float(row.quality_score or 0),
         "media": media,
+        "published_at": row.published_at,
+        "normalized": {
+            "articleId": article_id,
+            "categoryId": category_id,
+            "siteId": site_id,
+            "title": row.canonical_title or "",
+            "lead": row.summary or "",
+            "publishedAt": row.published_at or primary_source.get("source_published_at"),
+            "content": _load_content_full_text(row.mongo_normalized_id, row.mongo_raw_id) or row.summary or "",
+            "images": [],
+            "videos": [],
+            "url": row.canonical_url,
+        },
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }

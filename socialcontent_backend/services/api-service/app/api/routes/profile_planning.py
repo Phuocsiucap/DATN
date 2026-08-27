@@ -97,6 +97,8 @@ def list_profile_series_review(profile_id: uuid.UUID, user: User = Depends(get_c
 
 
 def _serialize_series(series: ContentSeries) -> dict:
+    metadata = series.metadata_json if isinstance(series.metadata_json, dict) else {}
+    category_id = metadata.get("category_id") or metadata.get("categoryId")
     return {
         "id": series.id,
         "profile_id": series.profile_id,
@@ -107,6 +109,10 @@ def _serialize_series(series: ContentSeries) -> dict:
         "current_part": series.current_part,
         "status": series.status,
         "context_version": int((series.context_json or {}).get("version") or 1),
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
+        "metadata": metadata,
         "created_at": series.created_at,
         "updated_at": series.updated_at,
     }
@@ -124,14 +130,20 @@ def _review_article_payload(db: Session, plan: MediaWorkflow) -> dict:
 def _serialize_source_content(content: ContentItem) -> dict:
     sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
     primary_source = sources[0] if sources else {}
+    source_metadata = primary_source.get("metadata_json") if isinstance(primary_source, dict) else {}
+    if not isinstance(source_metadata, dict):
+        source_metadata = {}
     media = content.media_jsonb if isinstance(content.media_jsonb, list) else []
+    article_id = source_metadata.get("article_id")
+    category_id = source_metadata.get("category_id")
+    site_id = source_metadata.get("site_id")
     
     return {
         "id": content.id,
         "content_type": content.content_type,
         "canonical_title": content.canonical_title,
         "summary": content.summary,
-        "full_text": _load_content_full_text(content.mongo_raw_id, content.mongo_normalized_id) or content.summary,
+        "full_text": _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id) or content.summary,
         "language": content.language,
         "status": content.status,
         "canonical_url": content.canonical_url,
@@ -139,6 +151,14 @@ def _serialize_source_content(content: ContentItem) -> dict:
         "source_url": primary_source.get("source_url"),
         "source_author": primary_source.get("source_author"),
         "source_published_at": primary_source.get("source_published_at"),
+        "source_metadata": source_metadata,
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": source_metadata.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
         "quality_score": float(content.quality_score or 0),
         "published_at": content.published_at,
         "created_at": content.created_at,

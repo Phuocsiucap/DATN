@@ -10,6 +10,7 @@ def main() -> None:
             "GENERATE_VIDEO_EDIT",
             "GENERATE_VIDEO_REVIEW",
             "GENERATE_VIDEO_VOICE",
+            "GENERATE_VIDEO_RENDER",
         },
         group_id="generate-video-workers",
     )

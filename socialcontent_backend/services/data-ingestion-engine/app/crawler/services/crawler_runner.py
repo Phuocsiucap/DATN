@@ -10,7 +10,9 @@ from common.db.models import CrawlJob, KafkaTask
 from app.crawler.crawlers.bilibili import BilibiliCrawler
 from app.crawler.crawlers.vnexpress import VNExpressCrawler
 from app.crawler.producers.content_events import CrawlerEventProducer
-from app.crawler.repositories.raw_documents import RawDocumentRepository
+from app.normalization.normalizers.document import normalize_raw_document
+from app.normalization.producers.normalized_events import NormalizationEventProducer
+from app.normalization.repositories.documents import NormalizationDocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +22,13 @@ class CrawlerRunner:
 
     def __init__(
         self,
-        repository: RawDocumentRepository | None = None,
+        repository: NormalizationDocumentRepository | None = None,
         producer: CrawlerEventProducer | None = None,
+        normalization_producer: NormalizationEventProducer | None = None,
     ) -> None:
-        self.repository = repository or RawDocumentRepository()
+        self.repository = repository or NormalizationDocumentRepository()
         self.producer = producer or CrawlerEventProducer()
+        self.normalization_producer = normalization_producer or NormalizationEventProducer()
 
     def pick_crawler(self, source_type: str):
         if source_type.upper() == "BILIBILI":
@@ -96,15 +100,17 @@ class CrawlerRunner:
                     message="Crawler item failed and was skipped",
                     metadata=error,
                 )
-            raw_document_ids = self.repository.insert_many(documents)
+            processed_documents = self.to_processed_documents(crawler, documents)
+            processed_document_ids = self.repository.insert_processed_many(processed_documents)
 
             task.status = "SUCCEEDED"
             task.completed_at = datetime.utcnow()
             job.status = "RUNNING"
-            job.current_stage = "CRAWLING"
-            job.total_discovered = max(job.total_discovered, job.total_crawled + len(raw_document_ids))
-            job.total_crawled += len(raw_document_ids)
-            job.progress_percent = max(float(job.progress_percent), 35)
+            job.current_stage = "NORMALIZING"
+            job.total_discovered = max(job.total_discovered, job.total_crawled + len(processed_document_ids))
+            job.total_crawled += len(processed_document_ids)
+            job.total_normalized += len(processed_document_ids)
+            job.progress_percent = max(float(job.progress_percent), 60)
             add_crawl_log(
                 db,
                 job_id=job.id,
@@ -112,20 +118,19 @@ class CrawlerRunner:
                 source_type=source_type,
                 stage="CRAWLING",
                 message="Crawler task completed",
-                metadata={"raw_document_count": len(raw_document_ids), "skipped_count": len(getattr(crawler, "last_errors", []))},
+                metadata={"processed_document_count": len(processed_document_ids), "skipped_count": len(getattr(crawler, "last_errors", []))},
             )
-            finalized = finalize_job_if_ready(db, job) if len(raw_document_ids) == 0 else False
+            finalized = finalize_job_if_ready(db, job) if len(processed_document_ids) == 0 else False
             db.commit()
 
-            for raw_document_id, document in zip(raw_document_ids, documents):
-                self.producer.raw_created(
+            for processed_document_id, document in zip(processed_document_ids, processed_documents):
+                self.normalization_producer.normalized(
                     job_id=job.id,
                     correlation_id=message.get("correlation_id"),
                     payload={
-                        "raw_document_id": raw_document_id,
+                        "processed_document_id": processed_document_id,
                         "task_id": str(task.id),
-                        "source_type": source_type,
-                        "content_type": document["content_type"],
+                        "quality": document.get("quality"),
                     },
                 )
             self.producer.task_completed(job_id=job.id, task_id=str(task.id))
@@ -175,3 +180,8 @@ class CrawlerRunner:
         if "retry_backoff_seconds" in configuration:
             return max(0, min(int(configuration["retry_backoff_seconds"]), 300))
         return min(2 ** max(task.attempt_count - 1, 0) * 2, 30)
+
+    def to_processed_documents(self, crawler, documents: list[dict]) -> list[dict]:
+        if getattr(crawler, "outputs_normalized", False):
+            return documents
+        return [normalize_raw_document(document) for document in documents]

@@ -7,6 +7,7 @@ from typing import Any
 from common.db.media_workflows import _image_urls, _serialize_source_content
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
+from app.video.services.generate_video_voice import DEFAULT_VOICE_SPEED
 from app.video.services.generate_video_rendering import export_final_video
 from app.video.services.generate_video_scripting import create_story_from_raw
 from app.video.services.generate_video_timeline import normalize_story_for_project, public_story_payload
@@ -107,6 +108,9 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
     source_content = _serialize_source_content(content) or {"id": str(content.id)}
     source_content["media"] = media
     full_text = source_content.get("full_text")
+    category_id = source_content.get("category_id") or source_content.get("categoryId")
+    article_id = source_content.get("article_id") or source_content.get("articleId")
+    site_id = source_content.get("site_id") or source_content.get("siteId")
 
     content_context = {
         "content_id": str(content.id),
@@ -114,6 +118,13 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
         "content_type": content.content_type,
         "source_scope": content.content_scope,
         "quality_score": float(content.quality_score or 0),
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": source_content.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
         "workflow_metadata": project_meta,
     }
 
@@ -186,6 +197,7 @@ def _recent_series_items(db: Any, series_id: uuid.UUID, current_workflow_id: uui
             "workflow_id": str(workflow.id),
             "title": workflow.title,
             "summary": _content_summary(content),
+            **_content_category_context(content),
             "voice_text": _workflow_voice_text(workflow),
             "status": workflow.status,
             "primary_content_id": str(workflow.primary_content_id) if workflow.primary_content_id else None,
@@ -227,6 +239,8 @@ def _workflow_voice_text(workflow: Any) -> str | None:
 
 
 def _series_context_payload(series: Any) -> dict[str, Any]:
+    metadata = series.metadata_json if isinstance(getattr(series, "metadata_json", None), dict) else {}
+    category_id = metadata.get("category_id") or metadata.get("categoryId")
     return {
         "id": str(series.id),
         "title": series.title,
@@ -235,6 +249,9 @@ def _series_context_payload(series: Any) -> dict[str, Any]:
         "status": series.status,
         "current_part": int(series.current_part or 0),
         "total_parts": int(series.total_parts or 0),
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
         "context_json": series.context_json or {},
     }
 
@@ -243,23 +260,37 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
     from common.db.models import ContentSeries
 
     decision = _story_series_decision(story)
+    series = None
+    category_id = _source_category_id(source)
+    if category_id and not getattr(project, "series_id", None):
+        series = _find_active_series_by_category_id(db, project.profile_id, category_id)
+        if series:
+            action = "USE_EXISTING"
+            decision = {
+                "action": action,
+                "target_series_id": str(series.id),
+                "series_title": series.title,
+                "reason": f"Matched source categoryId {category_id}",
+            }
+
     if not decision:
         return None
 
     action = str(decision.get("action") or "NONE").upper()
-    series = None
     if action == "USE_EXISTING":
-        target_series_id = _as_uuid(decision.get("target_series_id"))
-        if target_series_id:
-            candidate = db.get(ContentSeries, target_series_id)
-            if candidate and candidate.profile_id == project.profile_id and candidate.status == "ACTIVE":
-                series = candidate
+        if not series:
+            target_series_id = _as_uuid(decision.get("target_series_id"))
+            if target_series_id:
+                candidate = db.get(ContentSeries, target_series_id)
+                if candidate and candidate.profile_id == project.profile_id and candidate.status == "ACTIVE":
+                    series = candidate
     elif action == "CREATE_NEW":
         title = _clean_series_title(decision.get("series_title"))
         if title:
             series = _find_active_series_by_title(db, project.profile_id, title)
             if not series:
                 content_context = source.get("content") if isinstance(source.get("content"), dict) else {}
+                source_content = source.get("source_content") if isinstance(source.get("source_content"), dict) else {}
                 series = ContentSeries(
                     user_id=project.user_id,
                     profile_id=project.profile_id,
@@ -275,6 +306,13 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
                         "source": "llm_series_decision",
                         "source_content_id": content_context.get("content_id"),
                         "crawl_job_id": content_context.get("crawl_job_id"),
+                        "article_id": content_context.get("article_id") or source_content.get("article_id"),
+                        "articleId": content_context.get("articleId") or source_content.get("articleId"),
+                        "category_id": content_context.get("category_id") or source_content.get("category_id"),
+                        "categoryId": content_context.get("categoryId") or source_content.get("categoryId"),
+                        "category": content_context.get("category") or source_content.get("category"),
+                        "site_id": content_context.get("site_id") or source_content.get("site_id"),
+                        "siteId": content_context.get("siteId") or source_content.get("siteId"),
                         "reason": decision.get("reason"),
                     },
                 )
@@ -333,6 +371,71 @@ def _find_active_series_by_title(db: Any, profile_id: uuid.UUID, title: str):
     return next((series for series in rows if str(series.title or "").strip().casefold() == normalized), None)
 
 
+def _find_active_series_by_category_id(db: Any, profile_id: uuid.UUID, category_id: str):
+    from common.db.models import ContentSeries
+
+    target = str(category_id or "").strip()
+    if not target:
+        return None
+    rows = (
+        db.query(ContentSeries)
+        .filter(
+            ContentSeries.profile_id == profile_id,
+            ContentSeries.status == "ACTIVE",
+        )
+        .order_by(ContentSeries.updated_at.desc())
+        .limit(100)
+        .all()
+    )
+    for series in rows:
+        metadata = series.metadata_json if isinstance(series.metadata_json, dict) else {}
+        if str(metadata.get("category_id") or metadata.get("categoryId") or "").strip() == target:
+            return series
+    return None
+
+
+def _source_category_id(source: dict[str, Any]) -> str | None:
+    candidates = []
+    content = source.get("content") if isinstance(source.get("content"), dict) else {}
+    source_content = source.get("source_content") if isinstance(source.get("source_content"), dict) else {}
+    raw_article = source.get("raw_article") if isinstance(source.get("raw_article"), dict) else {}
+    raw_source_content = raw_article.get("source_content") if isinstance(raw_article.get("source_content"), dict) else {}
+    candidates.extend([
+        content.get("category_id"),
+        content.get("categoryId"),
+        source_content.get("category_id"),
+        source_content.get("categoryId"),
+        raw_source_content.get("category_id"),
+        raw_source_content.get("categoryId"),
+    ])
+    for value in candidates:
+        if value not in (None, "", []):
+            return str(value)
+    return None
+
+
+def _content_category_context(content: Any) -> dict[str, Any]:
+    if not content:
+        return {}
+    sources = content.sources_jsonb if isinstance(getattr(content, "sources_jsonb", None), list) else []
+    primary_source = sources[0] if sources else {}
+    metadata = primary_source.get("metadata_json") if isinstance(primary_source, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    article_id = metadata.get("article_id")
+    category_id = metadata.get("category_id")
+    site_id = metadata.get("site_id")
+    return {
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
+    }
+
+
 def _resolve_script_content_id(project: Any, metadata: dict[str, Any]) -> uuid.UUID | None:
     for value in (metadata.get("content_id"), getattr(project, "primary_content_id", None)):
         resolved = _as_uuid(value)
@@ -384,6 +487,10 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
         prompt = metadata.get("prompt") or ""
         if not isinstance(story, dict):
             raise RuntimeError("Missing story payload for generate-video edit run")
+
+        story.setdefault("meta", {})
+        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
@@ -452,6 +559,10 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
         instructions = metadata.get("instructions")
         if not isinstance(story, dict):
             raise RuntimeError("Missing story payload for generate-video review run")
+
+        story.setdefault("meta", {})
+        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
@@ -524,10 +635,14 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
         story = project.draft_json
         voice_id = metadata.get("voice_id")
-        voice_speed = float(metadata.get("voice_speed") or 1.0)
+        voice_speed = float(metadata.get("voice_speed") or DEFAULT_VOICE_SPEED)
         voice_provider = metadata.get("voice_provider")
         if not isinstance(story, dict):
             raise RuntimeError("Missing story payload for generate-video voice run")
+
+        story.setdefault("meta", {})
+        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
         task.started_at = datetime.now(timezone.utc)
@@ -647,7 +762,7 @@ def _maybe_enqueue_auto_generate_video_voice(db, project, *, trigger: str) -> No
         payload_jsonb={
             "trigger": trigger,
             "voice_provider": EDGE_TTS_NAMMINH_PROVIDER,
-            "voice_speed": 1.0,
+            "voice_speed": DEFAULT_VOICE_SPEED,
         },
     )
     project.status = "EDITING"

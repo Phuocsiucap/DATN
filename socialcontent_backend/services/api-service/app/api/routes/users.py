@@ -32,7 +32,9 @@ def get_my_ai_usage(user: User = Depends(get_current_user), db: Session = Depend
     recent = [
         {
             "id": str(r.id),
+            "run_type": r.run_type,
             "step_name": r.step_name,
+            "reference_id": str(r.reference_id) if r.reference_id else None,
             "model_provider": r.model_provider,
             "model_name": r.model_name,
             "input_tokens": r.input_tokens,

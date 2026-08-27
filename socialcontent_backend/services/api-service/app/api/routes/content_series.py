@@ -161,6 +161,8 @@ def _get_owned_series(db: Session, series_id: uuid.UUID, user: User) -> ContentS
 
 
 def _serialize_series(series: ContentSeries) -> dict:
+    metadata = series.metadata_json if isinstance(series.metadata_json, dict) else {}
+    category_id = metadata.get("category_id") or metadata.get("categoryId")
     return {
         "id": series.id,
         "profile_id": series.profile_id,
@@ -171,6 +173,10 @@ def _serialize_series(series: ContentSeries) -> dict:
         "current_part": series.current_part,
         "status": series.status,
         "context_version": int((series.context_json or {}).get("version") or 1),
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
+        "metadata": metadata,
         "created_at": series.created_at,
         "updated_at": series.updated_at,
     }

@@ -5,12 +5,25 @@ function normalizeText(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+const DETAIL_SELECTOR = "article.fck_detail, article .fck_detail, section.fck_detail, .fck_detail";
+
 function cleanUrl(value) {
   if (!value) return "";
   return value
     .replace(/\\\//g, "/")
     .replace(/&amp;/g, "&")
     .trim();
+}
+
+function isBlockedImage(url) {
+  const clean = cleanUrl(url).toLowerCase();
+  return (
+    !clean ||
+    clean.includes(".svg") ||
+    clean.includes("nguonuutien.jpg") ||
+    clean.includes("/logos/") ||
+    clean.includes("/graphics/logo")
+  );
 }
 
 function isVideoObject(node) {
@@ -75,6 +88,49 @@ function extractJsonLdVideos($) {
   });
 
   return videos;
+}
+
+function collectImageObjects(node, output = []) {
+  if (!node || typeof node !== "object") return output;
+
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectImageObjects(item, output));
+    return output;
+  }
+
+  if (node["@type"] === "ImageObject" && node.url) {
+    output.push({
+      src: cleanUrl(node.url),
+      alt: node.caption || "",
+      caption: node.caption || ""
+    });
+  }
+
+  for (const value of Object.values(node)) {
+    if (value && typeof value === "object") {
+      collectImageObjects(value, output);
+    }
+  }
+
+  return output;
+}
+
+function extractJsonLdImages($) {
+  const images = [];
+
+  $('script[type="application/ld+json"]').each((_, script) => {
+    const raw = $(script).text().trim();
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      images.push(...collectImageObjects(parsed));
+    } catch {
+      // Ignore non-strict JSON-LD.
+    }
+  });
+
+  return images;
 }
 
 function detectVideoKind(url) {
@@ -184,10 +240,33 @@ function normalizeVideos(rawVideos) {
   return Array.from(byUrl.values());
 }
 
+function dedupeImages(images) {
+  const bySrc = new Map();
+
+  for (const image of images) {
+    if (!image?.src || isBlockedImage(image.src) || bySrc.has(image.src)) continue;
+    bySrc.set(image.src, image);
+  }
+
+  return Array.from(bySrc.values());
+}
+
+function getCategoryName($) {
+  const direct = $('meta[name="tt_site_id_detail"]').attr("catename");
+  if (direct) return direct;
+
+  const folderNames = $('meta[name="tt_list_folder_name"]').attr("content") || "";
+  const names = folderNames
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item && item.toLowerCase() !== "vnexpress");
+  return names.at(-1) || "";
+}
+
 function extractDomVideos($) {
   const videos = [];
 
-  $("article.fck_detail video, video").each((_, video) => {
+  $(`${DETAIL_SELECTOR} video, video`).each((_, video) => {
     const el = $(video);
     const src = cleanUrl(el.attr("src") || el.attr("data-src"));
     if (src && !src.startsWith("blob:")) {
@@ -214,7 +293,7 @@ function extractDomVideos($) {
     });
   });
 
-  $("article.fck_detail iframe, iframe").each((_, iframe) => {
+  $(`${DETAIL_SELECTOR} iframe, iframe`).each((_, iframe) => {
     const el = $(iframe);
     const wrapper = el.closest("div");
     const nearbyTitle = normalizeText(
@@ -240,7 +319,17 @@ function extractDomVideos($) {
       "article.fck_detail [data-file]",
       "article.fck_detail [data-url]",
       "article.fck_detail [data-source]",
-      "article.fck_detail [data-src]"
+      "article.fck_detail [data-src]",
+      "article .fck_detail [data-video-src]",
+      "article .fck_detail [data-file]",
+      "article .fck_detail [data-url]",
+      "article .fck_detail [data-source]",
+      "article .fck_detail [data-src]",
+      "section.fck_detail [data-video-src]",
+      "section.fck_detail [data-file]",
+      "section.fck_detail [data-url]",
+      "section.fck_detail [data-source]",
+      "section.fck_detail [data-src]"
     ].join(",")
   ).each((_, node) => {
     const el = $(node);
@@ -292,6 +381,7 @@ async function getVnExpressDetail(source) {
 
   const articleId = $('meta[name="tt_article_id"]').attr("content");
   const categoryId = $('meta[name="tt_category_id"]').attr("content");
+  const categoryName = getCategoryName($);
   const siteId = $('meta[name="tt_site_id"]').attr("content");
 
   const title = $("h1.title-detail").first().text().trim();
@@ -299,21 +389,33 @@ async function getVnExpressDetail(source) {
   const publishedAt =
     $('meta[itemprop="datePublished"]').attr("content") ||
     $('meta[name="pubdate"]').attr("content");
+  const detailRoot = $(DETAIL_SELECTOR).first();
 
-  const content = $("article.fck_detail p.Normal")
+  const content = detailRoot
+    .find("p.Normal")
     .map((_, el) => normalizeText($(el).text()))
     .get()
     .filter(Boolean)
     .join("\n\n");
 
-  const images = $("article.fck_detail figure")
+  const metadataImages = [
+    {
+      src: cleanUrl($('meta[property="og:image"]').attr("content")),
+      alt: $('meta[property="og:image:alt"]').attr("content") || "",
+      caption: $('meta[property="og:image:alt"]').attr("content") || ""
+    },
+    ...extractJsonLdImages($)
+  ].filter((image) => image.src && !isBlockedImage(image.src));
+
+  const figureImages = detailRoot
+    .find("figure")
     .map((_, fig) => {
       const figure = $(fig);
-      if (figure.find("video, iframe").length) return null;
+      if (figure.find("video, iframe, .box_embed_video_parent, [data-vid]").length) return null;
 
       const img = $(fig).find("img").first();
       const src = cleanUrl(img.attr("data-src") || img.attr("src"));
-      if (!src || src.startsWith("data:") || src.includes(".svg")) return null;
+      if (!src || src.startsWith("data:") || isBlockedImage(src)) return null;
 
       return {
         src,
@@ -322,6 +424,8 @@ async function getVnExpressDetail(source) {
       };
     })
     .get();
+
+  const images = dedupeImages([...metadataImages, ...figureImages]);
   const videoThumbnailUrls = new Set(
     extractJsonLdVideos($)
       .map((video) => video.thumbnailUrl)
@@ -337,6 +441,7 @@ async function getVnExpressDetail(source) {
   return {
     articleId,
     categoryId,
+    categoryName,
     siteId,
     title,
     lead,
@@ -350,7 +455,7 @@ async function getVnExpressDetail(source) {
 
 const input =
   process.argv[2] ||
-  "https://vnexpress.net/12-de-cu-ban-thang-dep-nhat-world-cup-2026-5100277.html";
+  "https://vnexpress.net/ket-qua-viet-nam-vs-thai-lan-5113742-tong-thuat.html";
 
 const result = await getVnExpressDetail(input);
 console.dir(result, { depth: null });

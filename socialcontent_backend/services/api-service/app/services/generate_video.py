@@ -24,20 +24,48 @@ def get_elevenlabs_api_key(settings=None) -> str:
         raise HTTPException(status_code=500, detail="Missing ELEVENLABS_API_KEY")
     return api_key
 
-def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:
-    next_story = json.loads(json.dumps(story, ensure_ascii=False))
-    return next_story
+try:
+    from app.video.services.generate_video_timeline import (
+        normalize_story_for_project as _engine_normalize,
+        public_story_payload as _engine_public_payload,
+    )
 
-def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
-    normalized = normalize_story_for_project(story)
-    return {
-        "meta": normalized.get("meta") or {},
-        "video": normalized.get("video"),
-        "audio": normalized.get("audio"),
-        "timeline": normalized.get("timeline") or {},
-        "video_artifacts": normalized.get("video_artifacts") or {},
-        "story_data": normalized.get("story_data") or [],
-    }
+    def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:
+        return _engine_normalize(story)
+
+    def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
+        return _engine_public_payload(story)
+except ImportError:
+    try:
+        import sys
+        engine_path = str(Path(__file__).resolve().parents[3] / "ai-media-engine")
+        if engine_path not in sys.path:
+            sys.path.insert(0, engine_path)
+        from app.video.services.generate_video_timeline import (
+            normalize_story_for_project as _engine_normalize,
+            public_story_payload as _engine_public_payload,
+        )
+
+        def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:
+            return _engine_normalize(story)
+
+        def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
+            return _engine_public_payload(story)
+    except ImportError:
+        def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:
+            next_story = json.loads(json.dumps(story, ensure_ascii=False))
+            return next_story
+
+        def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
+            normalized = normalize_story_for_project(story)
+            return {
+                "meta": normalized.get("meta") or {},
+                "video": normalized.get("video"),
+                "audio": normalized.get("audio"),
+                "timeline": normalized.get("timeline") or {},
+                "video_artifacts": normalized.get("video_artifacts") or {},
+                "story_data": normalized.get("story_data") or [],
+            }
 
 
 try:

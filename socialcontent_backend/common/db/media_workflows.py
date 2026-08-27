@@ -161,7 +161,11 @@ def _serialize_source_content(content: ContentItem | None) -> dict[str, Any] | N
 
     sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
     primary_source = sources[0] if sources else {}
+    source_metadata = _source_metadata(primary_source)
     full_text = _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id)
+    category_id = source_metadata.get("category_id")
+    article_id = source_metadata.get("article_id")
+    site_id = source_metadata.get("site_id")
 
     return {
         "id": str(content.id),
@@ -176,17 +180,63 @@ def _serialize_source_content(content: ContentItem | None) -> dict[str, Any] | N
         "source_url": primary_source.get("source_url") or content.canonical_url,
         "source_author": primary_source.get("source_author"),
         "source_published_at": primary_source.get("source_published_at"),
+        "source_metadata": source_metadata,
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": source_metadata.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
         "quality_score": float(content.quality_score or 0),
         "published_at": content.published_at.isoformat() if content.published_at else None,
         "created_at": content.created_at.isoformat() if content.created_at else None,
         "updated_at": content.updated_at.isoformat() if content.updated_at else None,
+        "normalized": {
+            "articleId": article_id,
+            "categoryId": category_id,
+            "siteId": site_id,
+            "title": content.canonical_title or content.normalized_title or "",
+            "lead": content.summary or "",
+            "publishedAt": content.published_at.isoformat() if content.published_at else primary_source.get("source_published_at"),
+            "content": full_text or content.summary or "",
+            "images": [],
+            "videos": [],
+            "url": content.canonical_url,
+        },
     }
 
 
-def _load_content_full_text(mongo_normalized_id: str | None, mongo_raw_id: str | None) -> str | None:
+def _source_metadata(primary_source: dict[str, Any]) -> dict[str, Any]:
+    metadata = primary_source.get("metadata_json") if isinstance(primary_source, dict) else {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def content_category_payload(content: ContentItem | None) -> dict[str, Any]:
+    if not content:
+        return {}
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary_source = sources[0] if sources else {}
+    metadata = _source_metadata(primary_source)
+    article_id = metadata.get("article_id")
+    category_id = metadata.get("category_id")
+    site_id = metadata.get("site_id")
+    payload = {
+        "article_id": article_id,
+        "articleId": article_id,
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
+        "site_id": site_id,
+        "siteId": site_id,
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "", [])}
+
+
+def _load_content_full_text(mongo_normalized_id: str | None, _mongo_raw_id: str | None = None) -> str | None:
     try:
         from bson import ObjectId
-        from common.db.mongo import processed_documents, raw_documents
+        from common.db.mongo import processed_documents
 
         if mongo_normalized_id:
             proc_coll = processed_documents()
@@ -195,18 +245,6 @@ def _load_content_full_text(mongo_normalized_id: str | None, mongo_raw_id: str |
                 normalized = proc_doc.get("normalized") if isinstance(proc_doc, dict) else None
                 if isinstance(normalized, dict):
                     full_text = normalized.get("content") or normalized.get("description")
-                    if full_text:
-                        return str(full_text)
-            except Exception:
-                pass
-
-        if mongo_raw_id:
-            raw_coll = raw_documents()
-            try:
-                raw_doc = raw_coll.find_one({"_id": ObjectId(mongo_raw_id)})
-                raw = raw_doc.get("raw") if isinstance(raw_doc, dict) else None
-                if isinstance(raw, dict):
-                    full_text = raw.get("text") or raw.get("raw_text")
                     if full_text:
                         return str(full_text)
             except Exception:
@@ -229,6 +267,8 @@ def _image_urls(media: list[dict[str, Any]]) -> list[str]:
 
 
 def serialize_content_series(series: ContentSeries) -> dict[str, Any]:
+    metadata = series.metadata_json if isinstance(series.metadata_json, dict) else {}
+    category_id = metadata.get("category_id") or metadata.get("categoryId")
     return {
         "id": str(series.id),
         "user_id": str(series.user_id),
@@ -241,6 +281,9 @@ def serialize_content_series(series: ContentSeries) -> dict[str, Any]:
         "total_parts": series.total_parts,
         "context_json": series.context_json or {},
         "metadata": series.metadata_json or {},
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
         "created_at": series.created_at,
         "updated_at": series.updated_at,
     }

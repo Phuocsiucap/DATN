@@ -147,7 +147,7 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
                 result["skipped"] += 1
                 continue
             try:
-                service.publish_queue_item_to_tiktok(db, item.id, item.profile.user, source="scheduler")
+                service.publish_queue_item_to_tiktok(db, item.id, item.profile.user, source="scheduler", mode="direct")
                 result["published"] += 1
             except Exception as exc:
                 logger.exception("Auto publish failed queue_item_id=%s: %s", item.id, exc)

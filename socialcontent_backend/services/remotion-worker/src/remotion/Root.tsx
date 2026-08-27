@@ -226,6 +226,10 @@ function resolvePublicAsset(src?: string): string | null {
   if (!value) {
     return null;
   }
+  const localPublicAsset = localPublicAssetPath(value);
+  if (localPublicAsset) {
+    return staticFile(localPublicAsset);
+  }
   if (/^(https?:|data:|blob:|file:)/i.test(value)) {
     return value;
   }
@@ -233,6 +237,39 @@ function resolvePublicAsset(src?: string): string | null {
     return `file:///${value.replace(/\\/g, '/')}`;
   }
   return staticFile(value.replace(/^public[\\/]/, '').replace(/\\/g, '/'));
+}
+
+function localPublicAssetPath(value: string): string | null {
+  const normalized = value.replace(/\\/g, '/');
+  if (normalized.startsWith('assets/audio/')) {
+    return normalized;
+  }
+  const publicPrefix = '/public/';
+  const mediaPrefix = '/api/v1/generate-video/media/';
+
+  if (normalized.startsWith(publicPrefix)) {
+    return normalized.slice(publicPrefix.length);
+  }
+  if (normalized.startsWith(mediaPrefix)) {
+    return normalized.slice(mediaPrefix.length);
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const isLocalhost = ['localhost', '127.0.0.1', 'host.docker.internal'].includes(parsed.hostname);
+    if (!isLocalhost) {
+      return null;
+    }
+    if (parsed.pathname.startsWith(publicPrefix)) {
+      return parsed.pathname.slice(publicPrefix.length);
+    }
+    if (parsed.pathname.startsWith(mediaPrefix)) {
+      return parsed.pathname.slice(mediaPrefix.length);
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function fallbackBackground(seed: string): React.CSSProperties {

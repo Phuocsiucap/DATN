@@ -7,6 +7,7 @@ from typing import Any
 
 from common.core.config import get_settings
 from common.db.idempotency import claim_event
+from common.db.media_workflows import content_category_payload
 from common.db.models import ContentItem, MediaWorkflow, KafkaTask, SocialProfile, PlanningCandidate, PlanningRun
 from common.db.session import SessionLocal
 from common.events.envelope import build_event
@@ -105,6 +106,7 @@ def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, can
         if items and not existing.primary_content_id:
             existing.primary_content_id = items[0].id
             existing.inputs_jsonb = _workflow_inputs(items)
+            existing.metadata_json = {**(existing.metadata_json or {}), **content_category_payload(items[0])}
             existing.status = "READY"
             db.add(existing)
             db.commit()
@@ -114,6 +116,7 @@ def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, can
 
     inputs = _workflow_inputs(items)
     primary_content_id = items[0].id if items else None
+    primary_category_payload = content_category_payload(items[0]) if items else {}
 
     project = MediaWorkflow(
         user_id=profile.user_id,
@@ -122,7 +125,7 @@ def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, can
         status="READY" if items else "NEEDS_REVIEW",
         primary_content_id=primary_content_id,
         inputs_jsonb=inputs,
-        metadata_json={"selection_mode": "AUTO", "crawl_job_id": str(job_id), "filters": {"source_crawl_job_id": str(job_id)}},
+        metadata_json={"selection_mode": "AUTO", "crawl_job_id": str(job_id), "filters": {"source_crawl_job_id": str(job_id)}, **primary_category_payload},
     )
     db.add(project)
     db.commit()
@@ -145,7 +148,15 @@ def _content_items_for_crawl_job(db: Any, crawl_job_id: uuid.UUID, candidate_lim
 
 
 def _workflow_inputs(items: list[ContentItem]) -> list[dict[str, Any]]:
-    return [{"type": "content", "id": str(item.id), "score": float(item.quality_score or 0)} for item in items]
+    return [
+        {
+            "type": "content",
+            "id": str(item.id),
+            "score": float(item.quality_score or 0),
+            **content_category_payload(item),
+        }
+        for item in items
+    ]
 
 
 def _ensure_auto_planning_records(db: Any, project: MediaWorkflow, items: list[ContentItem], job_id: str) -> PlanningRun:
@@ -248,6 +259,7 @@ def _ensure_planning_candidate(db: Any, run: PlanningRun, project: MediaWorkflow
     candidate.metadata_json = {
         "quality_score": float(item.quality_score or 0),
         "status": item.status,
+        **content_category_payload(item),
     }
     db.add(candidate)
     return candidate

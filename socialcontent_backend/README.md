@@ -6,8 +6,7 @@ Backend mới cho Module 1, bám theo kiến trúc trong `.agents/module1`.
 
 - `api-service`: REST API, auth, user/admin system, crawl jobs, sources, content, stories, data quality.
 - `crawl-orchestrator`: nhận `crawl.job.created`, chia task, publish `crawl.task.requested`.
-- `crawler-service`: nhận task crawl, lưu raw MongoDB, publish `content.raw.created`.
-- `normalization-service`: đọc raw, clean/normalize/validate, lưu processed MongoDB, publish `content.normalized`.
+- `crawler-service`: nhận task crawl, normalize trực tiếp, lưu processed MongoDB, publish `content.normalized`.
 - `story-processing-service`: grouping, ordering, dedup, lưu canonical PostgreSQL, publish `story.grouped` và `content.canonical.saved`.
 
 ## Run Local
@@ -55,23 +54,18 @@ The API service keeps the old user/account ownership model:
 - Each `USER` owns their own `social_profiles`.
 - Social profile, strategy, queue, post, and metric routes always scope queries by `current_user.id`.
 - Users cannot read, edit, queue, or delete another user's accounts through normal user routes.
-- Profile runtime folders are generated as `social_profile/accounts/user_{user_id}/{platform}/{profile_key}`.
+- TikTok profiles use OAuth tokens and API identifiers; no browser profile folder is required.
 
 ## TikTok QR Login
 
-TikTok QR login uses Playwright persistent browser sessions and stores browser data in the profile runtime folder.
-
-Install browser runtime after dependencies:
-
-```bash
-python -m playwright install chromium
-```
+TikTok QR login uses TikTok OAuth QR APIs through `open.tiktokapis.com`.
 
 Config:
 
-- `TIKTOK_QR_LOGIN_URL`, default `https://www.tiktok.com/login/qrcode`
-- `BROWSER_CHANNEL`, default `chrome`, with Chromium fallback
-- `BROWSER_HEADLESS`, default `false`
+- `TIKTOK_CLIENT_KEY`
+- `TIKTOK_CLIENT_SECRET`
+- `TIKTOK_REDIRECT_URI`
+- `TIKTOK_OAUTH_SCOPES`, default `user.info.basic,video.upload,video.publish`
 
 Two flows are supported:
 
@@ -94,7 +88,7 @@ Use `source_type: "VNEXPRESS"` in a crawl job source.
 }
 ```
 
-The crawler discovers links from a direct article URL, configured source URL, VNExpress search, latest RSS, and homepage fallback. Each article is stored as a raw MongoDB document and then passed through the Module 1 normalization pipeline.
+The crawler discovers links from a direct article URL or RSS/category RSS, then parses article detail HTML and writes normalized processed documents directly.
 
 The VNExpress pipeline now records:
 
@@ -102,7 +96,7 @@ The VNExpress pipeline now records:
 - Terminal job status through the pipeline: `SUCCEEDED`, `PARTIAL_SUCCESS`, or `FAILED`.
 - Retry with bounded backoff using source `configuration.max_attempts` and `configuration.retry_backoff_seconds`.
 - Dead-letter events on permanent crawler/normalization failures.
-- Article metadata: description, author, published_at, category, tags, HTTP status/headers/timing, raw HTML, images, videos.
+- Article metadata: description, author, published_at, category, tags, HTTP status/headers/timing, article_id, category_id, site_id, images, videos.
 
 ## Bilibili Metadata Crawl Config
 
@@ -120,7 +114,7 @@ Use `source_type: "BILIBILI"` when the job should crawl Bilibili video/series me
 }
 ```
 
-The Bilibili crawler is metadata-only. It ports the old search and playlist/episode discovery logic, then stores raw metadata in MongoDB and lets the Module 1 pipeline normalize and persist canonical `Story`/`Episode` rows. Multi-episode results use `content_type: "PLAYLIST"` to match Module 1. It does not download, OCR, transcribe, translate, or render videos.
+The Bilibili crawler is metadata-only. It ports the old search and playlist/episode discovery logic, normalizes in memory, then writes processed MongoDB documents for canonical `Story`/`Episode` persistence. Multi-episode results use `content_type: "PLAYLIST"` to match Module 1. It does not download, OCR, transcribe, translate, or render videos.
 
 For direct Bilibili URLs, the crawler resolves `aid`/`bvid`, fetches view-detail metadata, prefers `ugc_season` episode lists when available, falls back to page lists, and can enrich missing series lists from Bilibili season archive APIs/page hints.
 

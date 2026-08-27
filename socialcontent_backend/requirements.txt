@@ -11,6 +11,5 @@ PyJWT
 bcrypt
 httpx
 edge-tts
-playwright
 alembic
 pgvector
