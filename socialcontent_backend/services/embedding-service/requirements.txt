@@ -1,0 +1,9 @@
+fastapi==0.115.14
+uvicorn==0.34.3
+pydantic==2.10.6
+pydantic-settings==2.7.1
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+pymongo==4.10.1
+kafka-python-ng
+python-dotenv==1.0.1

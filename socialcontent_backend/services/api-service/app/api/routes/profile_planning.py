@@ -143,7 +143,7 @@ def _serialize_source_content(content: ContentItem) -> dict:
         "content_type": content.content_type,
         "canonical_title": content.canonical_title,
         "summary": content.summary,
-        "full_text": _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id) or content.summary,
+        "full_text": _load_content_full_text(content.mongo_normalized_id) or content.summary,
         "language": content.language,
         "status": content.status,
         "canonical_url": content.canonical_url,

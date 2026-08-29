@@ -4,6 +4,9 @@ export type CrawlJob = {
   id: string
   name: string
   crawl_mode: string
+  content_scope?: string
+  created_by_type?: string
+  creator_name?: string | null
   status: string
   current_stage: string
   priority: number
@@ -44,6 +47,12 @@ export type ContentItem = {
   videos?: Array<Record<string, unknown>>
   url?: string | null
   normalized?: NormalizedArticle
+  thumbnail_url?: string | null
+  tags?: string[]
+  media_counts?: {
+    images?: number
+    videos?: number
+  }
 }
 
 export type NormalizedArticle = {
@@ -129,10 +138,73 @@ export type ProcessingRunDetail = {
   created_at: string
 }
 
+export type ProfileContentMatch = {
+  profile_id: string
+  profile_name: string
+  username?: string | null
+  platform: string
+  avatar_url?: string | null
+  status: string
+  score: number
+  recommendation_status: string
+  relation_reason?: string | null
+  threshold?: number
+  embedding_similarity?: number | null
+  similarity_threshold?: number | null
+  passed_similarity_gate?: boolean | null
+  similarity_source?: string | null
+  top_topic_match?: {
+    topic: string
+    topic_key?: string | null
+    description?: string | null
+    similarity: number
+    threshold?: number
+    matched?: boolean
+    match_source?: string
+  } | null
+  avoid_similarity_threshold?: number | null
+  embedding_model?: string | null
+  matched_topics?: string[]
+  avoided_topics?: string[]
+  blocked_by_avoid_topics?: boolean
+  topic_matches?: Array<{
+    topic: string
+    topic_key?: string | null
+    description?: string | null
+    similarity: number
+    threshold?: number
+    matched?: boolean
+    match_source?: string
+  }>
+  avoid_topic_matches?: Array<{
+    topic: string
+    topic_key?: string | null
+    description?: string | null
+    similarity: number
+    threshold?: number
+    matched?: boolean
+    match_source?: string
+  }>
+  tone?: string | null
+  target_audience?: string | null
+  can_create_script?: boolean
+  selection_reason?: string | null
+  ai_decision_reason?: string | null
+  fit_insights?: Array<{
+    label: string
+    value: string
+    tone?: 'green' | 'blue' | 'amber' | 'red' | 'purple' | 'gray' | string
+  }>
+  suggested_angle?: string | null
+  risk_notes?: string[]
+  source_evidence?: string[]
+}
+
 export type ContentDetail = ContentItem & {
   full_text?: string | null
   published_at?: string | null
   duration_seconds?: number | null
+  ai_selection_summary?: string | null
   source_type?: string | null
   source_url?: string | null
   source_author?: string | null
@@ -143,6 +215,7 @@ export type ContentDetail = ContentItem & {
   media?: ContentMediaDetail[]
   media_jsonb?: ContentMediaDetail[]
   processing_runs?: ProcessingRunDetail[]
+  profile_matches?: ProfileContentMatch[]
 }
 
 export type FinalSeriesInfo = {
@@ -249,7 +322,7 @@ export const fetchContentDetailApi = async (contentId: string) => {
   return data as ContentDetail
 }
 
-export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string }) => {
+export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string; view?: string }) => {
   const { data } = await api.get('/contents/final-view', { params })
   return data as FinalContentView
 }

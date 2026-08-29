@@ -1,5 +1,13 @@
 from app.schemas.auth import BootstrapAdminRequest, LoginRequest, RegisterRequest, TokenResponse
-from app.schemas.contents import ContentDetailResponse, ContentResponse, ContentUpdateRequest, FinalContentViewResponse
+from app.schemas.contents import (
+    ContentDetailResponse,
+    ContentFitInsightResponse,
+    ContentResponse,
+    ContentTopicMatchResponse,
+    ContentUpdateRequest,
+    FinalContentViewResponse,
+    ProfileContentMatchResponse,
+)
 from app.schemas.crawl_jobs import CrawlJobCreateRequest, CrawlJobResponse, CrawlJobSourceInput, CrawlLogResponse
 from app.schemas.planning import (
     MediaWorkflowResponse,
@@ -18,11 +26,17 @@ from app.schemas.sources import CrawlSourceCreateRequest, CrawlSourceUpdateReque
 from app.schemas.stories import EpisodeUpdateRequest, StoryResponse
 from app.schemas.social_profiles import (
     QueueStatusRequest,
+    QueueApproveScheduleRequest,
+    QueueRequestChangesRequest,
     SocialPostCreateRequest,
     SocialPostMetricCreateRequest,
     SocialProfileCreateRequest,
+    SocialProfileListResponse,
     SocialProfileResponse,
+    SocialProfileStrategyResponse,
     SocialProfileStrategyRequest,
+    StrategyTopicDetailResponse,
+    StrategyTopicMutationRequest,
     SchedulerSettingsRequest,
     TikTokPublishRequest,
     TikTokQrStartRequest,
@@ -34,7 +48,10 @@ __all__ = [
     "AdminUserCreateRequest",
     "ContentResponse",
     "ContentDetailResponse",
+    "ContentFitInsightResponse",
     "ContentUpdateRequest",
+    "ContentTopicMatchResponse",
+    "ProfileContentMatchResponse",
     "FinalContentViewResponse",
     "CrawlJobCreateRequest",
     "CrawlJobResponse",
@@ -57,11 +74,17 @@ __all__ = [
     "ContentSeriesUpdateRequest",
     "ContentSeriesCreateRequest",
     "QueueStatusRequest",
+    "QueueApproveScheduleRequest",
+    "QueueRequestChangesRequest",
     "SocialPostCreateRequest",
     "SocialPostMetricCreateRequest",
     "SocialProfileCreateRequest",
+    "SocialProfileListResponse",
     "SocialProfileResponse",
+    "SocialProfileStrategyResponse",
     "SocialProfileStrategyRequest",
+    "StrategyTopicDetailResponse",
+    "StrategyTopicMutationRequest",
     "SchedulerSettingsRequest",
     "TikTokPublishRequest",
     "TikTokQrStartRequest",

@@ -7,16 +7,12 @@ from sqlalchemy.orm import Session
 
 from common.db.models import PromptRun
 from common.db.session import SessionLocal
+from common.utils.token_calculator import PRICING_TABLE, calculate_token_cost
 
 logger = logging.getLogger(__name__)
 
-# Standard token costs per 1M tokens (USD)
-MODEL_PRICING = {
-    "deepseek-v4-flash": {"input": 0.14 / 1_000_000, "output": 0.28 / 1_000_000},
-    "deepseek-chat": {"input": 0.14 / 1_000_000, "output": 0.28 / 1_000_000},
-    "gpt-4o": {"input": 2.50 / 1_000_000, "output": 10.00 / 1_000_000},
-    "gpt-4o-mini": {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
-}
+# Backwards-compatible export for older imports. Values are USD per one million tokens.
+MODEL_PRICING = PRICING_TABLE
 
 
 def log_prompt_run(
@@ -32,6 +28,10 @@ def log_prompt_run(
     input_tokens: int = 0,
     output_tokens: int = 0,
     latency_ms: int = 0,
+    cost_usd: float | None = None,
+    prompt_version: str | None = None,
+    input_reference: str | None = None,
+    output_reference: str | None = None,
     status: str = "COMPLETED",
     error_message: str | None = None,
 ) -> None:
@@ -56,8 +56,7 @@ def log_prompt_run(
                 model_name = result.model
 
         tot_tok = in_tok + out_tok
-        rates = MODEL_PRICING.get(model_name, MODEL_PRICING["deepseek-v4-flash"])
-        cost = (in_tok * rates["input"]) + (out_tok * rates["output"])
+        cost = cost_usd if cost_usd is not None else calculate_token_cost(model_name, in_tok, out_tok)
 
         parsed_user_id = None
         if user_id:
@@ -89,10 +88,13 @@ def log_prompt_run(
             reference_id=parsed_ref_id,
             model_provider=model_provider,
             model_name=model_name,
+            prompt_version=prompt_version,
+            input_reference=input_reference,
+            output_reference=output_reference,
             input_tokens=in_tok,
             output_tokens=out_tok,
             total_tokens=tot_tok,
-            cost_usd=round(cost, 8),
+            cost_usd=round(float(cost or 0), 8),
             latency_ms=lat_ms,
             status=status,
             error_message=error_message,

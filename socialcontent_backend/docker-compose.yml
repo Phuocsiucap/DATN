@@ -57,6 +57,7 @@ services:
   #     - postgres
   #     - mongodb
   #     - kafka
+  #     - embedding-service
   #     - ai-media-planning-worker
   #   env_file:
   #     - .env
@@ -65,6 +66,7 @@ services:
   #     MONGO_URI: mongodb://mongodb:27017
   #     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
   #     PLANNING_ORCHESTRATOR_URL: http://ai-media-planning-worker:8050
+  #     EMBEDDING_SERVICE_URL: http://embedding-service:8075
   #   ports:
   #     - "8000:8000"
   #   volumes:
@@ -88,12 +90,12 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PYTHONUNBUFFERED: "1"
 
-  ai-media-planning-worker:
+  embedding-service:
     build:
       context: ..
-      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
-    working_dir: /app/services/ai-media-engine
-    command: uvicorn app.planning.main:app --host 0.0.0.0 --port 8050
+      dockerfile: socialcontent_backend/services/embedding-service/Dockerfile
+    working_dir: /app/services/embedding-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8075
     depends_on:
       - postgres
       - mongodb
@@ -104,6 +106,35 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_MODEL_NAME: text-embedding-3-small
+      EMBEDDING_DIMENSIONS: "512"
+      EMBEDDING_BATCH_SIZE: "64"
+      PYTHONUNBUFFERED: "1"
+      ENABLE_WORKERS: "true"
+    ports:
+      - "8075:8075"
+
+  ai-media-planning-worker:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
+    working_dir: /app/services/ai-media-engine
+    command: uvicorn app.planning.main:app --host 0.0.0.0 --port 8050
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+      - embedding-service
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_SERVICE_URL: http://embedding-service:8075
+      EMBEDDING_MODEL_NAME: text-embedding-3-small
+      EMBEDDING_DIMENSIONS: "512"
+      EMBEDDING_BATCH_SIZE: "64"
       PYTHONUNBUFFERED: "1"
       ENABLE_WORKERS: "true"
 
@@ -123,6 +154,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_SERVICE_URL: http://embedding-service:8075
       PYTHONUNBUFFERED: "1"
     volumes:
       - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public

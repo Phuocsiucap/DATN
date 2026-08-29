@@ -31,10 +31,14 @@ class Settings(BaseSettings):
     )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
-    embedding_service_url: str = "http://localhost:8060"
     planning_orchestrator_url: str = "http://localhost:8050"
     generate_video_service_url: str = "http://localhost:8070"
-    embedding_model_name: str = "embedding-service"
+    embedding_service_url: str = Field(default="http://localhost:8075", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))
+    embedding_model_name: str = Field(default="text-embedding-3-small", validation_alias=AliasChoices("EMBEDDING_MODEL_NAME", "OPENAI_EMBEDDING_MODEL"))
+    embedding_dimensions: int = Field(default=512, validation_alias=AliasChoices("EMBEDDING_DIMENSIONS", "OPENAI_EMBEDDING_DIMENSIONS"))
+    embedding_batch_size: int = Field(default=64, validation_alias=AliasChoices("EMBEDDING_BATCH_SIZE"))
+    embedding_batch_max_chars: int = Field(default=240_000, validation_alias=AliasChoices("EMBEDDING_BATCH_MAX_CHARS"))
+    embedding_request_timeout_seconds: int = Field(default=120, validation_alias=AliasChoices("EMBEDDING_REQUEST_TIMEOUT_SECONDS"))
     embedding_similarity_threshold: float = 0.62
     openai_api_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_API_KEY"))
     openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("OPENAI_MODEL"))

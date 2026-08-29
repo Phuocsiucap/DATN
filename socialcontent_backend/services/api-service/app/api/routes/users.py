@@ -1,9 +1,10 @@
 import uuid
+from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.db.models import User
+from common.db.models import PromptRun, User
 from common.db.session import get_db
 from app.schemas import api as schemas
 from app.api.deps import get_current_user, require_admin, require_system_admin
@@ -11,8 +12,6 @@ from app.services.users import UserService, to_user_response
 
 router = APIRouter()
 
-
-from common.db.models import PromptRun, User
 
 @router.get("/me", response_model=schemas.UserResponse)
 def me(user: User = Depends(get_current_user)):
@@ -56,6 +55,8 @@ def get_my_ai_usage(user: User = Depends(get_current_user), db: Session = Depend
         "total_tokens": total_tokens,
         "total_cost_usd": round(total_cost, 6),
         "prompt_runs_count": len(runs),
+        "breakdown_by_run_type": _usage_breakdown(runs, lambda run: run.run_type or "UNKNOWN"),
+        "breakdown_by_model": _usage_breakdown(runs, lambda run: f"{run.model_provider or 'unknown'}:{run.model_name or 'unknown'}"),
         "recent_runs": recent,
     }
 
@@ -83,10 +84,44 @@ def get_all_users_ai_usage(_: User = Depends(require_admin), db: Session = Depen
                 "total_tokens": tot_tok,
                 "total_cost_usd": round(cost, 6),
                 "prompt_runs_count": len(runs),
+                "breakdown_by_run_type": _usage_breakdown(runs, lambda run: run.run_type or "UNKNOWN"),
+                "breakdown_by_model": _usage_breakdown(runs, lambda run: f"{run.model_provider or 'unknown'}:{run.model_name or 'unknown'}"),
             }
         )
 
     return {"users_ai_usage": summary}
+
+
+def _usage_breakdown(runs: list[PromptRun], key_fn) -> list[dict]:
+    buckets: dict[str, dict] = defaultdict(
+        lambda: {
+            "runs": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": 0.0,
+        }
+    )
+    for run in runs:
+        key = str(key_fn(run))
+        bucket = buckets[key]
+        bucket["runs"] += 1
+        bucket["input_tokens"] += run.input_tokens or 0
+        bucket["output_tokens"] += run.output_tokens or 0
+        bucket["total_tokens"] += run.total_tokens or (run.input_tokens or 0) + (run.output_tokens or 0)
+        bucket["cost_usd"] += run.cost_usd or 0.0
+
+    return [
+        {
+            "key": key,
+            "runs": value["runs"],
+            "input_tokens": value["input_tokens"],
+            "output_tokens": value["output_tokens"],
+            "total_tokens": value["total_tokens"],
+            "cost_usd": round(value["cost_usd"], 6),
+        }
+        for key, value in sorted(buckets.items(), key=lambda item: item[1]["cost_usd"], reverse=True)
+    ]
 
 
 @router.get("", response_model=list[schemas.UserResponse])

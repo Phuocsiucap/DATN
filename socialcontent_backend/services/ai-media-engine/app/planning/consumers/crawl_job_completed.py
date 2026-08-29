@@ -3,18 +3,33 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
+
+from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
 from common.db.idempotency import claim_event
 from common.db.media_workflows import content_category_payload
-from common.db.models import ContentItem, MediaWorkflow, KafkaTask, SocialProfile, PlanningCandidate, PlanningRun
+from common.db.models import (
+    ContentItem,
+    ContentSeries,
+    MediaWorkflow,
+    PlanningCandidate,
+    PlanningRun,
+    ProfileContentLink,
+    SocialProfile,
+    SocialProfileStrategy,
+)
 from common.db.session import SessionLocal
-from common.events.envelope import build_event
-from common.events.kafka import consumer, publish
-from common.events.topics import CRAWL_JOB_COMPLETED, GENERATE_VIDEO_SCRIPT_REQUESTED
+from common.events.kafka import consumer
+from common.events.topics import CRAWL_JOB_COMPLETED
+from common.planning.embedding_matcher import StrategyCandidateScore, StrategyEmbeddingMatcher
+from app.planning.services.auto_workflow_planner import AutoWorkflowDecision, AutoWorkflowPlanner
+from app.video.services.generate_video_jobs import _maybe_enqueue_auto_voice_or_render
 
 logger = logging.getLogger(__name__)
+AUTO_SELECTION_ALGORITHM = "topic_cosine_threshold_ai_workflow_v2"
 
 
 def run_crawl_job_completed_consumer() -> None:
@@ -34,279 +49,582 @@ def run_crawl_job_completed_consumer() -> None:
                     continue
                 _handle_crawl_job_completed(db, message)
             kafka_consumer.commit()
-        except Exception as e:
-            logger.exception(f"[planning-orchestrator] Error processing crawl_job_completed record offset {record.offset}: {e}")
+        except Exception as exc:
+            logger.exception("[planning-orchestrator] Error processing crawl_job_completed record offset %s: %s", record.offset, exc)
 
 
-def _handle_crawl_job_completed(db: Any, message: dict[str, Any]) -> None:
+def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
     job_id = message.get("job_id") or message.get("payload", {}).get("job_id")
     status = message.get("payload", {}).get("status") or "SUCCEEDED"
     print(f"[planning-orchestrator] Received crawl.job.completed for job_id={job_id}, status={status}")
 
     if status not in {"SUCCEEDED", "PARTIAL_SUCCESS"}:
-        print(f"[planning-orchestrator] Skipping auto project queue for non-successful crawl job {job_id} (status={status})")
+        print(f"[planning-orchestrator] Skipping auto workflow for non-successful crawl job {job_id} (status={status})")
+        return
+    if not job_id:
+        print("[planning-orchestrator] Skipping auto workflow because crawl job id is missing")
         return
 
-    profiles = (
+    profiles = _auto_enabled_profiles(db)
+    if not profiles:
+        print(f"[planning-orchestrator] No active auto workflow profiles found for crawl job {job_id}")
+        return
+
+    matcher = StrategyEmbeddingMatcher()
+    planner = AutoWorkflowPlanner()
+    items = _content_items_for_crawl_job(db, uuid.UUID(str(job_id)))
+    if not items:
+        print(f"[planning-orchestrator] No READY content found for crawl job {job_id}; recording 0-candidate planning run")
+
+    for profile in profiles:
+        strategy = profile.strategy
+        if not strategy:
+            continue
+        try:
+            _process_profile_auto_workflows(
+                db,
+                profile=profile,
+                strategy=strategy,
+                job_id=str(job_id),
+                items=items,
+                matcher=matcher,
+                planner=planner,
+            )
+        except Exception as exc:
+            db.rollback()
+            print(f"[planning-orchestrator] Failed auto workflow planning for profile {profile.id} on crawl job {job_id}: {exc}")
+
+
+def _auto_enabled_profiles(db: Session) -> list[SocialProfile]:
+    return (
         db.query(SocialProfile)
-        .filter(SocialProfile.status == "active")
+        .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
+        .filter(
+            SocialProfile.status == "active",
+            SocialProfileStrategy.receive_system_content.is_(True),
+            SocialProfileStrategy.auto_project_queue_enabled.is_(True),
+        )
         .all()
     )
 
-    if not profiles:
-        print(f"[planning-orchestrator] No active social profiles found for auto project queue on crawl job {job_id}")
-        return
 
-    for profile in profiles:
-        if not profile.strategy:
-            continue
-        
-        strategy = profile.strategy
-        if not getattr(strategy, "receive_system_content", True):
-            continue
-        if not getattr(strategy, "auto_project_queue_enabled", False):
-            continue
-
-        try:
-            candidate_limit = max(1, min(int(getattr(strategy, "max_system_recommendations", 20) or 20), 100))
-            project = _create_project_from_crawl(db, profile, job_id, candidate_limit)
-            script_task = _enqueue_script_from_project(db, project, trigger="crawl_job_completed")
-            if script_task:
-                print(
-                    f"[planning-orchestrator] Created content project {project.id} and script task {script_task.id} "
-                    f"for profile {profile.id} from crawl job {job_id}"
-                )
-            else:
-                print(
-                    f"[planning-orchestrator] Created content project {project.id} for profile {profile.id} from crawl job {job_id}; "
-                    "no eligible content was available for video scripting"
-                )
-        except Exception as exc:
-            print(f"[planning-orchestrator] Failed auto project for profile {profile.id} on crawl job {job_id}: {exc}")
-
-
-def _create_project_from_crawl(db: Any, profile: SocialProfile, job_id: str, candidate_limit: int = 20) -> MediaWorkflow:
-    crawl_job_id = uuid.UUID(str(job_id))
-    items = _content_items_for_crawl_job(db, crawl_job_id, candidate_limit)
-    existing = next(
-        (
-            project
-            for project in db.query(MediaWorkflow)
-            .filter(MediaWorkflow.profile_id == profile.id)
-            .order_by(MediaWorkflow.created_at.desc())
-            .limit(50)
-            .all()
-            if isinstance(project.metadata_json, dict)
-            and str(project.metadata_json.get("crawl_job_id") or "") == str(job_id)
-            and str(project.metadata_json.get("selection_mode") or "") == "AUTO"
-        ),
-        None,
-    )
-    if existing:
-        if items and not existing.primary_content_id:
-            existing.primary_content_id = items[0].id
-            existing.inputs_jsonb = _workflow_inputs(items)
-            existing.metadata_json = {**(existing.metadata_json or {}), **content_category_payload(items[0])}
-            existing.status = "READY"
-            db.add(existing)
-            db.commit()
-            db.refresh(existing)
-        _ensure_auto_planning_records(db, existing, items, job_id)
-        return existing
-
-    inputs = _workflow_inputs(items)
-    primary_content_id = items[0].id if items else None
-    primary_category_payload = content_category_payload(items[0]) if items else {}
-
-    project = MediaWorkflow(
-        user_id=profile.user_id,
-        profile_id=profile.id,
-        title="Auto dataset from Module 1",
-        status="READY" if items else "NEEDS_REVIEW",
-        primary_content_id=primary_content_id,
-        inputs_jsonb=inputs,
-        metadata_json={"selection_mode": "AUTO", "crawl_job_id": str(job_id), "filters": {"source_crawl_job_id": str(job_id)}, **primary_category_payload},
-    )
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    _ensure_auto_planning_records(db, project, items, job_id)
-    return project
-
-
-def _content_items_for_crawl_job(db: Any, crawl_job_id: uuid.UUID, candidate_limit: int) -> list[ContentItem]:
+def _content_items_for_crawl_job(db: Session, crawl_job_id: uuid.UUID) -> list[ContentItem]:
     return (
         db.query(ContentItem)
         .filter(
             ContentItem.crawl_job_id == crawl_job_id,
             ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
         )
-        .order_by(ContentItem.quality_score.desc(), ContentItem.updated_at.desc())
-        .limit(candidate_limit)
+        .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
+        .limit(500)
         .all()
     )
 
 
-def _workflow_inputs(items: list[ContentItem]) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "content",
-            "id": str(item.id),
-            "score": float(item.quality_score or 0),
-            **content_category_payload(item),
-        }
-        for item in items
-    ]
-
-
-def _ensure_auto_planning_records(db: Any, project: MediaWorkflow, items: list[ContentItem], job_id: str) -> PlanningRun:
-    crawl_job_id = uuid.UUID(str(job_id))
-    existing_run = (
-        db.query(PlanningRun)
-        .filter(
-            PlanningRun.workflow_id == project.id,
-            PlanningRun.planning_mode == "AUTO",
-            PlanningRun.crawl_job_id == crawl_job_id,
-        )
-        .order_by(PlanningRun.created_at.desc())
-        .first()
-    )
-    now = datetime.now(timezone.utc)
-    input_payload = {
-        "crawl_job_id": str(job_id),
-        "candidate_limit": len(items),
-        "content_ids": [str(item.id) for item in items],
-        "filters": {
-            "content_item_crawl_job_id": str(job_id),
-            "statuses": ["READY", "USABLE_WITH_WARNING"],
-            "order_by": ["quality_score DESC", "updated_at DESC"],
-        },
-    }
-    output_payload = {
-        "workflow_id": str(project.id),
-        "selected_content_id": str(project.primary_content_id) if project.primary_content_id else None,
-        "input_count": len(items),
-    }
-    reason_payload = {
-        "trigger": "crawl_job_completed",
-        "selection_reasons": [
-            "Selected from ContentItem rows directly linked to this crawl_job_id",
-            "Ordered by quality_score descending, then updated_at descending",
-        ],
-    }
-    if existing_run:
-        existing_run.status = "SUCCEEDED" if items else "WAITING_REVIEW"
-        existing_run.input_jsonb = input_payload
-        existing_run.output_jsonb = output_payload
-        existing_run.reason_jsonb = reason_payload
-        existing_run.metadata_json = {**(existing_run.metadata_json or {}), "trigger": "crawl_job_completed"}
-        existing_run.completed_at = existing_run.completed_at or now
-        db.add(existing_run)
-        run = existing_run
-    else:
-        run = PlanningRun(
-            user_id=project.user_id,
-            profile_id=project.profile_id,
-            workflow_id=project.id,
-            crawl_job_id=crawl_job_id,
-            planning_mode="AUTO",
-            status="SUCCEEDED" if items else "WAITING_REVIEW",
-            input_jsonb=input_payload,
-            output_jsonb=output_payload,
-            reason_jsonb=reason_payload,
-            metadata_json={"trigger": "crawl_job_completed"},
-            started_at=now,
-            completed_at=now,
-        )
-        db.add(run)
-        db.flush()
-
-    for index, item in enumerate(items, start=1):
-        _ensure_planning_candidate(db, run, project, item, index, job_id)
-
+def _process_profile_auto_workflows(
+    db: Session,
+    *,
+    profile: SocialProfile,
+    strategy: SocialProfileStrategy,
+    job_id: str,
+    items: list[ContentItem],
+    matcher: StrategyEmbeddingMatcher,
+    planner: AutoWorkflowPlanner,
+) -> None:
+    ranked = matcher.rank_candidates(db, items, strategy, limit=len(items))
     db.commit()
-    db.refresh(run)
-    return run
 
+    eligible = [score for score in ranked if score.eligible]
+    for score in ranked:
+        _upsert_profile_content_link(db, profile, score, decision=None)
+    db.commit()
 
-def _ensure_planning_candidate(db: Any, run: PlanningRun, project: MediaWorkflow, item: ContentItem, rank: int, job_id: str) -> PlanningCandidate:
-    candidate = (
-        db.query(PlanningCandidate)
-        .filter(
-            PlanningCandidate.planning_run_id == run.id,
-            PlanningCandidate.content_id == item.id,
-        )
-        .first()
+    avoid_blocked_count = sum(1 for score in ranked if score.avoided_topics)
+    print(
+        f"[planning-orchestrator] Profile {profile.id}: {len(eligible)}/{len(ranked)} candidates passed topic cosine threshold + avoid-topic gates for crawl job {job_id}; avoid_blocked={avoid_blocked_count}"
     )
-    if not candidate:
-        candidate = PlanningCandidate(
-            planning_run_id=run.id,
-            workflow_id=project.id,
-            content_id=item.id,
+
+    now = datetime.now(timezone.utc)
+    planning_run = PlanningRun(
+        user_id=profile.user_id,
+        profile_id=profile.id,
+        workflow_id=None,
+        crawl_job_id=uuid.UUID(str(job_id)),
+        planning_mode="AUTO",
+        status="SUCCEEDED",
+        input_jsonb={
+            "crawl_job_id": str(job_id),
+            "candidate_count": len(ranked),
+            "eligible_count": len(eligible),
+            "avoid_blocked_count": avoid_blocked_count,
+            "strategy_similarity_threshold": matcher.strategy_similarity_threshold(strategy),
+        },
+        output_jsonb={
+            "candidate_count": len(ranked),
+            "eligible_count": len(eligible),
+            "workflows_created": [],
+        },
+        reason_jsonb={
+            "trigger": "crawl_job_completed",
+            "selection_reasons": [
+                f"Evaluated {len(ranked)} candidate items for profile {profile.id} with topic cosine threshold scoring.",
+                f"{len(eligible)} candidates passed similarity threshold and avoid-topic filters.",
+            ],
+        },
+        metadata_json={
+            "trigger": "crawl_job_completed",
+            "selection_algorithm": AUTO_SELECTION_ALGORITHM,
+        },
+        started_at=now,
+        completed_at=now,
+    )
+    db.add(planning_run)
+    db.flush()
+
+    candidate_records: dict[uuid.UUID, PlanningCandidate] = {}
+    for rank_idx, score in enumerate(ranked, start=1):
+        cand = PlanningCandidate(
+            planning_run_id=planning_run.id,
+            workflow_id=None,
+            content_id=score.content.id,
+            rank_order=rank_idx,
+            score=Decimal(str(score.score)),
+            selected=False,
+            eligible=score.eligible,
+            reason_jsonb={
+                "crawl_job_id": str(job_id),
+                "selection_reasons": score.selection_reasons,
+                "rejection_reasons": score.rejection_reasons,
+            },
+            metadata_json=score.metadata,
         )
-    candidate.rank_order = rank
-    candidate.score = item.quality_score or 0
-    candidate.selected = project.primary_content_id == item.id
-    candidate.eligible = True
-    candidate.reason_jsonb = {
+        db.add(cand)
+        candidate_records[score.content.id] = cand
+    db.flush()
+
+    created_workflows: list[str] = []
+    selected_content_ids: list[str] = []
+    ai_decisions: list[dict[str, Any]] = []
+    for score in eligible:
+        existing = _existing_auto_workflow(db, profile.id, score.content.id, job_id)
+        if existing:
+            _mark_existing_auto_workflow_link(db, profile, score, existing)
+            cand = candidate_records.get(score.content.id)
+            decision_payload = _workflow_ai_decision_payload(existing, score.content.id)
+            if cand:
+                cand.selected = True
+                cand.workflow_id = existing.id
+                _record_candidate_ai_decision(cand, decision_payload)
+            created_workflows.append(str(existing.id))
+            selected_content_ids.append(str(score.content.id))
+            ai_decisions.append(decision_payload)
+            db.commit()
+            print(
+                f"[planning-orchestrator] Skipping content {score.content.id}; auto workflow {existing.id} already exists for profile {profile.id}"
+            )
+            continue
+
+        decision = planner.decide_and_build_draft(
+            db,
+            profile=profile,
+            strategy=strategy,
+            content=score.content,
+            candidate_metadata=score.metadata,
+        )
+        _upsert_profile_content_link(db, profile, score, decision=decision)
+        cand = candidate_records.get(score.content.id)
+        decision_payload = {
+            **_decision_payload(decision),
+            "content_id": str(score.content.id),
+            "candidate_id": str(cand.id) if cand else None,
+        }
+        if not decision.should_create_workflow:
+            if cand:
+                _record_candidate_ai_decision(cand, decision_payload)
+            ai_decisions.append(decision_payload)
+            db.commit()
+            print(
+                f"[planning-orchestrator] AI rejected auto workflow for content {score.content.id} profile {profile.id}: {decision.reason}"
+            )
+            continue
+
+        workflow = _create_auto_workflow_from_decision(db, profile, strategy, score, decision, job_id)
+        if not planning_run.workflow_id:
+            planning_run.workflow_id = workflow.id
+
+        created_workflows.append(str(workflow.id))
+        selected_content_ids.append(str(score.content.id))
+        decision_payload["workflow_id"] = str(workflow.id)
+        ai_decisions.append(decision_payload)
+
+        if cand:
+            cand.selected = True
+            cand.workflow_id = workflow.id
+            _record_candidate_ai_decision(cand, decision_payload)
+
+        db.commit()
+        db.refresh(workflow)
+        _maybe_enqueue_auto_voice_or_render(db, workflow, workflow.draft_json or {}, trigger="auto_planning_draft_ready")
+        print(
+            f"[planning-orchestrator] Created auto workflow {workflow.id} for content {score.content.id} profile {profile.id}"
+        )
+
+    output_info = dict(planning_run.output_jsonb or {})
+    output_info["workflows_created"] = created_workflows
+    output_info["selected_content_ids"] = selected_content_ids
+    output_info["ai_decisions"] = ai_decisions
+    approved_decisions = [item for item in ai_decisions if item.get("should_create_workflow")]
+    if approved_decisions:
+        output_info["ai_decision"] = approved_decisions[0]
+    elif ai_decisions:
+        output_info["ai_decision"] = ai_decisions[0]
+    if selected_content_ids:
+        output_info["selected_content_id"] = selected_content_ids[0]
+    planning_run.output_jsonb = output_info
+    db.commit()
+
+
+def _existing_auto_workflow(db: Session, profile_id: uuid.UUID, content_id: uuid.UUID, job_id: str) -> MediaWorkflow | None:
+    rows = (
+        db.query(MediaWorkflow)
+        .filter(MediaWorkflow.profile_id == profile_id, MediaWorkflow.primary_content_id == content_id)
+        .order_by(MediaWorkflow.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    for workflow in rows:
+        metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
+        if metadata.get("selection_mode") == "AUTO" and str(metadata.get("crawl_job_id") or "") == str(job_id):
+            return workflow
+    return None
+
+
+def _create_auto_workflow_from_decision(
+    db: Session,
+    profile: SocialProfile,
+    strategy: SocialProfileStrategy,
+    score: StrategyCandidateScore,
+    decision: AutoWorkflowDecision,
+    job_id: str,
+) -> MediaWorkflow:
+    content = score.content
+    decision_meta = decision.metadata if isinstance(decision.metadata, dict) else {}
+    plan_title = str(decision_meta.get("plan_title") or content.canonical_title or "Auto workflow").strip()
+    story = dict(decision.story or {})
+    story.setdefault("meta", {})
+    metadata = {
+        "selection_mode": "AUTO",
+        "selection_algorithm": AUTO_SELECTION_ALGORITHM,
         "crawl_job_id": str(job_id),
-        "selection_reasons": [
-            "Included because content item is linked to this crawl_job_id",
-            "Eligible status: READY/USABLE_WITH_WARNING",
+        "content_angle": decision_meta.get("content_angle"),
+        "target_audience": decision_meta.get("target_audience") or strategy.target_audience,
+        "tone": decision_meta.get("tone") or strategy.tone,
+        "format": "NARRATED_STORY",
+        "planning_mode": decision_meta.get("planning_mode") or "SINGLE",
+        "target_duration_seconds": story.get("meta", {}).get("target_duration_seconds") or 60,
+        "recommended_part_count": 1,
+        "confidence_score": decision.confidence_score,
+        "risk_level": strategy.risk_level,
+        "risk_flags": decision_meta.get("risk_flags") or [],
+        "ai_reasoning": decision_meta.get("reasoning") or [decision.reason],
+        "production_requirements": {"requires_voice": True, "requires_subtitles": True, "requires_background_media": True},
+        "ai_decision": _decision_payload(decision),
+        "candidate": score.metadata,
+        **content_category_payload(content),
+    }
+    workflow = MediaWorkflow(
+        user_id=profile.user_id,
+        profile_id=profile.id,
+        title=plan_title,
+        status="EDITING",
+        planning_mode=str(metadata["planning_mode"]).upper(),
+        primary_content_id=content.id,
+        current_stage="DRAFT_READY",
+        progress_percent=100,
+        metadata_json={key: value for key, value in metadata.items() if value not in (None, "", [])},
+        inputs_jsonb=[
+            {
+                "type": "content",
+                "id": str(content.id),
+                "role": "primary",
+                "score": score.score,
+                "embedding_similarity": score.similarity,
+                "similarity_threshold": score.threshold,
+                "passed_similarity_gate": score.metadata.get("passed_similarity_gate"),
+                "similarity_source": score.metadata.get("similarity_source"),
+                "top_topic_match": score.metadata.get("top_topic_match"),
+                "eligible": score.eligible,
+                **content_category_payload(content),
+            }
         ],
-        "rejection_reasons": [],
-    }
-    candidate.metadata_json = {
-        "quality_score": float(item.quality_score or 0),
-        "status": item.status,
-        **content_category_payload(item),
-    }
-    db.add(candidate)
-    return candidate
+    )
+    db.add(workflow)
+    db.flush()
+
+    series = _apply_series_decision(db, workflow, decision.series_decision, content)
+    if series:
+        workflow.series_id = series.id
+        workflow.planning_mode = "SERIES"
+        metadata = dict(workflow.metadata_json or {})
+        metadata["planning_mode"] = "SERIES"
+        metadata["series_decision"] = _normalized_series_decision(decision.series_decision, series)
+        workflow.metadata_json = metadata
+        story.setdefault("meta", {})
+        story["meta"]["series_decision"] = metadata["series_decision"]
+        story["meta"]["series"] = _series_context_payload(series)
+
+    story.setdefault("meta", {})
+    story["meta"]["workflow_id"] = str(workflow.id)
+    story["meta"]["content_id"] = str(content.id)
+    workflow.draft_json = story
+    db.add(workflow)
+    return workflow
 
 
-def _enqueue_script_from_project(db: Any, project: MediaWorkflow, *, trigger: str) -> KafkaTask | None:
-    if not project.primary_content_id:
+def _apply_series_decision(
+    db: Session,
+    workflow: MediaWorkflow,
+    decision: dict[str, Any] | None,
+    content: ContentItem,
+) -> ContentSeries | None:
+    if not decision:
+        return None
+    action = str(decision.get("action") or "NONE").upper()
+    if action == "USE_EXISTING":
+        series_id = _as_uuid(decision.get("target_series_id"))
+        if not series_id:
+            return None
+        series = db.get(ContentSeries, series_id)
+        if series and series.profile_id == workflow.profile_id and series.status == "ACTIVE":
+            return series
+        return None
+    if action != "CREATE_NEW":
+        return None
+
+    title = _clean_series_title(decision.get("series_title"))
+    if not title:
         return None
     existing = (
-        db.query(KafkaTask)
-        .filter(
-            KafkaTask.reference_id == project.id,
-            KafkaTask.task_type == "GENERATE_VIDEO_SCRIPT",
-            KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
-        )
-        .order_by(KafkaTask.created_at.desc())
+        db.query(ContentSeries)
+        .filter(ContentSeries.profile_id == workflow.profile_id, ContentSeries.status == "ACTIVE", ContentSeries.title == title)
         .first()
     )
     if existing:
         return existing
 
-    task = KafkaTask(
-        reference_id=project.id,
-        reference_type="media_workflow",
-        task_type="GENERATE_VIDEO_SCRIPT",
-        status="PENDING",
-        current_stage="QUEUED_SCRIPT",
-        progress_percent=0,
-        payload_jsonb={
-            "content_id": str(project.primary_content_id),
-            "trigger": trigger,
+    category_payload = content_category_payload(content)
+    series = ContentSeries(
+        user_id=workflow.user_id,
+        profile_id=workflow.profile_id,
+        title=title,
+        description=str(decision.get("reason") or content.summary or "")[:1000] or None,
+        series_type="NARRATIVE",
+        status="ACTIVE",
+        current_part=0,
+        total_parts=0,
+        context_json={"version": 1},
+        metadata_json={
+            "created_from": "auto_planning",
+            "source": "llm_series_decision",
+            "source_content_id": str(content.id),
+            "crawl_job_id": str(content.crawl_job_id) if content.crawl_job_id else None,
+            "reason": decision.get("reason"),
+            **category_payload,
         },
     )
-    project.status = "SCRIPTING"
-    project.current_stage = "QUEUED_SCRIPT"
-    project.progress_percent = 0
-    db.add_all([task, project])
-    db.commit()
-    db.refresh(task)
-    publish(
-        GENERATE_VIDEO_SCRIPT_REQUESTED,
-        build_event(
-            event_type=GENERATE_VIDEO_SCRIPT_REQUESTED,
-            source="planning-orchestrator",
-            job_id=task.id,
-            payload={"workflow_id": str(project.id), "run_type": task.task_type, "task_id": str(task.id), "trigger": trigger},
-            correlation_id=project.id,
-        ),
+    db.add(series)
+    db.flush()
+    return series
+
+
+
+
+
+def _upsert_profile_content_link(
+    db: Session,
+    profile: SocialProfile,
+    score: StrategyCandidateScore,
+    decision: AutoWorkflowDecision | None,
+) -> ProfileContentLink:
+    link = (
+        db.query(ProfileContentLink)
+        .filter(
+            ProfileContentLink.user_id == profile.user_id,
+            ProfileContentLink.profile_id == profile.id,
+            ProfileContentLink.content_id == score.content.id,
+            ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
+        )
+        .first()
     )
-    return task
+    if not link:
+        link = ProfileContentLink(
+            user_id=profile.user_id,
+            profile_id=profile.id,
+            content_id=score.content.id,
+            relation_type="CONTENT_RECOMMENDATION",
+            source_scope=score.content.content_scope,
+            status="ACTIVE",
+        )
+    if score.eligible:
+        link.relation_reason = "EMBEDDING_STRATEGY_MATCH"
+    elif score.avoided_topics:
+        link.relation_reason = "EMBEDDING_AVOID_TOPIC_MATCH"
+    else:
+        link.relation_reason = "EMBEDDING_LOW_MATCH"
+    link.recommendation_status = _recommendation_status(score, decision)
+    link.score = Decimal(str(score.score))
+    link.metadata_json = {
+        **(link.metadata_json if isinstance(link.metadata_json, dict) else {}),
+        **score.metadata,
+        "eligible_for_auto_workflow": score.eligible,
+        "selection_reasons": score.selection_reasons,
+        "rejection_reasons": score.rejection_reasons,
+        **({"ai_decision": _decision_payload(decision)} if decision else {}),
+    }
+    db.add(link)
+    return link
+
+
+def _mark_existing_auto_workflow_link(
+    db: Session,
+    profile: SocialProfile,
+    score: StrategyCandidateScore,
+    workflow: MediaWorkflow,
+) -> ProfileContentLink:
+    link = _upsert_profile_content_link(db, profile, score, decision=None)
+    skip_reason = f"Auto workflow already exists for this crawl job: {workflow.id}"
+    existing_metadata = link.metadata_json if isinstance(link.metadata_json, dict) else {}
+    selection_reasons = list(existing_metadata.get("selection_reasons") or score.selection_reasons)
+    if skip_reason not in selection_reasons:
+        selection_reasons.append(skip_reason)
+    link.recommendation_status = "WORKFLOW_CREATED"
+    link.relation_reason = "AUTO_WORKFLOW_ALREADY_EXISTS"
+    link.metadata_json = {
+        **existing_metadata,
+        "eligible_for_auto_workflow": score.eligible,
+        "skipped_existing_auto_workflow_id": str(workflow.id),
+        "skip_reason": skip_reason,
+        "selection_reasons": selection_reasons,
+        "rejection_reasons": score.rejection_reasons,
+    }
+    db.add(link)
+    return link
+
+
+def _recommendation_status(score: StrategyCandidateScore, decision: AutoWorkflowDecision | None) -> str:
+    if decision and decision.should_create_workflow:
+        return "WORKFLOW_CREATED"
+    if decision and not decision.should_create_workflow:
+        return "AI_REJECTED"
+    if score.avoided_topics:
+        return "AVOID_TOPIC_MATCH"
+    return "RECOMMENDED" if score.eligible else "LOW_MATCH"
+
+
+def _record_candidate_ai_decision(candidate: PlanningCandidate, decision_payload: dict[str, Any]) -> None:
+    metadata = dict(candidate.metadata_json or {})
+    metadata["ai_decision"] = decision_payload
+    candidate.metadata_json = metadata
+
+    reason = dict(candidate.reason_jsonb or {})
+    reason["ai_decision"] = decision_payload
+    selection_reasons = list(reason.get("selection_reasons") or [])
+    rejection_reasons = list(reason.get("rejection_reasons") or [])
+    llm_reason = str(decision_payload.get("reason") or decision_payload.get("error_message") or "").strip()
+    if decision_payload.get("should_create_workflow"):
+        note = f"LLM approved auto workflow: {llm_reason}" if llm_reason else "LLM approved auto workflow."
+        if note not in selection_reasons:
+            selection_reasons.append(note)
+    else:
+        note = f"LLM rejected auto workflow: {llm_reason}" if llm_reason else "LLM rejected auto workflow."
+        if note not in rejection_reasons:
+            rejection_reasons.append(note)
+    reason["selection_reasons"] = selection_reasons
+    reason["rejection_reasons"] = rejection_reasons
+    candidate.reason_jsonb = reason
+
+
+def _workflow_ai_decision_payload(workflow: MediaWorkflow, content_id: uuid.UUID | None = None) -> dict[str, Any]:
+    metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
+    decision = metadata.get("ai_decision") if isinstance(metadata.get("ai_decision"), dict) else {}
+    return {
+        **decision,
+        "status": decision.get("status") or "WORKFLOW_ALREADY_EXISTS",
+        "should_create_workflow": bool(decision.get("should_create_workflow", True)),
+        "reason": decision.get("reason") or "Auto workflow already exists for this content and crawl job.",
+        "confidence_score": decision.get("confidence_score") or metadata.get("confidence_score"),
+        "provider": decision.get("provider"),
+        "model": decision.get("model"),
+        "workflow_id": str(workflow.id),
+        "content_id": str(content_id or workflow.primary_content_id) if (content_id or workflow.primary_content_id) else None,
+        "plan_title": decision.get("plan_title") or workflow.title,
+        "content_angle": decision.get("content_angle") or metadata.get("content_angle"),
+        "planning_mode": decision.get("planning_mode") or metadata.get("planning_mode"),
+        "risk_flags": decision.get("risk_flags") or metadata.get("risk_flags") or [],
+        "reasoning": decision.get("reasoning") or metadata.get("ai_reasoning") or [],
+        "series_decision": decision.get("series_decision") or metadata.get("series_decision"),
+        "error_message": decision.get("error_message"),
+    }
+
+
+def _decision_payload(decision: AutoWorkflowDecision | None) -> dict[str, Any]:
+    if not decision:
+        return {}
+    metadata = decision.metadata if isinstance(decision.metadata, dict) else {}
+    return {
+        "status": metadata.get("status"),
+        "should_create_workflow": decision.should_create_workflow,
+        "reason": decision.reason,
+        "confidence_score": decision.confidence_score,
+        "provider": decision.provider,
+        "model": decision.model,
+        "plan_title": metadata.get("plan_title"),
+        "content_angle": metadata.get("content_angle"),
+        "target_audience": metadata.get("target_audience"),
+        "tone": metadata.get("tone"),
+        "planning_mode": metadata.get("planning_mode"),
+        "risk_flags": metadata.get("risk_flags") or [],
+        "reasoning": metadata.get("reasoning") or [],
+        "series_decision": decision.series_decision,
+        "error_message": decision.error_message,
+    }
+
+
+def _normalized_series_decision(decision: dict[str, Any] | None, series: ContentSeries) -> dict[str, Any]:
+    raw = decision if isinstance(decision, dict) else {}
+    return {
+        "action": str(raw.get("action") or "USE_EXISTING").upper(),
+        "target_series_id": str(series.id),
+        "series_title": series.title,
+        "reason": raw.get("reason"),
+    }
+
+
+def _series_context_payload(series: ContentSeries) -> dict[str, Any]:
+    metadata = series.metadata_json if isinstance(series.metadata_json, dict) else {}
+    category_id = metadata.get("category_id") or metadata.get("categoryId")
+    return {
+        "id": str(series.id),
+        "title": series.title,
+        "description": series.description,
+        "series_type": series.series_type,
+        "status": series.status,
+        "current_part": int(series.current_part or 0),
+        "total_parts": int(series.total_parts or 0),
+        "category_id": category_id,
+        "categoryId": category_id,
+        "category": metadata.get("category"),
+        "context_json": series.context_json or {},
+    }
+
+
+def _clean_series_title(value: Any) -> str | None:
+    title = " ".join(str(value or "").split()).strip()
+    return title[:180] if title else None
+
+
+def _as_uuid(value: Any) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None

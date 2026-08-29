@@ -4,6 +4,10 @@ from typing import Any
 
 # Pricing per 1,000,000 tokens (USD)
 PRICING_TABLE: dict[str, dict[str, float]] = {
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
+    "deepseek-chat": {"input": 0.14, "output": 0.28},
+    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
+    "text-embedding-3-large": {"input": 0.13, "output": 0.0},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.00},

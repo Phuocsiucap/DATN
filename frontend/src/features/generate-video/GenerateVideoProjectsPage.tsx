@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertCircle,
   ArrowUpRight,
@@ -10,6 +11,7 @@ import {
   FolderKanban,
   Hash,
   Layers,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -22,7 +24,6 @@ import {
   createGenerateVideoStoryFromProjectApi,
   fetchVideoWorkspacesApi,
   updateVideoWorkspaceApi,
-  type VideoWorkflowProgress,
   type VideoWorkspaceSummary,
 } from '@/commons/apis/generateVideo'
 import {
@@ -34,8 +35,8 @@ import {
   type PlanningProfile,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
+import { SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
 import { SeriesModal } from './components/SeriesModal'
-import WorkflowProgress from './WorkflowProgress'
 
 type GenerateVideoProjectsPageProps = {
   onOpenProject: (workflowId: string) => void
@@ -54,7 +55,6 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   const [seriesFilter, setSeriesFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
-  const [message, setMessage] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [seriesModalOpen, setSeriesModalOpen] = useState(false)
   const [editingSeries, setEditingSeries] = useState<ContentSeries | null>(null)
@@ -107,9 +107,8 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       setItems(workspaceData.items)
       setTotal(workspaceData.total)
       setSeries(seriesData)
-      if (!quiet) setMessage('')
     } catch (error) {
-      setMessage(readApiError(error, 'Không tải được danh sách video workflow'))
+      toast.error(readApiError(error, 'Không tải được danh sách video workflow'))
     } finally {
       if (!quiet) setLoading(false)
     }
@@ -126,7 +125,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       })
       .catch((error) => {
         if (disposed) return
-        setMessage(readApiError(error, 'Không tải được profile'))
+        toast.error(readApiError(error, 'Không tải được profile'))
         setLoading(false)
       })
     return () => { disposed = true }
@@ -154,10 +153,10 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     setBusy(`regen-${workflow.id}`)
     try {
       await createGenerateVideoStoryFromProjectApi(workflow.id)
-      setMessage(`Đã đưa "${workflow.title}" vào hàng đợi tạo lại draft`)
+      toast.success(`Đã đưa "${workflow.title}" vào hàng đợi tạo lại draft`)
       await loadWorkspaces(true)
     } catch (error) {
-      setMessage(readApiError(error, 'Không tạo lại được draft'))
+      toast.error(readApiError(error, 'Không tạo lại được draft'))
     } finally {
       setBusy(null)
     }
@@ -176,14 +175,16 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     try {
       if (editingSeries) {
         await updateContentSeriesApi(editingSeries.id, data)
+        toast.success('Đã cập nhật series!')
       } else {
         await createContentSeriesApi({ ...data, profile_id: selectedProfileId })
+        toast.success('Đã tạo series mới!')
       }
       setSeriesModalOpen(false)
       setEditingSeries(null)
       await loadWorkspaces()
     } catch (error) {
-      setMessage(readApiError(error, 'Không lưu được series'))
+      toast.error(readApiError(error, 'Không lưu được series'))
     } finally {
       setBusy(null)
     }
@@ -194,10 +195,11 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     setBusy(`delete-series-${item.id}`)
     try {
       await deleteContentSeriesApi(item.id)
+      toast.success(`Đã xóa series "${item.title}"`)
       if (seriesFilter === item.id) setSeriesFilter('')
       await loadWorkspaces()
     } catch (error) {
-      setMessage(readApiError(error, 'Không xóa được series'))
+      toast.error(readApiError(error, 'Không xóa được series'))
     } finally {
       setBusy(null)
     }
@@ -208,11 +210,12 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     setBusy(`assign-${assigningWorkflow.id}`)
     try {
       await updateVideoWorkspaceApi(assigningWorkflow.id, { series_id: assignSeriesId || null })
+      toast.success('Đã gán series cho video')
       setAssigningWorkflow(null)
       setAssignSeriesId('')
       await loadWorkspaces(true)
     } catch (error) {
-      setMessage(readApiError(error, 'Không cập nhật được series'))
+      toast.error(readApiError(error, 'Không cập nhật được series'))
     } finally {
       setBusy(null)
     }
@@ -409,30 +412,14 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         </div>
       </section>
 
-      {/* Notification Toast Message */}
-      {message && (
-        <div
-          className={`flex items-center justify-between rounded-xl border px-4 py-2.5 text-xs font-bold shadow-xs transition-all ${
-            /không|lỗi|failed|error/i.test(message)
-              ? 'border-rose-200 bg-rose-50 text-rose-700'
-              : 'border-blue-200 bg-blue-50 text-blue-700'
-          }`}
-        >
-          <span>{message}</span>
-          <button onClick={() => setMessage('')} className="ml-2 text-slate-400 hover:text-slate-700">
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      {/* Workspaces List */}
+      {/* Workspaces Kanban */}
       <div className="min-h-0 flex-1 overflow-auto pr-0.5">
         {loading ? (
-          <div className="grid gap-3">
-            {Array.from({ length: 4 }).map((_, index) => (
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, index) => (
               <div
                 key={index}
-                className="h-28 animate-pulse rounded-2xl border border-slate-200/60 bg-white p-4 shadow-xs"
+                className="h-[520px] animate-pulse rounded-2xl border border-slate-200/60 bg-white p-4 shadow-xs"
               />
             ))}
           </div>
@@ -449,106 +436,45 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             </p>
           </div>
         ) : (
-          <div className="grid gap-3">
-            {items.map((item) => {
-              const active = hasActiveTask(item)
-              const failed = item.status === 'FAILED' || item.latest_task?.status === 'FAILED'
-              const completed = ['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status)
-
-              return (
-                <article
-                  key={item.id}
-                  className={`group relative grid gap-3.5 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-xs transition-all hover:border-slate-300 hover:shadow-md ${
-                    failed
-                      ? 'border-l-4 border-l-rose-500'
-                      : active
-                      ? 'border-l-4 border-l-blue-500'
-                      : completed
-                      ? 'border-l-4 border-l-emerald-500'
-                      : 'border-l-4 border-l-slate-300'
-                  } lg:grid-cols-[minmax(280px,1fr)_minmax(320px,0.9fr)_auto] lg:items-center`}
-                >
-                  {/* Left Column: Title & Info */}
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <h2
-                        onClick={() => onOpenProject(item.id)}
-                        className="cursor-pointer truncate text-sm font-black text-slate-900 transition-colors group-hover:text-blue-600"
-                      >
-                        {item.title}
-                      </h2>
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-extrabold tracking-wide ${
-                          failed
-                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                            : active
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                            : completed
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}
-                      >
-                        {workflowStatusLabel(item.status)}
-                      </span>
-                    </div>
-
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                      {item.primary_content?.summary || item.primary_content?.title || 'Không có mô tả nguồn'}
-                    </p>
-
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
-                      <button
-                        onClick={() => {
-                          setAssigningWorkflow(item)
-                          setAssignSeriesId(item.series?.id || '')
-                        }}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50 px-2.5 py-1 text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        <Layers size={12} className="text-slate-400 group-hover:text-blue-500" />
-                        {item.series?.title || 'Chưa thuộc series'}
-                      </button>
-
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2 py-1 text-slate-500">
-                        <Clock size={11} className="text-slate-400" />
-                        {formatDateTime(item.updated_at)}
-                      </span>
-
-                      <button
-                        onClick={() => copyId(item.id)}
-                        title="Click để copy ID đầy đủ"
-                        className="inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2 py-1 font-mono text-[10px] text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                      >
-                        <Hash size={10} className="text-slate-400" />
-                        {item.id.slice(0, 8)}
-                        {copiedId === item.id ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-slate-400" />}
-                      </button>
-                    </div>
+          <div className="grid min-w-[1180px] gap-3 md:grid-cols-5">
+            {kanbanColumns(items).map((column, columnIndex) => (
+              <section key={column.id} className="flex min-h-[650px] flex-col rounded-[8px] border border-slate-200/90 bg-white shadow-xs">
+                <div className="flex h-11 items-center justify-between border-b border-slate-100 px-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
+                    <h2 className="text-[13px] font-extrabold text-slate-900">{column.title}</h2>
                   </div>
-
-                  {/* Middle Column: Visual Workflow Progress */}
-                  <WorkflowProgress progress={summaryProgress(item)} compact />
-
-                  {/* Right Column: Actions */}
-                  <div className="flex items-center justify-end gap-2 pt-2 lg:pt-0">
-                    <button
-                      title="Tạo lại draft"
+                  <MoreHorizontal size={16} className="text-slate-400" />
+                </div>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+                  {column.items.map((item, index) => (
+                    <VideoKanbanCard
+                      key={item.id}
+                      item={item}
+                      index={index + columnIndex}
+                      copied={copiedId === item.id}
+                      busy={busy === `regen-${item.id}`}
                       disabled={Boolean(busy) || hasActiveTask(item)}
-                      onClick={() => void regenerateDraft(item)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-xs transition-all hover:border-slate-300 hover:bg-slate-50 active:scale-95 disabled:opacity-40"
-                    >
-                      <RefreshCw size={14} className={busy === `regen-${item.id}` ? 'animate-spin text-blue-600' : ''} />
-                    </button>
-                    <button
-                      title="Mở Workspace sản xuất"
-                      onClick={() => onOpenProject(item.id)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-xs font-extrabold text-white shadow-xs transition-all hover:from-blue-700 hover:to-indigo-700 hover:shadow-md hover:shadow-blue-500/20 active:scale-[0.98]"
-                    >
-                      Mở Workspace <ArrowUpRight size={15} strokeWidth={2.2} />
-                    </button>
-                  </div>
-                </article>
-              )
-            })}
+                      onOpen={() => onOpenProject(item.id)}
+                      onRegenerate={() => void regenerateDraft(item)}
+                      onCopy={() => copyId(item.id)}
+                      onAssign={() => {
+                        setAssigningWorkflow(item)
+                        setAssignSeriesId(item.series?.id || '')
+                      }}
+                    />
+                  ))}
+                  {column.items.length === 0 && (
+                    <div className="grid h-32 place-items-center rounded-[8px] border border-dashed border-slate-200 text-center text-[12px] font-semibold text-slate-400">
+                      Chưa có video
+                    </div>
+                  )}
+                </div>
+                <button className="mx-3 mb-3 h-9 rounded-[8px] border border-slate-200 bg-white text-[12px] font-bold text-[#6d5dfc] hover:bg-[#f8faff]">
+                  + Thêm video
+                </button>
+              </section>
+            ))}
           </div>
         )}
       </div>
@@ -641,20 +567,113 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   )
 }
 
-function hasActiveTask(item: VideoWorkspaceSummary) {
-  return Boolean(item.latest_task && activeTaskStatuses.has(item.latest_task.status))
+function kanbanColumns(items: VideoWorkspaceSummary[]) {
+  const buckets = [
+    { id: 'draft', title: 'Draft sẵn sàng', badgeClass: 'bg-[#f2f0ff] text-[#6d5dfc]', match: (item: VideoWorkspaceSummary) => ['SCRIPTING', 'READY', 'DRAFT_READY'].includes(item.status) },
+    { id: 'editing', title: 'Đang chỉnh sửa', badgeClass: 'bg-[#eef4ff] text-[#2556ea]', match: (item: VideoWorkspaceSummary) => ['EDITING', 'REVIEWING', 'VOICE_READY'].includes(item.status) },
+    { id: 'rendering', title: 'Đang render', badgeClass: 'bg-[#fff3d6] text-[#f59e0b]', match: (item: VideoWorkspaceSummary) => ['RENDERING'].includes(item.status) || hasActiveTask(item) },
+    { id: 'review', title: 'Chờ duyệt', badgeClass: 'bg-[#fff3d6] text-[#b76b00]', match: (item: VideoWorkspaceSummary) => ['RENDERED', 'VIDEO_APPROVED'].includes(item.status) },
+    { id: 'ready', title: 'Sẵn sàng xuất bản', badgeClass: 'bg-[#eaf8ef] text-[#16813b]', match: (item: VideoWorkspaceSummary) => ['QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status) },
+  ]
+
+  const assigned = new Set<string>()
+  const columns = buckets.map((bucket) => {
+    const columnItems = items.filter((item) => !assigned.has(item.id) && bucket.match(item))
+    columnItems.forEach((item) => assigned.add(item.id))
+    return { ...bucket, items: columnItems }
+  })
+  const fallback = items.filter((item) => !assigned.has(item.id))
+  columns[0].items.push(...fallback)
+  return columns
 }
 
-function summaryProgress(item: VideoWorkspaceSummary): VideoWorkflowProgress {
-  return {
-    workflow_id: item.id,
-    status: item.status,
-    current_stage: item.current_stage,
-    progress_percent: item.progress_percent,
-    tasks: item.latest_task ? [item.latest_task] : [],
-    final_video: item.final_video,
-    updated_at: item.updated_at,
-  }
+function VideoKanbanCard({
+  item,
+  index,
+  copied,
+  busy,
+  disabled,
+  onOpen,
+  onRegenerate,
+  onCopy,
+  onAssign,
+}: {
+  item: VideoWorkspaceSummary
+  index: number
+  copied: boolean
+  busy: boolean
+  disabled: boolean
+  onOpen: () => void
+  onRegenerate: () => void
+  onCopy: () => void
+  onAssign: () => void
+}) {
+  const duration = item.status === 'RENDERING' ? '01:04' : index % 2 ? '00:57' : '01:15'
+  return (
+    <article className="group overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-xs transition hover:border-[#c8d0ff] hover:shadow-sm">
+      <button onClick={onOpen} className="block w-full text-left">
+        <Thumbnail index={index} className="h-[138px] w-full rounded-none" duration={duration} />
+      </button>
+      <div className="space-y-3 p-3">
+        <div>
+          <button onClick={onOpen} className="line-clamp-2 text-left text-[13px] font-extrabold leading-5 text-slate-900 transition group-hover:text-[#2556ea]">
+            {item.title}
+          </button>
+          <div className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+            <SocialProfileAvatar
+              avatarUrl={item.profile?.avatar_url}
+              name={item.profile?.name}
+              platform={item.profile?.platform || 'tiktok'}
+              size="sm"
+            />
+            <span className="truncate">{item.profile?.name || 'SocialContentHub'}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          <StatusPill value={workflowStatusLabel(item.status)} tone={item.status === 'FAILED' ? 'red' : item.status === 'RENDERING' ? 'amber' : 'purple'} />
+          {item.primary_content?.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{item.primary_content.category}</span>}
+        </div>
+
+        {item.status === 'RENDERING' && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-500">{Math.round(Number(item.progress_percent || 45))}%</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-[#f59e0b]" style={{ width: `${Math.max(8, Math.min(100, Number(item.progress_percent || 45)))}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] font-semibold text-slate-500">
+          <button onClick={onAssign} className="inline-flex min-w-0 items-center gap-1 rounded-[6px] px-1.5 py-1 hover:bg-[#f4f6ff]">
+            <Layers size={12} />
+            <span className="truncate">{item.series?.title || 'Chưa series'}</span>
+          </button>
+          <span className="inline-flex items-center gap-1"><Clock size={11} />{formatDateTime(item.updated_at)}</span>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <button onClick={onCopy} className="inline-flex items-center gap-1 rounded-[6px] bg-slate-50 px-2 py-1 font-mono text-[10px] font-bold text-slate-500 hover:bg-slate-100">
+            <Hash size={10} />
+            {item.id.slice(0, 8)}
+            {copied ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
+          </button>
+          <div className="flex items-center gap-1">
+            <button disabled={disabled} onClick={onRegenerate} title="Tạo lại draft" className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              <RefreshCw size={13} className={busy ? 'animate-spin text-[#2556ea]' : ''} />
+            </button>
+            <button onClick={onOpen} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-[#2556ea] px-2.5 text-[11px] font-extrabold text-white">
+              Mở <ArrowUpRight size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function hasActiveTask(item: VideoWorkspaceSummary) {
+  return Boolean(item.latest_task && activeTaskStatuses.has(item.latest_task.status))
 }
 
 function workflowStatusLabel(value: string) {
@@ -684,4 +703,3 @@ function readApiError(error: unknown, fallback: string) {
   const candidate = error as { response?: { data?: { detail?: string } }; message?: string }
   return candidate.response?.data?.detail || candidate.message || fallback
 }
-

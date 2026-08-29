@@ -22,6 +22,7 @@ import {
   Maximize2,
   Mic2,
   Music,
+  Newspaper,
   Pause,
   Play,
   Plus,
@@ -40,6 +41,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
+import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
 import {
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
@@ -200,7 +202,20 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const [storySceneIndex, setStorySceneIndex] = useState(0)
   const [editPrompt, setEditPrompt] = useState('')
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showContentDetailId, setShowContentDetailId] = useState<string | null>(null)
   const [exportedVideoUrl, setExportedVideoUrl] = useState('')
+
+  const contentId = useMemo(() => {
+    if (!selectedProject) return null
+    return (
+      selectedProject.primary_content_id ||
+      (selectedProject.source_content as any)?.id ||
+      (selectedProject.source_content as any)?._id ||
+      (selectedProject.source_content as any)?.content_id ||
+      (story?.meta as any)?.source_content_id ||
+      null
+    )
+  }, [selectedProject, story])
   const [activeStep, setActiveStep] = useState<StepId>('story')
   const [voiceId] = useState(defaultVoiceId)
   const [voiceSpeed] = useState(1.2)
@@ -276,11 +291,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     : ''
 
 
-  const editSourceContent = {
-    ...((selectedProject?.source_content || {}) as Record<string, any>),
-    title: (selectedProject?.source_content as any)?.title || selectedProject?.title,
-    full_text: (selectedProject?.source_content as any)?.full_text || '',
-  }
   const loadInitial = async () => {
     setBusy('load')
     try {
@@ -326,7 +336,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
         updateStory(directStory)
         setPreviewStory(directStory)
         setPreviewVersion(Date.now())
-        setActiveStep(options.openSavedStory ? inferActiveStepFromProject(workflow, directStory) : 'story')
+        setActiveStep(options.openSavedStory ? inferActiveStepFromProject(workflow, directStory) : 'video')
         setStatus('')
       } else {
         setStory(null)
@@ -610,6 +620,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           </div>
           
           <div className="flex shrink-0 items-center gap-2">
+            {contentId && (
+              <button
+                onClick={() => setShowContentDetailId(contentId)}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-4 text-xs font-bold text-blue-700 shadow-sm transition-all hover:bg-blue-100"
+              >
+                <Newspaper size={15} /> Xem bài gốc
+              </button>
+            )}
             <button onClick={() => void loadInitial()} className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 shadow-sm transition-all hover:bg-slate-50">
                Reload
             </button>
@@ -685,8 +703,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
               <button disabled={!hasStoryInput || actionsLocked} onClick={() => { setActiveStep('video'); void generateVoice() }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
                 <Mic2 size={14} /> Tạo Voice AI
               </button>
+              {contentId && (
+                <button
+                  onClick={() => setShowContentDetailId(contentId)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                >
+                  <Newspaper size={14} /> Xem bài gốc
+                </button>
+              )}
             </div>
-            <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+            <div className="mt-3">
               <StoryDataEditor
                 story={story}
                 sceneIndex={storySceneIndex}
@@ -696,7 +722,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                   if (typeof nextIndex === 'number') setStorySceneIndex(nextIndex)
                 }}
               />
-              <SourceContentPreview source={editSourceContent} />
             </div>
           </Panel>
         )}
@@ -704,7 +729,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
 
       {showEditDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <div>
                 <div className="text-base font-black text-[#0f172a]">Edit story with AI</div>
@@ -714,25 +739,22 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                 <X size={16} />
               </button>
             </div>
-            <div className="grid flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <div className="grid content-start gap-3">
-                <textarea
-                  autoFocus
-                  value={editPrompt}
-                  onChange={(event) => setEditPrompt(event.target.value)}
-                  placeholder="Ví dụ: Viết lại subtitle tự nhiên hơn, tăng kịch tính ở 2 scene đầu, vẫn giữ đúng dữ kiện bài gốc."
-                  className="h-40 w-full resize-y rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-                />
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setShowEditDialog(false)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
-                    Cancel
-                  </button>
-                  <button disabled={!editPrompt.trim() || actionsLocked} onClick={() => void editStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                    <Wand2 size={14} /> Submit
-                  </button>
-                </div>
+            <div className="flex flex-col gap-3 p-4">
+              <textarea
+                autoFocus
+                value={editPrompt}
+                onChange={(event) => setEditPrompt(event.target.value)}
+                placeholder="Ví dụ: Viết lại subtitle tự nhiên hơn, tăng kịch tính ở 2 scene đầu, vẫn giữ đúng dữ kiện bài gốc."
+                className="h-40 w-full resize-y rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowEditDialog(false)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button disabled={!editPrompt.trim() || actionsLocked} onClick={() => void editStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                  <Wand2 size={14} /> Submit
+                </button>
               </div>
-              <SourceContentPreview source={editSourceContent} />
             </div>
           </div>
         </div>
@@ -804,6 +826,12 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           )}
         </section>
       </div>
+      {showContentDetailId && (
+        <ContentDetailDialog
+          contentId={showContentDetailId}
+          onClose={() => setShowContentDetailId(null)}
+        />
+      )}
     </div>
   )
 }
@@ -1957,7 +1985,7 @@ function RemotionLikeEditor({
     }
   }
 
-  return (
+  const legacyEditor = (
     <div
       className={isFullscreen
         ? "fixed inset-0 z-[80] flex h-screen w-screen flex-col overflow-hidden border border-[#2d2d37] bg-[#111115] text-[#f1f1f6] shadow-sm"
@@ -2055,6 +2083,885 @@ function RemotionLikeEditor({
       />
     </div>
   )
+  void legacyEditor
+
+  return (
+    <div
+      className={isFullscreen
+        ? "fixed inset-0 z-[80] flex h-screen w-screen flex-col overflow-hidden bg-[#f6f8ff] text-slate-950"
+        : "relative flex h-[760px] w-full flex-col overflow-hidden rounded-[8px] border border-[#dfe4f3] bg-[#f6f8ff] text-slate-950 shadow-sm"}
+      onClick={() => setAudioMenu(null)}
+    >
+      {addAudioType && (
+        <ProCutAddAudioPanel
+          busy={addAudioBusy}
+          error={addAudioError}
+          file={addAudioFile}
+          link={addAudioLink}
+          mode={addAudioMode}
+          type={addAudioType}
+          onCancel={() => setAddAudioType(null)}
+          onFileChange={setAddAudioFile}
+          onLinkChange={setAddAudioLink}
+          onModeChange={setAddAudioMode}
+          onTypeChange={setAddAudioType}
+          onSubmit={() => void submitAddAudio()}
+        />
+      )}
+      <StudioProductionShell
+        audioMenu={audioMenu}
+        audioSrc={audioSrc}
+        audio1Muted={audio1Muted}
+        audio2Muted={audio2Muted}
+        audioTracks={additionalAudioTracks}
+        currentScene={currentScene}
+        currentTime={currentTime}
+        dragRef={dragRef}
+        exporting={exporting}
+        fitting={fitting}
+        fps={fps}
+        isFullscreen={isFullscreen}
+        mutedTracks={mutedTracks}
+        musicDragRef={musicDragRef}
+        musicDuration={musicDuration}
+        musicLeft={musicLeft}
+        musicSrc={musicSrc}
+        musicStart={musicStart}
+        musicWidth={musicWidth}
+        playing={playing}
+        playheadLeft={playheadLeft}
+        previewStage={previewStage}
+        saving={saving}
+        sceneIndex={sceneIndex}
+        scenes={scenes}
+        story={story}
+        subtitleDragRef={subtitleDragRef}
+        timelineRef={timelineRef}
+        trackDragRef={trackDragRef}
+        videoDuration={videoDuration}
+        voiceGenerating={voiceGenerating}
+        voiceLeft={voiceLeft}
+        voiceProvider={voiceProvider}
+        voiceWidth={voiceWidth}
+        onAddTrack={() => openAddAudio()}
+        onAudioMenuDelete={deleteAudioMenuTarget}
+        onChange={onChange}
+        onContextMenuTrack={openAudioMenu}
+        onDuplicate={duplicateScene}
+        onExit={onExit}
+        onExport={onExport}
+        onFitFrames={onFitFrames}
+        onGenerateVoice={onGenerateVoice}
+        onPlayToggle={onPlayToggle}
+        onResizeScene={resizeScene}
+        onSeek={onSeek}
+        onSeekFromPointer={seekFromTimelinePointer}
+        onSelect={onSelect}
+        onSave={onSave}
+        onToggleFullscreen={onToggleFullscreen}
+        onToggleTrackMute={onToggleTrackMute}
+        onUpdateSubtitleTiming={updateSubtitleTiming}
+        onVoiceProviderChange={onVoiceProviderChange}
+      />
+    </div>
+  )
+}
+
+function StudioProductionShell({
+  audioMenu,
+  audioSrc,
+  audio1Muted,
+  audio2Muted,
+  audioTracks,
+  currentScene,
+  currentTime,
+  dragRef,
+  exporting,
+  fitting,
+  fps,
+  isFullscreen,
+  mutedTracks,
+  musicDragRef,
+  musicDuration,
+  musicLeft,
+  musicSrc,
+  musicStart,
+  musicWidth,
+  playing,
+  playheadLeft,
+  previewStage,
+  saving,
+  sceneIndex,
+  scenes,
+  story,
+  subtitleDragRef,
+  timelineRef,
+  trackDragRef,
+  videoDuration,
+  voiceGenerating,
+  voiceLeft,
+  voiceProvider,
+  voiceWidth,
+  onAddTrack,
+  onAudioMenuDelete,
+  onChange,
+  onContextMenuTrack,
+  onDuplicate,
+  onExit,
+  onExport,
+  onFitFrames,
+  onGenerateVoice,
+  onPlayToggle,
+  onResizeScene,
+  onSeek,
+  onSeekFromPointer,
+  onSelect,
+  onSave,
+  onToggleFullscreen,
+  onToggleTrackMute,
+  onUpdateSubtitleTiming,
+  onVoiceProviderChange,
+}: {
+  audioMenu: { x: number; y: number; kind: 'legacy-music' | 'track'; trackId?: string } | null
+  audioSrc: string
+  audio1Muted: boolean
+  audio2Muted: boolean
+  audioTracks: ProCutAudioTrack[]
+  currentScene: GenerateVideoScene | undefined
+  currentTime: number
+  dragRef: React.MutableRefObject<{ index: number; startX: number; leftDuration: number; rightDuration: number; totalDuration: number; timelineWidth: number } | null>
+  exporting: boolean
+  fitting: boolean
+  fps: number
+  isFullscreen: boolean
+  mutedTracks: Record<string, boolean>
+  musicDragRef: React.MutableRefObject<{ mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; totalDuration: number; timelineWidth: number } | null>
+  musicDuration: number
+  musicLeft: number
+  musicSrc: string
+  musicStart: number
+  musicWidth: number
+  playing: boolean
+  playheadLeft: number
+  previewStage: React.ReactNode
+  saving: boolean
+  sceneIndex: number
+  scenes: GenerateVideoScene[]
+  story: GenerateVideoStory
+  subtitleDragRef: React.MutableRefObject<{ index: number; mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; timelineWidth: number } | null>
+  timelineRef: React.RefObject<HTMLDivElement | null>
+  trackDragRef: React.MutableRefObject<{ id: string; mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; timelineWidth: number } | null>
+  videoDuration: number
+  voiceGenerating: boolean
+  voiceLeft: number
+  voiceProvider: GenerateVideoVoiceProvider
+  voiceWidth: number
+  onAddTrack: () => void
+  onAudioMenuDelete: () => void
+  onChange: (story: GenerateVideoStory) => void
+  onContextMenuTrack: (event: React.MouseEvent<HTMLElement>, item: { kind: 'legacy-music' | 'track'; trackId?: string }) => void
+  onDuplicate: () => void
+  onExit: () => void
+  onExport: () => void
+  onFitFrames: () => void
+  onGenerateVoice: () => void
+  onPlayToggle: () => void
+  onResizeScene: (event: React.PointerEvent<HTMLButtonElement>) => void
+  onSeek: (time: number) => void
+  onSeekFromPointer: (clientX: number) => void
+  onSelect: (index: number) => void
+  onSave: () => void
+  onToggleFullscreen: () => void
+  onToggleTrackMute: (trackId: string) => void
+  onUpdateSubtitleTiming: (index: number, start: number, duration: number) => void
+  onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+}) {
+  const progress = videoDuration ? Math.min(100, Math.max(0, (currentTime / videoDuration) * 100)) : 0
+  const frameSize = normalizeVideoFrame(story.video)
+  const aspectLabel = `${frameSize.width}:${frameSize.height}`
+  return (
+    <>
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#dfe4f3] bg-white px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <button title="Quay lại" onClick={onExit} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] hover:bg-[#f5f7ff]">
+            <ArrowLeft size={15} />
+          </button>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-black text-[#11183c]">{getStoryProjectName(story)}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-[10px] font-bold text-[#667097]">
+              <span>{scenes.length} scene</span>
+              <span>{formatStudioClock(videoDuration)}</span>
+              <span>{aspectLabel}</span>
+              <span>{fps} FPS</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button title="Nhân bản scene" onClick={onDuplicate} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff]">
+            <ArrowUpRight size={13} /> Nhân bản
+          </button>
+          <button title="Lưu chỉnh sửa" disabled={saving} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#b7c0ff] bg-white px-3 text-[11px] font-bold text-[#5b45ff] hover:bg-[#f5f2ff] disabled:opacity-50">
+            <Save size={13} /> {saving ? 'Đang lưu' : 'Lưu'}
+          </button>
+          <select
+            aria-label="Voice provider"
+            title="Voice provider"
+            value={voiceProvider}
+            disabled={voiceGenerating || saving || exporting}
+            onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
+            className="h-8 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-[11px] font-bold text-[#2d3463] outline-none disabled:opacity-50"
+          >
+            {voiceProviderOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <button disabled={voiceGenerating || saving || exporting} onClick={onGenerateVoice} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff] disabled:opacity-50">
+            <Mic2 size={13} /> {voiceGenerating ? 'Đang tạo' : 'Tạo Voice AI'}
+          </button>
+          <button disabled={fitting || saving || exporting || voiceGenerating} onClick={onFitFrames} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff] disabled:opacity-50">
+            <Wand2 size={13} /> Fit frame
+          </button>
+          <button title={isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'} onClick={onToggleFullscreen} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] hover:bg-[#f5f7ff]">
+            <Maximize2 size={14} />
+          </button>
+          <button disabled={exporting} onClick={onExport} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[#6247ff] px-3 text-[11px] font-black text-white shadow-sm shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
+            <UploadCloud size={13} /> {exporting ? 'Đang render' : 'Render video'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(360px,1fr)_420px] gap-3 overflow-hidden p-3">
+        <StudioSceneRail scenes={scenes} sceneIndex={sceneIndex} videoDuration={videoDuration} onDuplicate={onDuplicate} onSeek={onSeek} onSelect={onSelect} />
+        <section className="flex min-w-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-[#e9edf8] p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-[#667097]">
+            <div className="flex gap-2">
+              {videoAspectPresets.map((preset) => (
+                <button
+                  key={preset.label}
+                  onClick={() => onChange({ ...story, video: { ...(story.video || {}), width: preset.width, height: preset.height } })}
+                  className={`h-7 rounded-[8px] border px-3 ${frameSize.width === preset.width && frameSize.height === preset.height ? 'border-[#6247ff] bg-white text-[#4f36ee] ring-2 ring-[#6247ff]/15' : 'border-transparent bg-white/55 hover:bg-white'}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <span>{Math.round(progress)}%</span>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center rounded-[8px] bg-[#d9dfec] p-5">
+            <div className="flex h-full max-h-[540px] w-full items-center justify-center">
+              {previewStage}
+            </div>
+          </div>
+          <div className="mt-3 rounded-[8px] bg-white/70 px-3 py-2">
+            <button
+              className="group flex h-3 w-full items-center rounded-full bg-[#d8dded]"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect()
+                onSeek(((event.clientX - rect.left) / Math.max(1, rect.width)) * videoDuration)
+              }}
+            >
+              <span className="h-1.5 rounded-full bg-[#6247ff]" style={{ width: `${progress}%` }} />
+            </button>
+            <div className="mt-2 flex items-center justify-between text-[11px] font-black text-[#11183c]">
+              <span>{formatStudioClock(currentTime)} / {formatStudioClock(videoDuration)}</span>
+              <div className="flex items-center gap-2">
+                <button title="Về đầu" onClick={() => onSeek(0)} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm"><SkipBack size={14} /></button>
+                <button title={playing ? 'Tạm dừng' : 'Phát'} onClick={onPlayToggle} className="grid h-10 w-10 place-items-center rounded-full bg-[#1d2452] text-white shadow-md">
+                  {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
+                </button>
+                <button title="Tới cuối" onClick={() => onSeek(videoDuration)} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm"><SkipForward size={14} /></button>
+              </div>
+              <button title="Tắt/bật voice" onClick={() => onToggleTrackMute('audio-2')} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm">
+                {audio2Muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
+            </div>
+          </div>
+        </section>
+        <StudioInspector currentScene={currentScene} sceneIndex={sceneIndex} scenes={scenes} story={story} onChange={onChange} />
+      </div>
+
+      <StudioTimelinePanel
+        audioMenu={audioMenu}
+        audioSrc={audioSrc}
+        audio1Muted={audio1Muted}
+        audio2Muted={audio2Muted}
+        audioTracks={audioTracks}
+        dragRef={dragRef}
+        mutedTracks={mutedTracks}
+        musicDragRef={musicDragRef}
+        musicDuration={musicDuration}
+        musicLeft={musicLeft}
+        musicSrc={musicSrc}
+        musicStart={musicStart}
+        musicWidth={musicWidth}
+        playheadLeft={playheadLeft}
+        sceneIndex={sceneIndex}
+        scenes={scenes}
+        story={story}
+        subtitleDragRef={subtitleDragRef}
+        timelineRef={timelineRef}
+        trackDragRef={trackDragRef}
+        videoDuration={videoDuration}
+        voiceLeft={voiceLeft}
+        voiceWidth={voiceWidth}
+        onAddTrack={onAddTrack}
+        onAudioMenuDelete={onAudioMenuDelete}
+        onChange={onChange}
+        onContextMenuTrack={onContextMenuTrack}
+        onResizeScene={onResizeScene}
+        onSeek={onSeek}
+        onSeekFromPointer={onSeekFromPointer}
+        onSelect={onSelect}
+        onToggleTrackMute={onToggleTrackMute}
+        onUpdateSubtitleTiming={onUpdateSubtitleTiming}
+      />
+    </>
+  )
+}
+
+function StudioSceneRail({
+  scenes,
+  sceneIndex,
+  videoDuration,
+  onDuplicate,
+  onSeek,
+  onSelect,
+}: {
+  scenes: GenerateVideoScene[]
+  sceneIndex: number
+  videoDuration: number
+  onDuplicate: () => void
+  onSeek: (time: number) => void
+  onSelect: (index: number) => void
+}) {
+  return (
+    <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#e8ecf7] px-3">
+        <div className="flex items-center gap-2 text-[13px] font-black text-[#11183c]">
+          <FileText size={15} className="text-[#6247ff]" />
+          Kịch bản ({scenes.length})
+        </div>
+        <button title="AI gợi ý" className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#c9c2ff] px-2 text-[11px] font-bold text-[#6247ff]">
+          <Wand2 size={12} /> AI gợi ý
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+        {scenes.map((scene, index) => {
+          const active = index === sceneIndex
+          const start = getSceneStart(scenes, index)
+          const end = getSceneEnd(scenes, index)
+          return (
+            <button
+              key={`${scene.image}-${index}`}
+              onClick={() => {
+                onSelect(index)
+                onSeek(start)
+              }}
+              className={`grid w-full grid-cols-[24px_84px_minmax(0,1fr)] gap-2 rounded-[8px] border p-2 text-left transition ${active ? 'border-[#6247ff] bg-[#f4f2ff] shadow-sm ring-2 ring-[#6247ff]/10' : 'border-transparent hover:border-[#dfe4f3] hover:bg-[#f8faff]'}`}
+            >
+              <span className={`grid h-7 w-6 place-items-center rounded-[6px] text-[12px] font-black ${active ? 'bg-white text-[#6247ff]' : 'bg-[#f3f6fd] text-[#667097]'}`}>{index + 1}</span>
+              <SceneMediaThumb scene={scene} className="h-14 w-[84px] rounded-[6px] object-cover" />
+              <span className="min-w-0">
+                <span className="block truncate text-[12px] font-black text-[#11183c]">Scene {index + 1}</span>
+                <span className="mt-0.5 block truncate text-[11px] font-semibold text-[#56617f]">{scene.subtitle || fileNameFromPath(scene.image || '')}</span>
+                <span className="mt-1 block text-[10px] font-bold text-[#7782a4]">{formatStudioClock(start)} - {formatStudioClock(end)}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="border-t border-[#e8ecf7] p-2">
+        <button onClick={onDuplicate} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white text-[12px] font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
+          <Plus size={14} /> Thêm scene
+        </button>
+        <div className="mt-1 text-center text-[10px] font-bold text-[#98a2c3]">{formatStudioClock(videoDuration)} tổng thời lượng</div>
+      </div>
+    </aside>
+  )
+}
+
+function StudioInspector({
+  currentScene,
+  sceneIndex,
+  scenes,
+  story,
+  onChange,
+}: {
+  currentScene: GenerateVideoScene | undefined
+  sceneIndex: number
+  scenes: GenerateVideoScene[]
+  story: GenerateVideoStory
+  onChange: (story: GenerateVideoStory) => void
+}) {
+  const meta = story.meta || {}
+  const video = story.video || { width: 1080, height: 1920, fps: 30, background: '#05070b' }
+  const audio = story.audio || {}
+  const subtitleStyle = (currentScene?.text_style || {}) as Record<string, unknown>
+  const fontSize = readNumericStyleValue(subtitleStyle.fontSize, 48)
+  const backgroundColor = normalizeColorValue(String(video.background || '#05070b'))
+  const updateMeta = (field: keyof NonNullable<GenerateVideoStory['meta']>, value: string) => onChange({ ...story, meta: { ...meta, [field]: value } })
+  const updateVideo = (patch: Partial<GenerateVideoStory['video']>) => onChange({ ...story, video: { ...video, ...patch } })
+  const updateScene = (patch: Partial<GenerateVideoScene>) => currentScene && updateSceneAt(story, scenes, sceneIndex, patch, onChange)
+  const updateSubtitleStyle = (patch: React.CSSProperties) => currentScene && updateScene({
+    text_style: {
+      ...(currentScene.text_style || {}),
+      ...patch,
+    },
+  })
+  return (
+    <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
+      <div className="grid h-11 shrink-0 grid-cols-3 border-b border-[#e8ecf7] text-[12px] font-black text-[#56617f]">
+        <button className="border-b-2 border-[#6247ff] text-[#6247ff]">Thông tin</button>
+        <button>AI gợi ý</button>
+        <button>Script</button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+        <StudioSection title="Story data">
+          <StudioField label="Tiêu đề">
+            <input value={meta.title || getStoryProjectName(story)} onChange={(event) => updateMeta('title', event.target.value)} className={studioInputClass} />
+          </StudioField>
+          <div className="grid grid-cols-2 gap-2">
+            <StudioField label="Series ID"><input value={meta.series_id || ''} onChange={(event) => updateMeta('series_id', event.target.value)} className={studioInputClass} /></StudioField>
+            <StudioField label="Workflow ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={studioInputClass} /></StudioField>
+          </div>
+        </StudioSection>
+
+        <StudioSection title="Cấu hình sản xuất">
+          <div className="grid grid-cols-2 gap-2">
+            <StudioField label="Khung hình">
+              <select
+                value={`${video.width}x${video.height}`}
+                onChange={(event) => {
+                  const preset = videoAspectPresets.find((item) => `${item.width}x${item.height}` === event.target.value)
+                  if (preset) updateVideo({ width: preset.width, height: preset.height })
+                }}
+                className={studioInputClass}
+              >
+                {videoAspectPresets.map((preset) => <option key={preset.label} value={`${preset.width}x${preset.height}`}>{preset.label} · {preset.width}x{preset.height}</option>)}
+              </select>
+            </StudioField>
+            <StudioField label="FPS">
+              <select value={video.fps || 30} onChange={(event) => updateVideo({ fps: Number(event.target.value) || 30 })} className={studioInputClass}>
+                {fpsPresets.map((fps) => <option key={fps} value={fps}>{fps}</option>)}
+              </select>
+            </StudioField>
+          </div>
+          <StudioField label="Background">
+            <div className="flex gap-2">
+              <input type="color" value={backgroundColor} onChange={(event) => updateVideo({ background: event.target.value })} className="h-9 w-11 rounded-[7px] border border-[#dfe4f3] bg-white p-1" />
+              <input value={video.background || ''} onChange={(event) => updateVideo({ background: event.target.value })} className={studioInputClass} />
+            </div>
+          </StudioField>
+        </StudioSection>
+
+        <StudioSection title={`Scene ${sceneIndex + 1}`}>
+          <StudioField label="Hiệu ứng chuyển động">
+            <div className="grid grid-cols-2 gap-2">
+              {['slow-zoom', 'pan-right', 'pan-left', 'push-in'].map((effect) => (
+                <button
+                  key={effect}
+                  onClick={() => updateScene({ effect })}
+                  className={`h-8 rounded-[7px] border px-2 text-[11px] font-bold ${currentScene?.effect === effect ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
+                >
+                  {effect}
+                </button>
+              ))}
+            </div>
+          </StudioField>
+          <StudioField label="Cách hiển thị">
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'contain', label: 'Để nguyên' },
+                { value: 'cover', label: 'Làm đầy' },
+              ].map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => updateScene({ fit: item.value })}
+                  className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === item.value ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </StudioField>
+          <StudioField label="Nội dung hiển thị">
+            <textarea value={currentScene?.subtitle || ''} onChange={(event) => updateScene({ subtitle: event.target.value })} className={`${studioInputClass} min-h-20 py-2`} />
+          </StudioField>
+          <div className="grid grid-cols-[1fr_86px_40px_40px] gap-2">
+            <select value={String(subtitleStyle.fontFamily || 'Be Vietnam Pro, Inter, system-ui, sans-serif')} onChange={(event) => updateSubtitleStyle({ fontFamily: event.target.value })} className={studioInputClass}>
+              <option value="Be Vietnam Pro, Inter, system-ui, sans-serif">Be Vietnam Pro</option>
+              <option value="Inter, system-ui, sans-serif">Inter</option>
+              <option value="Arial, Helvetica, sans-serif">Arial</option>
+            </select>
+            <input type="number" value={fontSize} min={12} max={96} onChange={(event) => updateSubtitleStyle({ fontSize: Number(event.target.value) || 48 })} className={studioInputClass} />
+            <button title="Màu chữ" onClick={() => updateSubtitleStyle({ color: '#ffffff' })} className="h-9 rounded-[7px] border border-[#dfe4f3] bg-black" />
+            <button title="In đậm" onClick={() => updateSubtitleStyle({ fontWeight: 900 })} className="h-9 rounded-[7px] border border-[#dfe4f3] text-sm font-black text-[#27305b]">B</button>
+          </div>
+        </StudioSection>
+
+        <StudioSection title="Audio">
+          <StudioField label="Voice path"><input value={audio.voice || ''} onChange={(event) => updateAudio(story, onChange, { voice: event.target.value })} className={studioInputClass} /></StudioField>
+          <StudioField label="Music path"><input value={audio.music || ''} onChange={(event) => updateAudio(story, onChange, { music: event.target.value })} className={studioInputClass} /></StudioField>
+          <StudioVolume label="Voice volume" value={Number(audio.voiceVolume ?? 1)} onChange={(value) => updateAudio(story, onChange, { voiceVolume: value })} />
+          <StudioVolume label="Music volume" value={Number(audio.musicVolume ?? 0.12)} onChange={(value) => updateAudio(story, onChange, { musicVolume: value })} />
+        </StudioSection>
+      </div>
+    </aside>
+  )
+}
+
+const studioInputClass = 'h-9 w-full min-w-0 rounded-[7px] border border-[#dfe4f3] bg-white px-2.5 text-[12px] font-semibold text-[#27305b] outline-none focus:border-[#6247ff] focus:ring-2 focus:ring-[#6247ff]/10'
+
+function StudioSection({ children, title }: { children: React.ReactNode; title: string }) {
+  return (
+    <section className="space-y-2.5 border-b border-[#eef1f8] pb-4 last:border-b-0">
+      <div className="text-[12px] font-black text-[#11183c]">{title}</div>
+      {children}
+    </section>
+  )
+}
+
+function StudioField({ children, label }: { children: React.ReactNode; label: string }) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-[10px] font-black text-[#667097]">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function StudioVolume({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  const normalized = clampNumber(value, 0, 1)
+  return (
+    <label className="grid gap-1">
+      <span className="flex items-center justify-between text-[10px] font-black text-[#667097]">
+        <span>{label}</span>
+        <span>{Math.round(normalized * 100)}%</span>
+      </span>
+      <input type="range" min={0} max={1} step={0.01} value={normalized} onChange={(event) => onChange(Number(event.target.value))} style={{ accentColor: '#6247ff' }} />
+    </label>
+  )
+}
+
+function StudioTimelinePanel({
+  audioMenu,
+  audioSrc,
+  audio1Muted,
+  audio2Muted,
+  audioTracks,
+  dragRef,
+  mutedTracks,
+  musicDragRef,
+  musicDuration,
+  musicLeft,
+  musicSrc,
+  musicStart,
+  musicWidth,
+  playheadLeft,
+  sceneIndex,
+  scenes,
+  story,
+  subtitleDragRef,
+  timelineRef,
+  trackDragRef,
+  videoDuration,
+  voiceLeft,
+  voiceWidth,
+  onAddTrack,
+  onAudioMenuDelete,
+  onChange,
+  onContextMenuTrack,
+  onResizeScene,
+  onSeek,
+  onSeekFromPointer,
+  onSelect,
+  onToggleTrackMute,
+  onUpdateSubtitleTiming,
+}: {
+  audioMenu: { x: number; y: number; kind: 'legacy-music' | 'track'; trackId?: string } | null
+  audioSrc: string
+  audio1Muted: boolean
+  audio2Muted: boolean
+  audioTracks: ProCutAudioTrack[]
+  dragRef: React.MutableRefObject<{ index: number; startX: number; leftDuration: number; rightDuration: number; totalDuration: number; timelineWidth: number } | null>
+  mutedTracks: Record<string, boolean>
+  musicDragRef: React.MutableRefObject<{ mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; totalDuration: number; timelineWidth: number } | null>
+  musicDuration: number
+  musicLeft: number
+  musicSrc: string
+  musicStart: number
+  musicWidth: number
+  playheadLeft: number
+  sceneIndex: number
+  scenes: GenerateVideoScene[]
+  story: GenerateVideoStory
+  subtitleDragRef: React.MutableRefObject<{ index: number; mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; timelineWidth: number } | null>
+  timelineRef: React.RefObject<HTMLDivElement | null>
+  trackDragRef: React.MutableRefObject<{ id: string; mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; timelineWidth: number } | null>
+  videoDuration: number
+  voiceLeft: number
+  voiceWidth: number
+  onAddTrack: () => void
+  onAudioMenuDelete: () => void
+  onChange: (story: GenerateVideoStory) => void
+  onContextMenuTrack: (event: React.MouseEvent<HTMLElement>, item: { kind: 'legacy-music' | 'track'; trackId?: string }) => void
+  onResizeScene: (event: React.PointerEvent<HTMLButtonElement>) => void
+  onSeek: (time: number) => void
+  onSeekFromPointer: (clientX: number) => void
+  onSelect: (index: number) => void
+  onToggleTrackMute: (trackId: string) => void
+  onUpdateSubtitleTiming: (index: number, start: number, duration: number) => void
+}) {
+  const fps = story.video?.fps || 30
+  const visualScenes = collapseVisualScenes(scenes)
+  const textScenes = collapseTextScenes(scenes)
+  return (
+    <section className="relative h-[232px] shrink-0 overflow-hidden border-t border-[#dfe4f3] bg-white px-3 pb-3 pt-2">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex gap-1.5">
+          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><ScissorsIcon /> Tách</button>
+          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><Trash2 size={12} /> Xóa</button>
+          <button onClick={onAddTrack} className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><Plus size={12} /> Thêm media</button>
+        </div>
+        <div className="text-[11px] font-black text-[#667097]">{formatStudioClock(videoDuration)} · {Math.round(videoDuration * fps)} frames</div>
+      </div>
+      <div className="relative h-[190px] overflow-x-auto overflow-y-hidden rounded-[8px] border border-[#dfe4f3] bg-[#f7f9ff]">
+        <StudioFrameRuler duration={videoDuration} fps={fps} headerWidth={118} onSeek={onSeek} />
+        <div
+          data-no-seek="true"
+          className="absolute bottom-0 top-7 z-30 -ml-1.5 flex w-3 cursor-ew-resize justify-center"
+          style={{ left: `calc(118px + (100% - 118px) * ${playheadLeft / 100})` }}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            onSeekFromPointer(event.clientX)
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) onSeekFromPointer(event.clientX)
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+          }}
+        >
+          <div className="h-full w-0.5 bg-[#14b8a6]" />
+          <div className="absolute top-0 rounded bg-[#6247ff] px-1 py-0.5 text-[9px] font-black text-white">{formatStudioClock((playheadLeft / 100) * videoDuration)}</div>
+        </div>
+        {audioMenu && (
+          <div className="fixed z-[70] min-w-36 rounded-[8px] border border-[#dfe4f3] bg-white p-1 shadow-xl" style={{ left: audioMenu.x, top: audioMenu.y }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
+            <button onClick={onAudioMenuDelete} className="flex w-full items-center gap-2 rounded-[6px] px-3 py-2 text-left text-xs font-black text-red-600 hover:bg-red-50">
+              <Trash2 size={14} /> Delete track
+            </button>
+          </div>
+        )}
+        <StudioTimelineTrack label="Video / Frame" icon={<Film size={13} />}>
+          <div ref={timelineRef} className="relative h-8 overflow-hidden bg-white">
+            {visualScenes.map((scene, index) => {
+              const sourceIndex = findSceneIndexForVisual(scenes, scene, index)
+              const start = Number(scene.start || 0)
+              const end = typeof scene.end === 'number' ? scene.end : start + Number(scene.duration || 0)
+              const left = videoDuration ? (start / videoDuration) * 100 : 0
+              const width = videoDuration ? Math.max(2, ((end - start) / videoDuration) * 100) : 0
+              return (
+                <div key={`${scene.video_id || scene.image}-${index}`} className={`absolute inset-y-0 overflow-hidden border-r border-white ${sourceIndex === sceneIndex ? 'ring-2 ring-inset ring-[#6247ff]' : ''}`} style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}>
+                  <button onClick={() => { onSelect(sourceIndex); onSeek(start) }} className="h-full w-full overflow-hidden">
+                    <SceneMediaThumb scene={scene} className="h-full w-full object-cover" />
+                  </button>
+                  {visualScenes.length === scenes.length && index < scenes.length - 1 && (
+                    <button
+                      data-no-seek="true"
+                      onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture(event.pointerId)
+                        dragRef.current = { index, startX: event.clientX, leftDuration: Number(scenes[index].duration || 0), rightDuration: Number(scenes[index + 1].duration || 0), totalDuration: videoDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                      }}
+                      onPointerMove={onResizeScene}
+                      onPointerUp={() => { dragRef.current = null }}
+                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize bg-white/80"
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </StudioTimelineTrack>
+        <StudioTimelineTrack label="Subtitle" icon={<Type size={13} />}>
+          <div className="relative h-8 overflow-hidden bg-white">
+            {textScenes.map((scene, index) => {
+              const sourceIndex = findSceneIndexForText(scenes, scene, index)
+              const textStart = getSubtitleStart(textScenes, index)
+              const subtitleDuration = getSubtitleDuration(textScenes, index)
+              const left = videoDuration ? (textStart / videoDuration) * 100 : 0
+              const width = videoDuration ? Math.max(4, (subtitleDuration / videoDuration) * 100) : 0
+              if (!String(scene.subtitle || '').trim()) return null
+              return (
+                <div key={`${scene.text_id || index}`} className="absolute top-1 h-6 overflow-hidden rounded-[5px] border border-[#efb33d] bg-[#ffd78a]" style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}>
+                  <button
+                    data-no-seek="true"
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      event.currentTarget.setPointerCapture(event.pointerId)
+                      subtitleDragRef.current = { index: sourceIndex, mode: 'move', startX: event.clientX, start: textStart, duration: subtitleDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                    }}
+                    onPointerMove={(event) => {
+                      if (!subtitleDragRef.current) return
+                      const drag = subtitleDragRef.current
+                      const secondsPerPixel = videoDuration / Math.max(1, drag.timelineWidth)
+                      onUpdateSubtitleTiming(drag.index, drag.start + (event.clientX - drag.startX) * secondsPerPixel, drag.duration)
+                    }}
+                    onPointerUp={() => { subtitleDragRef.current = null }}
+                    className="h-full w-full cursor-grab truncate px-2 text-left text-[10px] font-black text-[#5f3900]"
+                  >
+                    {scene.subtitle}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </StudioTimelineTrack>
+        <StudioTimelineTrack label="Voice AI" icon={<Mic2 size={13} />} muted={audio2Muted} onToggleMute={() => onToggleTrackMute('audio-2')}>
+          <div className="relative h-8 overflow-hidden bg-white">
+            {audioSrc ? <WaveformCanvas src={audioSrc} color={audio2Muted ? '#94a3b8' : '#7c5cff'} className={`absolute inset-y-1 rounded-[5px] border bg-[#ede9fe] ${audio2Muted ? 'border-slate-300 opacity-50' : 'border-[#b8a9ff]'}`} style={{ left: `${voiceLeft}%`, width: `${voiceWidth}%` }} /> : null}
+          </div>
+        </StudioTimelineTrack>
+        <StudioTimelineTrack label="Background Music" icon={<Music size={13} />} muted={audio1Muted} onToggleMute={() => onToggleTrackMute('audio-1')}>
+          <div className="relative h-8 overflow-hidden bg-white">
+            {musicSrc ? (
+              <div onContextMenu={(event) => onContextMenuTrack(event, { kind: 'legacy-music' })} className={`absolute inset-y-1 overflow-hidden rounded-[5px] border bg-[#d9fbef] ${audio1Muted ? 'border-slate-300 opacity-50' : 'border-[#74dfbd]'}`} style={{ left: `${musicLeft}%`, width: `${Math.min(musicWidth, 100 - musicLeft)}%` }}>
+                <button
+                  data-no-seek="true"
+                  onPointerDown={(event) => {
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    musicDragRef.current = { mode: 'move', startX: event.clientX, start: musicStart, duration: musicDuration, totalDuration: videoDuration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+                  }}
+                  onPointerMove={(event) => {
+                    if (!musicDragRef.current) return
+                    const drag = musicDragRef.current
+                    const secondsPerPixel = drag.totalDuration / Math.max(1, drag.timelineWidth)
+                    updateAudio(story, onChange, { musicStart: clampNumber(drag.start + (event.clientX - drag.startX) * secondsPerPixel, 0, Math.max(0, videoDuration - drag.duration)) })
+                  }}
+                  onPointerUp={() => { musicDragRef.current = null }}
+                  className="h-full w-full cursor-grab px-2"
+                >
+                  <WaveformCanvas src={musicSrc} color={audio1Muted ? '#94a3b8' : '#21c79a'} className="h-full w-full" />
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </StudioTimelineTrack>
+        {audioTracks.map((track, index) => (
+          <StudioTimelineTrack key={track.id} label={`${track.type} ${index + 1}`} icon={<Music size={13} />} muted={Boolean(mutedTracks[track.id])} onToggleMute={() => onToggleTrackMute(track.id)}>
+            <StudioExtraAudioClip muted={Boolean(mutedTracks[track.id])} scenes={scenes} story={story} timelineRef={timelineRef} track={track} trackDragRef={trackDragRef} videoDuration={videoDuration} onChange={onChange} onContextMenuTrack={onContextMenuTrack} onSeek={onSeek} onSelect={onSelect} />
+          </StudioTimelineTrack>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function StudioTimelineTrack({ children, icon, label, muted, onToggleMute }: { children: React.ReactNode; icon: React.ReactNode; label: string; muted?: boolean; onToggleMute?: () => void }) {
+  return (
+    <div className="grid grid-cols-[118px_minmax(900px,1fr)] border-t border-[#e8ecf7] first:border-t-0">
+      <div className="flex h-8 items-center justify-between border-r border-[#e8ecf7] bg-[#f2f5fc] px-2 text-[10px] font-black text-[#27305b]">
+        <span className="flex min-w-0 items-center gap-1.5">
+          {icon}
+          <span className="truncate">{label}</span>
+        </span>
+        {onToggleMute ? (
+          <button title={muted ? 'Bật âm' : 'Tắt âm'} onClick={onToggleMute} className="grid h-5 w-5 place-items-center rounded bg-white text-[#667097]">
+            {muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+          </button>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function StudioFrameRuler({ duration, fps, headerWidth, onSeek }: { duration: number; fps: number; headerWidth: number; onSeek: (time: number) => void }) {
+  const ticks = Array.from({ length: 13 })
+  return (
+    <div className="flex h-7 cursor-pointer items-start justify-between border-b border-[#e8ecf7] bg-white pr-3 text-[10px] font-black text-[#667097]" style={{ marginLeft: headerWidth }} onClick={(event) => {
+      const rect = event.currentTarget.getBoundingClientRect()
+      onSeek(((event.clientX - rect.left) / Math.max(1, rect.width)) * duration)
+    }}>
+      {ticks.map((_, index) => {
+        const seconds = (duration * index) / Math.max(1, ticks.length - 1)
+        return (
+          <span key={index} className="relative flex h-7 min-w-[84px] items-start px-2 pt-1.5">
+            {formatStudioClock(seconds)}
+            <span className="absolute bottom-1 left-2 h-1 w-px bg-[#cbd3e8]" />
+            <span className="sr-only">{Math.round(seconds * fps)} frames</span>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function StudioExtraAudioClip({
+  muted,
+  scenes,
+  story,
+  timelineRef,
+  track,
+  trackDragRef,
+  videoDuration,
+  onChange,
+  onContextMenuTrack,
+  onSeek,
+  onSelect,
+}: {
+  muted: boolean
+  scenes: GenerateVideoScene[]
+  story: GenerateVideoStory
+  timelineRef: React.RefObject<HTMLDivElement | null>
+  track: ProCutAudioTrack
+  trackDragRef: React.MutableRefObject<{ id: string; mode: 'move' | 'trim-start' | 'trim-end'; startX: number; start: number; duration: number; timelineWidth: number } | null>
+  videoDuration: number
+  onChange: (story: GenerateVideoStory) => void
+  onContextMenuTrack: (event: React.MouseEvent<HTMLElement>, item: { kind: 'legacy-music' | 'track'; trackId?: string }) => void
+  onSeek: (time: number) => void
+  onSelect: (index: number) => void
+}) {
+  const src = track.src ? generateVideoMediaUrl(track.src) : ''
+  const start = Number(track.start || 0)
+  const duration = Number(track.duration || Math.max(0.5, videoDuration - start))
+  const left = videoDuration ? (start / videoDuration) * 100 : 0
+  const width = videoDuration ? Math.max(4, (duration / videoDuration) * 100) : 0
+  const seekFromLane = (event: React.MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-no-seek="true"]')) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const nextTime = ((event.clientX - rect.left) / Math.max(1, rect.width)) * videoDuration
+    onSeek(nextTime)
+    onSelect(sceneIndexAtTime(scenes, nextTime))
+  }
+  return (
+    <div onClick={seekFromLane} className="relative h-8 overflow-hidden bg-white">
+      <div onContextMenu={(event) => onContextMenuTrack(event, { kind: 'track', trackId: track.id })} className={`absolute inset-y-1 overflow-hidden rounded-[5px] border ${muted ? 'border-slate-300 bg-slate-100 opacity-50' : 'border-[#b8a9ff] bg-[#ede9fe]'}`} style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}>
+        <button
+          data-no-seek="true"
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId)
+            trackDragRef.current = { id: track.id, mode: 'move', startX: event.clientX, start, duration, timelineWidth: timelineRef.current?.getBoundingClientRect().width || 1 }
+          }}
+          onPointerMove={(event) => {
+            if (!trackDragRef.current) return
+            const drag = trackDragRef.current
+            const secondsPerPixel = videoDuration / Math.max(1, drag.timelineWidth)
+            updateAudioTrack(story, onChange, drag.id, { start: clampNumber(drag.start + (event.clientX - drag.startX) * secondsPerPixel, 0, Math.max(0, videoDuration - drag.duration)) })
+          }}
+          onPointerUp={() => { trackDragRef.current = null }}
+          className="h-full w-full cursor-grab px-2"
+        >
+          {src ? <WaveformCanvas src={src} color={muted ? '#94a3b8' : '#7c5cff'} className="h-full w-full" /> : null}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ScissorsIcon() {
+  return <span className="text-[12px] font-black">⌘</span>
 }
 
 function FigmaIcon({ className = '', name, size = 14 }: { className?: string; name: keyof typeof proCutFigmaAssets; size?: number }) {
@@ -3169,6 +4076,13 @@ function getStoryProjectName(story: GenerateVideoStory) {
 function fileNameFromPath(src: string) {
   const clean = String(src || '').split(/[?#]/)[0]
   return clean.split(/[\\/]/).filter(Boolean).pop() || 'untitled'
+}
+
+function formatStudioClock(seconds: number) {
+  const safeSeconds = Math.max(0, seconds || 0)
+  const minutes = Math.floor(safeSeconds / 60)
+  const wholeSeconds = Math.floor(safeSeconds % 60)
+  return `${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')}`
 }
 
 function formatTimelineClock(seconds: number, fps: number) {

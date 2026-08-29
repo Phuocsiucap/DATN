@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -196,8 +197,14 @@ def generate_elevenlabs_voice(story: dict[str, Any], settings, voice_id: str, vo
     if not api_key:
         raise RuntimeError("Missing ELEVENLABS_API_KEY")
 
+    text = build_voice_text(story)
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    source = story.get("source") if isinstance(story.get("source"), dict) else {}
+    user_id = meta.get("user_id") or story.get("user_id") or source.get("user_id") or (source.get("content") or {}).get("user_id")
+    reference_id = meta.get("workflow_id") or story.get("workflow_id") or source.get("workflow_id") or source.get("id")
+    started_at = time.perf_counter()
     payload = {
-        "text": build_voice_text(story),
+        "text": text,
         "model_id": __import__("os").getenv("ELEVENLABS_MODEL_ID", "eleven_v3"),
         "language_code": __import__("os").getenv("ELEVENLABS_LANGUAGE_CODE", "vi"),
         "voice_settings": {
@@ -215,13 +222,54 @@ def generate_elevenlabs_voice(story: dict[str, Any], settings, voice_id: str, vo
         with urllib.request.urlopen(request, timeout=180) as response:
             audio = response.read()
     except urllib.error.HTTPError as error:
-        raise RuntimeError(error.read().decode("utf-8")) from error
+        message = error.read().decode("utf-8")
+        log_prompt_run(
+            user_id=user_id,
+            reference_id=reference_id,
+            run_type="GENERATE_VOICE",
+            step_name="elevenlabs_tts",
+            model_provider="elevenlabs",
+            model_name=str(payload["model_id"]),
+            input_tokens=len(text),
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            cost_usd=0,
+            status="FAILED",
+            error_message=message,
+            input_reference=f"chars:{len(text)}",
+        )
+        raise RuntimeError(message) from error
+    except Exception as error:
+        log_prompt_run(
+            user_id=user_id,
+            reference_id=reference_id,
+            run_type="GENERATE_VOICE",
+            step_name="elevenlabs_tts",
+            model_provider="elevenlabs",
+            model_name=str(payload["model_id"]),
+            input_tokens=len(text),
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            cost_usd=0,
+            status="FAILED",
+            error_message=str(error),
+            input_reference=f"chars:{len(text)}",
+        )
+        raise
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(audio)
-
-
-
-import time
+    log_prompt_run(
+        user_id=user_id,
+        reference_id=reference_id,
+        run_type="GENERATE_VOICE",
+        step_name="elevenlabs_tts",
+        model_provider="elevenlabs",
+        model_name=str(payload["model_id"]),
+        input_tokens=len(text),
+        latency_ms=int((time.perf_counter() - started_at) * 1000),
+        cost_usd=estimate_elevenlabs_cost_usd(text),
+        status="COMPLETED",
+        input_reference=f"chars:{len(text)}",
+        output_reference=f"bytes:{len(audio)}",
+    )
 
 
 def generate_edge_tts_voice(text: str, voice: str, voice_speed: float, out_path: Path) -> None:
@@ -266,6 +314,15 @@ def get_elevenlabs_api_key(settings=None) -> str:
         except Exception:
             settings = None
     return (getattr(settings, "elevenlabs_api_key", "") if settings else "") or __import__("os").getenv("ELEVENLABS_API_KEY", "")
+
+
+def estimate_elevenlabs_cost_usd(text: str) -> float:
+    raw_rate = os.getenv("ELEVENLABS_TTS_COST_PER_1K_CHARS", "0")
+    try:
+        rate = float(raw_rate)
+    except (TypeError, ValueError):
+        rate = 0.0
+    return round((len(text) / 1000.0) * rate, 8)
 
 
 

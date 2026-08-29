@@ -13,6 +13,7 @@ CONTENT_DEDUPLICATION_REQUESTED = "content.deduplication.requested"
 CONTENT_DEDUPLICATED = "content.deduplicated"
 
 CONTENT_CANONICAL_SAVED = "content.canonical.saved"
+CONTENT_EMBEDDING_REQUESTED = "content.embedding.requested"
 CRAWL_JOB_PROGRESS = "crawl.job.progress"
 CRAWL_JOB_COMPLETED = "crawl.job.completed"
 DEAD_LETTER_CONTENT = "dead-letter.content"

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   createAdminUserApi,
   deleteAdminUserApi,
@@ -41,7 +42,6 @@ const hasSystemRole = (roles: string[]) => roles.some((role) => {
 export default function UsersPage({ currentUser }: UsersPageProps) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [createForm, setCreateForm] = useState(emptyCreateForm)
-  const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
   const totalActive = useMemo(() => users.filter((user) => user.is_active).length, [users])
@@ -49,12 +49,11 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
 
   const loadUsers = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await fetchAdminUsersApi()
       setUsers(data.items || [])
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tải danh sách user')
+      toast.error(error?.response?.data?.detail || 'Không thể tải danh sách user')
     } finally {
       setLoading(false)
     }
@@ -68,7 +67,6 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
 
   const handleCreateUser = async () => {
     setLoading(true)
-    setMessage('')
     try {
       await createAdminUserApi({
         email: createForm.email,
@@ -78,9 +76,9 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
       })
       setCreateForm(emptyCreateForm)
       await loadUsers()
-      setMessage('Đã tạo user mới.')
+      toast.success('Đã tạo user mới.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo user')
+      toast.error(error?.response?.data?.detail || 'Không thể tạo user')
     } finally {
       setLoading(false)
     }
@@ -88,13 +86,12 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
 
   const handleToggleActive = async (user: AdminUser) => {
     setLoading(true)
-    setMessage('')
     try {
       await updateAdminUserApi(user.id, { is_active: !user.is_active })
       await loadUsers()
-      setMessage(user.is_active ? 'Đã khóa user.' : 'Đã mở khóa user.')
+      toast.success(user.is_active ? 'Đã khóa user.' : 'Đã mở khóa user.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể cập nhật trạng thái')
+      toast.error(error?.response?.data?.detail || 'Không thể cập nhật trạng thái')
     } finally {
       setLoading(false)
     }
@@ -102,13 +99,12 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
 
   const handleChangeRole = async (user: AdminUser, role: string) => {
     setLoading(true)
-    setMessage('')
     try {
       await updateAdminUserApi(user.id, { roles: rolePayload(role) })
       await loadUsers()
-      setMessage('Đã cập nhật quyền user.')
+      toast.success('Đã cập nhật quyền user.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể cập nhật quyền')
+      toast.error(error?.response?.data?.detail || 'Không thể cập nhật quyền')
     } finally {
       setLoading(false)
     }
@@ -119,13 +115,12 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
     if (!password) return
 
     setLoading(true)
-    setMessage('')
     try {
       await updateAdminUserApi(user.id, { password })
       await loadUsers()
-      setMessage('Đã đổi mật khẩu và thu hồi refresh token cũ.')
+      toast.success('Đã đổi mật khẩu và thu hồi refresh token cũ.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể đổi mật khẩu')
+      toast.error(error?.response?.data?.detail || 'Không thể đổi mật khẩu')
     } finally {
       setLoading(false)
     }
@@ -136,13 +131,12 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
     if (!confirmed) return
 
     setLoading(true)
-    setMessage('')
     try {
       await deleteAdminUserApi(user.id)
       await loadUsers()
-      setMessage('Đã xóa user.')
+      toast.success('Đã xóa user.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể xóa user')
+      toast.error(error?.response?.data?.detail || 'Không thể xóa user')
     } finally {
       setLoading(false)
     }
@@ -169,12 +163,6 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
           Refresh
         </button>
       </div>
-
-      {message && (
-        <div className="bento-card rounded-xl p-4 text-sm" style={{ color: 'var(--on-surface)' }}>
-          {message}
-        </div>
-      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="bento-card rounded-xl p-5">

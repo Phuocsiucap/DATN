@@ -4,14 +4,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from common.core.config import get_settings
+from common.db.bootstrap import ensure_schema_compatibility
 from common.db.models import Base
-from common.db.session import engine
+from common.db.session import SessionLocal, engine
 from common.workers import run_thread_worker_forever
 from app.planning.consumers.crawl_job_completed import run_crawl_job_completed_consumer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    with SessionLocal() as db:
+        ensure_schema_compatibility(db)
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:

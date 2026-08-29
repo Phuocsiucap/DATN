@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
 import {
   Activity,
   AlertCircle,
@@ -16,7 +17,7 @@ import {
   Send,
   UsersRound,
 } from 'lucide-react'
-import { fetchPublishingQueueApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
@@ -40,6 +41,8 @@ type QueueItem = {
   profile_id: string
   profile_name?: string | null
   profile_scopes?: string[]
+  can_upload_inbox?: boolean
+  can_publish_direct?: boolean
   content_id?: string | null
   article_link?: string | null
   article_title: string
@@ -48,8 +51,17 @@ type QueueItem = {
   ai_reason?: string | null
   status: string
   scheduled_at?: string | null
+  scheduled_at_local?: string | null
   published_at?: string | null
   error?: string | null
+}
+
+type QueueSummary = {
+  total?: number
+  total_scheduled?: number
+  today?: number
+  date_range?: number
+  status_counts?: Record<string, number>
 }
 
 type CalendarDay = {
@@ -59,7 +71,7 @@ type CalendarDay = {
   isToday: boolean
 }
 
-const timeSlots = [8, 10, 12, 14, 16, 18, 20]
+const baseTimeSlots = [8, 10, 12, 14, 16, 18, 20]
 
 const statusMeta: Record<string, { label: string; color: string; dot: string; icon: ReactNode }> = {
   queued: { label: 'Đã lên lịch', color: '#2563eb', dot: '#10b981', icon: <Clock3 size={13} /> },
@@ -100,6 +112,8 @@ const formatTime = (value?: string | null) => {
   return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 }
 
+const scheduledValue = (item: QueueItem) => item.scheduled_at_local || item.scheduled_at
+
 const formatDateKey = (date: Date) => {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -139,16 +153,20 @@ const makeWeekDays = (start: Date): CalendarDay[] => {
 }
 
 const hasTikTokScope = (item: QueueItem, scope: string) => {
+  if (scope === 'video.publish' && item.can_publish_direct) return true
+  if (scope === 'video.upload' && item.can_upload_inbox) return true
   return (item.profile_scopes || []).includes(scope)
 }
 
-const isItemInSlot = (item: QueueItem, slotHour: number) => {
-  if (!item.scheduled_at) return false
-  const date = new Date(item.scheduled_at)
+const isItemInSlot = (item: QueueItem, slotHour: number, slots: number[]) => {
+  const value = scheduledValue(item)
+  if (!value) return false
+  const date = new Date(value)
   if (Number.isNaN(date.getTime())) return false
   const hour = date.getHours()
-  if (slotHour === timeSlots[timeSlots.length - 1]) return hour >= slotHour
-  return hour >= slotHour && hour < slotHour + 2
+  const slotIndex = slots.indexOf(slotHour)
+  const nextSlot = slots[slotIndex + 1] ?? 24
+  return hour >= slotHour && hour < nextSlot
 }
 
 export default function SchedulePage() {
@@ -156,29 +174,43 @@ export default function SchedulePage() {
   const [items, setItems] = useState<QueueItem[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('all')
   const [selectedPlatform, setSelectedPlatform] = useState('all')
+  const [selectedStatus, setSelectedStatus] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [weekStart, setWeekStart] = useState(() => startOfDay(new Date()))
+  const [summary, setSummary] = useState<QueueSummary>({})
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
   const [quickItem, setQuickItem] = useState<QueueItem | null>(null)
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
 
   const loadData = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const [profileData, queueData] = await Promise.all([
         fetchSocialProfilesApi(),
-        fetchPublishingQueueApi(),
+        fetchPublishingQueueApi({
+          profile_id: selectedProfileId !== 'all' ? selectedProfileId : undefined,
+          platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
+          queue_status: selectedStatus !== 'all' ? selectedStatus : undefined,
+          start_date: formatDateKey(weekStart),
+          end_date: formatDateKey(addDays(weekStart, 6)),
+          q: searchQuery.trim() || undefined,
+          view: 'schedule',
+          timezone: 'Asia/Bangkok',
+        }),
       ])
       const nextProfiles = profileData.items || []
       const nextItems = queueData.items || []
       setProfiles(nextProfiles)
       setItems(nextItems)
+      setSummary(queueData.summary || {})
       setQuickItem((current) => current ? (nextItems.find((item: QueueItem) => item.id === current.id) || current) : null)
-      setModalItem((current) => current ? (nextItems.find((item: QueueItem) => item.id === current.id) || current) : null)
+      setModalItem((current) => {
+        if (!current) return null
+        const nextItem = nextItems.find((item: QueueItem) => item.id === current.id)
+        return nextItem ? { ...current, ...nextItem } : current
+      })
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tải lịch xuất bản')
+      toast.error(error?.response?.data?.detail || 'Không thể tải lịch xuất bản')
     } finally {
       setLoading(false)
     }
@@ -186,17 +218,16 @@ export default function SchedulePage() {
 
   useEffect(() => {
     void loadData()
-  }, [])
+  }, [selectedProfileId, selectedPlatform, selectedStatus, searchQuery, weekStart])
 
   const handleApprove = async (queueItemId: string) => {
     setLoading(true)
-    setMessage('')
     try {
       await updatePublishingQueueItemApi(queueItemId, 'approved')
       await loadData()
-      setMessage('Đã duyệt bài trong lịch.')
+      toast.success('Đã duyệt bài trong lịch.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không duyệt được bài')
+      toast.error(error?.response?.data?.detail || 'Không duyệt được bài')
     } finally {
       setLoading(false)
     }
@@ -204,7 +235,6 @@ export default function SchedulePage() {
 
   const handlePublishNow = async (item: QueueItem, requestedMode?: 'inbox' | 'direct') => {
     setLoading(true)
-    setMessage('')
     const mode = requestedMode || (hasTikTokScope(item, 'video.publish') ? 'direct' : 'inbox')
     try {
       await publishPublishingQueueItemApi(item.id, {
@@ -213,9 +243,9 @@ export default function SchedulePage() {
         is_aigc: true,
       })
       await loadData()
-      setMessage(mode === 'direct' ? 'Đã gửi Direct Post lên TikTok.' : 'Đã gửi video vào inbox TikTok.')
+      toast.success(mode === 'direct' ? 'Đã gửi Direct Post lên TikTok.' : 'Đã gửi video vào inbox TikTok.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không đăng được video lên TikTok')
+      toast.error(error?.response?.data?.detail || 'Không đăng được video lên TikTok')
       await loadData()
     } finally {
       setLoading(false)
@@ -224,6 +254,19 @@ export default function SchedulePage() {
 
   const handlePublishItem = (item: PublishingQueueDetailItem, mode: 'inbox' | 'direct') => {
     void handlePublishNow(item, mode)
+  }
+
+  const handleOpenDetail = async (item: QueueItem) => {
+    setLoading(true)
+    try {
+      const detail = await fetchPublishingQueueItemApi(item.id)
+      setModalItem(detail)
+    } catch (error: any) {
+      setModalItem(item)
+      toast.error(error?.response?.data?.detail || 'Không tải được chi tiết bài, đang hiển thị dữ liệu lịch.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const weekEnd = useMemo(() => addDays(weekStart, 7), [weekStart])
@@ -261,19 +304,34 @@ export default function SchedulePage() {
 
   const weekItems = useMemo(() => {
     return filteredItems.filter((item) => {
-      if (!item.scheduled_at) return false
-      const time = new Date(item.scheduled_at).getTime()
+      const value = scheduledValue(item)
+      if (!value) return false
+      const time = new Date(value).getTime()
       return time >= weekStart.getTime() && time < weekEnd.getTime()
     }).sort((a, b) => {
-      const left = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER
-      const right = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER
+      const leftValue = scheduledValue(a)
+      const rightValue = scheduledValue(b)
+      const left = leftValue ? new Date(leftValue).getTime() : Number.MAX_SAFE_INTEGER
+      const right = rightValue ? new Date(rightValue).getTime() : Number.MAX_SAFE_INTEGER
       return left - right
     })
   }, [filteredItems, weekEnd, weekStart])
 
   const todayItems = useMemo(() => {
-    return weekItems.filter((item) => dateKey(item.scheduled_at) === todayKey)
+    return weekItems.filter((item) => dateKey(scheduledValue(item)) === todayKey)
   }, [todayKey, weekItems])
+
+  const calendarSlots = useMemo(() => {
+    const slots = new Set(baseTimeSlots)
+    weekItems.forEach((item) => {
+      const value = scheduledValue(item)
+      if (!value) return
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return
+      slots.add(Math.floor(date.getHours() / 2) * 2)
+    })
+    return Array.from(slots).sort((a, b) => a - b)
+  }, [weekItems])
 
   useEffect(() => {
     setQuickItem((current) => {
@@ -284,12 +342,9 @@ export default function SchedulePage() {
 
   const activeProfiles = profiles.filter((profile) => String(profile.status || '').toLowerCase() === 'active').length
   const weekRangeLabel = `${weekDays[0]?.subLabel || ''} - ${weekDays[6]?.subLabel || ''}`
-  const totalScheduled = items.filter((item) => item.scheduled_at).length
-  const thisWeekAllItems = items.filter((item) => {
-    if (!item.scheduled_at) return false
-    const time = new Date(item.scheduled_at).getTime()
-    return time >= weekStart.getTime() && time < weekEnd.getTime()
-  })
+  const totalScheduled = summary.total_scheduled ?? items.filter((item) => scheduledValue(item)).length
+  const todayCount = summary.today ?? todayItems.length
+  const thisWeekCount = summary.date_range ?? weekItems.length
 
   return (
     <div className="space-y-4">
@@ -297,7 +352,7 @@ export default function SchedulePage() {
         <div>
           <h2 className="text-2xl font-bold" style={{ color: 'var(--on-surface)' }}>Lịch đăng bài</h2>
           <p className="mt-1 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-            Quản lý lịch xuất bản theo tài khoản, nền tảng và video đã render.
+            Quản lý lịch xuất bản theo kênh social, nền tảng và video đã render.
           </p>
         </div>
 
@@ -307,7 +362,7 @@ export default function SchedulePage() {
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Tìm kiếm bài viết, nội dung, tài khoản..."
+              placeholder="Tìm kiếm bài viết, nội dung, kênh social..."
               className="min-w-0 flex-1 bg-transparent text-sm outline-none"
             />
           </div>
@@ -320,21 +375,30 @@ export default function SchedulePage() {
             <RefreshCw size={16} />
             Tải lại
           </button>
+          <select
+            value={selectedStatus}
+            onChange={(event) => setSelectedStatus(event.target.value)}
+            className="h-10 rounded-md border bg-white px-3 text-sm font-semibold outline-none"
+            style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="upcoming">Sắp đăng</option>
+            <option value="queued">Đã lên lịch</option>
+            <option value="needs_approval">Chờ duyệt</option>
+            <option value="approved">Đã duyệt</option>
+            <option value="publishing">Đang gửi</option>
+            <option value="published">Đã đăng</option>
+            <option value="failed">Lỗi</option>
+          </select>
         </div>
       </div>
 
-      {message && (
-        <div className="rounded-md border bg-white p-3 text-sm" style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}>
-          {message}
-        </div>
-      )}
-
       <section className="space-y-3">
-        <h3 className="text-sm font-bold" style={{ color: 'var(--on-surface)' }}>Tài khoản đã kết nối</h3>
+        <h3 className="text-sm font-bold" style={{ color: 'var(--on-surface)' }}>Kênh social đã kết nối</h3>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <AccountCard
             active={selectedProfileId === 'all'}
-            title="Tất cả tài khoản"
+            title="Tất cả kênh social"
             subtitle={`${profiles.length} profile`}
             platform="all"
             statusText={`${activeProfiles}/${profiles.length || 0} đang hoạt động`}
@@ -364,9 +428,9 @@ export default function SchedulePage() {
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={<CalendarDays size={18} />} tint="#7c3aed" label="Tổng bài đã lên lịch" value={String(totalScheduled)} helper="Toàn bộ hàng đợi" />
-        <StatCard icon={<Clock3 size={18} />} tint="#2563eb" label="Hôm nay" value={String(todayItems.length)} helper="Theo bộ lọc hiện tại" />
-        <StatCard icon={<Activity size={18} />} tint="#16a34a" label="Tuần này" value={String(thisWeekAllItems.length)} helper="Trong 7 ngày đang xem" />
-        <StatCard icon={<UsersRound size={18} />} tint="#ea580c" label="Tài khoản hoạt động" value={`${activeProfiles}/${profiles.length || 0}`} helper="Profile đang active" />
+        <StatCard icon={<Clock3 size={18} />} tint="#2563eb" label="Hôm nay" value={String(todayCount)} helper="Theo bộ lọc hiện tại" />
+        <StatCard icon={<Activity size={18} />} tint="#16a34a" label="Tuần này" value={String(thisWeekCount)} helper="Trong 7 ngày đang xem" />
+        <StatCard icon={<UsersRound size={18} />} tint="#ea580c" label="Kênh social hoạt động" value={`${activeProfiles}/${profiles.length || 0}`} helper="Profile đang active" />
       </section>
 
       <div className="flex flex-col gap-3 xl:flex-row">
@@ -446,13 +510,13 @@ export default function SchedulePage() {
                   ))}
                 </div>
 
-                {timeSlots.map((slot) => (
+                {calendarSlots.map((slot) => (
                   <div key={slot} className="grid min-h-[92px] grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b last:border-b-0" style={{ borderColor: 'var(--outline-variant)' }}>
                     <div className="px-3 py-3 text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>
                       {String(slot).padStart(2, '0')}:00
                     </div>
                     {weekDays.map((day) => {
-                      const dayItems = weekItems.filter((item) => dateKey(item.scheduled_at) === day.key && isItemInSlot(item, slot))
+                      const dayItems = weekItems.filter((item) => dateKey(scheduledValue(item)) === day.key && isItemInSlot(item, slot, calendarSlots))
                       return (
                         <div
                           key={`${day.key}-${slot}`}
@@ -470,7 +534,7 @@ export default function SchedulePage() {
                                 profile={profilesById.get(String(item.profile_id))}
                                 active={quickItem?.id === item.id}
                                 onSelect={() => setQuickItem(item)}
-                                onOpen={() => setModalItem(item)}
+                                onOpen={() => void handleOpenDetail(item)}
                                 onApprove={() => void handleApprove(item.id)}
                                 onPublish={() => void handlePublishNow(item)}
                                 loading={loading}
@@ -526,7 +590,7 @@ export default function SchedulePage() {
             item={quickItem}
             profile={quickItem ? profilesById.get(String(quickItem.profile_id)) : undefined}
             onClose={() => setQuickItem(null)}
-            onOpen={() => quickItem && setModalItem(quickItem)}
+            onOpen={() => quickItem && void handleOpenDetail(quickItem)}
           />
         </aside>
       </div>
@@ -657,7 +721,7 @@ function ScheduleEventCard({
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs font-black" style={{ color: platform.color }}>
           <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
-          {formatTime(item.scheduled_at)}
+          {formatTime(scheduledValue(item))}
         </div>
         <button
           onClick={(event) => {
@@ -767,31 +831,35 @@ function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem |
         <span className="flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
         {item.article_title}
       </div>
-      <div className="grid grid-cols-[1fr_82px] gap-3">
-        <div className="space-y-2 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-          <div>
-            <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Thời gian đăng</div>
-            {formatDateTime(item.scheduled_at)}
+      <div className="mb-3 overflow-hidden rounded-lg border bg-slate-950" style={{ borderColor: 'var(--outline-variant)' }}>
+        {videoUrl ? (
+          <MediaAssetPreview
+            item={{ media_type: 'VIDEO', source_url: videoUrl, thumbnail_url: profile?.avatar_url || undefined }}
+            controls
+            className="aspect-[9/16] max-h-[360px] w-full"
+          />
+        ) : (
+          <div className="flex h-[220px] w-full items-center justify-center text-xs font-semibold text-white/70">
+            Chưa có video
           </div>
-          <div>
-            <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Tài khoản</div>
-            {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
-          </div>
-          <div>
-            <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Nội dung</div>
-            <p className="line-clamp-3">{item.generated_content || item.ai_reason || 'Chưa có caption.'}</p>
-          </div>
-          <div className="flex items-center gap-1 font-semibold" style={{ color: status.color }}>
-            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
-            {status.label}
-          </div>
+        )}
+      </div>
+      <div className="space-y-2 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+        <div>
+          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Thời gian đăng</div>
+          {formatDateTime(scheduledValue(item))}
         </div>
-        <div className="h-20 overflow-hidden rounded-md bg-slate-100">
-          {videoUrl ? (
-            <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: videoUrl, thumbnail_url: profile?.avatar_url || undefined }} compact className="h-20 w-full" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>No video</div>
-          )}
+        <div>
+          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Kênh social</div>
+          {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
+        </div>
+        <div>
+          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Nội dung</div>
+          <p className="line-clamp-4">{item.generated_content || item.ai_reason || 'Chưa có caption.'}</p>
+        </div>
+        <div className="flex items-center gap-1 font-semibold" style={{ color: status.color }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
+          {status.label}
         </div>
       </div>
       <button

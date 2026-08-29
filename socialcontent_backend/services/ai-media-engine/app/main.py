@@ -3,16 +3,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from common.core.config import get_settings
+from common.db.bootstrap import ensure_schema_compatibility
 from common.db.models import Base
+from common.db.session import SessionLocal
 from common.db.session import engine
 from common.workers import run_thread_worker_forever
 
 from app.planning.consumers.crawl_job_completed import run_crawl_job_completed_consumer
 from app.video.consumers.generate_video_requested import run_generate_video_requested_consumer
-from app.embeddings import app as embeddings_app
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    with SessionLocal() as db:
+        ensure_schema_compatibility(db)
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
@@ -27,8 +30,6 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 app = FastAPI(title="AI Media Engine", lifespan=lifespan)
-
-app.mount("/embeddings", embeddings_app)
 
 @app.get("/health")
 def health():

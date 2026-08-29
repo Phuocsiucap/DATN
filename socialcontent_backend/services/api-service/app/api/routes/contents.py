@@ -5,12 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import JSONB
 
-from common.db.models import ContentItem, Story, User, KafkaTask
+from common.db.models import ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User, KafkaTask
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
 from common.events.topics import CONTENT_DEDUPLICATION_REQUESTED, CONTENT_NORMALIZATION_REQUESTED
 from common.db.media_workflows import _load_content_full_text
+from common.planning.embedding_matcher import StrategyEmbeddingMatcher
 from app.api.deps import get_current_user, require_admin
 from app.schemas import api as schemas
 
@@ -57,10 +58,11 @@ def list_contents(
     return [_content_response(item) for item in contents]
 
 
-@router.get("/final-view", response_model=schemas.FinalContentViewResponse)
+@router.get("/final-view")
 def final_content_view(
     crawl_job_id: uuid.UUID | None = None,
     content_scope: str | None = None,
+    view: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -102,7 +104,12 @@ def final_content_view(
         category_id = source_metadata.get("category_id")
         site_id = source_metadata.get("site_id")
         
-        row = {
+        row = _final_content_list_item(
+            content=content,
+            primary_source=primary_source,
+            source_metadata=source_metadata,
+            story_for_view=story_for_view,
+        ) if view == "list" else {
             "id": content.id,
             "content_type": content.content_type,
             "canonical_title": content.canonical_title,
@@ -152,10 +159,12 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
     source_type = primary_source.get("source_type")
     story_for_detail = None if _is_vnexpress_article(source_type, content) else content.story_id
     
-    full_text = _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id) or content.summary
+    full_text = _load_content_full_text(content.mongo_normalized_id) or content.summary
     normalized_article = _normalized_article(content, source_metadata, full_text, content.media_jsonb)
     if not normalized_article.get("publishedAt"):
         normalized_article["publishedAt"] = primary_source.get("source_published_at")
+    profile_matches = _profile_matches(db, content, source_metadata, user)
+    db.commit()
     
     return {
         "id": content.id,
@@ -181,8 +190,18 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
         "category_id": source_metadata.get("category_id"),
         "category": source_metadata.get("category"),
         "site_id": source_metadata.get("site_id"),
+        "thumbnail_url": source_metadata.get("thumbnail_url") or _first_media_url(content.media_jsonb),
+        "media_counts": {
+            "images": int(source_metadata.get("image_count") or _media_count(content.media_jsonb, "IMAGE")),
+            "videos": int(source_metadata.get("video_count") or _media_count(content.media_jsonb, "VIDEO")),
+        },
+        "tags": source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else [],
+        "media_jsonb": content.media_jsonb if isinstance(content.media_jsonb, list) else [],
+        "sources_jsonb": content.sources_jsonb if isinstance(content.sources_jsonb, list) else [],
         "story_id": story_for_detail,
         "episode_order": content.episode_order if story_for_detail else None,
+        "profile_matches": profile_matches,
+        "ai_selection_summary": profile_matches[0].get("selection_reason") if profile_matches else _content_selection_summary(content, source_metadata),
         **_normalized_aliases(normalized_article),
     }
 
@@ -230,6 +249,276 @@ def _content_response(content: ContentItem) -> dict:
     }
 
 
+def _final_content_list_item(content: ContentItem, primary_source: dict, source_metadata: dict, story_for_view: Story | None) -> dict:
+    article_id = source_metadata.get("article_id")
+    category_id = source_metadata.get("category_id")
+    site_id = source_metadata.get("site_id")
+    thumbnail_url = source_metadata.get("thumbnail_url") or _first_media_url(content.media_jsonb)
+    return {
+        "id": content.id,
+        "content_type": content.content_type,
+        "canonical_title": html.unescape(content.canonical_title) if content.canonical_title else content.canonical_title,
+        "summary": html.unescape(content.summary) if content.summary else content.summary,
+        "language": content.language,
+        "status": content.status,
+        "quality_score": float(content.quality_score or 0),
+        "created_at": content.created_at,
+        "published_at": content.published_at,
+        "source_type": primary_source.get("source_type"),
+        "source_url": primary_source.get("source_url") or content.canonical_url,
+        "article_id": article_id,
+        "category_id": category_id,
+        "category": source_metadata.get("category"),
+        "site_id": site_id,
+        "thumbnail_url": thumbnail_url,
+        "media_counts": {
+            "images": int(source_metadata.get("image_count") or _media_count(content.media_jsonb, "IMAGE")),
+            "videos": int(source_metadata.get("video_count") or _media_count(content.media_jsonb, "VIDEO")),
+        },
+        "tags": source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else [],
+        "story_id": story_for_view.id if story_for_view else None,
+        "episode_order": content.episode_order if story_for_view else None,
+        "series": _series_info(story_for_view) if story_for_view else None,
+    }
+
+
+def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, user: User) -> list[dict]:
+    profiles = db.query(SocialProfile).filter(SocialProfile.user_id == user.id).order_by(SocialProfile.created_at.desc()).all()
+    links = (
+        db.query(ProfileContentLink)
+        .filter(ProfileContentLink.user_id == user.id, ProfileContentLink.content_id == content.id)
+        .all()
+    )
+    link_by_profile = {link.profile_id: link for link in links}
+    matcher = StrategyEmbeddingMatcher()
+    matcher.ensure_content_embedding(db, content, preferred_model_name=matcher.model_name())
+    matches = []
+    for profile in profiles:
+        strategy = profile.strategy
+        link = link_by_profile.get(profile.id)
+        metadata = link.metadata_json if link and isinstance(link.metadata_json, dict) else {}
+        if strategy:
+            match_score = matcher.score_candidate(db, content, strategy)
+            score = match_score.score
+            similarity_threshold = match_score.threshold
+            threshold = round(similarity_threshold * 100.0, 1)
+            match_metadata = match_score.metadata
+            matched_topics = match_score.matched_topics
+            avoided_topics = match_score.avoided_topics
+            topic_matches = match_metadata.get("topic_matches") or []
+            avoid_topic_matches = match_metadata.get("avoid_topic_matches") or []
+            embedding_similarity = match_score.similarity
+            embedding_model = match_metadata.get("embedding_model")
+            passed_similarity_gate = match_metadata.get("passed_similarity_gate")
+            similarity_source = match_metadata.get("similarity_source")
+            top_topic_match = match_metadata.get("top_topic_match")
+            avoid_similarity_threshold = match_metadata.get("avoid_similarity_threshold")
+            can_create_script = str(profile.status or "").lower() == "active" and match_score.eligible
+            recommendation_status = _profile_recommendation_status(link, match_score.eligible, bool(match_score.avoided_topics))
+            relation_reason = link.relation_reason if link else _profile_relation_reason(match_score.eligible, bool(match_score.avoided_topics))
+        else:
+            score = round(float(content.quality_score or 0), 1)
+            threshold = 70.0
+            similarity_threshold = None
+            match_metadata = {}
+            matched_topics = []
+            avoided_topics = []
+            topic_matches = []
+            avoid_topic_matches = []
+            embedding_similarity = None
+            embedding_model = None
+            passed_similarity_gate = None
+            similarity_source = None
+            top_topic_match = None
+            avoid_similarity_threshold = None
+            can_create_script = str(profile.status or "").lower() == "active" and score >= threshold
+            recommendation_status = link.recommendation_status if link else ("RECOMMENDED" if score >= threshold else "LOW_MATCH")
+            relation_reason = link.relation_reason if link else "QUALITY_FALLBACK"
+        selection = _profile_selection_explanation(
+            content=content,
+            source_metadata=source_metadata,
+            profile=profile,
+            strategy=strategy,
+            score=score,
+            threshold=threshold,
+            matched_topics=matched_topics,
+            avoided_topics=avoided_topics,
+            metadata={**metadata, **match_metadata},
+        )
+        matches.append({
+            "profile_id": profile.id,
+            "profile_name": profile.profile_name,
+            "username": profile.username,
+            "platform": profile.platform,
+            "avatar_url": profile.avatar_url,
+            "status": profile.status,
+            "score": round(score, 1),
+            "recommendation_status": recommendation_status,
+            "relation_reason": relation_reason,
+            "threshold": threshold,
+            "embedding_similarity": embedding_similarity,
+            "similarity_threshold": similarity_threshold,
+            "passed_similarity_gate": passed_similarity_gate,
+            "similarity_source": similarity_source,
+            "top_topic_match": top_topic_match,
+            "avoid_similarity_threshold": avoid_similarity_threshold,
+            "embedding_model": embedding_model,
+            "matched_topics": matched_topics,
+            "avoided_topics": avoided_topics,
+            "topic_matches": topic_matches,
+            "avoid_topic_matches": avoid_topic_matches,
+            "blocked_by_avoid_topics": bool(avoided_topics),
+            "tone": strategy.tone if strategy else None,
+            "target_audience": strategy.target_audience if strategy else None,
+            "can_create_script": can_create_script,
+            **selection,
+        })
+    return sorted(matches, key=lambda item: item["score"], reverse=True)
+
+
+def _profile_recommendation_status(link: ProfileContentLink | None, eligible: bool, blocked_by_avoid_topics: bool) -> str:
+    if link and link.recommendation_status in {"WORKFLOW_CREATED", "AI_REJECTED"}:
+        return link.recommendation_status
+    if blocked_by_avoid_topics:
+        return "AVOID_TOPIC_MATCH"
+    return "RECOMMENDED" if eligible else "LOW_MATCH"
+
+
+def _profile_relation_reason(eligible: bool, blocked_by_avoid_topics: bool) -> str:
+    if eligible:
+        return "EMBEDDING_STRATEGY_MATCH"
+    if blocked_by_avoid_topics:
+        return "EMBEDDING_AVOID_TOPIC_MATCH"
+    return "EMBEDDING_LOW_MATCH"
+
+
+def _profile_selection_explanation(
+    content: ContentItem,
+    source_metadata: dict,
+    profile: SocialProfile,
+    strategy: SocialProfileStrategy | None,
+    score: float,
+    threshold: float,
+    matched_topics: list[str],
+    avoided_topics: list[str],
+    metadata: dict,
+) -> dict:
+    tags = [str(tag).strip() for tag in source_metadata.get("tags", []) if str(tag).strip()] if isinstance(source_metadata.get("tags"), list) else []
+    category = str(source_metadata.get("category") or "").strip()
+    tone = str(strategy.tone or "").strip() if strategy else ""
+    audience = str(strategy.target_audience or "").strip() if strategy else ""
+    content_topics = _split_terms(strategy.content_topics) if strategy else []
+    metadata_reason = _human_selection_note(str(metadata.get("reason") or metadata.get("selection_reason") or "").strip())
+    title = html.unescape(content.canonical_title or "bài viết này")
+    score_text = f"{round(score, 1)}/100"
+    threshold_text = f"{round(threshold, 1)}/100"
+
+    topic_value = ", ".join(matched_topics[:3]) or category or ", ".join(tags[:3]) or "Chưa có chủ đề rõ"
+    topic_tone = "green" if matched_topics else ("blue" if category or tags else "gray")
+    audience_value = audience or "Chưa cấu hình persona"
+    tone_value = tone or "Chưa cấu hình tone"
+
+    reason_parts: list[str] = []
+    if metadata_reason:
+        reason_parts.append(metadata_reason)
+    if score >= threshold:
+        reason_parts.append(f"AI chọn vì điểm phù hợp {score_text} vượt ngưỡng {threshold_text} của tài khoản {profile.profile_name}.")
+    else:
+        reason_parts.append(f"AI không đề xuất cho tài khoản {profile.profile_name} vì điểm phù hợp {score_text} chưa đạt ngưỡng {threshold_text}.")
+    if matched_topics:
+        reason_parts.append(f"Nội dung khớp chủ đề ưu tiên: {', '.join(matched_topics[:4])}.")
+    elif content_topics and score >= threshold:
+        reason_parts.append("Chưa khớp trực tiếp keyword ưu tiên, nhưng độ phù hợp ngữ nghĩa (Cosine Similarity) vẫn đủ để đề xuất.")
+    elif content_topics:
+        reason_parts.append("Chưa khớp trực tiếp keyword ưu tiên và điểm tương đồng ngữ nghĩa (Cosine Similarity) chưa đạt yêu cầu.")
+    elif category or tags:
+        reason_parts.append(f"Chủ đề được suy ra từ chuyên mục/tag: {topic_value}.")
+    if tone:
+        reason_parts.append(f"Tone triển khai phù hợp với cấu hình: {tone}.")
+    if audience:
+        reason_parts.append(f"Tệp người xem mục tiêu: {audience}.")
+    if avoided_topics:
+        reason_parts.append(f"Cần rà soát thêm vì chạm chủ đề nên tránh: {', '.join(avoided_topics[:4])}.")
+
+    risk_notes = []
+    if score < threshold:
+        risk_notes.append("Điểm phù hợp thấp hơn ngưỡng xuất bản tự động.")
+    if avoided_topics:
+        risk_notes.append(f"Có chủ đề nên tránh: {', '.join(avoided_topics[:4])}.")
+    if not matched_topics and content_topics:
+        risk_notes.append("Không tìm thấy keyword ưu tiên trong tiêu đề, tóm tắt hoặc tag.")
+
+    return {
+        "selection_reason": " ".join(reason_parts),
+        "ai_decision_reason": f"Điểm {score_text} so với ngưỡng {threshold_text}, tính từ điểm chất lượng, chủ đề/tag, tone và chiến lược của profile.",
+        "fit_insights": [
+            {"label": "Trúng chủ đề", "value": topic_value, "tone": topic_tone},
+            {"label": "Đúng tệp khán giả", "value": audience_value, "tone": "green" if audience else "gray"},
+            {"label": "Phù hợp tone", "value": tone_value, "tone": "green" if tone else "gray"},
+        ],
+        "suggested_angle": _profile_suggested_angle(title, profile.platform, topic_value, tone),
+        "risk_notes": risk_notes,
+        "source_evidence": [value for value in [category, *tags[:5]] if value],
+    }
+
+
+def _profile_suggested_angle(title: str, platform: str | None, topic_value: str, tone: str) -> str:
+    clean_title = title.strip()[:120]
+    platform_name = str(platform or "").lower()
+    if platform_name == "tiktok":
+        return f"Mở bằng câu hỏi từ tiêu đề \"{clean_title}\", dùng hình ảnh chính làm hook 3 giây đầu và giữ nhịp {tone or 'ngắn gọn, tự nhiên'}."
+    if platform_name == "facebook":
+        return f"Dẫn bằng insight gây tranh luận quanh {topic_value}, sau đó tóm tắt ý chính và hỏi ý kiến cộng đồng."
+    if platform_name == "youtube":
+        return f"Biến bài thành kịch bản ngắn có hook, bối cảnh, ba luận điểm chính và kết luận dễ nhớ."
+    return f"Khai thác góc {topic_value}, bắt đầu bằng vấn đề chính của bài và chốt bằng lời kêu gọi tương tác."
+
+
+def _human_selection_note(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        return ""
+    if normalized == "auto-recommended from global scope":
+        return "Bài được hệ thống tự đề xuất từ kho nội dung global."
+    if normalized == "auto-recommended from private scope":
+        return "Bài được hệ thống tự đề xuất từ kho nội dung riêng."
+    if normalized in {"strategy_match", "recommended"}:
+        return ""
+    return value
+
+
+def _content_selection_summary(content: ContentItem, source_metadata: dict) -> str:
+    tags = source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else []
+    topic = source_metadata.get("category") or ", ".join(str(tag) for tag in tags[:3]) or "nội dung này"
+    score = round(float(content.quality_score or 0), 1)
+    return f"AI giữ bài vì điểm chất lượng {score}/100 và tín hiệu chủ đề từ {topic} đủ để đưa vào bước phân tích tài khoản."
+
+
+def _metadata_terms(metadata: dict, key: str) -> list[str]:
+    value = metadata.get(key)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return _split_terms(value)
+    return []
+
+
+def _content_match_text(content: ContentItem, source_metadata: dict) -> str:
+    tags = source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else []
+    values = [
+        content.canonical_title,
+        content.normalized_title,
+        content.summary,
+        source_metadata.get("category"),
+        " ".join(str(tag) for tag in tags),
+    ]
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _split_terms(value: str | None) -> list[str]:
+    return [part.strip() for part in str(value or "").replace("\n", ",").split(",") if part.strip()]
+
+
 def _source_metadata(primary_source: dict) -> dict:
     metadata = primary_source.get("metadata_json") if isinstance(primary_source, dict) else {}
     return metadata if isinstance(metadata, dict) else {}
@@ -273,6 +562,22 @@ def _is_vnexpress_article(source_type: str | None, content: ContentItem) -> bool
 def _media_preview_items(media_items: list | None) -> list:
     media = media_items if isinstance(media_items, list) else []
     return media[:1]
+
+
+def _first_media_url(media_items: list | None) -> str | None:
+    media = media_items if isinstance(media_items, list) else []
+    for item in media:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("thumbnail_url") or item.get("source_url") or item.get("storage_url")
+        if value:
+            return value
+    return None
+
+
+def _media_count(media_items: list | None, media_type: str) -> int:
+    media = media_items if isinstance(media_items, list) else []
+    return sum(1 for item in media if isinstance(item, dict) and _media_kind(item).startswith(media_type))
 
 
 def _normalized_article(content: ContentItem, source_metadata: dict, body: str | None, media_items: list | None) -> dict:

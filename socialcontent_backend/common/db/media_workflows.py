@@ -162,7 +162,7 @@ def _serialize_source_content(content: ContentItem | None) -> dict[str, Any] | N
     sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
     primary_source = sources[0] if sources else {}
     source_metadata = _source_metadata(primary_source)
-    full_text = _load_content_full_text(content.mongo_normalized_id, content.mongo_raw_id)
+    full_text = _load_content_full_text(content.mongo_normalized_id)
     category_id = source_metadata.get("category_id")
     article_id = source_metadata.get("article_id")
     site_id = source_metadata.get("site_id")
@@ -233,7 +233,7 @@ def content_category_payload(content: ContentItem | None) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value not in (None, "", [])}
 
 
-def _load_content_full_text(mongo_normalized_id: str | None, _mongo_raw_id: str | None = None) -> str | None:
+def _load_content_full_text(mongo_normalized_id: str | None) -> str | None:
     try:
         from bson import ObjectId
         from common.db.mongo import processed_documents

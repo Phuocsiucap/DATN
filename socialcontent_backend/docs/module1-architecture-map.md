@@ -5,7 +5,7 @@ This backend follows `.agents/module1` as a four-worker FastAPI system:
 - API Service: REST API, PostgreSQL state, user/admin system, Kafka producer.
 - Crawl Orchestrator: consumes `crawl.job.created`, creates crawl tasks, emits `crawl.task.requested`.
 - Crawler Service: consumes crawl tasks, crawls and normalizes directly, writes MongoDB `processed_documents`, emits `content.normalized`.
-- Story Processing Service: consumes normalized refs, writes PostgreSQL canonical content, stories, episodes, duplicates, embeddings, processing runs.
+- Story Processing Service: consumes normalized refs, writes PostgreSQL canonical content, stories, episodes, duplicates, and processing runs; embedding is delegated to the ai-media planning worker via Kafka.
 
 VNExpress legacy crawler integration:
 

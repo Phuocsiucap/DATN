@@ -1,9 +1,8 @@
 import { type FormEvent, useState } from 'react'
+import { toast } from 'sonner'
 import {
-  AlertCircle,
   ArrowRight,
   Check,
-  CheckCircle2,
   Eye,
   EyeOff,
   Layers,
@@ -18,11 +17,6 @@ type AuthMode = 'login' | 'register'
 
 type AuthPageProps = {
   onAuthenticated: () => Promise<void> | void
-}
-
-type AuthMessage = {
-  type: 'success' | 'error'
-  text: string
 }
 
 const emptyLoginForm = { email: '', password: '' }
@@ -43,20 +37,15 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [loginForm, setLoginForm] = useState(emptyLoginForm)
   const [registerForm, setRegisterForm] = useState(emptyRegisterForm)
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<AuthMessage | null>(null)
   const [showPassword, setShowPassword] = useState(false)
 
   const handleLogin = async () => {
     setLoading(true)
-    setMessage(null)
     try {
       await loginApi(loginForm)
       await onAuthenticated()
     } catch (error: unknown) {
-      setMessage({
-        type: 'error',
-        text: getApiErrorMessage(error, 'Đăng nhập thất bại. Vui lòng kiểm tra lại email hoặc mật khẩu.'),
-      })
+      toast.error(getApiErrorMessage(error, 'Đăng nhập thất bại. Vui lòng kiểm tra lại email hoặc mật khẩu.'))
     } finally {
       setLoading(false)
     }
@@ -64,7 +53,6 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
 
   const handleRegister = async () => {
     setLoading(true)
-    setMessage(null)
     try {
       const roles = registerForm.roles
         .split(',')
@@ -75,11 +63,11 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
         password: registerForm.password,
         roles,
       })
-      setMessage({ type: 'success', text: 'Tạo tài khoản thành công! Vui lòng đăng nhập.' })
+      toast.success('Tạo tài khoản thành công! Vui lòng đăng nhập.')
       setRegisterForm(emptyRegisterForm)
       setMode('login')
     } catch (error: unknown) {
-      setMessage({ type: 'error', text: getApiErrorMessage(error, 'Tạo tài khoản thất bại') })
+      toast.error(getApiErrorMessage(error, 'Tạo tài khoản thất bại'))
     } finally {
       setLoading(false)
     }
@@ -155,10 +143,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
             <div className="mb-8 flex rounded-xl border border-slate-200/60 bg-slate-100 p-1">
               <button
                 type="button"
-                onClick={() => {
-                  setMode('login')
-                  setMessage(null)
-                }}
+                onClick={() => setMode('login')}
                 className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
                   mode === 'login'
                     ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
@@ -169,10 +154,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setMode('register')
-                  setMessage(null)
-                }}
+                onClick={() => setMode('register')}
                 className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
                   mode === 'register'
                     ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
@@ -194,24 +176,6 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                   : 'Điền thông tin bên dưới để đăng ký tài khoản'}
               </p>
             </div>
-
-            {/* Message alert */}
-            {message && (
-              <div
-                className={`mb-6 flex items-start gap-2.5 rounded-xl border p-3.5 text-xs ${
-                  message.type === 'success'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                    : 'border-rose-200 bg-rose-50 text-rose-800'
-                }`}
-              >
-                {message.type === 'success' ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                ) : (
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-                )}
-                <span className="leading-relaxed">{message.text}</span>
-              </div>
-            )}
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -311,4 +275,3 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
     </div>
   )
 }
-

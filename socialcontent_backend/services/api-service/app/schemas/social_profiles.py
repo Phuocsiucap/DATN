@@ -20,7 +20,9 @@ class TikTokQrStartRequest(BaseModel):
 
 class SocialProfileStrategyRequest(BaseModel):
     content_topics: str | None = None
+    content_topic_descriptions: dict[str, str] | None = None
     avoid_topics: str | None = None
+    avoid_topic_descriptions: dict[str, str] | None = None
     tone: str | None = None
     target_audience: str | None = None
     post_frequency_per_day: int | None = None
@@ -31,7 +33,8 @@ class SocialProfileStrategyRequest(BaseModel):
     schedule_timezone: str | None = None
     approval_mode: str | None = None
     risk_level: str | None = None
-    min_score: float | None = None
+    min_similarity: float | None = None
+    avoid_similarity_threshold: float | None = None
     require_video: bool | None = None
     receive_system_content: bool | None = None
     auto_project_queue_enabled: bool | None = None
@@ -39,6 +42,51 @@ class SocialProfileStrategyRequest(BaseModel):
     max_system_recommendations: int | None = None
     auto_queue_enabled: bool | None = None
     auto_publish_enabled: bool | None = None
+
+
+class StrategyTopicDetailResponse(BaseModel):
+    topic: str
+    topic_key: str
+    description: str
+    embedding_text: str
+    custom_description: bool = False
+
+
+class StrategyTopicMutationRequest(BaseModel):
+    kind: str = "content"
+    topic: str | None = None
+    description: str | None = None
+
+
+class SocialProfileStrategyResponse(BaseModel):
+    id: uuid.UUID
+    content_topics: str
+    content_topic_descriptions: dict[str, str] = Field(default_factory=dict)
+    content_topic_details: list[StrategyTopicDetailResponse] = Field(default_factory=list)
+    avoid_topics: str
+    avoid_topic_descriptions: dict[str, str] = Field(default_factory=dict)
+    avoid_topic_details: list[StrategyTopicDetailResponse] = Field(default_factory=list)
+    tone: str
+    target_audience: str
+    post_frequency_per_day: int
+    active_hours: str
+    schedule_enabled: bool
+    schedule_days: str
+    schedule_times: str
+    schedule_timezone: str
+    approval_mode: str
+    risk_level: str
+    min_similarity: float
+    avoid_similarity_threshold: float
+    require_video: bool
+    receive_system_content: bool
+    auto_project_queue_enabled: bool
+    video_render_mode: str
+    max_system_recommendations: int
+    auto_queue_enabled: bool
+    auto_publish_enabled: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class SchedulerSettingsRequest(BaseModel):
@@ -49,6 +97,16 @@ class SchedulerSettingsRequest(BaseModel):
 
 class QueueStatusRequest(BaseModel):
     status: str
+
+
+class QueueApproveScheduleRequest(BaseModel):
+    schedule_mode: str = "ai"
+    scheduled_at: datetime | None = None
+    timezone: str | None = "Asia/Bangkok"
+
+
+class QueueRequestChangesRequest(BaseModel):
+    note: str | None = None
 
 
 class TikTokPublishRequest(BaseModel):
@@ -86,10 +144,18 @@ class SocialProfileResponse(BaseModel):
     username: str | None
     external_id: str | None = None
     avatar_url: str | None = None
+    follower_count: int | None = None
+    following_count: int | None = None
+    likes_count: int | None = None
+    video_count: int | None = None
     status: str
     scopes: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     token_expires_at: datetime | None = None
     refresh_expires_at: datetime | None = None
     created_at: datetime
-    strategy: dict | None = None
+    strategy: SocialProfileStrategyResponse | None = None
+
+
+class SocialProfileListResponse(BaseModel):
+    items: list[SocialProfileResponse]

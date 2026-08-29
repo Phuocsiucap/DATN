@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Search, Bell, Radio, LogOut, Cpu, X, Coins } from 'lucide-react'
+import { ChevronDown, Coins, Cpu, LogOut, X } from 'lucide-react'
 import { getMyAiUsageApi } from '@/commons/apis/auth'
+import { SearchField, TopBarIconGroup, UserAvatar, type ApiUser, userDisplayName, userRoleLabel } from './social-ui'
 
 type TopNavBarProps = {
-  email?: string
+  currentUser?: ApiUser | null
   onLogout?: () => void
-  isSystemUser?: boolean
 }
 
 type AiUsageData = {
@@ -18,20 +18,21 @@ type AiUsageData = {
 }
 
 export default function TopNavBar({
-  email,
   onLogout,
-  isSystemUser = false,
+  currentUser,
 }: TopNavBarProps) {
   const [aiUsage, setAiUsage] = useState<AiUsageData | null>(null)
   const [showUsageModal, setShowUsageModal] = useState(false)
+  const displayName = userDisplayName(currentUser)
+  const roleLabel = userRoleLabel(currentUser)
 
   useEffect(() => {
     const loadUsage = async () => {
       try {
         const data = await getMyAiUsageApi()
         setAiUsage(data)
-      } catch (err) {
-        console.error('Failed to fetch AI usage', err)
+      } catch {
+        setAiUsage(null)
       }
     }
     void loadUsage()
@@ -46,159 +47,79 @@ export default function TopNavBar({
   }
 
   return (
-    <header
-      className="w-full sticky top-0 z-40 flex justify-between items-center h-[var(--app-topbar-height)] px-4 md:px-5 border-b backdrop-blur"
-      style={{
-        backgroundColor: 'rgba(244,246,249,0.92)',
-        borderColor: 'var(--outline-variant)',
-      }}
-    >
-      {/* Search */}
-      <div className="flex items-center gap-3 flex-1 max-w-xl">
-        <div className="relative w-full max-w-md">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2"
-            style={{ color: 'var(--on-surface-variant)' }} />
-          <input
-            className="h-8 w-full pl-8 pr-3 rounded-md text-xs outline-none transition-colors border"
-            style={{
-              backgroundColor: 'var(--surface-container-low)',
-              color: 'var(--on-surface)',
-              borderColor: 'var(--outline-variant)',
-            }}
-            placeholder="Tìm kiếm nội dung, kịch bản, dự án..."
-            type="text"
-          />
-        </div>
+    <header className="sticky top-0 z-40 flex h-[var(--app-topbar-height)] w-full items-center justify-between border-b border-[var(--outline-variant)] bg-white/90 px-5 backdrop-blur-xl">
+      <div className="hidden min-w-0 flex-1 md:block">
+        <SearchField className="mx-auto max-w-[580px]" placeholder="Tìm kiếm bài viết, nội dung, kênh social..." />
       </div>
 
-      {/* Right side */}
-      <div className="flex items-center gap-3">
-        {/* AI Usage Chip */}
+      <div className="ml-auto flex items-center gap-3">
         {aiUsage && (
-          <div className="relative">
+          <div className="relative hidden xl:block">
             <button
               onClick={() => setShowUsageModal(!showUsageModal)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all hover:bg-blue-50/80 hover:border-blue-300"
-              style={{
-                backgroundColor: 'var(--surface-container-lowest)',
-                borderColor: 'var(--outline-variant)',
-                color: 'var(--accent-strong)',
-              }}
+              className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 text-[12px] font-extrabold text-[#2556ea] transition hover:bg-[#f4f6ff]"
               title="Xem hạch toán Token AI & Chi phí"
             >
-              <Cpu size={13} className="text-blue-600 animate-pulse" />
-              <span>{formatTokens(aiUsage.total_tokens)} tokens</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-bold">
-                ${aiUsage.total_cost_usd}
-              </span>
+              <Cpu size={15} />
+              {formatTokens(aiUsage.total_tokens)}
+              <span className="rounded-[5px] bg-[#eef4ff] px-1.5 py-0.5 text-[10px] text-[#2556ea]">${aiUsage.total_cost_usd}</span>
             </button>
 
-            {/* Popover detail */}
             {showUsageModal && (
-              <div className="absolute right-0 mt-2 w-80 bento-card p-4 shadow-xl z-50 rounded-xl space-y-3 border">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: 'var(--on-surface)' }}>
-                    <Coins size={14} className="text-amber-500" />
-                    <span>Hạch toán Tiêu thụ Token AI</span>
+              <div className="app-card absolute right-0 mt-2 w-80 p-4">
+                <div className="flex items-center justify-between border-b border-[var(--outline-variant)] pb-2">
+                  <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#111827]">
+                    <Coins size={15} className="text-[#f59e0b]" />
+                    Hạch toán Token AI
                   </div>
-                  <button onClick={() => setShowUsageModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X size={14} />
+                  <button onClick={() => setShowUsageModal(false)} className="grid h-7 w-7 place-items-center rounded-[8px] text-[#64748b] hover:bg-[#f4f6ff]">
+                    <X size={15} />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2 rounded bg-slate-50 border">
-                    <p className="text-[10px] text-gray-500 font-medium">Input Tokens</p>
-                    <p className="font-bold text-slate-800">{aiUsage.total_input_tokens.toLocaleString()}</p>
-                  </div>
-                  <div className="p-2 rounded bg-slate-50 border">
-                    <p className="text-[10px] text-gray-500 font-medium">Output Tokens</p>
-                    <p className="font-bold text-slate-800">{aiUsage.total_output_tokens.toLocaleString()}</p>
-                  </div>
-                  <div className="p-2 rounded bg-blue-50/60 border border-blue-100">
-                    <p className="text-[10px] text-blue-600 font-medium">Tổng số lần gọi AI</p>
-                    <p className="font-bold text-blue-900">{aiUsage.prompt_runs_count} runs</p>
-                  </div>
-                  <div className="p-2 rounded bg-emerald-50/60 border border-emerald-100">
-                    <p className="text-[10px] text-emerald-600 font-medium">Tổng Chi phí USD</p>
-                    <p className="font-bold text-emerald-900">${aiUsage.total_cost_usd}</p>
-                  </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
+                  <UsageBox label="Input" value={aiUsage.total_input_tokens.toLocaleString()} />
+                  <UsageBox label="Output" value={aiUsage.total_output_tokens.toLocaleString()} />
+                  <UsageBox label="Runs" value={`${aiUsage.prompt_runs_count}`} />
+                  <UsageBox label="Cost" value={`$${aiUsage.total_cost_usd}`} />
                 </div>
-
-                {aiUsage.recent_runs && aiUsage.recent_runs.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-500 mb-1.5 uppercase tracking-wider">Lịch sử gọi AI gần đây</p>
-                    <div className="max-h-36 overflow-y-auto space-y-1 pr-1 custom-scrollbar text-[11px]">
-                      {aiUsage.recent_runs.slice(0, 5).map((run: any) => (
-                        <div key={run.id} className="flex justify-between items-center p-1.5 bg-gray-50 rounded border text-gray-700">
-                          <div>
-                            <span className="font-semibold block leading-tight">{run.step_name}</span>
-                            <span className="text-[9px] text-gray-400">{run.model_name}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="font-bold text-blue-600 block leading-tight">+{run.total_tokens || 0} tok</span>
-                            <span className="text-[9px] text-emerald-600">${run.cost_usd || 0}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
         )}
 
-        {/* System status */}
-        <div className="hidden lg:flex items-center gap-1.5 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Live
-        </div>
+        <TopBarIconGroup />
 
-        <div className="flex items-center gap-2">
-          {/* Notifications */}
-          <button className="relative inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-container-low)]" style={{ color: 'var(--on-surface-variant)' }}>
-            <Bell size={16} />
-            <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full border-2"
-              style={{ backgroundColor: 'var(--error)', borderColor: 'var(--surface)' }} />
-          </button>
-
-          {/* Live indicator */}
-          <button className="inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-container-low)]" style={{ color: 'var(--on-surface-variant)' }}>
-            <Radio size={16} />
-          </button>
-
-          <div className="h-7 w-px" style={{ backgroundColor: 'var(--outline-variant)' }} />
-
-          <div className="flex items-center gap-2">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-semibold leading-none" style={{ color: 'var(--on-surface)' }}>
-                {isSystemUser ? 'System Admin' : 'Creator User'}
-              </p>
-              <p className="text-[10px] mt-0.5" style={{ color: 'var(--on-surface-variant)' }}>
-                {email || 'Content Manager'}
-              </p>
+        <button className="flex items-center gap-3" title={currentUser?.email || displayName}>
+          <UserAvatar src={null} name={displayName} />
+          <div className="hidden text-left sm:block">
+            <div className="text-[13px] font-extrabold leading-tight text-[#111827]">
+              {displayName}
             </div>
-            <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${
-                isSystemUser ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200'
-              }`}
-            >
-              {isSystemUser ? 'SA' : 'U'}
-            </div>
-            {email && onLogout && (
-              <button
-                onClick={onLogout}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors hover:bg-[var(--surface-container-low)]"
-                style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
-                title="Đăng xuất"
-              >
-                <LogOut size={14} />
-              </button>
-            )}
+            <div className="text-[12px] font-medium text-[#64748b]">{roleLabel}</div>
           </div>
-        </div>
+          <ChevronDown size={16} className="text-[#526179]" />
+        </button>
+
+        {currentUser?.email && onLogout && (
+          <button
+            onClick={onLogout}
+            className="grid h-9 w-9 place-items-center rounded-[8px] border border-[var(--outline-variant)] text-[#526179] transition hover:bg-[#f4f6ff]"
+            title="Đăng xuất"
+          >
+            <LogOut size={16} />
+          </button>
+        )}
       </div>
     </header>
+  )
+}
+
+function UsageBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-2.5">
+      <div className="text-[10px] font-bold uppercase text-[#718096]">{label}</div>
+      <div className="mt-0.5 truncate text-[13px] font-extrabold text-[#111827]">{value}</div>
+    </div>
   )
 }

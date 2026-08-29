@@ -31,6 +31,7 @@ class CrawlJobResponse(BaseModel):
     crawl_mode: str
     content_scope: str = "GLOBAL"
     created_by_type: str = "SYSTEM"
+    creator_name: str | None = None
     status: str
     current_stage: str
     priority: int

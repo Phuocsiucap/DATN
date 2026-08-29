@@ -118,7 +118,7 @@ export type VideoWorkflowTask = {
 
 export type VideoWorkspaceSummary = {
   id: string
-  profile: { id: string; name: string; platform: string }
+  profile: { id: string; name: string; platform: string; avatar_url?: string | null }
   series?: { id: string; title: string; status: string } | null
   primary_content?: {
     id: string

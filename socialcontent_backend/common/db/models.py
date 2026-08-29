@@ -18,10 +18,10 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from common.db.session import Base
+from common.db.vector import Vector
 
 
 def uuid_pk():
@@ -120,6 +120,14 @@ class CrawlJob(Base):
     requester = relationship("User", back_populates="crawl_jobs")
     sources = relationship("CrawlJobSource", back_populates="job", cascade="all, delete-orphan")
     content_items = relationship("ContentItem", back_populates="crawl_job")
+
+    @property
+    def creator_name(self) -> str:
+        if self.created_by_type == "SYSTEM" and not self.requested_by:
+            return "Hệ thống"
+        if self.requester:
+            return self.requester.full_name or self.requester.email.split("@")[0] or "Hệ thống"
+        return "Hệ thống"
 
 
 class CrawlJobSource(Base):
@@ -242,8 +250,24 @@ class ContentEmbedding(Base):
 
     id = uuid_pk()
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    embedding = Column(JSONB, nullable=False)
+    embedding = Column(Vector, nullable=False)
     embedding_text = Column(Text, nullable=False)
+    model_name = Column(String(120), nullable=False, index=True)
+    embedding_dim = Column(Integer, nullable=False)
+    created_at = now_col()
+    updated_at = updated_col()
+
+
+class TopicEmbedding(Base):
+    __tablename__ = "topic_embeddings"
+    __table_args__ = (UniqueConstraint("topic_key", "model_name", "embedding_text_hash", name="uq_topic_embedding_model_text"),)
+
+    id = uuid_pk()
+    topic_key = Column(String(255), nullable=False, index=True)
+    topic = Column(Text, nullable=False)
+    embedding_text = Column(Text, nullable=False)
+    embedding_text_hash = Column(String(64), nullable=False, index=True)
+    embedding = Column(Vector, nullable=False)
     model_name = Column(String(120), nullable=False, index=True)
     embedding_dim = Column(Integer, nullable=False)
     created_at = now_col()
@@ -260,6 +284,10 @@ class SocialProfile(Base):
     username = Column(String(255), nullable=True)
     external_id = Column(String(255), nullable=True, index=True)
     avatar_url = Column(Text, nullable=True)
+    follower_count = Column(Integer, nullable=True)
+    following_count = Column(Integer, nullable=True)
+    likes_count = Column(Integer, nullable=True)
+    video_count = Column(Integer, nullable=True)
     folder_path = Column(String(500), unique=True, nullable=False)
     status = Column(String(40), default="active", nullable=False, index=True)
     access_token = Column(Text, nullable=True)
@@ -286,7 +314,9 @@ class SocialProfileStrategy(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     content_topics = Column(Text, default="", nullable=False)
+    content_topic_descriptions = Column(JSONB, nullable=False, default=dict)
     avoid_topics = Column(Text, default="", nullable=False)
+    avoid_topic_descriptions = Column(JSONB, nullable=False, default=dict)
     tone = Column(String(255), default="ngắn gọn, tự nhiên, đáng tin", nullable=False)
     target_audience = Column(String(255), default="", nullable=False)
     post_frequency_per_day = Column(Integer, default=2, nullable=False)
@@ -297,7 +327,8 @@ class SocialProfileStrategy(Base):
     schedule_timezone = Column(String(80), default="Asia/Bangkok", nullable=False)
     approval_mode = Column(String(40), default="manual", nullable=False)
     risk_level = Column(String(40), default="medium", nullable=False)
-    min_score = Column(Float, default=70.0, nullable=False)
+    min_similarity = Column(Float, default=0.62, nullable=False)
+    avoid_similarity_threshold = Column(Float, default=0.72, nullable=False)
     require_video = Column(Boolean, default=False, nullable=False)
     receive_system_content = Column(Boolean, default=True, nullable=False)
     auto_project_queue_enabled = Column(Boolean, default=False, nullable=False)
@@ -477,7 +508,7 @@ class PlanningRun(Base):
     id = uuid_pk()
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=True, index=True)
     crawl_job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     planning_mode = Column(String(40), default="AUTO", nullable=False, index=True)
     status = Column(String(40), default="PENDING", nullable=False, index=True)
@@ -536,7 +567,7 @@ class PlanningCandidate(Base):
 
     id = uuid_pk()
     planning_run_id = Column(UUID(as_uuid=True), ForeignKey("planning_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=True, index=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     rank_order = Column(Integer, nullable=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)

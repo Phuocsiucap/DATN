@@ -42,6 +42,7 @@ export type PlanningRun = {
   workflow_id: string
   workflow_title: string
   crawl_job_id?: string | null
+  crawl_job_name?: string | null
   planning_mode: string
   status: string
   current_stage: string
@@ -57,6 +58,27 @@ export type PlanningRun = {
   completed_at?: string | null
   created_at?: string | null
   updated_at?: string | null
+}
+
+export type PlanningAiDecision = {
+  status?: string | null
+  should_create_workflow?: boolean | null
+  reason?: string | null
+  confidence_score?: number | null
+  provider?: string | null
+  model?: string | null
+  workflow_id?: string | null
+  content_id?: string | null
+  candidate_id?: string | null
+  plan_title?: string | null
+  content_angle?: string | null
+  target_audience?: string | null
+  tone?: string | null
+  planning_mode?: string | null
+  risk_flags?: unknown[]
+  reasoning?: string[]
+  series_decision?: Record<string, unknown> | null
+  error_message?: string | null
 }
 
 export type PlanningCandidate = {
@@ -513,6 +535,34 @@ export const createMediaWorkflowFromSourcesApi = async (payload: {
   return data as MediaWorkflow
 }
 
+export type PlanningRunDetail = PlanningRun & {
+  profile?: { id: string; name: string } | null
+  workflow?: { id: string; title: string } | null
+  input?: Record<string, unknown>
+  output?: Record<string, unknown> & {
+    ai_decision?: PlanningAiDecision | null
+    ai_decisions?: PlanningAiDecision[]
+  }
+  reason?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  candidates?: Array<{
+    id: string
+    content_id?: string | null
+    workflow_id?: string | null
+    media_workflow_id?: string | null
+    title?: string | null
+    summary?: string | null
+    rank_order?: number | null
+    score: number
+    selected: boolean
+    eligible: boolean
+    reason?: Record<string, unknown>
+    metadata?: Record<string, unknown>
+    ai_decision?: PlanningAiDecision | null
+    created_at?: string | null
+  }>
+}
+
 export const fetchPlanningRunsApi = async (params: {
   profile_id?: string
   status?: string
@@ -521,4 +571,9 @@ export const fetchPlanningRunsApi = async (params: {
 } = {}) => {
   const { data } = await api.get('/planning-runs', { params })
   return data as { items: PlanningRun[]; total: number; limit: number; offset: number }
+}
+
+export const fetchPlanningRunDetailApi = async (runId: string) => {
+  const { data } = await api.get(`/planning-runs/${runId}`)
+  return data as PlanningRunDetail
 }

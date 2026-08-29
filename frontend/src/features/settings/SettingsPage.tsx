@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import { toast } from 'sonner'
 
-import { CircleUserRound, ShieldCheck, QrCode, Settings, Trash2, PlusCircle, RefreshCw, X, Save, CheckCircle2, ExternalLink } from 'lucide-react'
+import { AlertTriangle, Check, CircleUserRound, ExternalLink, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, X, Zap } from 'lucide-react'
 import {
   fetchSocialProfilesApi,
   createSocialProfileApi,
@@ -12,6 +13,7 @@ import {
   getTikTokQrLoginStatusApi,
   stopTikTokQrLoginApi,
   deleteSocialProfileApi,
+  syncSocialProfileApi,
   fetchAdminSchedulerSettingsApi,
   runPublishQueueSchedulerOnceApi,
   startAdminSchedulerApi,
@@ -20,25 +22,16 @@ import {
   fetchSocialProfileStrategyApi,
   updateSocialProfileStrategyApi,
   type SchedulerSettingsStatus,
-  type SchedulerSettings
+  type SchedulerSettings,
 } from '@/commons/apis/api'
+import { AppButton, AppCard, FilterChip, MetricCard, PageHeader, SearchField, SocialProfileAvatar, StatusPill, TabStrip } from '@/commons/component/social-ui'
+import { SocialProfileStrategyDialog, type SocialProfile } from './SocialProfileStrategyDialog'
 
 type CurrentUser = {
   id: string | number
   email: string
   roles: string[]
   is_system_admin?: boolean
-}
-
-type SocialProfile = {
-  id: string
-  platform: string
-  profile_name: string
-  username?: string | null
-  external_id?: string | null
-  avatar_url?: string | null
-  scopes?: string[]
-  status: string
 }
 
 type TabMode = 'profiles' | 'scheduler'
@@ -86,6 +79,22 @@ const getTikTokQrStatusLabel = (status: string) => {
   return labels[status] || status
 }
 
+function resolveProfileMetric(profile: SocialProfile, key: 'follower_count' | 'following_count' | 'likes_count' | 'video_count') {
+  const directValue = profile[key]
+  const metadata = profile.metadata || {}
+  const metadataUser = metadata.user && typeof metadata.user === 'object' ? metadata.user : {}
+  const metadataValue = metadataUser[key] ?? metadata[key]
+  const value = directValue ?? metadataValue
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : null
+}
+
+function formatProfileMetric(value: number | null) {
+  if (value === null) return '-'
+  return new Intl.NumberFormat('vi-VN', { notation: value >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value)
+}
+
 export default function SettingsPage({ currentUser }: { currentUser: CurrentUser | null }) {
   const isSystemUser = Boolean(
     currentUser?.is_system_admin ||
@@ -98,7 +107,6 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [activeTab, setActiveTab] = useState<TabMode>('profiles')
   const [profiles, setProfiles] = useState<SocialProfile[]>([])
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState('')
 
   // QR Session state
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null)
@@ -120,13 +128,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   // Scheduler state
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerSettingsStatus | null>(null)
   const [schedulerForm, setSchedulerForm] = useState<SchedulerSettings>(DEFAULT_SETTINGS)
+  const [syncingProfileId, setSyncingProfileId] = useState<string | null>(null)
 
   // Strategy Modal state
-  const [strategyModalOpen, setStrategyModalOpen] = useState(false)
   const [activeStrategyProfile, setActiveStrategyProfile] = useState<SocialProfile | null>(null)
+  const [strategyDialogOpen, setStrategyDialogOpen] = useState(false)
+  const [savingStrategy, setSavingStrategy] = useState(false)
   const [strategyForm, setStrategyForm] = useState<any>({
     content_topics: '',
+    content_topic_descriptions: {},
     avoid_topics: '',
+    avoid_topic_descriptions: {},
     tone: 'Professional & Authoritative',
     target_audience: '',
     approval_mode: 'manual',
@@ -134,23 +146,21 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     schedule_days: '0,1,2,3,4,5,6',
     schedule_times: '08:30,20:30',
     schedule_timezone: 'Asia/Bangkok',
-    min_score: 75,
+    min_similarity: 0.62,
+    avoid_similarity_threshold: 0.72,
     max_system_recommendations: 15,
     auto_project_queue_enabled: false,
     video_render_mode: 'manual',
     auto_queue_enabled: true,
     auto_publish_enabled: false,
-    receive_system_content: true,
-    relevance_weight: 1.5,
-    freshness_decay: 0.8,
-    authority_base: 85
+    receive_system_content: true
   })
   const [strategyLoading, setStrategyLoading] = useState(false)
 
   const loadProfiles = async () => {
     setLoading(true)
     try {
-      const data = await fetchSocialProfilesApi('tiktok')
+      const data = await fetchSocialProfilesApi()
       setProfiles(data.items || [])
     } catch {
       setProfiles([])
@@ -174,14 +184,13 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     if (isSystemUser) void loadSchedulerSettings()
   }, [isSystemUser])
 
-  // Auto-open strategy modal khi navigate tu PlanningPage
+  // Auto-select & open strategy dialog when navigating from PlanningPage
   useEffect(() => {
     const state = window.history.state as SettingsNavigationState
     if (!state?.openProfileId || profiles.length === 0) return
     const target = profiles.find((p) => p.id === state.openProfileId)
     if (target) {
-      void openStrategyModal(target)
-      // Xoa state khoi history de khong re-trigger neu user quay lai
+      void openProfileStrategyDialog(target)
       window.history.replaceState(null, '', window.location.pathname)
     }
   }, [profiles])
@@ -202,11 +211,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           setQrUrl(null)
           setQrReady(false)
           await loadProfiles()
-          setMessage('Đăng nhập TikTok thành công.')
+          toast.success('Đăng nhập TikTok thành công.')
         }
       } catch (error: any) {
         console.error(error)
-        setMessage(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
       }
     }, 4000)
 
@@ -246,11 +255,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           setNewProfileName('')
           setNewProfileUsername('')
           await loadProfiles()
-          setMessage('Đã thêm và đăng nhập TikTok profile thành công.')
+          toast.success('Đã thêm và đăng nhập TikTok profile thành công.')
         }
       } catch (error: any) {
         console.error(error)
-        setMessage(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái QR TikTok')
       }
     }, 4000)
 
@@ -268,15 +277,16 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     return () => window.clearTimeout(timer)
   }, [pendingSessionId, pendingQrImage, pendingQrUrl])
 
-  const openStrategyModal = async (profile: SocialProfile) => {
+  const openProfileStrategyDialog = async (profile: SocialProfile) => {
     setActiveStrategyProfile(profile)
-    setStrategyModalOpen(true)
+    setStrategyDialogOpen(true)
     setStrategyLoading(true)
     try {
       const data = await fetchSocialProfileStrategyApi(profile.id)
       if (data) setStrategyForm(data)
     } catch (err) {
       console.error(err)
+      toast.error('Không thể tải cấu hình chiến lược.')
     } finally {
       setStrategyLoading(false)
     }
@@ -288,17 +298,16 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const handleSaveStrategy = async () => {
     if (!activeStrategyProfile) return
-    setLoading(true)
-    setMessage('')
+    setSavingStrategy(true)
     try {
       const data = await updateSocialProfileStrategyApi(activeStrategyProfile.id, strategyForm)
       setStrategyForm(data)
-      setMessage('Lưu cấu hình Chiến lược thành công')
-      setStrategyModalOpen(false)
+      toast.success('Lưu cấu hình Chiến lược thành công')
+      setStrategyDialogOpen(false)
     } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Không thể lưu Chiến lược')
+      toast.error(err?.response?.data?.detail || 'Không thể lưu Chiến lược')
     } finally {
-      setLoading(false)
+      setSavingStrategy(false)
     }
   }
 
@@ -321,11 +330,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const handleCreateProfile = async () => {
     const profileName = newProfileName.trim()
     if (!profileName) {
-      setMessage('Vui lòng nhập tên profile.')
+      toast.warning('Vui lòng nhập tên profile.')
       return
     }
     setAddingProfile(true)
-    setMessage('')
     try {
       await createSocialProfileApi({
         platform: 'tiktok',
@@ -336,9 +344,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setNewProfileName('')
       setNewProfileUsername('')
       await loadProfiles()
-      setMessage('Đã thêm profile TikTok. Bạn có thể mở QR để đăng nhập.')
+      toast.success('Đã thêm profile TikTok. Bạn có thể mở QR để đăng nhập.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể thêm profile')
+      toast.error(error?.response?.data?.detail || 'Không thể thêm profile')
     } finally {
       setAddingProfile(false)
     }
@@ -348,7 +356,6 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     if (addingProfile) return
     const profileName = newProfileName.trim() || 'TikTok account'
     setAddingProfile(true)
-    setMessage('')
     try {
       const data = await startPendingTikTokQrLoginApi({
         profile_name: profileName,
@@ -359,9 +366,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setPendingQrUrl(data.qr_url)
       setPendingQrReady(false)
       setSessionStatus(resolveTikTokQrStatus(data))
-      setMessage('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
+      toast.info('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể mở QR thêm profile')
+      toast.error(error?.response?.data?.detail || 'Không thể mở QR thêm profile')
     } finally {
       setAddingProfile(false)
     }
@@ -369,7 +376,6 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const handleStartQr = async (profileId: string) => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await startTikTokQrLoginApi(profileId)
       setActiveProfileId(profileId)
@@ -377,9 +383,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setQrUrl(data.qr_url)
       setQrReady(false)
       setSessionStatus(resolveTikTokQrStatus(data))
-      setMessage('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
+      toast.info('Đã tạo QR TikTok. Chờ vài giây để mã sẵn sàng rồi quét bằng app TikTok.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể mở QR login')
+      toast.error(error?.response?.data?.detail || 'Không thể mở QR login')
     } finally {
       setLoading(false)
     }
@@ -397,8 +403,24 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     await loadProfiles()
   }
 
+  const handleSyncProfile = async (profileId: string) => {
+    setSyncingProfileId(profileId)
+    try {
+      const syncedProfile = await syncSocialProfileApi(profileId)
+      setProfiles((prev) => prev.map((profile) => (profile.id === profileId ? syncedProfile : profile)))
+      if (activeStrategyProfile?.id === profileId) {
+        setActiveStrategyProfile((prev) => (prev ? { ...prev, ...syncedProfile } : null))
+      }
+      toast.success('Đã đồng bộ thông tin TikTok profile.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể đồng bộ TikTok profile')
+    } finally {
+      setSyncingProfileId(null)
+    }
+  }
+
   const handleDeleteProfile = async (profileId: string) => {
-    if (!window.confirm('Xóa tài khoản này?')) return
+    if (!window.confirm('Xóa kênh social này?')) return
     setLoading(true)
     try {
       await deleteSocialProfileApi(profileId)
@@ -410,9 +432,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         setSessionStatus('idle')
       }
       await loadProfiles()
-      setMessage('Đã xóa tài khoản.')
+      toast.success('Đã xóa kênh social.')
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể xóa tài khoản')
+      toast.error(error?.response?.data?.detail || 'Không thể xóa kênh social')
     } finally {
       setLoading(false)
     }
@@ -428,14 +450,13 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const saveSchedulerSettings = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await updateAdminSchedulerSettingsApi(schedulerForm)
       setSchedulerStatus(data)
       setSchedulerForm(data.settings)
-      setMessage('Đã lưu cấu hình scheduler')
+      toast.success('Đã lưu cấu hình scheduler')
     } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Không lưu được')
+      toast.error(err?.response?.data?.detail || 'Không lưu được')
     } finally {
       setLoading(false)
     }
@@ -443,13 +464,12 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const startScheduler = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await startAdminSchedulerApi()
       setSchedulerStatus(data)
-      setMessage('Đã bật scheduler publish queue.')
+      toast.success('Đã bật scheduler publish queue.')
     } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Không bật được scheduler')
+      toast.error(err?.response?.data?.detail || 'Không bật được scheduler')
     } finally {
       setLoading(false)
     }
@@ -457,13 +477,12 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const stopScheduler = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await stopAdminSchedulerApi()
       setSchedulerStatus(data)
-      setMessage('Đã dừng scheduler publish queue.')
+      toast.success('Đã dừng scheduler publish queue.')
     } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Không dừng được scheduler')
+      toast.error(err?.response?.data?.detail || 'Không dừng được scheduler')
     } finally {
       setLoading(false)
     }
@@ -471,129 +490,129 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   const runPublishQueueOnce = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const data = await runPublishQueueSchedulerOnceApi()
       setSchedulerStatus(data)
-      setMessage('Đã chạy publish queue scheduler một lượt.')
+      toast.success('Đã chạy publish queue scheduler một lượt.')
     } catch (err: any) {
-      setMessage(err?.response?.data?.detail || 'Không chạy được publish queue')
+      toast.error(err?.response?.data?.detail || 'Không chạy được publish queue')
     } finally {
       setLoading(false)
     }
   }
 
-  return (
-    <div className="workspace-page">
-      <div className="workspace-header">
-        <div>
-          <h2 className="workspace-title">Cài Đặt & Tài Khoản</h2>
-          <p className="workspace-subtitle">Quản lý thông tin đăng nhập, profile mạng xã hội và cấu hình hệ thống.</p>
-        </div>
-        
-        <div className="flex flex-wrap gap-2 border-t border-[#eef2f7] pt-3">
-          <button onClick={() => setActiveTab('profiles')} className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'profiles' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
-            Kênh Mạng Xã Hội
-          </button>
-          {isSystemUser && (
-            <button onClick={() => setActiveTab('scheduler')} className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'scheduler' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}>
-              Cấu hình Scheduler (Admin)
-            </button>
-          )}
-        </div>
-      </div>
+  const activeProfiles = profiles.filter((profile) => String(profile.status || '').toLowerCase() === 'active').length
+  const connectedPlatforms = new Set(profiles.map((profile) => String(profile.platform || '').toLowerCase()).filter(Boolean)).size
 
-      {message && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800 flex items-center gap-2">
-          <CheckCircle2 size={16} /> {message}
-        </div>
-      )}
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Quản lý kênh social"
+        description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược AI tự động hóa."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchField placeholder="Tìm kiếm (Ctrl + K)" className="hidden w-[300px] lg:flex" />
+            <AppButton variant="secondary" icon={<RefreshCw size={15} />} onClick={() => void loadProfiles()} disabled={loading}>
+              Tải lại
+            </AppButton>
+            <AppButton icon={<Plus size={16} />} onClick={() => setAddProfileOpen(true)}>
+              Thêm kênh social
+            </AppButton>
+          </div>
+        }
+      />
+
+      <TabStrip
+        tabs={[
+          { value: 'profiles' as const, label: 'Kênh mạng xã hội', count: profiles.length },
+          ...(isSystemUser ? [{ value: 'scheduler' as const, label: 'Scheduler admin' }] : []),
+        ]}
+        value={activeTab}
+        onChange={(value) => setActiveTab(value)}
+      />
 
       {activeTab === 'profiles' && (
-        <div className="space-y-4">
-          <div className="workspace-card flex items-center gap-3 p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-100 text-slate-400">
-              <CircleUserRound size={20} />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-[#0f172a]">{currentUser?.email || 'Người dùng'}</h3>
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-[#64748b]">
-                <ShieldCheck size={14} className={isSystemUser ? 'text-amber-500' : 'text-emerald-500'} />
-                {isSystemUser ? 'System Administrator' : 'Content Creator'}
-              </div>
-            </div>
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard icon={<CircleUserRound size={18} />} label="Kênh social đã kết nối" value={profiles.length} tint="#2556ea" />
+            <MetricCard icon={<Check size={18} />} label="Đang hoạt động" value={activeProfiles} tint="#16a34a" />
+            <MetricCard icon={<AlertTriangle size={18} />} label="Cần xác thực" value={Math.max(profiles.length - activeProfiles, 0)} tint="#f97316" />
+            <MetricCard icon={<Zap size={18} />} label="Kênh social" value={connectedPlatforms} tint="#7c3aed" />
           </div>
 
-          <div className="workspace-card p-5">
-            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <QrCode size={18} className="text-[var(--accent)]" />
-                <h3 className="text-base font-bold text-[#0f172a]">TikTok Profiles</h3>
+          <AppCard className="p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterChip active label="Tất cả" count={profiles.length} />
+                <FilterChip label="TikTok" />
+                <FilterChip label="Facebook" />
+                <FilterChip label="Instagram" />
+                <FilterChip label="YouTube" />
               </div>
-              <button onClick={() => setAddProfileOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)]">
-                <PlusCircle size={14} /> Thêm tài khoản
+              <span className="text-xs text-slate-500 font-medium">Click "Cấu hình chiến lược AI" để chỉnh sửa định hướng từng kênh</span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {profiles.length === 0 && (
+                <div className="col-span-full rounded-xl border border-dashed border-[var(--outline-variant)] p-12 text-center text-sm text-[var(--on-surface-variant)] bg-slate-50/50">
+                  Chưa kết nối kênh social nào. Bấm "Thêm kênh social" ở góc trên để bắt đầu.
+                </div>
+              )}
+              {profiles.map((profile) => (
+                <SocialProfileCard
+                  key={profile.id}
+                  profile={profile}
+                  qrActive={activeProfileId === profile.id}
+                  syncing={syncingProfileId === profile.id}
+                  onOpenStrategy={() => void openProfileStrategyDialog(profile)}
+                  onSync={() => void handleSyncProfile(profile.id)}
+                  onQr={() => void handleStartQr(profile.id)}
+                  onStopQr={() => void handleStopQr(profile.id)}
+                  onDelete={() => void handleDeleteProfile(profile.id)}
+                />
+              ))}
+
+              <button
+                onClick={() => setAddProfileOpen(true)}
+                className="flex flex-col items-center justify-center min-h-[220px] rounded-xl border-2 border-dashed border-[var(--outline-variant)] bg-white p-6 text-center transition hover:border-[var(--accent)] hover:bg-indigo-50/30 group"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full border border-[var(--outline-variant)] text-[var(--accent)] group-hover:scale-110 transition-transform">
+                  <Plus size={24} />
+                </span>
+                <span className="mt-3 block text-sm font-bold text-[var(--accent)]">Kết nối thêm kênh social</span>
+                <span className="mt-1 block text-xs text-[var(--on-surface-variant)]">Thêm kênh TikTok / Social mới vào hệ thống.</span>
               </button>
             </div>
+          </AppCard>
 
-            <div className="grid gap-3">
-              {profiles.length === 0 && <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">Chưa kết nối tài khoản nào</div>}
-              {profiles.map(profile => (
-                <div key={profile.id} className="flex flex-col justify-between gap-3 rounded-md border border-[#eef2f7] p-3 md:flex-row md:items-center">
-                  <div className="flex min-w-0 items-center gap-3">
-                    {profile.avatar_url ? (
-                      <img src={profile.avatar_url} alt="" className="h-10 w-10 rounded-full border border-[#eef2f7] object-cover" />
-                    ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-                        <CircleUserRound size={20} />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="truncate font-bold text-[#0f172a]">{profile.profile_name}</div>
-                      <div className="mt-1 truncate text-xs text-[#64748b]">{profile.username || 'Chưa có username'} | {profile.status}</div>
-                      {profile.scopes && profile.scopes.length > 0 && (
-                        <div className="mt-1 truncate text-[11px] text-slate-400">{profile.scopes.join(', ')}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => openStrategyModal(profile)} className="inline-flex h-8 items-center gap-1 rounded-md border border-[#d9e0ea] bg-slate-100 px-3 text-xs font-bold text-[#091426] hover:bg-slate-200"><Settings size={14}/> Config</button>
-                    <button onClick={() => void handleStartQr(profile.id)} className="h-8 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100">Open QR</button>
-                    {activeProfileId === profile.id && <button onClick={() => void handleStopQr(profile.id)} className="h-8 rounded-md border border-[#d9e0ea] px-3 text-xs font-bold text-[#64748b]">Stop</button>}
-                    <button onClick={() => void handleDeleteProfile(profile.id)} className="icon-button border border-red-100 bg-red-50 text-red-600 hover:bg-red-100"><Trash2 size={14} /></button>
-                  </div>
+          {activeProfileId && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+              <h4 className="font-bold text-blue-900 mb-2">Mã QR Đăng Nhập TikTok</h4>
+              <p className="text-xs text-blue-800 mb-4">
+                {qrReady ? getTikTokQrHelpText(sessionStatus, false) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
+              </p>
+              {!qrReady ? (
+                <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
+              ) : qrImage ? (
+                <img src={qrImage} alt="QR Code" className="h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
+              ) : qrUrl ? (
+                <div className="rounded-xl border-2 border-white bg-white p-2 shadow-sm">
+                  <QRCodeSVG value={qrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
                 </div>
-              ))}
-            </div>
-
-            {activeProfileId && (
-              <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-6 flex flex-col items-center justify-center text-center">
-                <h4 className="font-bold text-blue-900 mb-2">Mã QR Đăng Nhập</h4>
-                <p className="text-xs text-blue-800 mb-4">
-                  {qrReady ? getTikTokQrHelpText(sessionStatus, false) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
-                </p>
-                {!qrReady ? (
-                  <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
-                ) : qrImage ? (
-                  <img src={qrImage} alt="QR Code" className="h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
-                ) : qrUrl ? (
-                  <div className="rounded-xl border-2 border-white bg-white p-2 shadow-sm">
-                    <QRCodeSVG value={qrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
-                  </div>
-                ) : (
-                  <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100">Đang tải...</div>
-                )}
-                {qrReady && qrUrl && (
-                  <a href={qrUrl} className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
-                    <ExternalLink size={14} /> Mở link QR
-                  </a>
-                )}
-                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
-                  {qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
-                  Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}
-                </div>
+              ) : (
+                <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100">Đang tải...</div>
+              )}
+              {qrReady && qrUrl && (
+                <a href={qrUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                  <ExternalLink size={14} /> Mở link QR
+                </a>
+              )}
+              <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
+                {qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
+                Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -601,7 +620,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         <div className="workspace-card p-5">
            <div className="flex items-center justify-between gap-3 mb-6">
             <div>
-              <h2 className="text-base font-bold text-[#0f172a]">Cấu Hình Scheduler</h2>
+              <h2 className="text-base font-bold text-[#0f172a]">Cấu Hình Scheduler Admin</h2>
               <p className="mt-1 text-xs text-[#64748b]">Trạng thái: <span className="font-semibold">{schedulerStatus?.status || '...'}</span></p>
             </div>
             <button onClick={() => void loadSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50">
@@ -641,21 +660,22 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         </div>
       )}
 
+      {/* Add profile Modal */}
       {addProfileOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg rounded-lg border border-[#d9e0ea] bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#eef2f7] px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl border border-[#d9e0ea] bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[#eef2f7] px-6 py-4 bg-slate-50">
               <div>
                 <h3 className="text-lg font-bold text-[#0f172a]">Thêm TikTok Profile</h3>
-                <p className="mt-1 text-sm text-[#64748b]">Tạo profile social content mới và kết nối TikTok bằng QR.</p>
+                <p className="mt-0.5 text-xs text-[#64748b]">Tạo profile social content mới và kết nối TikTok bằng mã QR.</p>
               </div>
-              <button onClick={() => void closeAddProfile()} className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-                <X size={20} />
+              <button onClick={() => void closeAddProfile()} className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+                <X size={18} />
               </button>
             </div>
 
             <div className="space-y-4 p-6">
-              <label className="block space-y-2 text-sm">
+              <label className="block space-y-1.5 text-sm">
                 <span className="font-bold text-slate-700">Tên profile</span>
                 <input
                   value={newProfileName}
@@ -665,7 +685,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                 />
               </label>
 
-              <label className="block space-y-2 text-sm">
+              <label className="block space-y-1.5 text-sm">
                 <span className="font-bold text-slate-700">Username TikTok</span>
                 <input
                   value={newProfileUsername}
@@ -693,7 +713,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                     <div className="mx-auto flex h-64 w-64 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>
                   )}
                   {pendingQrReady && pendingQrUrl && (
-                    <a href={pendingQrUrl} className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
+                    <a href={pendingQrUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
                       <ExternalLink size={14} /> Mở link QR
                     </a>
                   )}
@@ -725,304 +745,124 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         </div>
       )}
 
-      {/* Strategy Configuration Modal */}
-      {strategyModalOpen && activeStrategyProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="my-8 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d9e0ea] bg-white shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#eef2f7] sticky top-0 bg-white z-10">
-              <div>
-                <h3 className="text-xl font-bold text-[#0f172a]">Cấu Hình Chiến Lược (Strategy)</h3>
-                <p className="text-sm text-[#64748b]">Profile: <span className="font-bold text-[#3525cd]">{activeStrategyProfile.profile_name}</span></p>
+      {/* Social Profile Strategy Modal */}
+      <SocialProfileStrategyDialog
+        open={strategyDialogOpen}
+        profile={activeStrategyProfile}
+        strategyForm={strategyForm}
+        strategyLoading={strategyLoading}
+        saving={savingStrategy}
+        onClose={() => setStrategyDialogOpen(false)}
+        onChange={handleUpdateStrategyField}
+        onSave={() => void handleSaveStrategy()}
+      />
+    </div>
+  )
+}
+
+function SocialProfileCard({
+  profile,
+  qrActive,
+  syncing,
+  onOpenStrategy,
+  onSync,
+  onQr,
+  onStopQr,
+  onDelete,
+}: {
+  profile: SocialProfile
+  qrActive: boolean
+  syncing: boolean
+  onOpenStrategy: () => void
+  onSync: () => void
+  onQr: () => void
+  onStopQr: () => void
+  onDelete: () => void
+}) {
+  const stats = [
+    { label: 'Follower', value: resolveProfileMetric(profile, 'follower_count') },
+    { label: 'Lượt thích', value: resolveProfileMetric(profile, 'likes_count') },
+    { label: 'Bài viết', value: resolveProfileMetric(profile, 'video_count') },
+  ].filter((item) => item.value !== null)
+
+  return (
+    <div className="rounded-xl border border-[var(--outline-variant)] bg-white p-5 shadow-sm transition hover:shadow-md hover:border-slate-300 flex flex-col justify-between space-y-4">
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <SocialProfileAvatar
+              avatarUrl={profile.avatar_url}
+              name={profile.profile_name}
+              platform={profile.platform}
+              size="xl"
+            />
+            <div className="min-w-0 space-y-1">
+              <div className="truncate text-base font-bold text-[var(--on-surface)]" title={profile.profile_name}>
+                {profile.profile_name}
               </div>
-              <button onClick={() => setStrategyModalOpen(false)} className="text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-full p-2">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto bg-[var(--surface)] p-5">
-              {strategyLoading ? (
-                <div className="py-12 flex justify-center text-[#64748b]">
-                  <RefreshCw className="animate-spin mr-2" /> Đang tải cấu hình...
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* Left Column: Strategy & Defaults */}
-                  <div className="lg:col-span-7 flex flex-col gap-6">
-                    {/* Content Strategy Card */}
-                    <section className="bg-white rounded-xl border border-[#d9e0ea] p-5 shadow-sm">
-                      <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-[#eef2f7] pb-2">Content Strategy</h4>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-[#0f172a] mb-1">Preferred Topics</label>
-                            <textarea 
-                              className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2.5" 
-                              placeholder="e.g., Enterprise AI, Automation..." 
-                              rows={2}
-                              value={strategyForm.content_topics || ''}
-                              onChange={e => handleUpdateStrategyField('content_topics', e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-[#0f172a] mb-1">Topics to Avoid</label>
-                            <textarea 
-                              className="w-full rounded-lg border-[#d9e0ea] focus:border-red-500 focus:ring-red-500 text-sm p-2.5" 
-                              placeholder="e.g., Politics, Controversial..." 
-                              rows={2}
-                              value={strategyForm.avoid_topics || ''}
-                              onChange={e => handleUpdateStrategyField('avoid_topics', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-[#0f172a] mb-1">Primary Tone</label>
-                            <select 
-                              className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2.5"
-                              value={strategyForm.tone || ''}
-                              onChange={e => handleUpdateStrategyField('tone', e.target.value)}
-                            >
-                              <option value="Professional & Authoritative">Professional & Authoritative</option>
-                              <option value="Dramatic & Urgent">Dramatic & Urgent</option>
-                              <option value="Mystery & Intrigue">Mystery & Intrigue</option>
-                              <option value="Casual & Approachable">Casual & Approachable</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-[#0f172a] mb-1">Target Audience Persona</label>
-                            <input 
-                              type="text"
-                              className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2.5" 
-                              placeholder="e.g., C-Level Executives..."
-                              value={strategyForm.target_audience || ''}
-                              onChange={e => handleUpdateStrategyField('target_audience', e.target.value)}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-
-                    {/* Private Crawl Defaults */}
-                    <section className="bg-white rounded-xl border border-[#d9e0ea] p-5 shadow-sm">
-                      <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-[#eef2f7] pb-2">Private Crawl Defaults</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="bg-slate-50 border border-[#d9e0ea] p-3 rounded-lg">
-                          <label className="block text-[10px] font-bold text-[#64748b] mb-1 uppercase">Relevance Weight</label>
-                          <input 
-                            type="number" step="0.1" 
-                            className="w-full bg-transparent border-b border-slate-300 focus:border-[#3525cd] focus:ring-0 px-0 py-1 font-mono text-sm"
-                            value={strategyForm.relevance_weight || 1.0}
-                            onChange={e => handleUpdateStrategyField('relevance_weight', parseFloat(e.target.value))}
-                          />
-                        </div>
-                        <div className="bg-slate-50 border border-[#d9e0ea] p-3 rounded-lg">
-                          <label className="block text-[10px] font-bold text-[#64748b] mb-1 uppercase">Freshness Decay</label>
-                          <input 
-                            type="number" step="0.1" 
-                            className="w-full bg-transparent border-b border-slate-300 focus:border-[#3525cd] focus:ring-0 px-0 py-1 font-mono text-sm"
-                            value={strategyForm.freshness_decay || 1.0}
-                            onChange={e => handleUpdateStrategyField('freshness_decay', parseFloat(e.target.value))}
-                          />
-                        </div>
-                        <div className="bg-slate-50 border border-[#d9e0ea] p-3 rounded-lg">
-                          <label className="block text-[10px] font-bold text-[#64748b] mb-1 uppercase">Authority Base</label>
-                          <input 
-                            type="number" 
-                            className="w-full bg-transparent border-b border-slate-300 focus:border-[#3525cd] focus:ring-0 px-0 py-1 font-mono text-sm"
-                            value={strategyForm.authority_base || 50}
-                            onChange={e => handleUpdateStrategyField('authority_base', parseInt(e.target.value))}
-                          />
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-
-                  {/* Right Column: System & Automation */}
-                  <div className="lg:col-span-5 flex flex-col gap-6">
-                    {/* System Content */}
-                    <section className="rounded-xl border border-indigo-100 bg-white p-5 shadow-sm">
-                      <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-indigo-100 pb-2">System Content</h4>
-                      <div className="space-y-5">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <label className="font-semibold text-sm text-[#0f172a] block">Receive System Content</label>
-                            <span className="text-[11px] text-[#64748b]">Opt-in to global AI suggestions</span>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox" className="sr-only peer"
-                              checked={strategyForm.receive_system_content ?? true}
-                              onChange={e => handleUpdateStrategyField('receive_system_content', e.target.checked)}
-                            />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
-                          </label>
-                        </div>
-                        
-                        <div>
-                          <div className="flex justify-between mb-1">
-                            <label className="font-semibold text-xs text-[#0f172a]">Minimum Score Threshold</label>
-                            <span className="font-mono text-xs text-[#3525cd] bg-indigo-100 px-1.5 rounded">{strategyForm.min_score || 0}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="100" 
-                            className="w-full accent-[#3525cd]" 
-                            value={strategyForm.min_score || 0}
-                            onChange={e => handleUpdateStrategyField('min_score', parseInt(e.target.value))}
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block font-semibold text-xs text-[#0f172a] mb-1">Max Recommendations / Day</label>
-                          <input 
-                            type="number" 
-                            className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
-                            value={strategyForm.max_system_recommendations ?? 0}
-                            onChange={e => handleUpdateStrategyField('max_system_recommendations', parseInt(e.target.value))}
-                          />
-                        </div>
-                      </div>
-                    </section>
-
-                    {/* Automation */}
-                    <section className="bg-white rounded-xl border border-[#d9e0ea] p-5 shadow-sm">
-                      <h4 className="text-md font-bold text-[#0f172a] mb-4 border-b border-[#eef2f7] pb-2">Automation</h4>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="font-semibold text-sm text-[#0f172a] block mb-1">Review Mode</label>
-                          <select
-                            className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
-                            value={strategyForm.approval_mode || 'manual'}
-                            onChange={e => handleUpdateStrategyField('approval_mode', e.target.value)}
-                          >
-                            <option value="manual">Manual: reviewer phải duyệt video</option>
-                            <option value="auto">Auto: hệ thống tự duyệt sau khi render</option>
-                          </select>
-                        </div>
-
-                        <div className="flex items-start justify-between">
-                          <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Create Workflow</label>
-                            <span className="text-[11px] text-[#64748b]">Tự động phác thảo bài viết & kịch bản từ nội dung điểm cao.</span>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input
-                              type="checkbox" className="sr-only peer"
-                              checked={strategyForm.auto_project_queue_enabled || false}
-                              onChange={e => handleUpdateStrategyField('auto_project_queue_enabled', e.target.checked)}
-                            />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
-                          </label>
-                        </div>
-                        
-                        <div className="h-px bg-[#eef2f7] w-full"></div>
-                        
-                        <div className="flex items-start justify-between">
-                          <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Auto Queue After Approval</label>
-                            <span className="text-[11px] text-[#64748b]">Sau khi video được duyệt, tự đưa vào Publishing Queue.</span>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input
-                              type="checkbox" className="sr-only peer"
-                              checked={strategyForm.auto_queue_enabled ?? true}
-                              onChange={e => handleUpdateStrategyField('auto_queue_enabled', e.target.checked)}
-                            />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
-                          </label>
-                        </div>
-
-                        <div className="h-px bg-[#eef2f7] w-full"></div>
-
-                        <div>
-                          <label className="font-semibold text-sm text-[#0f172a] block mb-1">Video Render Mode</label>
-                          <select
-                            className="w-full rounded-lg border-[#d9e0ea] focus:border-[#3525cd] focus:ring-[#3525cd] text-sm p-2"
-                            value={strategyForm.video_render_mode || 'manual'}
-                            onChange={e => handleUpdateStrategyField('video_render_mode', e.target.value)}
-                          >
-                            <option value="manual">Manual render sau khi duyệt script</option>
-                            <option value="auto">Auto render ngay khi script sẵn sàng</option>
-                          </select>
-                          <span className="mt-1 block text-[11px] text-[#64748b]">Auto sẽ enqueue render job sau bước create/save/review/edit story hoặc tạo voice.</span>
-                        </div>
-
-                        <div className="h-px bg-[#eef2f7] w-full"></div>
-
-                        <div className="flex items-start justify-between">
-                          <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Schedule Enabled</label>
-                            <span className="text-[11px] text-[#64748b]">Dùng khung ngày giờ bên dưới cho Publishing Queue.</span>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input
-                              type="checkbox" className="sr-only peer"
-                              checked={strategyForm.schedule_enabled ?? true}
-                              onChange={e => handleUpdateStrategyField('schedule_enabled', e.target.checked)}
-                            />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
-                          </label>
-                        </div>
-
-                        <div className="flex items-start justify-between">
-                          <div className="pr-2">
-                            <label className="font-semibold text-sm text-[#0f172a] block">Scheduler Auto Publish</label>
-                            <span className="text-[11px] text-[#64748b]">Khi tới lịch, scheduler tự gửi video đã duyệt lên TikTok bằng API.</span>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
-                            <input
-                              type="checkbox" className="sr-only peer"
-                              checked={strategyForm.auto_publish_enabled || false}
-                              onChange={e => handleUpdateStrategyField('auto_publish_enabled', e.target.checked)}
-                            />
-                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--accent)]"></div>
-                          </label>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <label className="space-y-1 text-xs font-semibold text-[#0f172a]">
-                            <span>Ngày chạy scheduler</span>
-                            <input
-                              value={strategyForm.schedule_days || '0,1,2,3,4,5,6'}
-                              onChange={e => handleUpdateStrategyField('schedule_days', e.target.value)}
-                              className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm font-normal outline-none focus:border-[#3525cd]"
-                            />
-                          </label>
-                          <label className="space-y-1 text-xs font-semibold text-[#0f172a]">
-                            <span>Giờ đăng</span>
-                            <input
-                              value={strategyForm.schedule_times || ''}
-                              onChange={e => handleUpdateStrategyField('schedule_times', e.target.value)}
-                              placeholder="08:30,20:30"
-                              className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 text-sm font-normal outline-none focus:border-[#3525cd]"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="px-6 py-4 border-t border-[#eef2f7] bg-slate-50 flex justify-end gap-3 rounded-b-2xl sticky bottom-0 z-10">
-              <button 
-                onClick={() => setStrategyModalOpen(false)}
-                className="px-5 py-2.5 rounded-lg border border-slate-300 text-slate-700 font-bold text-sm hover:bg-slate-100 transition-colors"
-              >
-                Hủy (Cancel)
-              </button>
-              <button 
-                onClick={handleSaveStrategy}
-                disabled={loading}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50"
-              >
-                <Save size={14} />
-                Lưu Cấu Hình (Save)
-              </button>
+              <div className="truncate text-xs font-medium text-[var(--on-surface-variant)]">
+                {profile.username ? `@${profile.username}` : profile.platform}
+              </div>
+              <div className="flex items-center gap-2 pt-0.5">
+                <StatusPill value={profile.status || 'active'} />
+              </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+            title="Xóa kênh social"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
-      )}
+
+        {stats.length > 0 && (
+          <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-center text-xs">
+            {stats.map((stat) => (
+              <div key={stat.label}>
+                <div className="font-extrabold text-slate-800">{formatProfileMetric(stat.value)}</div>
+                <div className="text-[11px] text-slate-500">{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-slate-100">
+        <AppButton
+          className="w-full justify-center text-xs font-bold"
+          icon={<SlidersHorizontal size={15} />}
+          onClick={onOpenStrategy}
+        >
+          Cấu hình chiến lược AI
+        </AppButton>
+
+        <div className="grid grid-cols-2 gap-2">
+          <AppButton
+            variant="secondary"
+            className="w-full justify-center text-xs"
+            icon={<RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />}
+            disabled={syncing}
+            onClick={onSync}
+          >
+            {syncing ? 'Đang sync' : 'Đồng bộ'}
+          </AppButton>
+
+          {String(profile.platform || '').toLowerCase() === 'tiktok' && (
+            <AppButton
+              variant="secondary"
+              className="w-full justify-center text-xs"
+              icon={<QrCode size={13} />}
+              onClick={qrActive ? onStopQr : onQr}
+            >
+              {qrActive ? 'Dừng QR' : 'Mở QR'}
+            </AppButton>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

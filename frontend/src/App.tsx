@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Provider } from 'react-redux'
+import { Toaster } from 'sonner'
 import { store } from '@/commons/store'
 import { useWebSocket } from '@/commons/hooks/useWebSocket'
 import Sidebar from '@/commons/component/Sidebar'
@@ -28,6 +29,7 @@ import './index.css'
 type CurrentUser = {
   id: string | number
   email: string
+  full_name?: string | null
   roles: string[]
   is_system_admin?: boolean
 }
@@ -172,22 +174,22 @@ function AppContent() {
   }
 
   return (
-    <div className="compact-ui flex min-h-screen" style={{ backgroundColor: 'var(--surface)' }}>
+    <div className="compact-ui app-shell flex min-h-screen">
       <Sidebar
         activeTab={tab}
         onTabChange={handleTabChange}
         isSystemUser={isSystemUser}
+        currentUser={currentUser}
       />
 
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
         <TopNavBar
-          email={currentUser.email}
+          currentUser={currentUser}
           onLogout={() => void handleLogout()}
-          isSystemUser={isSystemUser}
         />
         <div className={tab === 'generateVideo'
-          ? 'flex-1 min-h-0 w-full overflow-y-auto p-2 pb-16'
-          : 'w-full max-w-[1680px] mx-auto px-4 py-4 pb-20 md:px-5 md:pb-4'
+          ? 'flex-1 min-h-0 w-full overflow-y-auto p-4 pb-20 md:p-5 md:pb-5'
+          : 'w-full max-w-[1600px] mx-auto px-4 py-5 pb-20 md:px-6 md:pb-6'
         }>
           {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
           {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
@@ -216,6 +218,7 @@ export default function App() {
 
   return (
     <Provider store={store}>
+      <Toaster position="top-right" richColors closeButton duration={3500} />
       <AppContent />
     </Provider>
   )

@@ -13,7 +13,6 @@ from app.story_processing.deduplication.rules import find_duplicate_content
 from app.story_processing.grouping.rules import extract_episode_number, grouping_key, normalize_story_text
 from app.story_processing.ordering.episodes import update_story_completion
 from app.story_processing.producers.story_events import StoryEventProducer
-from app.story_processing.services.embeddings import ContentEmbeddingWriter
 from app.story_processing.repositories.processed_documents import ProcessedDocumentRepository
 
 logger = logging.getLogger(__name__)
@@ -32,11 +31,9 @@ class CanonicalWriter:
         self,
         repository: ProcessedDocumentRepository | None = None,
         producer: StoryEventProducer | None = None,
-        embedding_writer: ContentEmbeddingWriter | None = None,
     ) -> None:
         self.repository = repository or ProcessedDocumentRepository()
         self.producer = producer or StoryEventProducer()
-        self.embedding_writer = embedding_writer or ContentEmbeddingWriter()
 
     def handle_content_normalized(self, db: Session, message: dict) -> None:
         event_id = message.get("event_id")
@@ -178,7 +175,6 @@ class CanonicalWriter:
             content_hash=content_hash,
             transcript_hash=transcript_hash,
             quality_score=quality.get("score", 0),
-            mongo_raw_id=None,
             mongo_normalized_id=processed_document_id,
             sources_jsonb=sources_jsonb,
             media_jsonb=media_jsonb,
@@ -208,8 +204,6 @@ class CanonicalWriter:
                 )
                 db.add(link)
             db.flush()
-
-        self._upsert_embedding(db, content, normalized, job)
 
         story = None
         if self._should_group_as_story(source_type, normalized):
@@ -304,7 +298,6 @@ class CanonicalWriter:
         existing_content.media_jsonb = media
         existing_content.duplicate_count = (existing_content.duplicate_count or 0) + 1
         db.add(existing_content)
-        self._upsert_embedding(db, existing_content, normalized, job_id)
 
         story = None
         if self._should_group_as_story(source_type, normalized):
@@ -351,22 +344,6 @@ class CanonicalWriter:
         db.flush()
         finalized = finalize_job_if_ready(db, job)
         return existing_content, story, True, finalized, job.status if job else None
-
-    def _upsert_embedding(self, db: Session, content: ContentItem, normalized: dict, job_or_id) -> None:
-        try:
-            self.embedding_writer.upsert_for_content(db, content, normalized)
-        except Exception as exc:
-            logger.warning("Content embedding skipped for content_id=%s: %s", content.id, exc)
-            job = job_or_id if isinstance(job_or_id, CrawlJob) else db.get(CrawlJob, job_or_id) if job_or_id else None
-            if job:
-                add_crawl_log(
-                    db,
-                    job_id=job.id,
-                    stage="EMBEDDING",
-                    level="WARNING",
-                    message="Content embedding skipped",
-                    metadata={"content_id": str(content.id), "error": str(exc)},
-                )
 
     def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:
         key_bytes = hashlib.sha256(f"{source_type}:{source_external_id}".encode("utf-8")).digest()[:8]

@@ -1,20 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Plus, RefreshCcw, RotateCcw, Square } from 'lucide-react'
-import { Sheet, SheetContent, SheetTrigger } from '@/commons/component/ui/sheet'
+import { toast } from 'sonner'
+import { CalendarDays, Download, Eye, Loader2, MoreHorizontal, Plus, RefreshCcw, RotateCcw, Square, X } from 'lucide-react'
 import {
   cancelCrawlJobApi,
   createCrawlJobApi,
-  fetchCrawlJobLogsApi,
   fetchCrawlJobsApi,
+  fetchContentDetailApi,
   retryCrawlJobApi,
   fetchFinalContentViewApi,
+  type ContentDetail,
   type CrawlJob,
-  type CrawlLog,
+  type FinalContentItem,
 } from '@/commons/apis/module1'
-import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
-import { MediaAssetPreview } from '@/commons/media'
-
-const stageSteps = ['API', 'ORCHESTRATOR', 'CRAWLER', 'NORMALIZE', 'STORY', 'CANONICAL']
+import { ContentDetailSheet } from '@/features/content/ContentPage'
+import {
+  AppButton,
+  AppCard,
+  EmptyBlock,
+  PageHeader,
+  SearchField,
+  SelectControl,
+  StatusPill,
+  Thumbnail,
+} from '@/commons/component/social-ui'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
@@ -22,11 +30,7 @@ const shortId = (value: string) => value.slice(0, 8)
 export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isSystemUser?: boolean; onOpenModule2?: (jobId?: string) => void }) {
   const [jobs, setJobs] = useState<CrawlJob[]>([])
   const [selectedJob, setSelectedJob] = useState<CrawlJob | null>(null)
-  const [logSheetJob, setLogSheetJob] = useState<CrawlJob | null>(null)
-  const [logSheetOpen, setLogSheetOpen] = useState(false)
-  const [logs, setLogs] = useState<CrawlLog[]>([])
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   
   // Create Form State
@@ -38,13 +42,12 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   const loadCrawlData = async () => {
     setLoading(true)
-    setMessage('')
     try {
       const nextJobs = await fetchCrawlJobsApi()
       setJobs(nextJobs)
-      setSelectedJob((current) => current ? nextJobs.find((job) => job.id === current.id) ?? current : nextJobs[0] ?? null)
+      setSelectedJob((current) => current ? nextJobs.find((job) => job.id === current.id) ?? current : null)
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tải dữ liệu Crawl Jobs')
+      toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu Crawl Jobs')
     } finally {
       setLoading(false)
     }
@@ -53,14 +56,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   useEffect(() => {
     void loadCrawlData()
   }, [])
-
-  useEffect(() => {
-    if (!logSheetOpen || !logSheetJob) {
-      setLogs([])
-      return
-    }
-    fetchCrawlJobLogsApi(logSheetJob.id).then(setLogs).catch(() => setLogs([]))
-  }, [logSheetJob, logSheetOpen])
 
   const metrics = useMemo(() => {
     const running = jobs.filter((job) => ['RUNNING', 'QUEUED', 'PENDING'].includes(job.status)).length
@@ -72,7 +67,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   const createJob = async () => {
     setLoading(true)
-    setMessage('')
     try {
       await createCrawlJobApi({
         name: jobName,
@@ -90,10 +84,11 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
           },
         }],
       })
+      toast.success('Đã tạo crawl job thành công!')
       setShowCreate(false)
       await loadCrawlData()
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tạo crawl job')
+      toast.error(error?.response?.data?.detail || 'Không thể tạo crawl job')
     } finally {
       setLoading(false)
     }
@@ -103,45 +98,29 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
     setLoading(true)
     try {
       await (action === 'cancel' ? cancelCrawlJobApi(job.id) : retryCrawlJobApi(job.id))
+      toast.success(action === 'cancel' ? 'Đã hủy job.' : 'Đã gửi yêu cầu chạy lại job.')
       await loadCrawlData()
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Thao tác job thất bại')
+      toast.error(error?.response?.data?.detail || 'Thao tác job thất bại')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="workspace-page">
-      <div className="workspace-header">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="workspace-title">Thu Thập Dữ Liệu</h2>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${!isSystemUser ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
-                {!isSystemUser ? 'PRIVATE CRAWL' : 'GLOBAL CRAWL'}
-              </span>
-            </div>
-            <p className="workspace-subtitle">
-              {!isSystemUser
-                ? 'Tạo các tác vụ thu thập dữ liệu riêng cho kênh cá nhân của bạn.'
-                : 'Quản lý crawler toàn hệ thống, chuẩn hóa canonical content & phân phối tới các kênh eligible.'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => void loadCrawlData()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--outline-variant)] bg-white px-3 text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]">
-              <RefreshCcw size={14} /> Tải lại
-            </button>
-            <button onClick={() => setShowCreate(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)]">
-              <Plus size={14} /> Tạo Job Crawl
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="app-page">
+      <PageHeader
+        title="Thu thập dữ liệu"
+        description="Tạo và quản lý các job crawl dữ liệu từ nhiều nguồn khác nhau."
+        actions={
+          <>
+            <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
+            <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
+          </>
+        }
+      />
 
       <section className="min-w-0">
-        {message && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</div>}
         {loading && (
           <div className="mb-4 flex items-center gap-2 text-sm text-[#64748b]">
             <Loader2 className="animate-spin" size={16} /> Đang xử lý...
@@ -155,19 +134,23 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
             ['Xong một phần', metrics.partial, 'bg-amber-500'],
             ['Lỗi', metrics.failed, 'bg-red-500'],
           ]} />
-          
-          <Flow />
-          
-          <JobsTable
-            jobs={jobs}
-            selectedJob={selectedJob}
-            onViewLogs={(job) => {
-              setSelectedJob(job)
-              setLogSheetJob(job)
-              setLogSheetOpen(true)
-            }}
-            onAction={jobAction}
-          />
+
+          <div className="min-w-0">
+            <AppCard className="mb-4 grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
+              <SearchField placeholder="Tìm kiếm job..." />
+              <SelectControl><option>Tất cả nguồn</option></SelectControl>
+              <SelectControl><option>Tất cả trạng thái</option></SelectControl>
+              <SelectControl><option>Người tạo</option></SelectControl>
+              <SelectControl icon={<CalendarDays size={15} />}><option>Chọn khoảng thời gian</option></SelectControl>
+            </AppCard>
+
+            <JobsTable
+              jobs={jobs}
+              selectedJob={selectedJob}
+              onOpenDetail={(job) => setSelectedJob(job)}
+              onAction={jobAction}
+            />
+          </div>
         </div>
       </section>
 
@@ -188,11 +171,9 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         />
       )}
 
-      <JobLogsSheet
-        job={logSheetJob}
-        logs={logs}
-        open={logSheetOpen}
-        onOpenChange={setLogSheetOpen}
+      <CrawlJobDetailSheet
+        job={selectedJob}
+        onClose={() => setSelectedJob(null)}
         onOpenModule2={onOpenModule2}
       />
     </div>
@@ -213,31 +194,15 @@ function MetricGrid({ items, loading }: { items: [string, number, string][]; loa
         </>
       ) : (
         items.map(([label, value, marker]) => (
-          <div key={label} className="bento-card h-[70px] p-3 flex flex-col justify-between">
+          <AppCard key={label} className="h-[78px] p-4 flex flex-col justify-between">
             <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--on-surface-variant)]">
               <span className={`h-2 w-2 rounded-full ${marker}`} />
               {label}
             </div>
-            <div className="text-xl font-bold leading-6 text-[var(--on-surface)]">{value.toLocaleString('vi-VN')}</div>
-          </div>
+            <div className="text-2xl font-extrabold leading-6 text-[var(--on-surface)]">{value.toLocaleString('vi-VN')}</div>
+          </AppCard>
         ))
       )}
-    </div>
-  )
-}
-
-function Flow() {
-  return (
-    <div className="bento-card p-4">
-      <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--on-surface-variant)] mb-3">Data Pipeline Topology</h3>
-      <div className="grid gap-2 md:grid-cols-7">
-        {stageSteps.map((step, index) => (
-          <div key={step} className="rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-2.5 text-center transition-all hover:border-[var(--accent)]">
-            <div className="text-[10px] font-bold font-mono text-[var(--accent)]">{String(index + 1).padStart(2, '0')}</div>
-            <div className="mt-1 text-[11px] font-bold text-[var(--on-surface)]">{step}</div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
@@ -246,19 +211,19 @@ function JobsTable({
   jobs,
   selectedJob,
   loading,
-  onViewLogs,
+  onOpenDetail,
   onAction,
 }: {
   jobs: CrawlJob[]
   selectedJob: CrawlJob | null
   loading?: boolean
-  onViewLogs: (job: CrawlJob) => void
+  onOpenDetail: (job: CrawlJob) => void
   onAction: (action: 'cancel' | 'retry', job: CrawlJob) => void
 }) {
   return (
-    <div className="bento-card table-scroll overflow-hidden">
+    <div className="app-card table-scroll overflow-hidden">
       <div className="data-grid-lg">
-        <TableHeader columns={['Job', 'Trạng thái', 'Stage', 'Tiến độ', 'Khám phá/Tải/Lỗi/Trùng', 'Hành động']} />
+        <TableHeader columns={['Job', 'Nguồn', 'Trạng thái', 'Tiến độ', 'Kết quả', 'Thời gian', 'Người tạo', 'Hành động']} />
         {loading && jobs.length === 0 ? (
           <div className="p-4 space-y-3">
             {[1, 2, 3].map((n) => (
@@ -274,18 +239,33 @@ function JobsTable({
           <EmptyState label="Chưa có crawl jobs nào" />
         ) : (
           jobs.map((job) => (
-            <div key={job.id} onClick={() => onViewLogs(job)} className={`grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] items-center gap-3 border-t border-[var(--outline-variant)] px-4 py-3 text-xs transition-colors ${selectedJob?.id === job.id ? 'bg-[var(--secondary-container)]/30' : 'hover:bg-[var(--surface-container-low)]'}`}>
+            <div key={job.id} onClick={() => onOpenDetail(job)} className={`grid cursor-pointer grid-cols-[1.6fr_0.9fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr] items-center gap-3 border-t border-[var(--outline-variant)] px-4 py-4 text-xs transition-colors ${selectedJob?.id === job.id ? 'app-row-selected' : 'hover:bg-[var(--surface-container-low)]'}`}>
               <div>
-                <div className="font-semibold text-[var(--on-surface)]">{job.name}</div>
-                <div className="mt-1 text-[11px] font-mono text-[var(--on-surface-variant)]">{shortId(job.id)} · {formatDate(job.created_at)}</div>
+                <div className="font-extrabold text-[var(--on-surface)]">{job.name}</div>
+                <div className="mt-1 truncate text-[11px] font-mono text-[var(--on-surface-variant)]">ID: {shortId(job.id)}-...</div>
+              </div>
+              <div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">◎</span>
+                <span className="rounded-[5px] bg-emerald-100 px-1.5 py-0.5 text-[10px] font-black text-emerald-700">D</span>
               </div>
               <Badge value={job.status} />
-              <div className="text-[var(--on-surface-variant)] font-medium">{job.current_stage}</div>
-              <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
-              <div className="text-[var(--on-surface-variant)] font-mono">{job.total_discovered}/{job.total_normalized}/{job.total_failed}/{job.total_duplicates}</div>
+              <div>
+                <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
+                  <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
+                </div>
+              </div>
+              <div className="font-bold text-[#34415a]">{job.total_normalized || job.total_discovered} bài</div>
+              <div className="text-[var(--on-surface-variant)] font-medium">{formatDate(job.created_at)}</div>
+              <div className="flex items-center gap-2">
+                <Thumbnail index={2} className="h-6 w-6 rounded-full" />
+                <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
+              </div>
               <div className="flex flex-wrap gap-1">
+                <button className="icon-button text-[var(--accent)] hover:bg-[var(--surface-container-low)]" title="Xem chi tiết" onClick={(event) => { event.stopPropagation(); onOpenDetail(job) }}><Eye size={14} /></button>
                 <button className="icon-button text-[var(--accent)] hover:bg-[var(--surface-container-low)]" title="Chạy lại" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>
                 <button className="icon-button text-red-600 hover:bg-red-50" title="Dừng job" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
+                <button className="icon-button text-[#526179] hover:bg-[var(--surface-container-low)]" title="Khác"><MoreHorizontal size={14} /></button>
               </div>
             </div>
           ))
@@ -330,109 +310,197 @@ function CreateDialog(props: any) {
   )
 }
 
-function JobLogsSheet(props: any) {
-  const [activeTab, setActiveTab] = useState<'logs' | 'contents'>('logs')
-  const [contents, setContents] = useState<any[]>([])
+function CrawlJobDetailSheet({
+  job,
+  onClose,
+  onOpenModule2,
+}: {
+  job: CrawlJob | null
+  onClose: () => void
+  onOpenModule2?: (jobId?: string) => void
+}) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'contents'>('contents')
+  const [contents, setContents] = useState<FinalContentItem[]>([])
   const [loadingContents, setLoadingContents] = useState(false)
-  
-  const [selectedContentId, setSelectedContentId] = useState<string | null>(null)
+  const [selectedContent, setSelectedContent] = useState<FinalContentItem | null>(null)
+  const [contentDetail, setContentDetail] = useState<ContentDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    if (!props.open) {
-      setActiveTab('logs')
+    if (!job) {
+      setActiveTab('contents')
       setContents([])
-      setSelectedContentId(null)
+      setSelectedContent(null)
+      setContentDetail(null)
+      setDetailLoading(false)
     }
-  }, [props.open])
+  }, [job])
 
   useEffect(() => {
-    if (activeTab === 'contents' && props.job) {
-      setLoadingContents(true)
-      fetchFinalContentViewApi({ crawl_job_id: props.job.id })
-        .then((res: any) => {
-          setContents(res.normal_items || [])
-        })
-        .catch(console.error)
-        .finally(() => setLoadingContents(false))
+    if (!job || activeTab !== 'contents') {
+      return
     }
-  }, [activeTab, props.job])
+    setLoadingContents(true)
+    fetchFinalContentViewApi({ crawl_job_id: job.id, view: 'list' })
+      .then((res) => setContents(res.normal_items || []))
+      .catch(() => setContents([]))
+      .finally(() => setLoadingContents(false))
+  }, [activeTab, job])
+
+  if (!job) return null
+
+  const totalContents = contents.length || job.total_normalized || 0
+  const openContentDetail = async (item: FinalContentItem) => {
+    setSelectedContent(item)
+    setContentDetail(null)
+    setDetailLoading(true)
+    try {
+      const detail = await fetchContentDetailApi(item.id)
+      setContentDetail(detail)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   return (
     <>
-      <Sheet open={props.open} onOpenChange={props.onOpenChange}>
-        <SheetTrigger asChild><span className="hidden" /></SheetTrigger>
-        <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[800px] p-0">
-          <div className="detail-shell">
-            <div className="detail-header">
-              <h3 className="text-base font-bold">Chi tiết Job - {props.job?.name}</h3>
-              <p className="mt-1 font-mono text-xs text-slate-500">{props.job ? `ID: ${props.job.id}` : ''}</p>
-              
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button 
-                  onClick={() => setActiveTab('logs')} 
-                  className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'logs' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
-                >
-                  Logs Hệ thống
-                </button>
-                <button 
-                  onClick={() => setActiveTab('contents')} 
-                  className={`h-8 rounded-md border px-3 text-xs font-semibold transition-colors ${activeTab === 'contents' ? 'border-[var(--accent)] bg-[var(--secondary-container)] text-[var(--accent-strong)]' : 'border-[#d9e0ea] bg-white text-[#64748b]'}`}
-                >
-                  Nội dung Crawl được
-                </button>
+      <div className="fixed inset-0 z-[80]">
+        <button
+          type="button"
+          aria-label="Đóng chi tiết job"
+          onClick={onClose}
+          className="absolute inset-0 bg-[#0f172a]/10 backdrop-blur-[1px]"
+        />
+        <aside className="sheet-slide-in absolute bottom-0 right-0 top-0 flex w-full max-w-[720px] flex-col overflow-hidden border-l border-[var(--outline-variant)] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+          <div className="border-b border-[var(--outline-variant)] p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-[20px] font-extrabold text-[#111827]">Chi tiết Job - {job.name}</h2>
+                <p className="mt-1 truncate text-[12px] font-mono text-[#64748b]">ID: {job.id}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <StatusPill value={job.status === 'SUCCEEDED' ? 'Hoàn thành' : job.status} />
+                <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-[8px] text-[#526179] hover:bg-[#f4f6ff]"><X size={18} /></button>
               </div>
             </div>
+            <div className="mt-4 flex gap-6 border-b border-[var(--outline-variant)]">
+              {[
+                { key: 'overview' as const, label: 'Tổng quan' },
+                { key: 'contents' as const, label: 'Nội dung Crawl được', count: totalContents },
+              ].map((tab) => (
+                <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`relative h-10 text-[13px] font-bold ${activeTab === tab.key ? 'text-[#2556ea]' : 'text-[#526179]'}`}>
+                  {tab.label}
+                  {typeof tab.count === 'number' && <span className="ml-1 rounded-full bg-[#2556ea] px-2 py-0.5 text-[10px] text-white">{tab.count}</span>}
+                  {activeTab === tab.key && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[#2556ea]" />}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            <div className="detail-body">
-              {activeTab === 'logs' ? (
-                <div className="space-y-3">
-                  {props.logs.map((log: any) => (
-                    <div key={log.id} className="rounded-md border bg-white p-3 font-mono text-xs">
-                      <div className="text-slate-500 mb-1">{formatDate(log.created_at)} - {log.stage} [{log.level}]</div>
-                      <div>{log.message}</div>
-                    </div>
-                  ))}
-                  {props.logs.length === 0 && <div className="empty-state">Chưa có log nào</div>}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {activeTab === 'overview' && (
+              <div className="space-y-4 p-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <JobMetric label="Đã phát hiện" value={job.total_discovered} />
+                  <JobMetric label="Đã crawl" value={job.total_crawled} />
+                  <JobMetric label="Đã chuẩn hóa" value={job.total_normalized} />
+                  <JobMetric label="Lỗi" value={job.total_failed} tone="red" />
                 </div>
-              ) : (
                 <div>
+                  <div className="mb-2 text-[13px] font-extrabold text-[#111827]">Tiến độ</div>
+                  <div className="h-2 overflow-hidden rounded-full bg-[#e9edf5]">
+                    <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
+                  </div>
+                  <div className="mt-2 text-[12px] font-semibold text-[#526179]">{Number(job.progress_percent || 0).toFixed(0)}% hoàn thành</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-[12px]">
+                  <MetaInfo label="Chế độ" value={job.crawl_mode} />
+                  <MetaInfo label="Stage" value={job.current_stage} />
+                  <MetaInfo label="Tạo lúc" value={formatDate(job.created_at)} />
+                  <MetaInfo label="Cập nhật" value={formatDate(job.updated_at)} />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'contents' && (
+              <>
+                <div className="flex items-center justify-between border-b border-[var(--outline-variant)] px-5 py-3">
+                  <span className="text-[13px] font-medium text-[#526179]">Hiển thị {contents.length ? `1 đến ${Math.min(20, contents.length)} trong` : '0 trong'} {totalContents} bài</span>
+                  <AppButton variant="secondary" className="h-9 px-3" icon={<Download size={15} />}>Xuất dữ liệu</AppButton>
+                </div>
+                <div className="p-4">
                   {loadingContents ? (
                     <div className="loading-state"><Loader2 className="animate-spin" size={16}/> Đang tải nội dung...</div>
                   ) : contents.length === 0 ? (
-                    <div className="empty-state">Chưa có bài nào được crawl thành công</div>
+                    <EmptyBlock label="Chưa có bài nào được crawl thành công." />
                   ) : (
-                    <div className="grid gap-2">
-                      {contents.map((item: any) => (
-                        <div key={item.id} onClick={() => setSelectedContentId(item.id)} className="flex cursor-pointer gap-3 rounded-md border bg-white p-3 transition-colors hover:bg-slate-50">
-                          <div className="h-12 w-[72px] shrink-0 overflow-hidden rounded bg-black">
-                            {(item.media_jsonb || item.media)?.[0] ? (
-                              <MediaAssetPreview item={(item.media_jsonb || item.media)[0]} compact className="h-12 w-[72px]" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-[10px] text-white/50">No media</div>
-                            )}
-                          </div>
+                    <div className="space-y-3">
+                      {contents.map((item, index) => (
+                        <button
+                          key={item.id}
+                          onClick={() => void openContentDetail(item)}
+                          className="grid w-full grid-cols-[112px_minmax(0,1fr)_58px] gap-3 rounded-[8px] p-2 text-left transition hover:bg-[#f8faff]"
+                        >
+                          <Thumbnail src={getContentMediaSrc(item)} index={index} className="h-[76px] w-[112px]" fallback={false} />
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-bold text-[#0f172a]">{item.canonical_title}</div>
-                            <div className="text-xs text-slate-500 mt-1 truncate">{item.summary || item.canonical_url || shortId(item.id)}</div>
-                            <div className="mt-2"><Badge value={item.status} /></div>
+                            <div className="line-clamp-2 text-[13px] font-extrabold leading-5 text-[#111827]">{item.canonical_title}</div>
+                            <p className="mt-1 line-clamp-2 text-[12px] font-medium leading-5 text-[#526179]">{item.summary || item.canonical_url || shortId(item.id)}</p>
                           </div>
-                        </div>
+                          <StatusPill value={item.status || 'READY'} tone="green" />
+                        </button>
                       ))}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
-        </SheetContent>
-      </Sheet>
 
-      <ContentDetailDialog 
-        contentId={selectedContentId} 
-        onClose={() => setSelectedContentId(null)} 
-        onOpenModule2={props.onOpenModule2}
+          {activeTab === 'contents' && contents.length > 0 && (
+            <div className="flex items-center justify-between border-t border-[var(--outline-variant)] p-4">
+              <div className="flex items-center gap-2 text-[13px] font-semibold text-[#526179]">
+                <button className="grid h-8 w-8 place-items-center rounded-[8px] text-[#718096]">‹</button>
+                <button className="grid h-8 w-8 place-items-center rounded-[8px] bg-[#2556ea] text-white">1</button>
+                <button className="grid h-8 w-8 place-items-center rounded-[8px] text-[#526179]">›</button>
+              </div>
+              <SelectControl className="w-28"><option>20 / trang</option></SelectControl>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <ContentDetailSheet
+        item={contentDetail}
+        loading={detailLoading}
+        fallbackTitle={selectedContent?.canonical_title}
+        onClose={() => {
+          setSelectedContent(null)
+          setContentDetail(null)
+          setDetailLoading(false)
+        }}
+        onOpenModule2={onOpenModule2}
       />
     </>
+  )
+}
+
+function JobMetric({ label, value, tone = 'green' }: { label: string; value: number; tone?: 'green' | 'red' }) {
+  return (
+    <div className="rounded-[8px] border border-[#edf1f7] bg-[#fbfcff] p-3">
+      <div className="text-[11px] font-bold text-[#64748b]">{label}</div>
+      <div className={`mt-1 text-[22px] font-extrabold ${tone === 'red' ? 'text-[#ef233c]' : 'text-[#16a34a]'}`}>{Number(value || 0).toLocaleString('vi-VN')}</div>
+    </div>
+  )
+}
+
+function MetaInfo({ label, value }: { label: string; value?: string | number | null }) {
+  return (
+    <div className="rounded-[8px] border border-[#edf1f7] bg-white p-3">
+      <div className="text-[11px] font-bold text-[#64748b]">{label}</div>
+      <div className="mt-1 truncate text-[12px] font-extrabold text-[#34415a]">{value || '-'}</div>
+    </div>
   )
 }
 
@@ -447,7 +515,7 @@ function Badge({ value }: { value: string }) {
 
 function TableHeader({ columns }: { columns: string[] }) {
   return (
-    <div className={`grid grid-cols-[1.7fr_1fr_1fr_0.8fr_1fr_1.2fr] gap-3 bg-[#f8fafc] px-3 py-3 text-[11px] font-bold uppercase tracking-wider text-[#64748b]`}>
+    <div className="app-table-header grid grid-cols-[1.6fr_0.9fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr] gap-3 px-4 py-3">
       {columns.map(c => <div key={c}>{c}</div>)}
     </div>
   )
@@ -455,4 +523,17 @@ function TableHeader({ columns }: { columns: string[] }) {
 
 function EmptyState({ label }: { label: string }) {
   return <div className="empty-state m-3">{label}</div>
+}
+
+function getContentMediaSrc(item: any) {
+  if (!item) return null
+  if (item.thumbnail_url) return item.thumbnail_url
+  const media = (item.media_jsonb || item.media || [])[0]
+  if (media?.thumbnail_url || media?.source_url || media?.storage_url) {
+    return media.thumbnail_url || media.source_url || media.storage_url
+  }
+  if (item.normalized?.images?.[0]?.src) {
+    return item.normalized.images[0].src
+  }
+  return null
 }

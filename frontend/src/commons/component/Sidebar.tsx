@@ -1,209 +1,217 @@
 import type { ReactNode } from 'react'
 import {
+  BarChart3,
+  Bot,
+  CalendarDays,
+  ChevronDown,
+  CircleHelp,
+  Clapperboard,
+  Database,
+  FileCheck2,
+  Image,
   LayoutDashboard,
+  LogOut,
+  Megaphone,
   Newspaper,
   Settings,
-  Workflow,
   Sparkles,
-  FileCheck2,
-  Clapperboard,
-  CalendarDays,
-  UsersRound,
+  UserRound,
+  Wrench,
 } from 'lucide-react'
 import type { Tab } from './navigation'
+import { BrandMark, UserAvatar, type ApiUser, userDisplayName, userRoleLabel } from './social-ui'
+import { cn } from '@/commons/lib/utils'
 
 interface SidebarProps {
   activeTab: Tab
   onTabChange: (tab: Tab) => void
   isSystemUser?: boolean
+  currentUser?: ApiUser | null
 }
 
-interface NavSection {
+type NavItem = {
+  key: Tab
+  label: string
+  icon: ReactNode
+  badge?: string | number
+}
+
+type NavSection = {
   title: string
-  items: { key: Tab; label: string; icon: ReactNode; badge?: string }[]
+  items: NavItem[]
 }
 
-type NavItem = NavSection['items'][number]
-
-const getAdminSections = (): NavSection[] => [
+const creatorSections: NavSection[] = [
   {
-    title: 'QUẢN TRỊ & TỔNG QUAN',
+    title: 'TỔNG QUAN',
     items: [
-      { key: 'dashboard', label: 'System Dashboard', icon: <LayoutDashboard size={15} /> },
-      { key: 'users', label: 'Quản lý Người dùng', icon: <UsersRound size={15} />, badge: 'Admin' },
+      { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
+      { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
     ],
   },
   {
-    title: 'DỮ LIỆU HỆ THỐNG (GLOBAL)',
+    title: 'NỘI DUNG',
     items: [
-      { key: 'crawl', label: 'Global Crawl Jobs', icon: <Workflow size={15} /> },
-      { key: 'content', label: 'Kho Dữ liệu Global', icon: <Newspaper size={15} /> },
+      { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
+      { key: 'planning', label: 'Kế hoạch nội dung', icon: <Sparkles size={17} /> },
+      { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
+      { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
     ],
   },
   {
-    title: 'CÔNG CỤ CREATOR (XEM TRƯỚC)',
+    title: 'SẢN XUẤT',
     items: [
-      { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
-      { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
-      { key: 'approvals', label: 'Duyệt Đăng bài', icon: <FileCheck2 size={15} /> },
-      { key: 'schedule', label: 'Lịch Xuất bản', icon: <CalendarDays size={15} /> },
+      { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
+    ],
+  },
+  {
+    title: 'QUẢN LÝ',
+    items: [
+      { key: 'settings', label: 'Kênh social', icon: <Megaphone size={17} /> },
     ],
   },
 ]
 
-const getCreatorSections = (): NavSection[] => [
+const adminSections: NavSection[] = [
   {
-    title: 'TỔNG QUAN SÁNG TẠO',
+    title: 'QUẢN LÝ',
     items: [
-      { key: 'dashboard', label: 'Creator Dashboard', icon: <LayoutDashboard size={15} /> },
+      { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={17} /> },
+      { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
+      { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
+      { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
+      { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
     ],
   },
   {
-    title: 'DỮ LIỆU CÁ NHÂN (PRIVATE)',
+    title: 'SẢN XUẤT',
     items: [
-      { key: 'crawl', label: 'Thu thập Dữ liệu Riêng', icon: <Workflow size={15} /> },
-      { key: 'content', label: 'Kho Dữ liệu Riêng', icon: <Newspaper size={15} /> },
+      { key: 'planning', label: 'AI đề xuất', icon: <Bot size={17} /> },
+      { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
     ],
   },
   {
-    title: 'AI & SẢN XUẤT VIDEO',
+    title: 'CÀI ĐẶT',
     items: [
-      { key: 'planning', label: 'Chiến dịch AI', icon: <Sparkles size={15} /> },
-      { key: 'generateVideo', label: 'Xưởng Sản xuất Video', icon: <Clapperboard size={15} /> },
+      { key: 'settings', label: 'Cấu hình chiến lược', icon: <Settings size={17} /> },
+      { key: 'users', label: 'Thành viên', icon: <UserRound size={17} /> },
     ],
   },
-  {
-    title: 'QA & XUẤT BẢN',
-    items: [
-      { key: 'approvals', label: 'Duyệt Đăng bài', icon: <FileCheck2 size={15} /> },
-      { key: 'schedule', label: 'Lịch Xuất bản', icon: <CalendarDays size={15} /> },
-    ],
-  },
+]
+
+const quickLinks = [
+  { label: 'Kho media', icon: <Image size={16} /> },
+  { label: 'Công cụ', icon: <Wrench size={16} /> },
+  { label: 'Phân tích', icon: <BarChart3 size={16} /> },
 ]
 
 export default function Sidebar({
   activeTab,
   onTabChange,
   isSystemUser = false,
+  currentUser,
 }: SidebarProps) {
-  const sections = isSystemUser ? getAdminSections() : getCreatorSections()
-  const settingsItem: NavItem = { key: 'settings', label: isSystemUser ? 'Cài đặt System' : 'Kênh & Strategy', icon: <Settings size={15} /> }
-  
-  const mobileItems: NavItem[] = [
-    ...sections.flatMap((section) => section.items),
-    settingsItem,
-  ]
+  const sections = isSystemUser ? adminSections : creatorSections
+  const mobileItems = sections.flatMap((section) => section.items).slice(0, 6)
+  const displayName = userDisplayName(currentUser)
+  const roleLabel = userRoleLabel(currentUser)
 
   return (
     <>
-      <aside
-        className="w-[var(--app-sidebar-width)] h-screen sticky left-0 top-0 flex-col py-3 hidden md:flex z-50 border-r select-none"
-        style={{ backgroundColor: 'var(--primary)', borderColor: 'rgba(255,255,255,0.08)' }}
-      >
-        {/* Workspace Brand Header */}
-        <div className="px-3 pb-3 mb-2 flex flex-col gap-2 border-b border-white/10">
-          <div className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="SocialContent Hub" className="w-8 h-8 object-contain rounded-md" />
-            <div>
-              <h1 className="text-xs font-bold leading-tight text-white">
-                SOCIALCONTENT
-              </h1>
-              <p className="text-[9px] font-medium" style={{ color: 'rgba(255,255,255,0.6)' }}>
-                STUDIO PLATFORM
-              </p>
-            </div>
+      <aside className="sticky left-0 top-0 z-50 hidden h-screen w-[var(--app-sidebar-width)] shrink-0 flex-col border-r border-[var(--outline-variant)] bg-white px-4 py-5 md:flex">
+        <BrandMark />
+
+        <button className="mt-6 flex w-full items-center gap-3 rounded-[8px] border border-[var(--outline-variant)] bg-white p-3 text-left shadow-sm">
+          <UserAvatar src={null} name={displayName} size="lg" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-extrabold text-[#111827]">{displayName}</div>
+            <div className="mt-0.5 truncate text-[12px] font-medium text-[#64748b]">{roleLabel}</div>
           </div>
+          <ChevronDown size={16} className="text-[#526179]" />
+        </button>
 
-          {/* Role Status Tag */}
-          <div className={`px-2.5 py-1 rounded text-[10px] font-bold tracking-wider uppercase text-center border ${
-            isSystemUser 
-              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
-              : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-          }`}>
-            {isSystemUser ? 'System Admin Workspace' : 'Content Creator Workspace'}
-          </div>
-        </div>
-
-        {/* Navigation Sections */}
-        <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 custom-scrollbar">
-          {sections.map((section, idx) => (
-            <div key={idx} className="space-y-1">
-              <div className="px-2.5 mb-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                {section.title}
-              </div>
-
-              {section.items.map((item) => {
-                const isActive = activeTab === item.key
-                return (
-                  <button
+        <nav className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+          {sections.map((section) => (
+            <div key={section.title} className="mb-5">
+              <div className="mb-2 px-1 text-[11px] font-extrabold text-[#526179]">{section.title}</div>
+              <div className="space-y-1">
+                {section.items.map((item) => (
+                  <NavButton
                     key={item.key}
+                    item={item}
+                    active={activeTab === item.key}
                     onClick={() => onTabChange(item.key)}
-                    className="relative w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium transition-colors hover:bg-white/10"
-                    style={{
-                      color: isActive ? '#ffffff' : 'rgba(255,255,255,0.7)',
-                      backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
-                      borderLeft: isActive
-                        ? isSystemUser ? '3px solid #f59e0b' : '3px solid #22c55e'
-                        : '3px solid transparent',
-                    }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {item.icon}
-                      <span className="truncate">{item.label}</span>
-                    </div>
-
-                    {item.badge && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-500/30">
-                        {item.badge}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
+                  />
+                ))}
+              </div>
             </div>
           ))}
+
+          {!isSystemUser && (
+            <div className="mb-5">
+              <div className="mb-2 px-1 text-[11px] font-extrabold text-[#526179]">TIỆN ÍCH</div>
+              <div className="space-y-1">
+                {quickLinks.map((item) => (
+                  <button key={item.label} className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-[13px] font-semibold text-[#34415a] hover:bg-[#f4f6ff]">
+                    <span className="text-[#718096]">{item.icon}</span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </nav>
 
-        {/* Footer Actions */}
-        <div className="px-2.5 pt-2.5 border-t border-white/10 space-y-1">
-          <button
-            onClick={() => onTabChange('settings')}
-            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-xs transition-colors"
-            style={{
-              color: activeTab === 'settings' ? '#ffffff' : 'rgba(255,255,255,0.7)',
-              backgroundColor: activeTab === 'settings' ? 'rgba(255,255,255,0.12)' : 'transparent',
-              borderLeft: activeTab === 'settings' ? (isSystemUser ? '3px solid #f59e0b' : '3px solid #22c55e') : '3px solid transparent',
-            }}
-          >
-            <Settings size={15} />
-            <span>{isSystemUser ? 'Cài đặt System & Logs' : 'Kênh & Strategy'}</span>
+        <div className="space-y-3">
+          <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-3">
+            <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#111827]">
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-[#fff3d6] text-[#f59e0b]">♕</span>
+              Gói Premium
+            </div>
+            <div className="mt-1 text-[12px] font-medium text-[#64748b]">Sử dụng: 72 / 200 video</div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
+              <div className="h-full w-[38%] rounded-full bg-[linear-gradient(135deg,#6d5dfc,#2556ea)]" />
+            </div>
+          </div>
+
+          <button className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-[13px] font-semibold text-[#34415a] hover:bg-[#f4f6ff]">
+            <CircleHelp size={17} />
+            Trợ giúp
+          </button>
+          <button className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-[13px] font-semibold text-[#34415a] hover:bg-[#f4f6ff]">
+            <LogOut size={17} />
+            Đăng xuất
           </button>
         </div>
       </aside>
 
-      {/* Mobile Bottom Bar */}
-      <nav
-        className="fixed inset-x-0 bottom-0 z-50 flex h-16 items-stretch gap-1 overflow-x-auto border-t px-2 py-1.5 md:hidden"
-        style={{ backgroundColor: 'var(--surface-container-lowest)', borderColor: 'var(--outline-variant)' }}
-      >
-        {mobileItems.map((item) => {
-          const isActive = activeTab === item.key
-          return (
-            <button
-              key={item.key}
-              onClick={() => onTabChange(item.key)}
-              className="flex min-w-[70px] flex-1 flex-col items-center justify-center gap-1 rounded-md px-2 text-[10px] font-medium transition-colors"
-              style={{
-                backgroundColor: isActive ? 'var(--secondary-container)' : 'transparent',
-                color: isActive ? 'var(--accent-strong)' : 'var(--on-surface-variant)',
-              }}
-            >
-              {item.icon}
-              <span className="max-w-full truncate">{item.label}</span>
-            </button>
-          )
-        })}
+      <nav className="fixed inset-x-0 bottom-0 z-50 flex h-16 items-stretch gap-1 overflow-x-auto border-t border-[var(--outline-variant)] bg-white px-2 py-1.5 md:hidden">
+        {mobileItems.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => onTabChange(item.key)}
+            className={cn('flex min-w-[70px] flex-1 flex-col items-center justify-center gap-1 rounded-[8px] px-2 text-[10px] font-bold transition-colors', activeTab === item.key ? 'bg-[#f2f0ff] text-[#4f46e5]' : 'text-[#64748b]')}
+          >
+            {item.icon}
+            <span className="max-w-full truncate">{item.label}</span>
+          </button>
+        ))}
       </nav>
     </>
+  )
+}
+
+function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn('flex h-[42px] w-full items-center justify-between rounded-[8px] px-3 text-[13px] font-bold transition-colors', active ? 'bg-[#f2f0ff] text-[#2556ea]' : 'text-[#34415a] hover:bg-[#f8faff]')}
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span className={active ? 'text-[#2556ea]' : 'text-[#64748b]'}>{item.icon}</span>
+        <span className="truncate">{item.label}</span>
+      </span>
+      {item.badge !== undefined && <span className={cn('grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[11px] font-extrabold', active ? 'bg-[#2556ea] text-white' : 'bg-[#eef1f7] text-[#64748b]')}>{item.badge}</span>}
+    </button>
   )
 }

@@ -36,6 +36,57 @@ class ContentResponse(BaseModel):
     categoryId: str | None = None
     siteId: str | None = None
 
+
+class ContentTopicMatchResponse(BaseModel):
+    topic: str
+    topic_key: str | None = None
+    description: str | None = None
+    similarity: float
+    threshold: float | None = None
+    matched: bool | None = None
+    match_source: str | None = None
+
+
+class ContentFitInsightResponse(BaseModel):
+    label: str
+    value: str
+    tone: str | None = None
+
+
+class ProfileContentMatchResponse(BaseModel):
+    profile_id: uuid.UUID
+    profile_name: str
+    username: str | None = None
+    platform: str
+    avatar_url: str | None = None
+    status: str
+    score: float
+    recommendation_status: str
+    relation_reason: str | None = None
+    threshold: float | None = None
+    embedding_similarity: float | None = None
+    similarity_threshold: float | None = None
+    passed_similarity_gate: bool | None = None
+    similarity_source: str | None = None
+    top_topic_match: ContentTopicMatchResponse | None = None
+    avoid_similarity_threshold: float | None = None
+    embedding_model: str | None = None
+    matched_topics: list[str] = Field(default_factory=list)
+    avoided_topics: list[str] = Field(default_factory=list)
+    blocked_by_avoid_topics: bool = False
+    topic_matches: list[ContentTopicMatchResponse] = Field(default_factory=list)
+    avoid_topic_matches: list[ContentTopicMatchResponse] = Field(default_factory=list)
+    tone: str | None = None
+    target_audience: str | None = None
+    can_create_script: bool = False
+    selection_reason: str | None = None
+    ai_decision_reason: str | None = None
+    fit_insights: list[ContentFitInsightResponse] = Field(default_factory=list)
+    suggested_angle: str | None = None
+    risk_notes: list[str] = Field(default_factory=list)
+    source_evidence: list[str] = Field(default_factory=list)
+
+
 class ContentDetailResponse(ContentResponse):
     full_text: str | None = None
     published_at: datetime | None = None
@@ -55,6 +106,14 @@ class ContentDetailResponse(ContentResponse):
     videos: list[Any] = Field(default_factory=list)
     url: str | None = None
     normalized: dict[str, Any] = Field(default_factory=dict)
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
+    thumbnail_url: str | None = None
+    media_counts: dict[str, int] = Field(default_factory=dict)
+    tags: list[Any] = Field(default_factory=list)
+    media_jsonb: list[Any] = Field(default_factory=list)
+    sources_jsonb: list[Any] = Field(default_factory=list)
+    profile_matches: list[ProfileContentMatchResponse] = Field(default_factory=list)
+    ai_selection_summary: str | None = None
 
 
 class FinalSeriesInfoResponse(BaseModel):

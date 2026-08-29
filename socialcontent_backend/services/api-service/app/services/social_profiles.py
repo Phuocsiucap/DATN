@@ -3,16 +3,20 @@ from __future__ import annotations
 import uuid
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from common.db.models import PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileStrategy, User
+from common.planning.embedding_matcher import StrategyEmbeddingMatcher
 from app.schemas import api as schemas
 from app.services.tiktok_oauth import (
     build_tiktok_token_metadata,
+    fetch_tiktok_user_info,
     granted_scopes,
     poll_tiktok_oauth_qr_session,
     requested_tiktok_scopes,
@@ -20,7 +24,7 @@ from app.services.tiktok_oauth import (
     stop_tiktok_oauth_qr_session,
 )
 from app.services import generate_video as video_pipeline
-from app.services.tiktok_posting import direct_post_video_to_tiktok, upload_video_to_tiktok_inbox
+from app.services.tiktok_posting import direct_post_video_to_tiktok, ensure_tiktok_access_token, upload_video_to_tiktok_inbox
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,53 @@ def _scope_list(value: object) -> list[str]:
             if scope and scope not in scopes:
                 scopes.append(scope)
     return scopes
+
+
+def _append_human_note(current: str | None, note: str) -> str:
+    base = (current or "").strip()
+    if not base:
+        return note
+    if note in base:
+        return base
+    return f"{base}\n{note}"
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_tiktok_user_info(profile: SocialProfile, user_info: dict, update_metadata: bool = True) -> None:
+    display_name = (user_info.get("display_name") or "").strip()
+    username = (user_info.get("username") or "").strip()
+    if display_name:
+        profile.profile_name = display_name
+    if username:
+        profile.username = username
+
+    avatar_url = user_info.get("avatar_large_url") or user_info.get("avatar_url_100") or user_info.get("avatar_url")
+    if avatar_url:
+        profile.avatar_url = avatar_url
+
+    for source_key, attr_name in (
+        ("follower_count", "follower_count"),
+        ("following_count", "following_count"),
+        ("likes_count", "likes_count"),
+        ("video_count", "video_count"),
+    ):
+        if source_key in user_info:
+            setattr(profile, attr_name, _optional_int(user_info.get(source_key)))
+
+    if update_metadata:
+        metadata = dict(profile.metadata_json or {})
+        metadata["provider"] = "tiktok"
+        metadata["user"] = user_info
+        metadata["last_profile_sync_at"] = datetime.now(timezone.utc).isoformat()
+        profile.metadata_json = metadata
 
 
 class SocialProfileService:
@@ -275,7 +326,23 @@ class SocialProfileService:
         profile.refresh_expires_at = now + timedelta(seconds=refresh_expires_in) if refresh_expires_in else None
         profile.scopes_jsonb = scope_values
         profile.metadata_json = build_tiktok_token_metadata(token_data, user_info)
+        _apply_tiktok_user_info(profile, user_info, update_metadata=False)
 
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    async def sync_profile(self, db: Session, profile: SocialProfile) -> SocialProfile:
+        self.ensure_tiktok_profile(profile)
+        access_token = ensure_tiktok_access_token(profile)
+        user_info = await fetch_tiktok_user_info(access_token)
+        open_id = user_info.get("open_id")
+        if profile.external_id and open_id and str(profile.external_id) != str(open_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token TikTok không khớp với profile hiện tại")
+        if open_id and not profile.external_id:
+            profile.external_id = open_id
+        profile.status = "active"
+        _apply_tiktok_user_info(profile, user_info)
         db.commit()
         db.refresh(profile)
         return profile
@@ -294,8 +361,12 @@ class SocialProfileService:
         for field, value in payload.model_dump(exclude_unset=True).items():
             if field == "post_frequency_per_day" and value is not None:
                 value = max(int(value), 1)
-            elif field == "min_score" and value is not None:
-                value = max(0.0, min(float(value), 100.0))
+            elif field == "min_similarity" and value is not None:
+                value = max(0.0, min(float(value), 1.0))
+            elif field == "avoid_similarity_threshold" and value is not None:
+                value = max(0.0, min(float(value), 1.0))
+            elif field in {"content_topic_descriptions", "avoid_topic_descriptions"}:
+                value = self.normalize_topic_descriptions(value)
             elif field == "schedule_days" and value is not None:
                 value = self.normalize_schedule_days(value)
             elif field == "schedule_times" and value is not None:
@@ -310,28 +381,179 @@ class SocialProfileService:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="risk_level phải là low, medium hoặc high")
             setattr(strategy, field, value)
 
+        strategy.content_topic_descriptions = self.prune_topic_descriptions(strategy.content_topics, strategy.content_topic_descriptions)
+        strategy.avoid_topic_descriptions = self.prune_topic_descriptions(strategy.avoid_topics, strategy.avoid_topic_descriptions)
         db.commit()
         db.refresh(strategy)
         return strategy
 
-    def list_profile_queue(self, db: Session, profile: SocialProfile, queue_status: str | None = None) -> list[PublishingQueueItem]:
-        query = db.query(PublishingQueueItem).filter(PublishingQueueItem.profile_id == profile.id)
-        if queue_status:
-            query = query.filter(PublishingQueueItem.status == queue_status)
+    def list_strategy_topics(self, strategy: SocialProfileStrategy, kind: str) -> list[dict]:
+        topics, descriptions = self.strategy_topic_state(strategy, kind)
+        return self.serialize_strategy_topic_details(topics, descriptions)
+
+    def add_strategy_topic(self, db: Session, strategy: SocialProfileStrategy, payload: schemas.StrategyTopicMutationRequest) -> SocialProfileStrategy:
+        kind = self.normalize_topic_kind(payload.kind)
+        topic = str(payload.topic or "").strip()
+        if not topic:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Topic không được để trống")
+        topics, descriptions = self.strategy_topic_state(strategy, kind)
+        topic_list = self.split_terms(topics)
+        topic_key = StrategyEmbeddingMatcher.topic_key(topic)
+        if topic_key not in {StrategyEmbeddingMatcher.topic_key(item) for item in topic_list}:
+            topic_list.append(topic)
+        description = str(payload.description or "").strip()
+        if description:
+            descriptions[topic_key] = description
+        self.apply_strategy_topic_state(strategy, kind, topic_list, descriptions)
+        db.commit()
+        db.refresh(strategy)
+        return strategy
+
+    def update_strategy_topic(
+        self,
+        db: Session,
+        strategy: SocialProfileStrategy,
+        topic_key: str,
+        payload: schemas.StrategyTopicMutationRequest,
+    ) -> SocialProfileStrategy:
+        kind = self.normalize_topic_kind(payload.kind)
+        lookup_key = StrategyEmbeddingMatcher.topic_key(topic_key)
+        topics, descriptions = self.strategy_topic_state(strategy, kind)
+        topic_list = self.split_terms(topics)
+        index = next((idx for idx, item in enumerate(topic_list) if StrategyEmbeddingMatcher.topic_key(item) == lookup_key), None)
+        if index is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy topic")
+
+        next_topic = str(payload.topic or topic_list[index]).strip()
+        if not next_topic:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Topic không được để trống")
+        next_key = StrategyEmbeddingMatcher.topic_key(next_topic)
+        topic_list[index] = next_topic
+
+        if lookup_key != next_key and lookup_key in descriptions and next_key not in descriptions:
+            descriptions[next_key] = descriptions.pop(lookup_key)
+        elif lookup_key != next_key:
+            descriptions.pop(lookup_key, None)
+
+        if payload.description is not None:
+            description = str(payload.description or "").strip()
+            if description:
+                descriptions[next_key] = description
+            else:
+                descriptions.pop(next_key, None)
+
+        self.apply_strategy_topic_state(strategy, kind, topic_list, descriptions)
+        db.commit()
+        db.refresh(strategy)
+        return strategy
+
+    def delete_strategy_topic(self, db: Session, strategy: SocialProfileStrategy, kind: str, topic_key: str) -> SocialProfileStrategy:
+        normalized_kind = self.normalize_topic_kind(kind)
+        lookup_key = StrategyEmbeddingMatcher.topic_key(topic_key)
+        topics, descriptions = self.strategy_topic_state(strategy, normalized_kind)
+        topic_list = [item for item in self.split_terms(topics) if StrategyEmbeddingMatcher.topic_key(item) != lookup_key]
+        descriptions.pop(lookup_key, None)
+        self.apply_strategy_topic_state(strategy, normalized_kind, topic_list, descriptions)
+        db.commit()
+        db.refresh(strategy)
+        return strategy
+
+    def list_profile_queue(
+        self,
+        db: Session,
+        profile: SocialProfile,
+        queue_status: str | None = None,
+        scheduled_from: datetime | None = None,
+        scheduled_to: datetime | None = None,
+        search: str | None = None,
+    ) -> list[PublishingQueueItem]:
+        query = (
+            db.query(PublishingQueueItem)
+            .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+            .filter(PublishingQueueItem.profile_id == profile.id)
+        )
+        query = self.apply_queue_filters(
+            query,
+            queue_status=queue_status,
+            scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to,
+            search=search,
+        )
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
-    def list_user_queue(self, db: Session, user: User, queue_status: str | None = None) -> list[PublishingQueueItem]:
+    def list_user_queue(
+        self,
+        db: Session,
+        user: User,
+        queue_status: str | None = None,
+        profile_id: uuid.UUID | None = None,
+        platform: str | None = None,
+        scheduled_from: datetime | None = None,
+        scheduled_to: datetime | None = None,
+        search: str | None = None,
+    ) -> list[PublishingQueueItem]:
         query = db.query(PublishingQueueItem).join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
         if not self.is_system_user(user):
             query = query.filter(SocialProfile.user_id == user.id)
+        if profile_id:
+            query = query.filter(PublishingQueueItem.profile_id == profile_id)
+        if platform:
+            query = query.filter(PublishingQueueItem.platform == platform.strip().lower())
+        query = self.apply_queue_filters(
+            query,
+            queue_status=queue_status,
+            scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to,
+            search=search,
+        )
+        return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
+
+    def apply_queue_filters(
+        self,
+        query,
+        *,
+        queue_status: str | None = None,
+        scheduled_from: datetime | None = None,
+        scheduled_to: datetime | None = None,
+        search: str | None = None,
+    ):
         if queue_status == "upcoming":
             query = query.filter(PublishingQueueItem.status.in_(["queued", "approved", "publishing"]))
         elif queue_status:
             query = query.filter(PublishingQueueItem.status == queue_status)
-        return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
+        if scheduled_from:
+            query = query.filter(PublishingQueueItem.scheduled_at >= scheduled_from)
+        if scheduled_to:
+            query = query.filter(PublishingQueueItem.scheduled_at < scheduled_to)
+        term = (search or "").strip()
+        if term:
+            pattern = f"%{term}%"
+            query = query.filter(
+                or_(
+                    PublishingQueueItem.article_title.ilike(pattern),
+                    PublishingQueueItem.generated_content.ilike(pattern),
+                    PublishingQueueItem.ai_reason.ilike(pattern),
+                    SocialProfile.profile_name.ilike(pattern),
+                    SocialProfile.username.ilike(pattern),
+                )
+            )
+        return query
+
+    def get_owned_queue_item(self, db: Session, queue_item_id: uuid.UUID, user: User) -> PublishingQueueItem:
+        query = (
+            db.query(PublishingQueueItem)
+            .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+            .filter(PublishingQueueItem.id == queue_item_id)
+        )
+        if not self.is_system_user(user):
+            query = query.filter(SocialProfile.user_id == user.id)
+        item = query.first()
+        if not item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
+        return item
 
     def update_queue_status(self, db: Session, queue_item_id: uuid.UUID, user: User, next_status: str) -> PublishingQueueItem:
-        if next_status not in {"queued", "needs_approval", "approved", "skipped"}:
+        if next_status not in {"queued", "needs_approval", "approved", "skipped", "changes_requested"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trạng thái queue không hợp lệ")
         item = (
             db.query(PublishingQueueItem)
@@ -343,10 +565,154 @@ class SocialProfileService:
             item = None
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
+        if item.status in {"published", "skipped"} and next_status != item.status:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item đã kết thúc không thể chuyển lại trạng thái duyệt")
         item.status = next_status
         db.commit()
         db.refresh(item)
         return item
+
+    def request_queue_item_changes(
+        self,
+        db: Session,
+        queue_item_id: uuid.UUID,
+        user: User,
+        *,
+        note: str | None = None,
+    ) -> PublishingQueueItem:
+        item = self.get_owned_queue_item(db, queue_item_id, user)
+        if item.status in {"published", "skipped"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể yêu cầu chỉnh sửa")
+        item.status = "changes_requested"
+        item.error = None
+        message = (note or "").strip() or "Reviewer yêu cầu chỉnh sửa trước khi duyệt."
+        item.ai_reason = _append_human_note(item.ai_reason, message)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def approve_and_publish_queue_item_now(
+        self,
+        db: Session,
+        queue_item_id: uuid.UUID,
+        user: User,
+        *,
+        mode: str = "direct",
+        privacy_level: str | None = None,
+        disable_comment: bool = False,
+        disable_duet: bool = False,
+        disable_stitch: bool = False,
+        is_aigc: bool = True,
+        brand_content_toggle: bool = False,
+        brand_organic_toggle: bool = False,
+    ) -> dict:
+        item = self.get_owned_queue_item(db, queue_item_id, user)
+        if item.status in {"published", "skipped"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể đăng ngay")
+        item.status = "approved"
+        item.scheduled_at = datetime.now(timezone.utc)
+        item.error = None
+        item.ai_reason = _append_human_note(item.ai_reason, "Reviewer đã duyệt và chọn đăng ngay.")
+        db.add(item)
+        db.commit()
+        return self.publish_queue_item_to_tiktok(
+            db,
+            queue_item_id,
+            user,
+            source="manual_approval",
+            mode=mode,
+            privacy_level=privacy_level,
+            disable_comment=disable_comment,
+            disable_duet=disable_duet,
+            disable_stitch=disable_stitch,
+            is_aigc=is_aigc,
+            brand_content_toggle=brand_content_toggle,
+            brand_organic_toggle=brand_organic_toggle,
+        )
+
+    def approve_and_schedule_queue_item(
+        self,
+        db: Session,
+        queue_item_id: uuid.UUID,
+        user: User,
+        *,
+        schedule_mode: str = "ai",
+        scheduled_at: datetime | None = None,
+        timezone_name: str | None = None,
+    ) -> PublishingQueueItem:
+        item = self.get_owned_queue_item(db, queue_item_id, user)
+        if item.status in {"published", "skipped"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể lên lịch lại")
+        if item.platform != "tiktok":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Luồng duyệt này chỉ hỗ trợ TikTok")
+        if not item.profile:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item thiếu thông tin profile")
+
+        mode = (schedule_mode or "ai").strip().lower()
+        if mode not in {"ai", "manual"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_mode phải là ai hoặc manual")
+
+        tzinfo = self.resolve_schedule_timezone(timezone_name or getattr(item.profile.strategy, "schedule_timezone", None))
+        if mode == "manual":
+            if scheduled_at is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at bắt buộc khi chọn lịch thủ công")
+            publish_at = self.normalize_scheduled_datetime(scheduled_at, tzinfo)
+            reason = "Reviewer đã duyệt và chọn lịch đăng thủ công."
+        else:
+            publish_at = self.pick_ai_schedule_time(item.profile, tzinfo)
+            reason = "Reviewer đã duyệt; AI chọn khung giờ đăng tiếp theo theo chiến lược của tài khoản."
+
+        now = datetime.now(timezone.utc)
+        if publish_at <= now:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thời gian đăng phải nằm trong tương lai")
+
+        item.status = "approved"
+        item.scheduled_at = publish_at
+        item.error = None
+        item.ai_reason = _append_human_note(item.ai_reason, reason)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def resolve_schedule_timezone(self, timezone_name: str | None) -> ZoneInfo:
+        try:
+            return ZoneInfo(timezone_name or "Asia/Bangkok")
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("Asia/Bangkok")
+
+    def normalize_scheduled_datetime(self, value: datetime, tzinfo: ZoneInfo) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=tzinfo)
+        return value.astimezone(timezone.utc)
+
+    def pick_ai_schedule_time(self, profile: SocialProfile, tzinfo: ZoneInfo) -> datetime:
+        strategy = profile.strategy
+        now = datetime.now(tzinfo)
+        if not strategy:
+            return (now + timedelta(hours=1)).astimezone(timezone.utc)
+        days = {
+            int(item)
+            for item in str(strategy.schedule_days or "0,1,2,3,4,5,6").split(",")
+            if item.strip().isdigit()
+        }
+        times = [item.strip() for item in str(strategy.schedule_times or "").split(",") if item.strip()]
+        if not times:
+            return (now + timedelta(hours=1)).astimezone(timezone.utc)
+        for day_offset in range(0, 8):
+            candidate_date = (now + timedelta(days=day_offset)).date()
+            if days and candidate_date.weekday() not in days:
+                continue
+            for value in times:
+                try:
+                    hour, minute = [int(part) for part in value.split(":", 1)]
+                except ValueError:
+                    continue
+                candidate = datetime.combine(candidate_date, time(hour=hour, minute=minute), tzinfo=tzinfo)
+                if candidate > now + timedelta(minutes=5):
+                    return candidate.astimezone(timezone.utc)
+        return (now + timedelta(hours=1)).astimezone(timezone.utc)
 
     def publish_queue_item_to_tiktok(
         self,
@@ -569,6 +935,10 @@ class SocialProfileService:
         return metric
 
     def serialize_profile(self, profile: SocialProfile) -> dict:
+        metadata = getattr(profile, "metadata_json", None) or {}
+        user_metadata = metadata.get("user") if isinstance(metadata, dict) else {}
+        if not isinstance(user_metadata, dict):
+            user_metadata = {}
         data = {
             "id": profile.id,
             "platform": profile.platform,
@@ -576,9 +946,13 @@ class SocialProfileService:
             "username": profile.username,
             "external_id": getattr(profile, "external_id", None),
             "avatar_url": getattr(profile, "avatar_url", None),
+            "follower_count": getattr(profile, "follower_count", None) if getattr(profile, "follower_count", None) is not None else _optional_int(user_metadata.get("follower_count")),
+            "following_count": getattr(profile, "following_count", None) if getattr(profile, "following_count", None) is not None else _optional_int(user_metadata.get("following_count")),
+            "likes_count": getattr(profile, "likes_count", None) if getattr(profile, "likes_count", None) is not None else _optional_int(user_metadata.get("likes_count")),
+            "video_count": getattr(profile, "video_count", None) if getattr(profile, "video_count", None) is not None else _optional_int(user_metadata.get("video_count")),
             "status": profile.status,
             "scopes": _scope_list(getattr(profile, "scopes_jsonb", None)),
-            "metadata": getattr(profile, "metadata_json", None) or {},
+            "metadata": metadata,
             "token_expires_at": getattr(profile, "token_expires_at", None),
             "refresh_expires_at": getattr(profile, "refresh_expires_at", None),
             "created_at": profile.created_at,
@@ -591,7 +965,11 @@ class SocialProfileService:
         return {
             "id": strategy.id,
             "content_topics": strategy.content_topics,
+            "content_topic_descriptions": self.prune_topic_descriptions(strategy.content_topics, strategy.content_topic_descriptions),
+            "content_topic_details": self.serialize_strategy_topic_details(strategy.content_topics, strategy.content_topic_descriptions),
             "avoid_topics": strategy.avoid_topics,
+            "avoid_topic_descriptions": self.prune_topic_descriptions(strategy.avoid_topics, strategy.avoid_topic_descriptions),
+            "avoid_topic_details": self.serialize_strategy_topic_details(strategy.avoid_topics, strategy.avoid_topic_descriptions),
             "tone": strategy.tone,
             "target_audience": strategy.target_audience,
             "post_frequency_per_day": strategy.post_frequency_per_day,
@@ -602,7 +980,8 @@ class SocialProfileService:
             "schedule_timezone": strategy.schedule_timezone,
             "approval_mode": strategy.approval_mode,
             "risk_level": strategy.risk_level,
-            "min_score": strategy.min_score,
+            "min_similarity": getattr(strategy, "min_similarity", 0.62),
+            "avoid_similarity_threshold": getattr(strategy, "avoid_similarity_threshold", 0.72),
             "require_video": strategy.require_video,
             "receive_system_content": getattr(strategy, "receive_system_content", True),
             "auto_project_queue_enabled": getattr(strategy, "auto_project_queue_enabled", False),
@@ -613,6 +992,83 @@ class SocialProfileService:
             "created_at": strategy.created_at,
             "updated_at": strategy.updated_at,
         }
+
+    def serialize_strategy_topic_details(self, raw_topics: str | None, raw_descriptions: dict | None = None) -> list[dict]:
+        descriptions = self.normalize_topic_descriptions(raw_descriptions)
+        details = []
+        for topic in self.split_terms(raw_topics):
+            topic_key = StrategyEmbeddingMatcher.topic_key(topic)
+            custom_description = descriptions.get(topic_key)
+            description = StrategyEmbeddingMatcher.topic_description(topic, custom_description)
+            details.append(
+                {
+                    "topic": topic,
+                    "topic_key": topic_key,
+                    "description": description,
+                    "embedding_text": StrategyEmbeddingMatcher.topic_embedding_text(topic, description),
+                    "custom_description": bool(custom_description),
+                }
+            )
+        return details
+
+    @staticmethod
+    def split_terms(value: str | None) -> list[str]:
+        return [part.strip() for part in str(value or "").replace("\n", ",").split(",") if part.strip()]
+
+    @staticmethod
+    def normalize_topic_descriptions(value: dict | None) -> dict[str, str]:
+        return StrategyEmbeddingMatcher.topic_descriptions_map(value)
+
+    def prune_topic_descriptions(self, raw_topics: str | None, descriptions: dict | None) -> dict[str, str]:
+        allowed_keys = {StrategyEmbeddingMatcher.topic_key(topic) for topic in self.split_terms(raw_topics)}
+        return {
+            key: value
+            for key, value in self.normalize_topic_descriptions(descriptions).items()
+            if key in allowed_keys and value
+        }
+
+    @staticmethod
+    def normalize_topic_kind(kind: str | None) -> str:
+        normalized = str(kind or "content").strip().lower()
+        if normalized in {"content", "preferred", "content_topics"}:
+            return "content"
+        if normalized in {"avoid", "avoid_topics"}:
+            return "avoid"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="kind phải là content hoặc avoid")
+
+    def strategy_topic_state(self, strategy: SocialProfileStrategy, kind: str) -> tuple[str, dict[str, str]]:
+        normalized = self.normalize_topic_kind(kind)
+        if normalized == "avoid":
+            return strategy.avoid_topics, self.prune_topic_descriptions(strategy.avoid_topics, strategy.avoid_topic_descriptions)
+        return strategy.content_topics, self.prune_topic_descriptions(strategy.content_topics, strategy.content_topic_descriptions)
+
+    def apply_strategy_topic_state(
+        self,
+        strategy: SocialProfileStrategy,
+        kind: str,
+        topics: list[str],
+        descriptions: dict[str, str],
+    ) -> None:
+        topic_text = ", ".join(self.dedupe_topics(topics))
+        pruned_descriptions = self.prune_topic_descriptions(topic_text, descriptions)
+        if self.normalize_topic_kind(kind) == "avoid":
+            strategy.avoid_topics = topic_text
+            strategy.avoid_topic_descriptions = pruned_descriptions
+        else:
+            strategy.content_topics = topic_text
+            strategy.content_topic_descriptions = pruned_descriptions
+
+    @staticmethod
+    def dedupe_topics(topics: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for topic in topics:
+            clean = str(topic or "").strip()
+            key = StrategyEmbeddingMatcher.topic_key(clean)
+            if clean and key not in seen:
+                seen.add(key)
+                result.append(clean)
+        return result
 
     def serialize_queue_item(self, item: PublishingQueueItem) -> dict:
         return {

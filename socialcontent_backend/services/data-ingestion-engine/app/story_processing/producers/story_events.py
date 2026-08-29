@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from common.events.envelope import build_event
 from common.events.kafka import publish
-from common.events.topics import CONTENT_CANONICAL_SAVED, CRAWL_JOB_COMPLETED, STORY_GROUPED
+from common.events.topics import CONTENT_CANONICAL_SAVED, CONTENT_EMBEDDING_REQUESTED, CRAWL_JOB_COMPLETED, STORY_GROUPED
 
 
 class StoryEventProducer:
@@ -21,6 +21,10 @@ class StoryEventProducer:
         )
 
     def job_completed(self, *, job_id, status: str) -> None:
+        publish(
+            CONTENT_EMBEDDING_REQUESTED,
+            build_event(event_type=CONTENT_EMBEDDING_REQUESTED, source=self.source, job_id=job_id, payload={"job_id": str(job_id), "status": status}),
+        )
         publish(
             CRAWL_JOB_COMPLETED,
             build_event(event_type=CRAWL_JOB_COMPLETED, source=self.source, job_id=job_id, payload={"status": status}),

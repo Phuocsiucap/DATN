@@ -31,6 +31,8 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    with SessionLocal() as db:
+        ensure_schema_compatibility(db)
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:

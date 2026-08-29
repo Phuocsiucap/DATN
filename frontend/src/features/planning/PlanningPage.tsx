@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Loader2, RefreshCcw, CheckCircle2, XCircle, ChevronRight, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
 
 import {
   approveContentPlanApi,
+  fetchPlanningRunDetailApi,
   fetchPlanningRunsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
@@ -11,6 +13,7 @@ import {
   type ContentPlan,
   type PlanningProfile,
   type PlanningRun,
+  type PlanningRunDetail,
   type ProfileSeriesReview,
   type ReviewSourceContent,
   type StoryScene,
@@ -18,6 +21,7 @@ import {
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { MediaAssetPreview, mediaPlaybackUrl, mediaPreviewUrl, isImageMedia, isVideoMedia } from '@/commons/media'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
+import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
@@ -42,6 +46,9 @@ export default function PlanningPage({
 }) {
   const activeStep = initialStep
   const [jobs, setJobs] = useState<PlanningRun[]>([])
+  const [selectedRun, setSelectedRun] = useState<PlanningRun | null>(null)
+  const [runDetail, setRunDetail] = useState<PlanningRunDetail | null>(null)
+  const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
@@ -55,9 +62,22 @@ export default function PlanningPage({
   const [regenerateInstructions, setRegenerateInstructions] = useState('')
   const [regenerateSubmitting, setRegenerateSubmitting] = useState(false)
 
+  const handleOpenRunDetail = async (run: PlanningRun) => {
+    setSelectedRun(run)
+    setRunDetail(null)
+    setRunDetailLoading(true)
+    try {
+      const detail = await fetchPlanningRunDetailApi(run.id)
+      setRunDetail(detail)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể tải chi tiết Planning Run')
+    } finally {
+      setRunDetailLoading(false)
+    }
+  }
+
   const [loading, setLoading] = useState(true)
   const [plansLoading, setPlansLoading] = useState(false)
-  const [message, setMessage] = useState('')
 
   const selectedProfile = useMemo(
     () => profiles.find(profile => profile.id === selectedProfileId),
@@ -66,13 +86,12 @@ export default function PlanningPage({
 
   const loadProfilePlanning = async (profileId: string) => {
     setPlansLoading(true)
-    setMessage('')
     try {
       const nextReviewSeries = await fetchProfileSeriesReviewApi(profileId)
       setReviewSeries(nextReviewSeries)
     } catch (error: any) {
       setReviewSeries([])
-      setMessage(error?.response?.data?.detail || 'Không thể tải kế hoạch theo profile')
+      toast.error(error?.response?.data?.detail || 'Không thể tải kế hoạch theo profile')
     } finally {
       setPlansLoading(false)
     }
@@ -80,7 +99,6 @@ export default function PlanningPage({
 
   const loadData = async () => {
     setLoading(true)
-    setMessage('')
     try {
       if (activeStep === 'jobs') {
         const nextRuns = await fetchPlanningRunsApi()
@@ -95,7 +113,7 @@ export default function PlanningPage({
         setSelectedProfileId((current) => current || nextProfiles[0]?.id || '')
       }
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning')
+      toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning')
     } finally {
       setLoading(false)
     }
@@ -154,21 +172,19 @@ export default function PlanningPage({
   const openRegenerateArticle = (plan: ContentPlan) => {
     setRegeneratePlan(plan)
     setRegenerateInstructions('')
-    setMessage('')
   }
 
   const submitRegenerateArticle = async () => {
     if (!regeneratePlan) return
-    setMessage('')
     setRegenerateSubmitting(true)
     try {
       await regenerateContentPlanApi(regeneratePlan.id, regenerateInstructions.trim() || undefined)
-      setMessage('Đã gửi yêu cầu viết lại bài. Job mới sẽ xuất hiện ở trang Tiến Trình Job.')
+      toast.success('Đã gửi yêu cầu viết lại bài. Job mới sẽ xuất hiện ở trang Tiến Trình Job.')
       setRegeneratePlan(null)
       setRegenerateInstructions('')
       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || 'Không thể gửi yêu cầu viết lại bài')
+      toast.error(error?.response?.data?.detail || 'Không thể gửi yêu cầu viết lại bài')
     } finally {
       setRegenerateSubmitting(false)
     }
@@ -193,8 +209,6 @@ export default function PlanningPage({
         </div>
       </div>
 
-      {message && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{message}</div>}
-
       {loading ? (
         <div className="flex items-center justify-center p-12 text-[#64748b]">
           <Loader2 className="animate-spin mr-2" size={24} /> Đang xử lý...
@@ -204,7 +218,11 @@ export default function PlanningPage({
           {activeStep === 'jobs' && (
             <div className="space-y-4">
               {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào" /></div> : jobs.map((job) => (
-                <div key={job.id} className="workspace-card relative overflow-hidden p-4">
+                <div
+                  key={job.id}
+                  onClick={() => handleOpenRunDetail(job)}
+                  className="workspace-card relative overflow-hidden p-4 hover:shadow-md transition-shadow cursor-pointer group"
+                >
                   <div className="flex justify-between items-start mb-5">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -212,14 +230,27 @@ export default function PlanningPage({
                         <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase">{job.planning_mode}</span>
                         <Badge value={job.status} />
                       </div>
-                      <div className="mt-2 mb-1 text-sm font-bold text-[var(--accent)]">
+                      <div className="mt-2 mb-1 text-sm font-bold text-[var(--accent)] group-hover:underline flex items-center gap-1.5">
                         {job.workflow_title}
+                        <ChevronRight size={14} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
                       </div>
-                      <div className="text-xs text-slate-500">{job.profile_name} · Crawl #{job.crawl_job_id ? shortId(job.crawl_job_id) : '-'}</div>
+                      <div className="text-xs text-slate-500">
+                        {job.profile_name} · {job.crawl_job_name || 'Crawl job'}
+                        {job.crawl_job_id ? <span className="font-mono"> #{shortId(job.crawl_job_id)}</span> : null}
+                      </div>
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-bold text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
-                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{job.current_stage}</div>
+                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">{job.current_stage}</div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleOpenRunDetail(job)
+                        }}
+                        className="inline-flex items-center gap-1 rounded border border-[#d9e0ea] bg-white hover:bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors shadow-sm"
+                      >
+                        <FileText size={12} className="text-[#3525cd]" /> Xem chi tiết
+                      </button>
                     </div>
                   </div>
 
@@ -368,12 +399,13 @@ export default function PlanningPage({
                                     event.stopPropagation()
                                     try {
                                       const result = await approveContentPlanApi(article.plan!.id)
+                                      toast.success('Đã phê duyệt kịch bản!')
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
                                       const workflowId = result.media_workflows?.[0]?.id
                                       if (!workflowId) throw new Error('Backend did not return workflow_id')
                                       onOpenGenerateVideo?.(workflowId)
-                                    } catch {
-                                      alert('Lỗi phê duyệt!')
+                                    } catch (err: any) {
+                                      toast.error(err?.response?.data?.detail || 'Lỗi phê duyệt!')
                                     }
                                   }}
                                   className="inline-flex h-9 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700"
@@ -385,9 +417,10 @@ export default function PlanningPage({
                                     event.stopPropagation()
                                     try {
                                       await rejectContentPlanApi(article.plan!.id, 'Không đạt yêu cầu')
+                                      toast.success('Đã từ chối kịch bản.')
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
-                                    } catch {
-                                      alert('Lỗi từ chối!')
+                                    } catch (err: any) {
+                                      toast.error(err?.response?.data?.detail || 'Lỗi từ chối!')
                                     }
                                   }}
                                   className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-600 hover:bg-red-50"
@@ -464,6 +497,14 @@ export default function PlanningPage({
           </div>
         </SheetContent>
       </Sheet>
+
+      <PlanningRunDetailSheet
+        run={selectedRun}
+        detail={runDetail}
+        loading={runDetailLoading}
+        onClose={() => setSelectedRun(null)}
+        onOpenProfileSettings={onOpenProfileSettings}
+      />
     </div>
   )
 }
