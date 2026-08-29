@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, User
+from common.db.models import ContentItem, MediaWorkflow, SocialProfileSnapshot, User
 from common.db.session import get_db
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
@@ -248,12 +248,43 @@ async def delete_social_profile(profile_id: uuid.UUID, db: Session = Depends(get
     return {"message": "Đã xóa tài khoản mạng xã hội"}
 
 
-@router.post("/{profile_id}/sync", response_model=schemas.SocialProfileResponse)
+@router.post("/{profile_id}/sync")
 async def sync_social_profile(profile_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
-    synced_profile = await service.sync_profile(db, profile)
-    return service.serialize_profile(synced_profile)
+    return await service.sync_profile(db, profile)
+
+
+@router.get("/{profile_id}/snapshots")
+def get_profile_snapshots(
+    profile_id: uuid.UUID,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    profile = service.get_owned_profile(db, profile_id, current_user)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    snapshots = (
+        db.query(SocialProfileSnapshot)
+        .filter(SocialProfileSnapshot.profile_id == profile.id, SocialProfileSnapshot.captured_at >= since)
+        .order_by(SocialProfileSnapshot.captured_at.asc())
+        .all()
+    )
+    return {
+        "profile_id": str(profile.id),
+        "items": [
+            {
+                "id": str(s.id),
+                "follower_count": s.follower_count,
+                "following_count": s.following_count,
+                "likes_count": s.likes_count,
+                "video_count": s.video_count,
+                "captured_at": s.captured_at.isoformat(),
+            }
+            for s in snapshots
+        ],
+    }
 
 
 @router.get("/{profile_id}/strategy", response_model=schemas.SocialProfileStrategyResponse)
@@ -450,6 +481,19 @@ def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneIn
     scheduled_at = item.scheduled_at
     scheduled_at_local = _ensure_aware(scheduled_at).astimezone(tzinfo).isoformat() if scheduled_at else None
     video_url = _queue_video_url(item.article_link)
+    if not video_url and item.content_id:
+        wf = db.query(MediaWorkflow).filter(MediaWorkflow.primary_content_id == item.content_id).first()
+        if wf:
+            metadata = wf.metadata_json if isinstance(wf.metadata_json, dict) else {}
+            artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
+            final_uri = next((it.get("uri") for it in artifacts if isinstance(it, dict) and it.get("uri") and it.get("type") == "FINAL_VIDEO"), None)
+            if not final_uri:
+                final_uri = metadata.get("rendered_video") or metadata.get("final_video")
+            if not final_uri and isinstance(wf.draft_json, dict):
+                story_artifacts = wf.draft_json.get("video_artifacts") if isinstance(wf.draft_json.get("video_artifacts"), dict) else {}
+                final_uri = story_artifacts.get("final")
+            if final_uri:
+                video_url = _queue_video_url(final_uri)
     return {
         "id": data["id"],
         "profile_id": data["profile_id"],

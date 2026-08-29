@@ -16,6 +16,7 @@ import GenerateVideoProjectsPage from '@/features/generate-video/GenerateVideoPr
 import VideoProductionWorkspace from '@/features/generate-video/VideoProductionWorkspace'
 import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
+import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
 import UsersPage from '@/features/users/UsersPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 import TermsPage from '@/features/legal/TermsPage'
@@ -202,6 +203,7 @@ function AppContent() {
           ))}
           {tab === 'approvals' && <ApprovalsPage />}
           {tab === 'schedule' && <SchedulePage />}
+          {tab === 'publishedPosts' && <PublishedPostsPage />}
           {tab === 'users' && (isSystemUser ? <UsersPage currentUser={currentUser} /> : <DashboardPage currentUser={currentUser} />)}
           {tab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>

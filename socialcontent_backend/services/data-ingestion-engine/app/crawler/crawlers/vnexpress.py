@@ -5,7 +5,7 @@ import html
 import json
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -23,6 +23,7 @@ class VNExpressCrawler(BaseCrawler):
     latest_rss_url = "https://vnexpress.net/rss/tin-moi-nhat.rss"
     homepage_url = "https://vnexpress.net/"
     blocked_image_names = {"nguonuutien.jpg"}
+    vietnam_timezone = timezone(timedelta(hours=7))
 
     def __init__(self) -> None:
         self.last_errors: list[dict[str, Any]] = []
@@ -117,11 +118,15 @@ class VNExpressCrawler(BaseCrawler):
         lead = self._first_match(body, [r"<p[^>]*class=[\"'][^\"']*description[^\"']*[\"'][^>]*>(.*?)</p>"])
         content = self._article_paragraphs(body)
         json_ld_videos = self._json_ld_videos(body)
-        video_thumbnail_urls = {video.get("thumbnailUrl") for video in json_ld_videos if video.get("thumbnailUrl")}
+        video_thumbnail_fps = {
+            self._image_fingerprint(video.get("thumbnailUrl") or "")
+            for video in json_ld_videos
+            if video.get("thumbnailUrl")
+        }
         images = [
             image
             for image in self._dedupe_dicts([*self._metadata_images(body), *self._image_objects(body, url)], "src")
-            if image.get("src") not in video_thumbnail_urls
+            if self._image_fingerprint(image.get("src") or "") not in video_thumbnail_fps
         ]
         videos = self._normalize_videos([*json_ld_videos, *self._dom_videos(body), *self._regex_videos(body)])
 
@@ -234,42 +239,119 @@ class VNExpressCrawler(BaseCrawler):
 
     def _article_paragraphs(self, body: str) -> list[str]:
         scope = self._article_scope(body)
-        paragraphs_html = re.findall(r"<p[^>]*>(.*?)</p>", scope, flags=re.IGNORECASE | re.DOTALL)
+        # Capture the full <p ...>...</p> to inspect tag attributes (e.g. class="description")
+        paragraphs_full = re.findall(r"(<p[^>]*>)(.*?)</p>", scope, flags=re.IGNORECASE | re.DOTALL)
 
         result = []
         seen = set()
-        for raw_p in paragraphs_html:
+        for p_tag, raw_p in paragraphs_full:
+            # Skip structural/UI elements by inner content class
             if re.search(r'class=["\'][^"\']*(?:breadcrumb|tag_|author|copyright|ads|social|comment)[^"\']*["\']', raw_p, re.IGNORECASE):
                 continue
+            # Skip the description/sapo paragraph — it is already stored separately
+            if re.search(r'class=["\'][^"\']*\bdescription\b[^"\']*["\']', p_tag, re.IGNORECASE):
+                continue
             text = self._html_to_text(raw_p)
-            if text and text not in seen:
-                seen.add(text)
-                result.append(text)
+            if not text or text in seen:
+                continue
+            # Skip paragraphs that are purely related-article links (>> prefix)
+            if re.match(r"^>{1,2}\s", text) or text.startswith(">>"):
+                continue
+            # Skip "Xem thêm" / "xem thêm" navigation CTA paragraphs
+            if re.match(r"^>{0,2}\s*[Xx]em thêm\b", text):
+                continue
+            # Skip very short right-aligned paragraphs (byline/author artifacts)
+            if len(text) <= 5 and re.search(r'text-align\s*:\s*right', p_tag, re.IGNORECASE):
+                continue
+            seen.add(text)
+            result.append(text)
         return result
 
     def _image_objects(self, body: str, base_url: str) -> list[dict[str, str]]:
-        figures = re.findall(r"<figure\b[^>]*>(.*?)</figure>", body, flags=re.IGNORECASE | re.DOTALL)
-        containers = figures or re.findall(r"<img\b[^>]*>", self._article_scope(body), flags=re.IGNORECASE | re.DOTALL)
-
         images: list[dict[str, str]] = []
-        for container in containers:
-            if re.search(r"<iframe\b|box_embed_video_parent|\bdata-vid=", container, flags=re.IGNORECASE):
+        scope = self._article_scope(body)
+        for attrs, container in self._image_candidate_attrs(scope):
+            if re.search(r"box_embed_video_parent|\bdata-vid=", container, flags=re.IGNORECASE):
                 continue
-            img_match = re.search(r"<img\b([^>]*)>", container, flags=re.IGNORECASE | re.DOTALL)
-            attrs = img_match.group(1) if img_match else container
-            src = self._clean_url(self._attr(attrs, "data-src") or self._attr(attrs, "src") or self._attr(attrs, "data-original"))
-            if not src or src.startswith("data:") or "svg" in src.lower() or self._is_blocked_image(src):
-                continue
-            images.append(
-                {
-                    "src": urljoin(base_url, src),
-                    "alt": self._html_to_text(self._attr(attrs, "alt") or ""),
-                    "caption": self._html_to_text(
-                        self._first_match(container, [r"<figcaption\b[^>]*>(.*?)</figcaption>"]) or ""
-                    ),
-                }
-            )
+
+            for src in self._image_urls_from_attrs(attrs):
+                if self._is_blocked_image(src):
+                    continue
+                images.append(
+                    {
+                        "src": urljoin(base_url, src),
+                        "alt": self._html_to_text(self._attr(attrs, "alt") or ""),
+                        "caption": self._image_caption(attrs, container),
+                    }
+                )
         return self._dedupe_dicts(images, "src")
+
+    def _image_candidate_attrs(self, scope: str) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        container_patterns = [
+            r"<div\b[^>]*class=[\"'][^\"']*item_slide_show[^\"']*[\"'][^>]*>.*?(?=<div\b[^>]*class=[\"'][^\"']*item_slide_show|\Z)",
+            r"<div\b[^>]*class=[\"'][^\"']*item_gallery_new[^\"']*[\"'][^>]*>.*?</div>",
+            r"<div\b[^>]+data-component-type=[\"']image-flip[\"'][^>]*>.*?</div>",
+            r"<figure\b[^>]*>.*?</figure>",
+        ]
+        for pattern in container_patterns:
+            for container_match in re.finditer(pattern, scope, flags=re.IGNORECASE | re.DOTALL):
+                container = container_match.group(0)
+                for tag in re.findall(r"<(?:img|source|div)\b([^>]*)>", container, flags=re.IGNORECASE | re.DOTALL):
+                    if self._image_urls_from_attrs(tag):
+                        candidates.append((tag, container))
+
+        for tag_match in re.finditer(r"<img\b([^>]*)>", scope, flags=re.IGNORECASE | re.DOTALL):
+            attrs = tag_match.group(1)
+            if self._image_urls_from_attrs(attrs):
+                candidates.append((attrs, tag_match.group(0)))
+        return candidates
+
+    def _image_urls_from_attrs(self, attrs: str) -> list[str]:
+        urls = []
+        for name in [
+            "data-component-value1",
+            "data-component-value2",
+            "data-component-front",
+            "data-component-back",
+            "data-desktop-src",
+            "data-mobile-src",
+            "data-src",
+            "data-original",
+            "src",
+        ]:
+            src = self._clean_url(self._attr(attrs, name))
+            if self._looks_like_image_url(src):
+                urls.append(src)
+
+        for name in ["data-srcset", "srcset"]:
+            for src in self._srcset_urls(self._attr(attrs, name) or ""):
+                if self._looks_like_image_url(src):
+                    urls.append(src)
+        return self._dedupe_urls(urls)
+
+    def _srcset_urls(self, value: str) -> list[str]:
+        urls = []
+        for item in html.unescape(value or "").split(","):
+            src = item.strip().split(" ")[0]
+            if src:
+                urls.append(self._clean_url(src))
+        return urls
+
+    def _looks_like_image_url(self, src: str) -> bool:
+        if not src or src.startswith("data:"):
+            return False
+        return bool(re.search(r"\.(?:jpe?g|png|webp|gif)(?:[?#].*)?$", src, flags=re.IGNORECASE))
+
+    def _image_caption(self, attrs: str, container: str) -> str:
+        caption = (
+            self._attr(attrs, "data-caption")
+            or self._attr(attrs, "data-component-caption")
+            or self._first_match(container, [r"<figcaption\b[^>]*>(.*?)</figcaption>"])
+            or self._first_match(container, [r"<div[^>]+class=[\"'][^\"']*(?:desc_cation|caption-gallery)[^\"']*[\"'][^>]*>(.*?)</div>"])
+            or ""
+        )
+        return self._html_to_text(self._decode_jsonish_string(caption).strip("\"'"))
 
     def _metadata_images(self, body: str) -> list[dict[str, str]]:
         images = []
@@ -386,6 +468,7 @@ class VNExpressCrawler(BaseCrawler):
         for match in re.finditer(r"<video\b([^>]*)>(.*?)</video>", scope, flags=re.IGNORECASE | re.DOTALL):
             attrs = match.group(1)
             inner = match.group(2)
+            block = scope[max(0, match.start() - 2500) : min(len(scope), match.end() + 1000)]
             src = self._clean_url(self._attr(attrs, "src") or self._attr(attrs, "data-src"))
             if src and not src.startswith("blob:"):
                 videos.append(
@@ -393,9 +476,16 @@ class VNExpressCrawler(BaseCrawler):
                         "source": "video-tag",
                         "src": src,
                         "type": self._attr(attrs, "type") or "",
-                        "poster": self._clean_url(self._attr(attrs, "poster") or self._attr(attrs, "data-poster")),
+                        "poster": self._clean_url(
+                            self._attr(attrs, "poster")
+                            or self._attr(attrs, "data-poster")
+                            or self._first_image_url(block)
+                        ),
                         "modes": self._attr(attrs, "data-mode") or "",
                         "maxMode": self._attr(attrs, "max-mode") or "",
+                        "videoId": self._video_id(attrs, block),
+                        "name": self._dom_video_title(block),
+                        "duration": self._attr(attrs, "duration") or self._attr(block, "data-duration") or "",
                     }
                 )
             for source_attrs in re.findall(r"<source\b([^>]*)>", inner, flags=re.IGNORECASE | re.DOTALL):
@@ -406,6 +496,9 @@ class VNExpressCrawler(BaseCrawler):
                             "source": "video-source",
                             "src": source_src,
                             "type": self._attr(source_attrs, "type") or "",
+                            "videoId": self._video_id(attrs, block),
+                            "poster": self._clean_url(self._first_image_url(block)),
+                            "name": self._dom_video_title(block),
                         }
                     )
 
@@ -428,6 +521,35 @@ class VNExpressCrawler(BaseCrawler):
                     videos.append({"source": f"data-attr:{name}", "src": src})
 
         return videos
+
+    def _first_image_url(self, html_fragment: str) -> str:
+        for tag in re.findall(r"<(?:img|source|div)\b([^>]*)>", html_fragment, flags=re.IGNORECASE | re.DOTALL):
+            for src in self._image_urls_from_attrs(tag):
+                if src and not self._is_blocked_image(src):
+                    return src
+        return ""
+
+    def _video_id(self, attrs: str, container: str) -> str:
+        for value in [self._attr(attrs, "data-vid"), self._attr(container, "data-vid"), self._attr(attrs, "id")]:
+            if not value:
+                continue
+            match = re.search(r"(\d{3,})", value)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _dom_video_title(self, container: str) -> str:
+        title = self._first_match(
+            container,
+            [
+                r"<div[^>]+class=[\"'][^\"']*parser_title[^\"']*[\"'][^>]*>(.*?)</div>",
+                r"<p[^>]+class=[\"'][^\"']*Normal[^\"']*[\"'][^>]*>(.*?)</p>",
+            ],
+        )
+        if not title:
+            return ""
+        title = re.sub(r"\bVideo:\s*.*$", "", title, flags=re.IGNORECASE | re.DOTALL)
+        return self._html_to_text(title)
 
     def _regex_videos(self, body: str) -> list[dict[str, str]]:
         videos = []
@@ -473,6 +595,7 @@ class VNExpressCrawler(BaseCrawler):
             "duration": raw_video.get("duration") or "",
             "qualities": qualities,
             "maxQuality": raw_video.get("maxMode") or "",
+            "videoId": raw_video.get("videoId") or "",
             "extractionSource": raw_video.get("source") or "",
         }
 
@@ -496,6 +619,7 @@ class VNExpressCrawler(BaseCrawler):
             "duration": existing.get("duration") or incoming.get("duration"),
             "qualities": existing.get("qualities") or incoming.get("qualities") or [],
             "maxQuality": existing.get("maxQuality") or incoming.get("maxQuality"),
+            "videoId": existing.get("videoId") or incoming.get("videoId"),
             "extractionSource": ",".join(sources),
         }
 
@@ -547,6 +671,7 @@ class VNExpressCrawler(BaseCrawler):
                         "duration": video.get("duration"),
                         "qualities": video.get("qualities") if isinstance(video.get("qualities"), list) else [],
                         "max_quality": video.get("maxQuality"),
+                        "video_id": video.get("videoId"),
                         "extraction_source": video.get("extractionSource"),
                     }
                 )
@@ -612,6 +737,16 @@ class VNExpressCrawler(BaseCrawler):
         return None
 
     def _meta_content(self, body: str, name: str) -> str | None:
+        for attrs in re.findall(r"<meta\b([^>]*)>", body, flags=re.IGNORECASE | re.DOTALL):
+            content = self._attr(attrs, "content")
+            if not content:
+                continue
+            attr_name = self._attr(attrs, "name")
+            property_name = self._attr(attrs, "property")
+            itemprop = self._attr(attrs, "itemprop")
+            if attr_name == name or itemprop == name or property_name == f"og:{name}":
+                return content
+
         patterns = [
             rf"<meta[^>]+name=[\"']{re.escape(name)}[\"'][^>]+content=[\"']([^\"']+)[\"']",
             rf"<meta[^>]+property=[\"']og:{re.escape(name)}[\"'][^>]+content=[\"']([^\"']+)[\"']",
@@ -622,17 +757,103 @@ class VNExpressCrawler(BaseCrawler):
         ]
         return self._first_match(body, patterns)
 
-    def _published_at(self, body: str) -> str | None:
+    def _meta_property_content(self, body: str, property_name: str) -> str | None:
+        for attrs in re.findall(r"<meta\b([^>]*)>", body, flags=re.IGNORECASE | re.DOTALL):
+            content = self._attr(attrs, "content")
+            if content and self._attr(attrs, "property") == property_name:
+                return content
         return self._first_match(
             body,
             [
-                r"<meta[^>]+property=[\"']article:published_time[\"'][^>]+content=[\"']([^\"']+)[\"']",
-                r"<meta[^>]+itemprop=[\"']datePublished[\"'][^>]+content=[\"']([^\"']+)[\"']",
-                r"<meta[^>]+name=[\"']pubdate[\"'][^>]+content=[\"']([^\"']+)[\"']",
-                r"<span[^>]*class=[\"'][^\"']*date[^\"']*[\"'][^>]*>(.*?)</span>",
-                r"<p[^>]*class=[\"'][^\"']*date[^\"']*[\"'][^>]*>(.*?)</p>",
+                rf"<meta[^>]+property=[\"']{re.escape(property_name)}[\"'][^>]+content=[\"']([^\"']+)[\"']",
+                rf"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']{re.escape(property_name)}[\"']",
             ],
         )
+
+    def _published_at(self, body: str) -> str | None:
+        published_at = (
+            self._meta_property_content(body, "article:published_time")
+            or self._meta_content(body, "datePublished")
+            or self._meta_content(body, "pubdate")
+            or self._json_ld_first(body, "datePublished")
+            or self._first_match(
+                body,
+                [
+                    r"<span[^>]*class=[\"'][^\"']*date[^\"']*[\"'][^>]*>(.*?)</span>",
+                    r"<p[^>]*class=[\"'][^\"']*date[^\"']*[\"'][^>]*>(.*?)</p>",
+                ],
+            )
+        )
+        return self._normalize_datetime_text(published_at)
+
+    def _normalize_datetime_text(self, value: str | None) -> str | None:
+        text = self._html_to_text(value or "")
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+        except ValueError:
+            pass
+
+        match = re.search(
+            r"(\d{1,2})/(\d{1,2})/(\d{4})\s*,\s*(\d{1,2}):(\d{2})(?::(\d{2}))?",
+            text,
+        )
+        if not match:
+            return text
+        day, month, year, hour, minute, second = match.groups()
+        dt = datetime(
+            int(year),
+            int(month),
+            int(day),
+            int(hour),
+            int(minute),
+            int(second or 0),
+            tzinfo=self.vietnam_timezone,
+        )
+        return dt.isoformat()
+
+    def _json_ld_first(self, body: str, key: str) -> str | None:
+        for parsed in self._json_ld_documents(body):
+            value = self._find_json_key(parsed, key)
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    def _json_ld_documents(self, body: str) -> list[Any]:
+        documents = []
+        scripts = re.findall(
+            r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        for raw in scripts:
+            text = html.unescape(raw).strip()
+            if not text:
+                continue
+            try:
+                documents.append(json.loads(text))
+            except json.JSONDecodeError:
+                continue
+        return documents
+
+    def _find_json_key(self, node: Any, key: str) -> Any:
+        if isinstance(node, list):
+            for item in node:
+                value = self._find_json_key(item, key)
+                if value not in (None, ""):
+                    return value
+            return None
+        if not isinstance(node, dict):
+            return None
+        if key in node:
+            return node[key]
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                found = self._find_json_key(value, key)
+                if found not in (None, ""):
+                    return found
+        return None
 
     def _category(self, body: str) -> str | None:
         category = self._meta_content(body, "section") or self._first_match(
@@ -652,11 +873,88 @@ class VNExpressCrawler(BaseCrawler):
         return self._html_to_text(category) if category else None
 
     def _tags(self, body: str) -> list[str]:
-        keywords = self._meta_content(body, "keywords")
-        if keywords:
-            return [item.strip() for item in keywords.split(",") if item.strip()]
+        title = self._html_to_text(
+            self._first_match(
+                body,
+                [
+                    r"<h1[^>]*class=[\"'][^\"']*title-detail[^\"']*[\"'][^>]*>(.*?)</h1>",
+                    r"<title[^>]*>(.*?)</title>",
+                ],
+            )
+            or ""
+        )
+        for raw_tags in [
+            self._meta_property_content(body, "article:tag"),
+            ",".join(self._json_ld_tags(body)),
+            self._meta_content(body, "news_keywords"),
+            self._meta_content(body, "keywords"),
+        ]:
+            tags = self._clean_tags(raw_tags, title)
+            if tags:
+                return tags
         tag_matches = re.findall(r"<a[^>]+class=[\"'][^\"']*tag_item[^\"']*[\"'][^>]*>(.*?)</a>", body, flags=re.IGNORECASE | re.DOTALL)
-        return [self._html_to_text(tag) for tag in tag_matches if self._html_to_text(tag)]
+        return self._dedupe_texts([self._html_to_text(tag) for tag in tag_matches if self._html_to_text(tag)])
+
+    def _json_ld_tags(self, body: str) -> list[str]:
+        tags: list[str] = []
+        for parsed in self._json_ld_documents(body):
+            value = self._find_json_key(parsed, "about")
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        tags.append(item)
+                    elif isinstance(item, dict) and item.get("name"):
+                        tags.append(str(item["name"]))
+            elif isinstance(value, str):
+                tags.append(value)
+        return tags
+
+    def _clean_tags(self, raw_tags: str | None, title: str) -> list[str]:
+        if not raw_tags:
+            return []
+        tags = []
+        for item in raw_tags.split(","):
+            tag = self._html_to_text(item)
+            if tag and not self._is_noise_tag(tag, title):
+                tags.append(tag)
+        return self._dedupe_texts(tags)
+
+    def _is_noise_tag(self, tag: str, title: str) -> bool:
+        normalized_tag = normalize_title(tag)
+        normalized_title = normalize_title(title)
+        return (
+            not normalized_tag
+            or normalized_tag == normalized_title
+            or normalized_tag == f"{normalized_title} - vnexpress"
+            or normalized_tag.endswith(" - vnexpress")
+        )
+
+    def _dedupe_texts(self, items: list[str]) -> list[str]:
+        deduped = []
+        seen = set()
+        for item in items:
+            text = item.strip()
+            key = normalize_title(text)
+            if text and key not in seen:
+                seen.add(key)
+                deduped.append(text)
+        return deduped
+
+    def _decode_jsonish_string(self, value: str) -> str:
+        text = html.unescape(value or "").strip()
+        if not text:
+            return ""
+        if text[0] in {"\"", "'"}:
+            try:
+                return str(json.loads(text))
+            except json.JSONDecodeError:
+                pass
+        if "\\u" in text or "\\/" in text:
+            try:
+                return bytes(text, "utf-8").decode("unicode_escape").replace("\\/", "/")
+            except UnicodeDecodeError:
+                pass
+        return text
 
     def _attr(self, tag: str, attr: str) -> str | None:
         match = re.search(rf"\b{re.escape(attr)}\s*=\s*([\"'])(.*?)\1", tag, flags=re.IGNORECASE | re.DOTALL)
@@ -701,14 +999,22 @@ class VNExpressCrawler(BaseCrawler):
                 deduped.append(normalized)
         return deduped
 
+    def _dedupe_urls(self, urls: list[str]) -> list[str]:
+        deduped = []
+        seen = set()
+        for url in urls:
+            normalized = self._clean_url(url).strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                deduped.append(normalized)
+        return deduped
+
     def _image_fingerprint(self, url: str) -> str:
         if not url:
             return ""
         clean = url.split("?")[0].split("#")[0].lower()
-        asset_id_match = re.search(r"-(\d{7,})\.(png|jpg|jpeg|webp|gif)", clean)
-        if asset_id_match:
-            return f"vne_asset_{asset_id_match.group(1)}"
-        return re.sub(r"https?://i\d+-", "https://i-", clean)
+        parsed = urlparse(clean)
+        return parsed.path.rsplit("/", 1)[-1] or re.sub(r"https?://i\d+-", "https://i-", clean)
 
     def _dedupe_dicts(self, items: list[dict[str, str]], key: str) -> list[dict[str, str]]:
         deduped = []

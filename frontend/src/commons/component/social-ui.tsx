@@ -3,6 +3,7 @@ import {
   BarChart3,
   Bell,
   ChevronDown,
+  Clapperboard,
   ExternalLink,
   Eye,
   HelpCircle,
@@ -46,16 +47,7 @@ export function userRoleLabel(user?: ApiUser | null) {
   return roles[0] || 'Member'
 }
 
-export const demoImages = [
-  'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1592841200221-a6898f307baa?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1559827260-dc66d52bef19?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=560&q=80',
-  'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=560&q=80',
-]
+export const demoImages: string[] = []
 
 export type PlatformName = 'facebook' | 'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'vnexpress' | 'web' | string
 
@@ -423,9 +415,7 @@ export function Thumbnail({
   src,
   title,
   className,
-  index = 0,
   duration,
-  fallback = true,
 }: {
   src?: string | null
   title?: string
@@ -435,10 +425,10 @@ export function Thumbnail({
   fallback?: boolean
 }) {
   const [imgError, setImgError] = useState(false)
-  const imageSrc = !imgError && src ? src : (fallback ? demoImages[index % demoImages.length] : '')
+  const imageSrc = !imgError && src ? src : ''
 
   return (
-    <div className={cn('relative overflow-hidden rounded-[8px] bg-[#edf1f7]', className)}>
+    <div className={cn('relative overflow-hidden rounded-[8px] bg-slate-900', className)}>
       {imageSrc ? (
         <img
           src={imageSrc}
@@ -448,7 +438,16 @@ export function Thumbnail({
           className="h-full w-full object-cover"
         />
       ) : (
-        <div className="grid h-full w-full place-items-center text-[11px] font-bold text-[#94a3b8]">No media</div>
+        <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-950 p-3 text-center">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white/80 backdrop-blur-xs">
+            <Clapperboard size={18} />
+          </div>
+          {title && (
+            <span className="mt-2 line-clamp-1 text-[10px] font-extrabold text-slate-300 px-2">
+              {title}
+            </span>
+          )}
+        </div>
       )}
       {duration && <span className="absolute bottom-1.5 right-1.5 rounded-[5px] bg-black/80 px-1.5 py-0.5 text-[10px] font-bold text-white">{duration}</span>}
     </div>

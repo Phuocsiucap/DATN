@@ -53,6 +53,8 @@ def _schema_compatibility_current(db: Session) -> bool:
         "social_profile_strategies",
         "content_items",
         "social_profiles",
+        "publishing_queue_items",
+        "social_posts",
         "planning_runs",
         "planning_candidates",
         "content_embeddings",
@@ -86,6 +88,13 @@ def _schema_compatibility_current(db: Session) -> bool:
             "refresh_expires_at",
             "scopes_jsonb",
             "metadata",
+        },
+        "publishing_queue_items": {
+            "platform_publish_id",
+            "publish_status",
+        },
+        "social_posts": {
+            "platform_publish_id",
         },
         "topic_embeddings": {"embedding_text_hash"},
     }
@@ -209,6 +218,25 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     CREATE INDEX IF NOT EXISTS ix_social_profiles_user_platform_external_id
                     ON social_profiles (user_id, platform, external_id);
+                END IF;
+
+                IF to_regclass('publishing_queue_items') IS NOT NULL THEN
+                    ALTER TABLE publishing_queue_items
+                    ADD COLUMN IF NOT EXISTS platform_publish_id VARCHAR(255);
+
+                    ALTER TABLE publishing_queue_items
+                    ADD COLUMN IF NOT EXISTS publish_status JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+                    CREATE INDEX IF NOT EXISTS ix_publishing_queue_items_platform_publish_id
+                    ON publishing_queue_items (platform_publish_id);
+                END IF;
+
+                IF to_regclass('social_posts') IS NOT NULL THEN
+                    ALTER TABLE social_posts
+                    ADD COLUMN IF NOT EXISTS platform_publish_id VARCHAR(255);
+
+                    CREATE INDEX IF NOT EXISTS ix_social_posts_platform_publish_id
+                    ON social_posts (platform_publish_id);
                 END IF;
 
                 IF to_regclass('media_workflow') IS NOT NULL THEN

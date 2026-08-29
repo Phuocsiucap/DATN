@@ -110,6 +110,8 @@ class ContentSeriesResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    profile_id: uuid.UUID | None = None
+    profileId: uuid.UUID | None = None
     title: str
     description: str | None
     series_type: str

@@ -437,7 +437,7 @@ def _serialize_story_data(draft_json: dict[str, Any], workflow: MediaWorkflow) -
         raw_scenes = []
         for idx in range(count):
             t_clip = text_clips[idx] if idx < len(text_clips) else {}
-            v_clip = video_clips[idx] if idx < len(video_clips) else {}
+            v_clip = _video_clip_for_text(video_clips, t_clip, idx) if t_clip else (video_clips[idx] if idx < len(video_clips) else {})
             text_str = sanitize_instruction_text(str(t_clip.get("text") or "").strip())
             voice_str = sanitize_instruction_text(str(t_clip.get("voice_text") or text_str).strip())
 
@@ -449,9 +449,15 @@ def _serialize_story_data(draft_json: dict[str, Any], workflow: MediaWorkflow) -
             if not text_str and not v_clip.get("src"):
                 continue
             raw_scenes.append({
+                "scene_index": t_clip.get("scene_index") if t_clip.get("scene_index") is not None else v_clip.get("scene_index"),
+                "video_id": v_clip.get("id"),
+                "text_id": t_clip.get("id"),
+                **({"video_ids": _clip_video_ids(t_clip)} if _clip_video_ids(t_clip) else {}),
+                **({"text_ids": _clip_text_ids(v_clip)} if _clip_text_ids(v_clip) else {}),
                 "subtitle": text_str,
                 "voice_text": voice_str,
                 "image": v_clip.get("src") or "",
+                "media_type": v_clip.get("type") or "image",
                 "effect": v_clip.get("effect") or "slow-zoom",
                 "fit": v_clip.get("fit") or "contain",
                 "duration": t_clip.get("duration") or v_clip.get("duration") or 4,
@@ -465,6 +471,60 @@ def _serialize_story_data(draft_json: dict[str, Any], workflow: MediaWorkflow) -
             continue
         result.append(_normalize_story_scene(raw, index, fallback_text=workflow.title if not raw.get("subtitle") else ""))
     return result
+
+
+def _video_clip_for_text(video_clips: list[dict[str, Any]], text_clip: dict[str, Any], fallback_index: int) -> dict[str, Any]:
+    if not video_clips:
+        return {}
+
+    video_ids = _clip_video_ids(text_clip)
+    if video_ids:
+        matched = next((clip for clip in video_clips if str(clip.get("id") or "") in video_ids), None)
+        if matched:
+            return matched
+
+    text_id = str(text_clip.get("id") or "")
+    if text_id:
+        matched = next((clip for clip in video_clips if text_id in _clip_text_ids(clip)), None)
+        if matched:
+            return matched
+
+    matched = next((clip for clip in video_clips if _clip_overlap_seconds(clip, text_clip) > 0), None)
+    if matched:
+        return matched
+
+    return video_clips[fallback_index] if fallback_index < len(video_clips) else video_clips[-1]
+
+
+def _clip_text_ids(item: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    raw_list = item.get("text_ids") if item.get("text_ids") is not None else item.get("textIds")
+    if isinstance(raw_list, list):
+        values.extend(raw_list)
+    raw_single = item.get("text_id") if item.get("text_id") is not None else item.get("textId")
+    if raw_single is not None:
+        values.append(raw_single)
+    return list(dict.fromkeys(str(value) for value in values if str(value or "").strip()))
+
+
+def _clip_video_ids(item: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    raw_list = item.get("video_ids") if item.get("video_ids") is not None else item.get("videoIds")
+    if isinstance(raw_list, list):
+        values.extend(raw_list)
+    raw_single = item.get("video_id") if item.get("video_id") is not None else item.get("videoId")
+    if raw_single is not None:
+        values.append(raw_single)
+    return list(dict.fromkeys(str(value) for value in values if str(value or "").strip()))
+
+
+def _clip_overlap_seconds(left: dict[str, Any], right: dict[str, Any]) -> float:
+    try:
+        start = max(float(left.get("start") or 0), float(right.get("start") or 0))
+        end = min(float(left.get("end") or 0), float(right.get("end") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, end - start)
 
 
 def _normalize_story_scene(raw: dict[str, Any], index: int, fallback_text: str = "") -> dict[str, Any]:
@@ -490,7 +550,21 @@ def _normalize_story_scene(raw: dict[str, Any], index: int, fallback_text: str =
         "subtitle": _compact_scene_text(subtitle, 140),
         "voice_text": _compact_scene_text(voice_text, 250),
     }
-    for key in ("media_type", "scale", "opacity", "position_x", "position_y", "rotation", "subtitle_start", "subtitle_duration"):
+    for key in (
+        "scene_index",
+        "video_id",
+        "video_ids",
+        "text_id",
+        "text_ids",
+        "media_type",
+        "scale",
+        "opacity",
+        "position_x",
+        "position_y",
+        "rotation",
+        "subtitle_start",
+        "subtitle_duration",
+    ):
         if raw.get(key) is not None:
             scene[key] = raw[key]
     if isinstance(raw.get("text_style"), dict):

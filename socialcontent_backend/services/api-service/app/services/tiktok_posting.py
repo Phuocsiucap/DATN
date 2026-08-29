@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 MAX_CHUNK_SIZE = 64 * 1024 * 1024
 DEFAULT_DIRECT_PRIVACY_LEVEL = "SELF_ONLY"
+TIKTOK_PUBLISH_COMPLETE_STATUS = "PUBLISH_COMPLETE"
+TIKTOK_PUBLISH_FAILED_STATUSES = {"FAILED", "PUBLISH_FAILED"}
 
 
 def _utc_now() -> datetime:
@@ -73,6 +76,68 @@ def _json_payload(response: httpx.Response, fallback: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback)
     return payload
+
+
+def tiktok_publish_status_value(status_data: dict[str, Any] | None) -> str:
+    if not isinstance(status_data, dict):
+        return ""
+    return str(status_data.get("status") or "").strip().upper()
+
+
+def tiktok_publish_is_complete(status_data: dict[str, Any] | None) -> bool:
+    return tiktok_publish_status_value(status_data) == TIKTOK_PUBLISH_COMPLETE_STATUS
+
+
+def tiktok_publish_is_failed(status_data: dict[str, Any] | None) -> bool:
+    return tiktok_publish_status_value(status_data) in TIKTOK_PUBLISH_FAILED_STATUSES
+
+
+def extract_tiktok_public_post_id(status_data: dict[str, Any] | None) -> str | None:
+    if not isinstance(status_data, dict):
+        return None
+    candidate_keys = (
+        "publicaly_available_post_id",
+        "publicly_available_post_id",
+        "post_id",
+        "video_id",
+    )
+    for key in candidate_keys:
+        value = status_data.get(key)
+        if value:
+            return str(value).strip()
+    public_posts = status_data.get("publicaly_available_post_ids") or status_data.get("publicly_available_post_ids")
+    if isinstance(public_posts, list):
+        for value in public_posts:
+            if value:
+                return str(value).strip()
+    return None
+
+
+def tiktok_publish_failure_reason(status_data: dict[str, Any] | None) -> str | None:
+    if not isinstance(status_data, dict):
+        return None
+    for key in ("fail_reason", "failure_reason", "error_message", "message"):
+        value = status_data.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def poll_tiktok_publish_status(
+    access_token: str,
+    publish_id: str,
+    *,
+    max_attempts: int = 12,
+    interval_seconds: float = 10,
+) -> dict[str, Any]:
+    last_status: dict[str, Any] = {}
+    for attempt in range(max(max_attempts, 1)):
+        if attempt > 0:
+            time.sleep(max(interval_seconds, 0))
+        last_status = fetch_tiktok_publish_status(access_token, publish_id)
+        if tiktok_publish_is_complete(last_status) or tiktok_publish_is_failed(last_status):
+            break
+    return last_status
 
 
 def ensure_tiktok_access_token(profile: SocialProfile) -> str:

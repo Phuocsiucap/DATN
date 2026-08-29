@@ -6,6 +6,7 @@ export type Tab =
   | 'generateVideo'
   | 'approvals'
   | 'schedule'
+  | 'publishedPosts'
   | 'users'
   | 'settings'
 
@@ -17,6 +18,7 @@ export const TAB_PATHS: Record<Tab, string> = {
   generateVideo: '/generate-video',
   approvals: '/approvals',
   schedule: '/schedule',
+  publishedPosts: '/published-posts',
   users: '/users',
   settings: '/settings',
 }

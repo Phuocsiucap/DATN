@@ -26,8 +26,16 @@ FULL_USER_FIELDS = (
     "bio_description,profile_deep_link,profile_web_link,is_verified,username,"
     "follower_count,following_count,likes_count,video_count"
 )
-BASIC_USER_FIELDS = "open_id,union_id,avatar_url,avatar_url_100,avatar_large_url,display_name"
-REQUIRED_TIKTOK_SCOPES = ("user.info.basic", "video.upload", "video.publish")
+REQUIRED_TIKTOK_SCOPES = (
+    "user.info.basic",
+    "user.info.profile",
+    "user.info.stats",
+    "video.list",
+    "video.upload",
+    "video.publish",
+)
+VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/"
+VIDEO_FIELDS = "id,title,create_time,cover_image_url,share_url,video_description,duration,height,width,view_count,like_count,comment_count,share_count"
 
 
 @dataclass
@@ -369,3 +377,26 @@ def build_tiktok_token_metadata(token_data: dict[str, Any], user_info: dict[str,
 
 def granted_scopes(token_data: dict[str, Any]) -> list[str]:
     return _scope_list(token_data.get("scope"))
+
+
+async def fetch_tiktok_video_list(access_token: str, max_count: int = 20, cursor: int | None = None) -> dict[str, Any]:
+    params = {"fields": VIDEO_FIELDS}
+    body: dict[str, Any] = {"max_count": max_count}
+    if cursor:
+        body["cursor"] = cursor
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.post(
+            VIDEO_LIST_URL,
+            params=params,
+            json=body,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        )
+    payload = _json_payload(response, "TikTok video list response không hợp lệ")
+    _log_tiktok_response("video_list", response, payload)
+    if response.status_code >= 400:
+        _raise_for_tiktok_error(payload, "Không lấy được danh sách video TikTok")
+        raise HTTPException(status_code=response.status_code, detail="Không lấy được danh sách video TikTok")
+    _raise_for_tiktok_error(payload, "Không lấy được danh sách video TikTok")
+    data = payload.get("data")
+    return data if isinstance(data, dict) else {}
+

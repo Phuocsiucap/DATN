@@ -413,16 +413,23 @@ def _apply_series_decision(
         return existing
 
     category_payload = content_category_payload(content)
+    desc = decision.get("series_description") or decision.get("reason") or content.summary
+    series_type = str(decision.get("series_type") or "NARRATIVE").upper()
+    try:
+        total_parts = max(0, int(decision.get("total_parts") or 0))
+    except (TypeError, ValueError):
+        total_parts = 0
+
     series = ContentSeries(
         user_id=workflow.user_id,
         profile_id=workflow.profile_id,
         title=title,
-        description=str(decision.get("reason") or content.summary or "")[:1000] or None,
-        series_type="NARRATIVE",
+        description=str(desc)[:1000] if desc else None,
+        series_type=series_type,
         status="ACTIVE",
         current_part=0,
-        total_parts=0,
-        context_json={"version": 1},
+        total_parts=total_parts,
+        context_json={"version": 1, "created_from": "auto_planning"},
         metadata_json={
             "created_from": "auto_planning",
             "source": "llm_series_decision",

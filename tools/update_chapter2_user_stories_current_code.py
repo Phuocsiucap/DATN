@@ -9,7 +9,7 @@ from docx.table import Table
 
 
 SOURCE = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_Final.docx")
-OUTPUT = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_CurrentFlow_Gherkin.docx")
+OUTPUT = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_CodeUpdate_20260829.docx")
 
 
 STORIES = [
@@ -41,6 +41,10 @@ STORIES = [
     ("26", "Xuất bản", "Metrics", "US-26", "Ghi nhận metrics và xem hiệu suất bài đăng", "Là nhà sáng tạo nội dung, tôi muốn ghi nhận lượt xem, thích, bình luận, chia sẻ và xem overview tăng trưởng của các bài đã đăng.", 3, 13, "Release V2.0 (13/09)", "Sprint 4", "Medium", "Executing"),
     ("27", "Xuất bản", "TikTok publishing", "US-27", "Đăng ngay TikTok bằng Direct Post hoặc Inbox Upload", "Là nhà sáng tạo nội dung, tôi muốn đăng video lên TikTok theo scope tài khoản, tạo SocialPost và cập nhật trạng thái queue.", 5, 21, "Release V2.0 (13/09)", "Sprint 4", "High", "Executing"),
     ("28", "Xuất bản", "Publish scheduler", "US-28", "Tự động đăng queue item đến hạn theo scheduler", "Là hệ thống, tôi muốn kiểm tra queue định kỳ và chỉ tự đăng khi chiến lược kênh cho phép auto publish.", 5, 21, "Release V2.0 (13/09)", "Sprint 4", "High", "Executing"),
+    ("31", "Xuất bản", "Rendered workflow queue sync", "US-31", "Tự đồng bộ video đã render sang hàng đợi chờ duyệt", "Là người vận hành, tôi muốn các MediaWorkflow đã render được tự tạo PublishingQueueItem khi mở queue để không bỏ sót video cần duyệt.", 3, 13, "Release V2.0 (13/09)", "Sprint 4", "High", "Executing"),
+    ("32", "Xuất bản", "Review feedback loop", "US-32", "Trả workflow về biên tập khi reviewer yêu cầu chỉnh sửa", "Là reviewer, tôi muốn khi yêu cầu chỉnh sửa ở Publishing Queue thì workflow liên quan quay lại trạng thái EDITING và lưu rõ ghi chú review.", 3, 13, "Release V2.0 (13/09)", "Sprint 4", "High", "Executing"),
+    ("33", "Sản xuất video", "AI series decision", "US-33", "Lưu metadata series do AI đề xuất theo chủ đề và mạch truyện", "Là nhà sáng tạo nội dung, tôi muốn AI khi lập kế hoạch hoặc sinh kịch bản có thể tạo/gán series với mô tả, loại series và tổng số tập để quản lý nội dung dài kỳ chính xác hơn.", 3, 13, "Release V2.0 (13/09)", "Sprint 4", "Medium", "Executing"),
+    ("34", "Sản xuất video", "Real media preview", "US-34", "Hiển thị thumbnail, avatar và video preview từ dữ liệu thật", "Là người vận hành sản xuất, tôi muốn workspace và approval queue hiển thị media thật từ nguồn crawl/workflow thay vì ảnh demo để kiểm tra đúng nội dung trước khi duyệt.", 2, 8, "Release V2.0 (13/09)", "Sprint 4", "Medium", "Executing"),
     ("29", "Triển khai & vận hành", "Deployment", "US-29", "Triển khai hệ thống microservices lên môi trường chính thức", "Là quản trị viên hệ thống, tôi muốn triển khai các service API, ingestion, AI media và frontend theo cấu hình môi trường để vận hành ổn định.", 5, 21, "Release Production (20/09)", "Sprint 5", "High", "Planned"),
     ("30", "Triển khai & vận hành", "Administration", "US-30", "Quản trị hệ thống và cấu hình lịch tự động hóa", "Là quản trị viên, tôi muốn quản lý người dùng, cấu hình hệ thống, audit log và trạng thái scheduler để kiểm soát vận hành.", 3, 13, "Release Production (20/09)", "Sprint 5", "Medium", "Planned"),
 ]
@@ -171,7 +175,7 @@ SCENARIOS = {
 
 
 V1_ORDER = ["US-01", "US-02", "US-03", "US-06", "US-07", "US-08", "US-09", "US-10", "US-11", "US-12", "US-13", "US-14", "US-15"]
-V2_ORDER = ["US-16", "US-17", "US-18", "US-19", "US-20", "US-21", "US-22", "US-23", "US-04", "US-05", "US-24", "US-25", "US-26", "US-27", "US-28"]
+V2_ORDER = ["US-16", "US-17", "US-18", "US-19", "US-20", "US-21", "US-22", "US-23", "US-04", "US-05", "US-24", "US-25", "US-26", "US-27", "US-28", "US-31", "US-32", "US-33", "US-34"]
 PROD_ORDER = ["US-29", "US-30"]
 
 GHERKIN_SCENARIOS = {
@@ -205,7 +209,7 @@ GHERKIN_SCENARIOS = {
     ]),
     "US-08": ("Crawler worker theo source type", [
         ("Thu thập dữ liệu VNExpress", "KafkaTask CRAWL_URL có source_type VNEXPRESS", "crawler runner nhận task", "hệ thống dùng VNExpressCrawler, lưu dữ liệu thô và cập nhật counters của crawl job"),
-        ("Thu thập dữ liệu Bilibili", "KafkaTask CRAWL_URL có source_type BILIBILI", "crawler runner nhận task", "hệ thống dùng BilibiliCrawler, chuẩn hóa output khi cần và phát sự kiện content.normalized"),
+        ("Làm sạch nội dung bài VNExpress", "bài VNExpress có sapo, đoạn liên quan, CTA Xem thêm hoặc thông tin tác giả nằm trong thẻ p", "crawler trích xuất phần thân bài", "hệ thống bỏ đoạn mô tả đã lưu riêng, bỏ link điều hướng/bài liên quan và chỉ giữ nội dung chính để tránh trùng lặp trong pipeline"),
     ]),
     "US-09": ("Chuẩn hóa và lưu ContentItem", [
         ("Tạo ContentItem từ dữ liệu thô", "crawler đã lưu raw document từ nguồn crawl", "normalization pipeline xử lý dữ liệu", "hệ thống tạo ContentItem có metadata, full text, media metadata và trạng thái chất lượng"),
@@ -256,24 +260,24 @@ GHERKIN_SCENARIOS = {
         ("Lưu final video artifact", "Remotion render hoàn tất thành công", "worker cập nhật kết quả render", "hệ thống lưu FINAL_VIDEO artifact, cập nhật final_video và chuyển workflow sang trạng thái chờ duyệt hoặc rendered"),
     ]),
     "US-21": ("Quản lý ContentSeries", [
-        ("Tạo và gán series", "người dùng có SocialProfile và nhiều workflow liên quan", "tạo ContentSeries và gán workflow vào series", "hệ thống lưu series_id để dùng context liên tục cho các tập tiếp theo"),
+        ("Tạo và gán series thủ công", "người dùng có SocialProfile và nhiều workflow liên quan", "tạo ContentSeries hoặc gán workflow vào series hiện có", "hệ thống lưu series_id, description, current_part và total_parts để dùng context liên tục cho các tập tiếp theo"),
         ("Kiểm tra tính nhất quán series", "series đã có nhiều workflow hoặc episode", "người dùng chạy consistency-check", "hệ thống cảnh báo scene rỗng, thiếu số tập hoặc dữ liệu không liền mạch"),
     ]),
     "US-22": ("Xưởng sản xuất video", [
-        ("Xem kanban workflow", "người dùng có danh sách MediaWorkflow", "mở trang Xưởng sản xuất video", "hệ thống hiển thị các cột Draft sẵn sàng, Đang chỉnh sửa, Đang render, Chờ duyệt và Sẵn sàng xuất bản"),
-        ("Mở workspace chi tiết", "người dùng chọn một workflow trong kanban", "mở Video Production Workspace", "hệ thống hiển thị source_content, story_data, progress, final_video và các capability action theo trạng thái hiện tại"),
+        ("Xem kanban workflow bốn cột", "người dùng có danh sách MediaWorkflow", "mở trang Xưởng sản xuất video", "hệ thống hiển thị các cột Draft kịch bản, Đang biên tập & Voice, Đang render MP4 và Chờ duyệt video theo trạng thái thực tế của workflow"),
+        ("Mở studio chi tiết", "người dùng chọn workflow có story/timeline", "mở Video Production Workspace ở bước video", "hệ thống hiển thị studio toàn màn hình gồm rail cảnh, preview theo aspect ratio, panel chỉnh scene, inspector thông tin/AI/script và action Export MP4"),
     ]),
     "US-23": ("Duyệt video đã render", [
         ("Approve video", "MediaWorkflow đã có file MP4 final_video", "người dùng xem preview và bấm Approve Video", "hệ thống đánh dấu video_approved và lưu metadata review Module 4"),
-        ("Tự động queue sau approve", "SocialProfileStrategy bật auto_queue_enabled", "video được approve thành công", "hệ thống tạo hoặc cập nhật PublishingQueueItem cho video đã duyệt"),
+        ("Phân biệt trạng thái chờ duyệt và đã duyệt", "workflow đã render xong nhưng chưa được reviewer duyệt", "người dùng xem danh sách dự án video", "hệ thống hiển thị trạng thái RENDERED là Chờ duyệt video, còn VIDEO_APPROVED/QUEUED_FOR_PUBLISHING/PUBLISHED được xếp vào nhóm đã sẵn sàng xuất bản"),
     ]),
     "US-24": ("Đưa video vào Publishing Queue", [
         ("Queue video đã duyệt", "MediaWorkflow có final_video và video_approved", "người dùng bấm Queue Post", "hệ thống tạo PublishingQueueItem với profile, caption, hashtags, scheduled_at và trạng thái phù hợp"),
-        ("Chặn queue video chưa duyệt", "MediaWorkflow chưa có final_video hoặc chưa được approve", "người dùng cố đưa video vào queue", "API từ chối thao tác và trả thông báo điều kiện chưa đạt"),
+        ("Chọn lịch theo chiến lược profile", "SocialProfileStrategy có schedule_days, schedule_times, timezone và approval_mode", "hệ thống tính lịch cho queue item", "queue item nhận scheduled_at phù hợp và trạng thái approved hoặc needs_approval tùy cấu hình approval_mode"),
     ]),
     "US-25": ("Theo dõi và xử lý Publishing Queue", [
         ("Lọc danh sách queue", "người dùng mở trang Approvals hoặc Schedule", "chọn profile, platform, status, date hoặc từ khóa tìm kiếm", "hệ thống trả danh sách queue item đúng bộ lọc và quyền truy cập"),
-        ("Yêu cầu chỉnh sửa queue item", "queue item chưa sẵn sàng để đăng", "người dùng bấm Request Changes và nhập ghi chú", "hệ thống chuyển item sang changes_requested và lưu lý do xử lý"),
+        ("Xem chi tiết nguồn và video", "queue item liên kết với ContentItem hoặc MediaWorkflow đã render", "người dùng mở dialog chi tiết", "hệ thống hiển thị bài nguồn, caption, lịch đăng và video preview được resolve từ workflow nếu article_link không phải URL video"),
     ]),
     "US-26": ("Ghi nhận và xem metrics bài đăng", [
         ("Ghi nhận SocialPostMetric", "SocialPost đã được tạo sau khi publish", "hệ thống hoặc người vận hành gửi số views, likes, comments và shares", "API lưu SocialPostMetric với mốc thời gian snapshot"),
@@ -295,6 +299,22 @@ GHERKIN_SCENARIOS = {
         ("Cấu hình khoảng thời gian Background Scheduler", "quản trị viên đăng nhập với vai trò SYSTEM_ADMIN", "điều chỉnh publish_queue_interval_minutes thành 5 phút và bấm Lưu", "hệ thống cập nhật cấu hình vào SystemSetting và Background Scheduler tự động áp dụng chu kỳ quét mới"),
         ("Xem nhật ký audit log hệ thống", "các thao tác tạo job, duyệt bài, đăng bài thủ công/tự động đã diễn ra", "quản trị viên vào trang Audit Logs", "hệ thống hiển thị danh sách nhật ký gồm người thực hiện, hành động, mục tiêu và mốc thời gian"),
     ]),
+    "US-31": ("Rendered Workflow Queue Sync", [
+        ("Tự tạo queue item khi mở danh sách queue", "MediaWorkflow có trạng thái RENDERED, VIDEO_APPROVED hoặc QUEUED_FOR_PUBLISHING, có final video và chưa có queued_post_id hợp lệ", "người vận hành mở danh sách Publishing Queue", "hệ thống tự tạo PublishingQueueItem trạng thái needs_approval, đặt scheduled_at mặc định sau 2 giờ và ghi queued_post_id vào metadata workflow"),
+        ("Không tạo trùng queue item", "MediaWorkflow đã có metadata queued_post_id trỏ tới PublishingQueueItem còn tồn tại", "hệ thống chạy bước đồng bộ rendered workflow sang queue", "workflow bị bỏ qua và không phát sinh queue item thứ hai cho cùng một video"),
+    ]),
+    "US-32": ("Review Feedback Loop", [
+        ("Reviewer yêu cầu chỉnh sửa từ queue", "queue item chưa đạt yêu cầu nội dung hoặc kỹ thuật", "reviewer bấm Request Changes và nhập ghi chú", "hệ thống chuyển queue item sang changes_requested, bỏ cờ video_approved và đưa MediaWorkflow liên quan về status/current_stage EDITING"),
+        ("Lưu vết quyết định review vào workflow", "queue item có workflow liên quan theo queued_post_id hoặc theo cặp profile/content", "hệ thống xử lý yêu cầu changes_requested", "metadata workflow được cập nhật module4_review với decision changes_requested, reviewer, thời gian, ghi chú và previous_decision"),
+    ]),
+    "US-33": ("AI Series Decision Metadata", [
+        ("AI tạo series mới có metadata đầy đủ", "Auto Planning hoặc Generate Video Script không tìm thấy series phù hợp cho nội dung mới", "LLM trả series_decision với series_title, series_description, series_type và total_parts", "hệ thống tạo ContentSeries active với description, type, tổng số tập và context_json ghi nguồn tạo từ auto_planning hoặc generate_video_script"),
+        ("AI gán vào series theo mạch nội dung", "đã có ContentSeries active cùng chủ đề hoặc có mạch truyện liên quan", "AI đánh giá topic relevance, story continuity và reusable theme", "hệ thống gán workflow vào series phù hợp mà không bắt buộc category phải trùng tuyệt đối"),
+    ]),
+    "US-34": ("Real Media Preview", [
+        ("Hiển thị thumbnail và avatar thật trong video workspace", "MediaWorkflow có primary_content chứa thumbnail_url, thumbnailUrl, image_url hoặc media_jsonb và profile có avatar_url", "người dùng mở Xưởng sản xuất video", "frontend hiển thị thumbnail từ dữ liệu nguồn và avatar profile, chỉ dùng fallback icon khi thật sự không có media"),
+        ("Resolve video preview từ workflow cho approval queue", "queue item article_link không phải URL video nhưng có MediaWorkflow liên quan chứa FINAL_VIDEO hoặc rendered_video", "người dùng mở chi tiết queue item", "backend trả video_url từ workflow artifact/metadata/draft_json để reviewer xem đúng MP4 cần duyệt"),
+    ]),
 }
 
 SPRINT_TASKS = {
@@ -305,7 +325,7 @@ SPRINT_TASKS = {
     "US-05": ["Thiết kế form cấu hình SocialProfileStrategy", "Lưu cờ schedule, approval và auto publishing"],
     "US-06": ["Lưu CrawlJob và danh sách CrawlJobSource", "Phát crawl.job.created và tạo KafkaTask CRAWL_URL"],
     "US-07": ["Xây dựng detail/SSE progress cho crawl job", "Bổ sung cancel và retry theo trạng thái job"],
-    "US-08": ["Tích hợp VNExpressCrawler và BilibiliCrawler", "Retry/backoff task lỗi và cập nhật job counters"],
+    "US-08": ["Tích hợp crawler theo source_type cho VNExpress/Bilibili", "Làm sạch nội dung VNExpress để bỏ sapo trùng, CTA và đoạn liên quan"],
     "US-09": ["Chuẩn hóa nội dung thô thành ContentItem", "Lưu full text/media metadata và trạng thái chất lượng"],
     "US-10": ["Gom ContentItem thành Story/Episode", "Lưu episode_order và metadata nguồn"],
     "US-11": ["Bổ sung final view, profile_matches và lọc chất lượng", "Xây dựng reprocess và mark-duplicate cho admin"],
@@ -318,14 +338,18 @@ SPRINT_TASKS = {
     "US-18": ["Tích hợp Edge TTS/ElevenLabs cho voice-over", "Lưu MP3 artifact và audio clip vào timeline"],
     "US-19": ["Đồng bộ audio, text clip và visual clip", "Cảnh báo regenerate khi draft đổi sau voice/render"],
     "US-20": ["Render MP4 bằng Remotion worker", "Lưu FINAL_VIDEO artifact và cập nhật trạng thái workflow"],
-    "US-21": ["CRUD ContentSeries và gán workflow", "Rebuild context và consistency-check series"],
-    "US-22": ["Xây dựng kanban xưởng sản xuất video", "Tính capabilities và progress cho workspace"],
-    "US-23": ["Approve video đã render và lưu review metadata", "Tự tạo queue item khi profile bật auto_queue_enabled"],
-    "US-24": ["Tạo PublishingQueueItem từ video approved", "Hỗ trợ lịch thủ công hoặc lịch gợi ý"],
-    "US-25": ["Lọc queue theo profile, trạng thái và ngày", "Xử lý approve, request changes, skip và detail preview"],
+    "US-21": ["CRUD ContentSeries và gán workflow", "Lưu description/current_part/total_parts và kiểm tra consistency series"],
+    "US-22": ["Xây dựng kanban bốn cột đúng trạng thái workflow", "Thiết kế studio chi tiết với scene rail, preview, editor panel và inspector"],
+    "US-23": ["Approve video đã render và lưu review metadata", "Tách trạng thái Chờ duyệt video khỏi nhóm đã duyệt/sẵn sàng xuất bản"],
+    "US-24": ["Tạo PublishingQueueItem từ video approved", "Tính scheduled_at theo schedule_days, schedule_times, timezone và approval_mode"],
+    "US-25": ["Lọc queue theo profile, trạng thái và ngày", "Hiển thị detail preview gồm source, caption, lịch và video_url resolve từ workflow"],
     "US-26": ["Ghi nhận SocialPostMetric", "Tính overview hiệu suất và growth theo SocialPost"],
     "US-27": ["Publish now qua TikTok Direct Post", "Fallback Inbox Upload theo scope video.upload"],
     "US-28": ["Quét queue đến hạn trong publish scheduler", "Tôn trọng schedule_enabled, approval_mode và auto_publish_enabled"],
+    "US-31": ["Đồng bộ rendered workflow sang PublishingQueueItem khi list queue", "Lưu queued_post_id để chống tạo trùng queue item"],
+    "US-32": ["Xử lý request changes từ approval queue", "Đưa workflow liên quan về EDITING và ghi module4_review"],
+    "US-33": ["Mở rộng AI series_decision với description, type và total_parts", "Gán series theo topic relevance, story continuity và reusable theme"],
+    "US-34": ["Trả thumbnail/avatar thật cho video workspace", "Resolve final video từ workflow artifacts/metadata/draft_json cho approval preview"],
     "US-29": ["Đóng gói API, ingestion, AI media và frontend", "Cấu hình database, Kafka, storage và biến môi trường"],
     "US-30": ["Xây dựng trang quản trị user/role/settings", "Giám sát audit log, scheduler snapshot và queue lỗi"],
 }
@@ -463,6 +487,78 @@ def make_sprint_backlog_rows(story_ids):
     return rows
 
 
+V1_SPRINT_PLAN = [
+    ("Sprint 1", "Hoàn thiện nền tảng đăng nhập, phân quyền, crawl job và pipeline xử lý dữ liệu đầu vào.", "US-01, US-02, US-03, US-06, US-07, US-08, US-09, US-10, US-11", "10/08/2026", "16/08/2026", "Người dùng đăng nhập được, tạo/theo dõi crawl job, dữ liệu VNExpress/Bilibili được làm sạch và lưu thành ContentItem/Story.", "Done"),
+    ("Sprint 2", "Khởi tạo MediaWorkflow và duyệt kế hoạch nội dung theo SocialProfileStrategy.", "US-12, US-13, US-14, US-15", "17/08/2026", "23/08/2026", "MediaWorkflow được tạo từ content/story/crawl job, PlanningRun chọn candidate và người dùng duyệt/từ chối kế hoạch.", "Done"),
+]
+
+
+V2_SPRINT_PLAN = [
+    ("Sprint 3", "Sinh timeline, chỉnh sửa story, tạo voice, căn timeline, render MP4 và quản lý ContentSeries.", "US-16, US-17, US-18, US-19, US-20, US-21", "24/08/2026", "30/08/2026", "Workflow có draft story, voice artifact, timeline đồng bộ, FINAL_VIDEO và series context đủ metadata để dùng tiếp.", "Executing"),
+    ("Sprint 4", "Hoàn thiện workspace/studio video, TikTok profile strategy, queue duyệt, lịch đăng, publish scheduler và feedback loop.", "US-04, US-05, US-22, US-23, US-24, US-25, US-26, US-27, US-28, US-31, US-32, US-33, US-34", "31/08/2026", "13/09/2026", "Workspace hiển thị media thật, queue tự đồng bộ video rendered, reviewer yêu cầu sửa được trả workflow về EDITING, TikTok publish hoạt động theo strategy.", "Executing"),
+]
+
+
+PROD_SPRINT_PLAN = [
+    ("Sprint 5", "Đóng gói triển khai và hoàn thiện công cụ quản trị vận hành.", "US-29, US-30", "14/09/2026", "20/09/2026", "Các service chạy ổn định trên môi trường chính thức, admin quản lý user/settings/audit log/scheduler.", "Planned"),
+]
+
+
+V2_RELEASE_ROWS = [
+    ("Phiên bản", "V2.0 - Sản xuất video, duyệt queue và xuất bản TikTok theo SocialProfileStrategy", "Cập nhật"),
+    ("Ngày phát hành dự kiến", "13/09/2026", "Đang thực hiện"),
+    ("Sprint bao phủ", "Sprint 3 và Sprint 4", "Đang thực hiện"),
+    ("Phạm vi user story", "US-16, US-17, US-18, US-19, US-20, US-21, US-22, US-23, US-04, US-05, US-24, US-25, US-26, US-27, US-28, US-31, US-32, US-33, US-34", "Cập nhật theo code"),
+    ("Mục tiêu phát hành", "Hoàn thiện luồng từ MediaWorkflow đến story/timeline, voice, render FINAL_VIDEO, duyệt video, tự đồng bộ PublishingQueueItem, xử lý request changes, lên lịch và publish TikTok.", "Đang thực hiện"),
+    ("Tiêu chí chấp nhận", "Workspace hiển thị đúng kanban bốn cột và media thật; studio chỉnh được scene/script/config; queue không tạo trùng; request changes trả workflow về EDITING; scheduler/publish tôn trọng strategy.", "Đang kiểm thử"),
+    ("Tính năng hoàn thành", "Script/scene/AI edit/TTS, subtitle sync/render MP4, ContentSeries context, AI series metadata, QA approval, queue sync, real media preview, TikTok QR/profile strategy, manual/auto publish và metrics.", "Đang hoàn thiện"),
+]
+
+
+V2_REVIEW_ROWS = [
+    ("Frontend", "Video workspace và studio", "Kanban bốn cột, sidebar series, card thumbnail/avatar thật, studio gồm scene rail, preview aspect ratio, editor panel và inspector.", "Rà soát responsive và trạng thái disable action khi workflow thiếu artifact.", "Đạt"),
+    ("Backend API", "Workspace summary, queue, approval", "API trả profile.avatar, thumbnail_url/thumbnailUrl, series profile_id/profileId; queue detail resolve video_url từ workflow.", "Bổ sung test cho fallback content_media và final video từ artifacts/metadata/draft_json.", "Đạt"),
+    ("AI Media", "Script, series decision, render", "LLM schema có series_description, series_type, total_parts; tạo ContentSeries từ auto planning/script; Remotion lưu FINAL_VIDEO.", "Theo dõi chất lượng matching series theo mạch truyện và reusable theme.", "Đạt"),
+    ("Publishing", "Queue sync và feedback loop", "list_user_queue tự sync workflow rendered sang queue; queued_post_id chống trùng; request changes cập nhật module4_review và trả workflow về EDITING.", "Kiểm tra idempotency khi queue item bị xóa hoặc workflow có nhiều artifact final.", "Đạt"),
+    ("Scheduler/TikTok", "Lên lịch và đăng bài", "Publish scheduler kiểm tra schedule_enabled, approval_mode, auto_publish_enabled; hỗ trợ Direct Post và Inbox Upload theo scope.", "Theo dõi lỗi token/scope và retry publish failed.", "Đạt"),
+]
+
+
+V2_RETRO_ROWS = [
+    ("Điểm làm tốt", "Luồng V2 đã rõ trạng thái hơn: RENDERED là Chờ duyệt video, còn VIDEO_APPROVED/QUEUED_FOR_PUBLISHING/PUBLISHED tách khỏi giai đoạn biên tập."),
+    ("Điểm làm tốt", "Workspace bỏ dữ liệu demo và ưu tiên media thật từ ContentItem/MediaWorkflow, giúp reviewer kiểm tra đúng video cần duyệt."),
+    ("Vấn đề còn tồn tại", "Một số trạng thái và metadata workflow phụ thuộc nhiều nguồn fallback nên cần test regression kỹ để tránh queue trùng hoặc mất video_url."),
+    ("Bài học", "Các user story cần bám entity code thực tế như MediaWorkflow, ContentSeries, PublishingQueueItem, KafkaTask và SocialProfileStrategy thay vì mô tả nghiệp vụ quá chung."),
+    ("Hành động tiếp theo", "Bổ sung test cho sync_rendered_workflows_to_queue, mark_queue_workflow_changes_requested, series_decision metadata và workspace summary media fallback."),
+]
+
+
+TABLE_CAPTIONS = [
+    "Bảng 2.1. Product Roadmap của dự án",
+    "Bảng 2.2. Danh sách các user story trong Product Backlog",
+    "Bảng 2.3. Ước tính độ phức tạp câu chuyện người dùng",
+    "Bảng 2.4. Phân bổ câu chuyện người dùng theo Release và Sprint",
+    "Bảng 2.5. Thứ tự ưu tiên phát triển User Story",
+    "Bảng 2.6. Sprint Planning cho phiên bản V1.0",
+    "Bảng 2.7. Sprint Backlog cho phiên bản V1.0",
+    "Bảng 2.8. Kiểm thử chức năng xác thực và phân quyền",
+    "Bảng 2.9. Kiểm thử chức năng crawl job và thu thập dữ liệu",
+    "Bảng 2.10. Kiểm thử chức năng chuẩn hóa dữ liệu và story grouping",
+    "Bảng 2.11. Kiểm thử chức năng lập kế hoạch nội dung và MediaWorkflow",
+    "Bảng 2.12. Thông tin phát hành phiên bản V1.0",
+    "Bảng 2.13. Sprint Review cho phiên bản V1.0",
+    "Bảng 2.14. Sprint Retrospective cho phiên bản V1.0",
+    "Bảng 2.15. Sprint Planning cho phiên bản V2.0",
+    "Bảng 2.16. Sprint Backlog cho phiên bản V2.0",
+    "Bảng 2.17. Thông tin phát hành phiên bản V2.0",
+    "Bảng 2.18. Sprint Review cho phiên bản V2.0",
+    "Bảng 2.19. Sprint Retrospective cho phiên bản V2.0",
+    "Bảng 2.20. Sprint Planning cho giai đoạn Production",
+    "Bảng 2.21. Sprint Backlog cho giai đoạn Production",
+    "Bảng 2.22. Kiểm thử các chức năng giai đoạn Production",
+]
+
+
 def insert_after_heading(anchor, lines):
     for line in lines:
         paragraph = anchor.insert_paragraph_before()
@@ -495,6 +591,53 @@ def make_story_section(story_ids):
     return lines
 
 
+def set_caption_text(paragraph, text):
+    set_paragraph_text(paragraph, text)
+    for run in paragraph.runs:
+        run.bold = True
+    try:
+        paragraph.style = "Caption"
+    except KeyError:
+        pass
+
+
+def insert_caption_before_table(document, table, text):
+    paragraph_el = OxmlElement("w:p")
+    table._element.addprevious(paragraph_el)
+    paragraph = Paragraph(paragraph_el, document)
+    paragraph.add_run(text)
+    set_caption_text(paragraph, text)
+
+
+def previous_nonempty_paragraph(blocks, table_index):
+    for index in range(table_index - 1, -1, -1):
+        block = blocks[index]
+        if isinstance(block, Paragraph) and block.text.strip():
+            return block
+        if isinstance(block, Table):
+            break
+    return None
+
+
+def ensure_table_captions(document):
+    blocks = list(iter_blocks(document))
+    table_index = 0
+    for block_index, block in enumerate(blocks):
+        if not isinstance(block, Table):
+            continue
+        if table_index >= len(TABLE_CAPTIONS):
+            raise ValueError("More tables than expected; add captions to TABLE_CAPTIONS.")
+        caption = TABLE_CAPTIONS[table_index]
+        previous = previous_nonempty_paragraph(blocks, block_index)
+        if previous is not None and previous.text.strip().startswith("Bảng "):
+            set_caption_text(previous, caption)
+        else:
+            insert_caption_before_table(document, block, caption)
+        table_index += 1
+    if table_index != len(TABLE_CAPTIONS):
+        raise ValueError(f"Expected {len(TABLE_CAPTIONS)} tables but found {table_index}.")
+
+
 def main():
     doc = Document(SOURCE)
     tables = doc.tables
@@ -508,9 +651,36 @@ def main():
     replace_table(doc, tables[2], ["Mã PBI", "User story", "Story Point", "Effort (giờ)"], estimate_rows, font_size=10)
     replace_table(doc, tables[3], ["Release", "Sprint", "Mã PBI", "Tên PBI", "Giai đoạn", "Trạng thái"], allocation_rows, font_size=10)
     replace_table(doc, tables[4], ["Mã PBI", "Story Point", "Effort (giờ)", "Sprint", "Priority"], priority_rows, font_size=10)
+    replace_table(doc, tables[5], ["Sprint", "Mục tiêu sprint", "PBI chính", "Ngày bắt đầu", "Ngày kết thúc", "Definition of Done", "Trạng thái"], V1_SPRINT_PLAN, font_size=9)
     replace_table(doc, tables[6], ["Product Backlog Item", "Sprint Task", "Owner", "Status", "Est. Effort (h)", "Actual (h)"], make_sprint_backlog_rows(V1_ORDER), font_size=9)
+    replace_table(doc, tables[14], ["Sprint", "Mục tiêu sprint", "PBI chính", "Ngày bắt đầu", "Ngày kết thúc", "Definition of Done", "Trạng thái"], V2_SPRINT_PLAN, font_size=9)
     replace_table(doc, tables[15], ["Product Backlog Item", "Sprint Task", "Owner", "Status", "Est. Effort (h)", "Actual (h)"], make_sprint_backlog_rows(V2_ORDER), font_size=9)
+    replace_table(doc, tables[21], ["Hạng mục", "Nội dung", "Trạng thái"], V2_RELEASE_ROWS, font_size=9)
+    replace_table(doc, tables[22], ["Nhóm", "Phạm vi review", "Kết quả đạt được", "Điều chỉnh sau review", "Trạng thái"], V2_REVIEW_ROWS, font_size=9)
+    replace_table(doc, tables[23], ["Loại ghi nhận", "Nội dung retrospective"], V2_RETRO_ROWS, font_size=10)
+    replace_table(doc, tables[24], ["Sprint", "Mục tiêu sprint", "PBI chính", "Ngày bắt đầu", "Ngày kết thúc", "Definition of Done", "Trạng thái"], PROD_SPRINT_PLAN, font_size=9)
     replace_table(doc, tables[25], ["Product Backlog Item", "Sprint Task", "Owner", "Status", "Est. Effort (h)", "Actual (h)"], make_sprint_backlog_rows(PROD_ORDER), font_size=9)
+
+    v1_plan_anchor = remove_between(doc, "2.5.1.1. Mục tiêu", "Bảng 2.6.")
+    insert_after_heading(v1_plan_anchor, [
+        "Phiên bản V1.0 tập trung xây dựng nền tảng bắt buộc của hệ thống SocialContentHub: xác thực, phân quyền, crawl đa nguồn, chuẩn hóa dữ liệu, gom nhóm story và lập kế hoạch nội dung bằng MediaWorkflow.",
+        "Sau khi đối chiếu với code hiện tại, phạm vi V1.0 vẫn giữ vai trò là luồng nền: người dùng tạo CrawlJob, worker xử lý nguồn VNExpress/Bilibili qua KafkaTask, dữ liệu được làm sạch và lưu thành ContentItem/Story, sau đó PlanningRun chọn candidate theo SocialProfileStrategy để người dùng duyệt.",
+        "Các điểm đã chỉnh trong báo cáo gồm việc bỏ cách gọi cũ content project/project plan, thay bằng MediaWorkflow, và bổ sung yêu cầu làm sạch nội dung VNExpress để loại sapo trùng, link bài liên quan, CTA Xem thêm và artifact tác giả.",
+    ])
+
+    v2_plan_anchor = remove_between(doc, "2.5.2.1. Mục tiêu", "Bảng 2.11.")
+    insert_after_heading(v2_plan_anchor, [
+        "Phiên bản V2.0 phản ánh các thay đổi lớn nhất của code hiện tại: sản xuất video theo MediaWorkflow, studio chỉnh timeline, voice, render MP4, quản lý ContentSeries, duyệt video, đồng bộ Publishing Queue và xuất bản TikTok theo chiến lược từng Social Profile.",
+        "So với bản mô tả cũ, V2.0 không còn chỉ dừng ở preview/render. Workspace hiện có kanban bốn cột, màn hình studio chi tiết với scene rail, preview theo aspect ratio, panel chỉnh scene, inspector thông tin/AI/script; trạng thái RENDERED được hiểu là Chờ duyệt video, còn VIDEO_APPROVED/QUEUED_FOR_PUBLISHING/PUBLISHED thuộc nhóm đã sẵn sàng xuất bản.",
+        "Báo cáo cũng bổ sung các user story mới cho các luồng code vừa xuất hiện: tự đồng bộ workflow đã render sang PublishingQueueItem, trả workflow về EDITING khi reviewer yêu cầu chỉnh sửa, lưu metadata series do AI đề xuất và hiển thị thumbnail/avatar/video preview từ dữ liệu thật.",
+    ])
+
+    prod_plan_anchor = remove_between(doc, "2.5.3.1. Mục tiêu", "Bảng 2.16.")
+    insert_after_heading(prod_plan_anchor, [
+        "Giai đoạn Production tập trung đóng gói triển khai và vận hành hệ thống sau khi các luồng nghiệp vụ V1.0/V2.0 đã ổn định.",
+        "Phạm vi chính gồm cấu hình môi trường cho API service, data-ingestion-engine, ai-media-engine, frontend, Kafka, database, storage, đồng thời hoàn thiện trang quản trị người dùng, SystemSetting, audit log và snapshot scheduler.",
+        "Các user story Production được giữ riêng để tránh nhầm với luồng sản xuất nội dung đang phát triển ở V2.0.",
+    ])
 
     v1_anchor = remove_between(doc, "2.5.1.2. Xây dựng kịch bản", "2.5.1.3. Phát triển tính năng")
     insert_after_heading(v1_anchor, make_story_section(V1_ORDER))
@@ -518,15 +688,27 @@ def main():
     v2_anchor = remove_between(doc, "2.5.2.2. Xây dựng kịch bản", "2.5.2.3. Phát triển tính năng")
     insert_after_heading(v2_anchor, make_story_section(V2_ORDER))
 
+    v2_dev_anchor = remove_between(doc, "2.5.2.3. Phát triển tính năng", "2.5.2.4. Phát hành")
+    insert_after_heading(v2_dev_anchor, [
+        "Ở phiên bản V2.0, phần phát triển tính năng được điều chỉnh theo kiến trúc code hiện tại: MediaWorkflow là đối tượng trung tâm, liên kết với SocialProfile, ContentItem, ContentSeries, KafkaTask, artifact voice/video và PublishingQueueItem. Luồng không còn mô tả chung là tạo content project, mà đi theo chuỗi rõ ràng: sinh timeline, chỉnh story, tạo voice, render MP4, duyệt video, đồng bộ queue, lên lịch và đăng TikTok.",
+        ("Nhóm US-16 đến US-20: ", "AI Media Engine nhận MediaWorkflow có nguồn nội dung hợp lệ, sinh story/timeline gồm scene, subtitle, voice text, visual prompt và timing; người dùng có thể chỉnh bằng AI hoặc thủ công; voice-over được tạo qua provider phù hợp; timeline được căn lại theo audio/subtitle/visual; cuối cùng Remotion Worker xuất FINAL_VIDEO và cập nhật trạng thái workflow sang nhóm rendered/chờ duyệt."),
+        ("Nhóm US-21 và US-33: ", "ContentSeries được quản lý như ngữ cảnh dài kỳ của kênh. Code hiện tại cho phép AI trả series_decision có series_description, series_type và total_parts; khi tạo series mới, hệ thống lưu description/type/tổng số tập và context_json ghi nguồn tạo. Khi đã có series phù hợp, AI gán workflow theo topic relevance, story continuity và reusable theme, không còn phụ thuộc cứng vào việc category phải trùng tuyệt đối."),
+        ("Nhóm US-22 và US-34: ", "Video workspace đã chuyển sang mô hình xưởng sản xuất/studio. Danh sách dự án dùng kanban bốn cột gồm Draft kịch bản, Đang biên tập & Voice, Đang render MP4 và Chờ duyệt video; card ưu tiên thumbnail từ primary_content hoặc media_jsonb và avatar SocialProfile, chỉ dùng fallback icon khi không có media thật. Workspace chi tiết hiển thị rail cảnh, preview theo aspect ratio, panel chỉnh scene, inspector thông tin/AI/script, nút reload và lệnh xuất MP4."),
+        ("Nhóm US-23 đến US-25, US-31 và US-32: ", "Luồng duyệt/xuất bản đã được tách rõ. RENDERED nghĩa là video đang chờ duyệt; VIDEO_APPROVED, QUEUED_FOR_PUBLISHING và PUBLISHED thuộc nhóm đã sẵn sàng xuất bản hoặc đã xử lý. Khi người dùng mở queue, service tự đồng bộ MediaWorkflow đã render thành PublishingQueueItem nếu chưa có queued_post_id hợp lệ, đặt trạng thái needs_approval và lịch mặc định sau 2 giờ. Nếu reviewer yêu cầu chỉnh sửa, queue item chuyển changes_requested, workflow liên quan quay lại EDITING và metadata module4_review lưu decision, reviewer, thời gian, ghi chú và previous_decision."),
+        ("Nhóm US-26 đến US-28: ", "Sau khi queue item được duyệt hoặc đến hạn, hệ thống ghi nhận SocialPost/SocialPostMetric, hỗ trợ Direct Post hoặc Inbox Upload tùy scope TikTok, đồng thời publish scheduler chỉ tự đăng khi profile active, token hợp lệ và SocialProfileStrategy cho phép schedule_enabled, approval_mode/auto_publish_enabled phù hợp."),
+        "Các kiểm thử của V2.0 cần tập trung vào tính đúng trạng thái workflow, idempotency khi đồng bộ queue, khả năng resolve final video từ artifact/metadata/draft_json, đường quay lại EDITING khi request changes, và tính nhất quán dữ liệu hiển thị giữa backend workspace summary với frontend studio.",
+    ])
+
     prod_anchor = remove_between(doc, "2.5.3.2. Xây dựng kịch bản", "2.5.3.3. Phát triển tính năng")
     insert_after_heading(prod_anchor, make_story_section(PROD_ORDER))
 
     note_anchor = find_paragraph(doc, "Bảng 2.2. Danh sách các user story")
     insert_after_heading(note_anchor, [
-        ("Ghi chú cập nhật: ", "Danh sách user story dưới đây đã được điều chỉnh theo luồng code hiện tại: dữ liệu được thu thập bằng crawl job/KafkaTask, lập kế hoạch qua MediaWorkflow và PlanningRun, sản xuất video qua timeline script/voice/render, sau đó duyệt và xuất bản qua Publishing Queue/TikTok API."),
+        ("Ghi chú cập nhật 29/08/2026: ", "Danh sách user story dưới đây đã được điều chỉnh theo code hiện tại: dữ liệu được thu thập bằng crawl job/KafkaTask, lập kế hoạch qua MediaWorkflow và PlanningRun, sản xuất video qua studio timeline/script/voice/render, video render xong được đồng bộ sang Publishing Queue để duyệt, reviewer có thể trả workflow về EDITING khi yêu cầu chỉnh sửa, sau đó hệ thống lên lịch và đăng TikTok theo SocialProfileStrategy."),
     ])
 
     normalize_legacy_terms(doc)
+    ensure_table_captions(doc)
 
     doc.save(OUTPUT)
     print(OUTPUT)

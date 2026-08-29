@@ -1,16 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { Loader2, RefreshCcw, CheckCircle2, XCircle, ChevronRight, AlertTriangle, Settings2, FileText, ExternalLink } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  CheckCircle2,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCcw,
+  Settings2,
+  Trash2,
+  XCircle,
+} from 'lucide-react'
 
 import {
   approveContentPlanApi,
+  createContentSeriesApi,
+  deleteContentSeriesApi,
   fetchPlanningRunDetailApi,
   fetchPlanningRunsApi,
   fetchProfileSeriesReviewApi,
   regenerateContentPlanApi,
   rejectContentPlanApi,
+  updateContentSeriesApi,
   type ContentPlan,
+  type ContentSeries,
   type PlanningProfile,
   type PlanningRun,
   type PlanningRunDetail,
@@ -18,9 +36,11 @@ import {
   type ReviewSourceContent,
   type StoryScene,
 } from '@/commons/apis/planning'
+import { updateVideoWorkspaceApi } from '@/commons/apis/generateVideo'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { MediaAssetPreview, mediaPlaybackUrl, mediaPreviewUrl, isImageMedia, isVideoMedia } from '@/commons/media'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
+import { SeriesModal, TransferSeriesModal, type SeriesFormData } from '@/features/generate-video/components/SeriesModal'
 import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
@@ -61,6 +81,63 @@ export default function PlanningPage({
   const [regeneratePlan, setRegeneratePlan] = useState<ContentPlan | null>(null)
   const [regenerateInstructions, setRegenerateInstructions] = useState('')
   const [regenerateSubmitting, setRegenerateSubmitting] = useState(false)
+
+  const [editingSeries, setEditingSeries] = useState<ContentSeries | null>(null)
+  const [seriesModalOpen, setSeriesModalOpen] = useState(false)
+  const [seriesSubmitting, setSeriesSubmitting] = useState(false)
+
+  const [transferringArticle, setTransferringArticle] = useState<{
+    workflowId: string
+    title: string
+    currentSeriesId?: string | null
+  } | null>(null)
+  const [transferSubmitting, setTransferSubmitting] = useState(false)
+
+  const handleSaveSeries = async (formData: SeriesFormData) => {
+    setSeriesSubmitting(true)
+    try {
+      if (editingSeries) {
+        await updateContentSeriesApi(editingSeries.id, formData)
+        toast.success('Đã cập nhật series thành công!')
+      } else {
+        await createContentSeriesApi({ ...formData, profile_id: selectedProfileId || formData.profile_id })
+        toast.success('Đã tạo series mới!')
+      }
+      setSeriesModalOpen(false)
+      setEditingSeries(null)
+      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Lỗi khi lưu series!')
+    } finally {
+      setSeriesSubmitting(false)
+    }
+  }
+
+  const handleDeleteSeries = async (seriesItem: ContentSeries) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa series "${seriesItem.title}"?`)) return
+    try {
+      await deleteContentSeriesApi(seriesItem.id)
+      toast.success(`Đã xóa series "${seriesItem.title}"`)
+      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Lỗi khi xóa series!')
+    }
+  }
+
+  const handleTransferArticleSeries = async (targetSeriesId: string | null) => {
+    if (!transferringArticle) return
+    setTransferSubmitting(true)
+    try {
+      await updateVideoWorkspaceApi(transferringArticle.workflowId, { series_id: targetSeriesId })
+      toast.success('Đã chuyển bài qua series mới!')
+      setTransferringArticle(null)
+      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Lỗi khi chuyển series cho bài viết!')
+    } finally {
+      setTransferSubmitting(false)
+    }
+  }
 
   const handleOpenRunDetail = async (run: PlanningRun) => {
     setSelectedRun(run)
@@ -301,18 +378,26 @@ export default function PlanningPage({
                       {selectedProfile ? `${selectedProfile.profile_name}${selectedProfile.username ? ` (@${selectedProfile.username})` : ''}` : 'Chọn account để xem kế hoạch riêng'}
                     </div>
                   </div>
-                  <select
-                    value={selectedProfileId}
-                    onChange={(event) => setSelectedProfileId(event.target.value)}
-                    className="h-10 rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm font-semibold text-[#0f172a] outline-none focus:border-[#3525cd]"
-                  >
-                    {profiles.length === 0 && <option value="">Chưa có social profile</option>}
-                    {profiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''} - {profile.platform}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedProfileId}
+                      onChange={(event) => setSelectedProfileId(event.target.value)}
+                      className="h-10 rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm font-semibold text-[#0f172a] outline-none focus:border-[#3525cd]"
+                    >
+                      {profiles.length === 0 && <option value="">Chưa có social profile</option>}
+                      {profiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''} - {profile.platform}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => { setEditingSeries(null); setSeriesModalOpen(true) }}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 text-xs font-bold text-white shadow-xs transition-colors hover:bg-blue-700"
+                    >
+                      <Plus size={15} /> Tạo series mới
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -334,6 +419,20 @@ export default function PlanningPage({
                         </div>
                         <h3 className="text-xl font-black text-[#0f172a]">{item.series.title}</h3>
                         <p className="mt-1 line-clamp-2 max-w-3xl text-sm leading-6 text-slate-600">{item.series.description || 'Các bài trong series này được nhóm theo nguồn content và mỗi bài có story_data riêng.'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setEditingSeries(item.series); setSeriesModalOpen(true) }}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-xs transition-colors hover:bg-slate-50"
+                        >
+                          <Pencil size={13} /> Sửa series
+                        </button>
+                        <button
+                          onClick={() => void handleDeleteSeries(item.series)}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                        >
+                          <Trash2 size={13} /> Xóa
+                        </button>
                       </div>
                     </div>
 
@@ -371,7 +470,25 @@ export default function PlanningPage({
                           <div className="flex items-center gap-2">
                             <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
                           </div>
-                          <div className="flex justify-end gap-2">
+                          <div className="flex justify-end gap-2 flex-wrap">
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                const workflowId = article.plan?.workflow_id || article.plan?.id
+                                if (workflowId) {
+                                  setTransferringArticle({
+                                    workflowId,
+                                    title: article.plan?.title || article.source_content?.canonical_title || 'Bài viết',
+                                    currentSeriesId: item.series.id,
+                                  })
+                                } else {
+                                  toast.error('Bài này chưa tạo workflow kịch bản để chuyển series')
+                                }
+                              }}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors"
+                            >
+                              <ArrowRightLeft size={14} /> Chuyển series
+                            </button>
                             {article.source_content && (
                               <button
                                 onClick={(event) => {
@@ -440,6 +557,33 @@ export default function PlanningPage({
             </div>
           )}
         </div>
+      )}
+
+      {seriesModalOpen && (
+        <SeriesModal
+          key={editingSeries?.id || 'new-series-planning'}
+          seriesToEdit={editingSeries}
+          profiles={profiles}
+          isSubmitting={seriesSubmitting}
+          onClose={() => { setSeriesModalOpen(false); setEditingSeries(null) }}
+          onSubmit={(data) => void handleSaveSeries(data)}
+        />
+      )}
+
+      {transferringArticle && (
+        <TransferSeriesModal
+          itemTitle={transferringArticle.title}
+          currentSeriesId={transferringArticle.currentSeriesId}
+          seriesList={reviewSeries.map((item) => item.series)}
+          isSubmitting={transferSubmitting}
+          onClose={() => setTransferringArticle(null)}
+          onSubmit={(targetSeriesId) => void handleTransferArticleSeries(targetSeriesId)}
+          onCreateNewSeries={() => {
+            setTransferringArticle(null)
+            setEditingSeries(null)
+            setSeriesModalOpen(true)
+          }}
+        />
       )}
 
       <ArticleReviewSheet

@@ -5,6 +5,7 @@ import {
   Composition,
   Img,
   Sequence,
+  Video,
   interpolate,
   staticFile,
   useCurrentFrame,
@@ -22,6 +23,8 @@ type Clip = {
   volume?: number;
   effect?: string;
   fit?: 'cover' | 'contain' | string;
+  sourceStart?: number;
+  source_start?: number;
 };
 
 type Story = {
@@ -73,34 +76,27 @@ const StorytellingDemo: React.FC<{story?: Story}> = ({story}) => {
   const videoClips = Array.isArray(timeline.video) ? timeline.video : [];
   const textClips = Array.isArray(timeline.text) ? timeline.text : [];
   const audioClips = resolveAudioClips(story);
-  const activeVideo = findActiveClip(videoClips, seconds);
   const activeText = findActiveClip(textClips, seconds);
   const title = String(story?.meta?.title || story?.meta?.workflow_title || 'SocialContentHub');
   const subtitle = String(activeText?.text || title);
-  const imageSrc = resolveVisualSrc(activeVideo?.src);
-  const zoom = interpolate(frame, [0, fps * 8], [1, 1.06], {extrapolateRight: 'extend'});
   const tint = colorFromText(title);
 
   return (
     <AbsoluteFill style={{backgroundColor: '#08090d', fontFamily: 'Inter, Arial, sans-serif'}}>
       <AbsoluteFill style={fallbackBackground(tint)} />
-      {imageSrc ? (
-        <AbsoluteFill
-          style={{
-            transform: `scale(${zoom})`,
-            transformOrigin: 'center',
-          }}
-        >
-          <Img
-            src={imageSrc}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: activeVideo?.fit === 'contain' ? 'contain' : 'cover',
-            }}
-          />
-        </AbsoluteFill>
-      ) : null}
+      {videoClips.map((clip, index) => {
+        const src = resolveVisualSrc(clip.src);
+        if (!src) {
+          return null;
+        }
+        const from = Math.max(0, Math.round((clip.start || 0) * fps));
+        const duration = Math.max(1, Math.round(((clip.end || 0) - (clip.start || 0)) * fps));
+        return (
+          <Sequence key={clip.id || `visual-${index}`} from={from} durationInFrames={duration}>
+            <VisualClip clip={clip} src={src} />
+          </Sequence>
+        );
+      })}
       <AbsoluteFill
         style={{
           background:
@@ -125,26 +121,6 @@ const StorytellingDemo: React.FC<{story?: Story}> = ({story}) => {
       >
         {subtitle}
       </div>
-      <div
-        style={{
-          position: 'absolute',
-          left: 76,
-          right: 76,
-          bottom: 90,
-          height: 10,
-          borderRadius: 999,
-          backgroundColor: 'rgba(255,255,255,0.22)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            width: `${Math.min(100, (seconds / Math.max(1, getDurationSeconds(story))) * 100)}%`,
-            height: '100%',
-            backgroundColor: '#ffffff',
-          }}
-        />
-      </div>
       {audioClips.map((clip, index) => {
         const src = resolvePublicAsset(clip.src);
         if (!src) {
@@ -158,6 +134,29 @@ const StorytellingDemo: React.FC<{story?: Story}> = ({story}) => {
           </Sequence>
         );
       })}
+    </AbsoluteFill>
+  );
+};
+
+const VisualClip: React.FC<{clip: Clip; src: string}> = ({clip, src}) => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const zoom = interpolate(frame, [0, fps * 8], [1, 1.06], {extrapolateRight: 'extend'});
+  const sourceStart = Math.max(0, Math.round(Number(clip.sourceStart ?? clip.source_start ?? 0) * fps));
+  const style: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: clip.fit === 'contain' ? 'contain' : 'cover',
+  };
+
+  return (
+    <AbsoluteFill
+      style={{
+        transform: `scale(${zoom})`,
+        transformOrigin: 'center',
+      }}
+    >
+      {isVideoClip(clip, src) ? <Video src={src} muted startFrom={sourceStart} style={style} /> : <Img src={src} style={style} />}
     </AbsoluteFill>
   );
 };
@@ -221,6 +220,10 @@ function resolveVisualSrc(src?: string): string | null {
   return resolvePublicAsset(value);
 }
 
+function isVideoClip(clip: Clip, src: string): boolean {
+  return String(clip.type || '').toLowerCase().includes('video') || /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(src);
+}
+
 function resolvePublicAsset(src?: string): string | null {
   const value = String(src || '').trim();
   if (!value) {
@@ -241,7 +244,7 @@ function resolvePublicAsset(src?: string): string | null {
 
 function localPublicAssetPath(value: string): string | null {
   const normalized = value.replace(/\\/g, '/');
-  if (normalized.startsWith('assets/audio/')) {
+  if (normalized.startsWith('assets/audio/') || normalized.startsWith('assets/videos/')) {
     return normalized;
   }
   const publicPrefix = '/public/';

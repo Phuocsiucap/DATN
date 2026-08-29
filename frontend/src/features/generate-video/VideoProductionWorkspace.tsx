@@ -15,6 +15,7 @@ import {
   FastForward,
   FileText,
   Film,
+  FolderKanban,
   Clock,
   Globe,
   Image as ImageIcon,
@@ -24,6 +25,7 @@ import {
   Music,
   Newspaper,
   Pause,
+  Pencil,
   Play,
   Plus,
   Rewind,
@@ -66,6 +68,8 @@ import {
   type VideoWorkflowProgress,
   type VideoWorkspaceDetail,
 } from '@/commons/apis/generateVideo'
+import { fetchAllContentSeriesApi, fetchContentSeriesApi, type ContentSeries } from '@/commons/apis/planning'
+import { TransferSeriesModal } from './components/SeriesModal'
 import WorkflowProgress from './WorkflowProgress'
 
 type StepId = 'plan' | 'story' | 'video' | 'preview'
@@ -204,6 +208,45 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const [showEditDialog, setShowEditDialog] = useState(false)
   const [showContentDetailId, setShowContentDetailId] = useState<string | null>(null)
   const [exportedVideoUrl, setExportedVideoUrl] = useState('')
+
+  const [transferModalOpen, setTransferModalOpen] = useState(false)
+  const [allSeries, setAllSeries] = useState<ContentSeries[]>([])
+  const [transferSubmitting, setTransferSubmitting] = useState(false)
+
+  const openTransferModal = async () => {
+    setTransferModalOpen(true)
+    const profileId = selectedProject?.profile?.id
+    if (profileId) {
+      try {
+        const data = await fetchContentSeriesApi(profileId)
+        setAllSeries(data)
+      } catch {
+        setAllSeries([])
+      }
+    } else {
+      try {
+        const data = await fetchAllContentSeriesApi()
+        setAllSeries(data)
+      } catch {
+        setAllSeries([])
+      }
+    }
+  }
+
+  const handleTransferSeries = async (targetSeriesId: string | null) => {
+    if (!selectedId) return
+    setTransferSubmitting(true)
+    try {
+      await updateVideoWorkspaceApi(selectedId, { series_id: targetSeriesId })
+      setStatus('Đã chuyển dự án sang series mới!')
+      setTransferModalOpen(false)
+      await loadProjectById(selectedId, { quiet: true })
+    } catch (error: any) {
+      setStatus(error?.response?.data?.detail || 'Không thể chuyển series')
+    } finally {
+      setTransferSubmitting(false)
+    }
+  }
 
   const contentId = useMemo(() => {
     if (!selectedProject) return null
@@ -571,9 +614,12 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     }
   }
 
+  const isStudioDetail = activeStep === 'video' && Boolean(previewStory || story)
+
   return (
-    <div className="workspace-page">
-            <div className="mb-4 flex flex-col gap-4">
+    <div className={isStudioDetail ? "min-h-[calc(100vh-24px)] bg-[#f6f8ff]" : "workspace-page"}>
+      {!isStudioDetail && (
+      <div className="mb-4 flex flex-col gap-4">
         <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-start md:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -592,6 +638,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
             
             {selectedProject && (
               <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-slate-600 md:pl-12">
+                <button
+                  type="button"
+                  onClick={() => void openTransferModal()}
+                  title="Chuyển series cho dự án này"
+                  className="flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 transition-colors font-bold shadow-2xs"
+                >
+                  <FolderKanban size={13} />
+                  <span>{selectedProject.series?.title || 'Chưa thuộc series nào'}</span>
+                  <Pencil size={11} className="ml-0.5 opacity-75" />
+                </button>
                 <div className="flex items-center gap-1.5 rounded-md bg-slate-100 px-2.5 py-1">
                   <Film size={13} className="text-slate-400" />
                   {String(selectedProject.metadata?.format || 'NARRATED_STORY').replace('_', ' ')}
@@ -667,7 +723,9 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           </div>
         )}
       </div>
+      )}
 
+      {!isStudioDetail && (
       <div className="grid gap-4">
         {activeStep === 'plan' && (
           <Panel title="1. Story data từ AI">
@@ -726,6 +784,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           </Panel>
         )}
       </div>
+      )}
 
       {showEditDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
@@ -776,6 +835,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           onVoiceProviderChange={setVoiceProvider}
           onFitFrames={() => void generateVoice()}
           onExit={() => setActiveStep('story')}
+          onReload={() => void loadInitial()}
           onChange={(nextStory) => {
             setPreviewStory(nextStory)
             updateStory(nextStory)
@@ -830,6 +890,16 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
         <ContentDetailDialog
           contentId={showContentDetailId}
           onClose={() => setShowContentDetailId(null)}
+        />
+      )}
+      {transferModalOpen && (
+        <TransferSeriesModal
+          itemTitle={selectedProject?.title || 'Video Project'}
+          currentSeriesId={selectedProject?.series?.id}
+          seriesList={allSeries}
+          isSubmitting={transferSubmitting}
+          onClose={() => setTransferModalOpen(false)}
+          onSubmit={(targetSeriesId) => void handleTransferSeries(targetSeriesId)}
         />
       )}
     </div>
@@ -1397,6 +1467,7 @@ function StoryVisualPreview({
   onVoiceProviderChange,
   onFitFrames,
   onExit,
+  onReload,
   onChange,
 }: {
   story: GenerateVideoStory | null
@@ -1413,6 +1484,7 @@ function StoryVisualPreview({
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
   onFitFrames: () => void
   onExit: () => void
+  onReload: () => void
   onChange: (story: GenerateVideoStory) => void
 }) {
   const scenes = useMemo(() => story ? storyTimelineScenes(story) : [], [story])
@@ -1634,6 +1706,7 @@ function StoryVisualPreview({
   }
   const frameSize = normalizeVideoFrame(story?.video)
   const frameAspect = frameSize.width / frameSize.height
+  const storyBackgroundColor = normalizeColorValue(String(story?.video?.background || '#05070b'))
   const previewMaxHeight = isFullscreen ? 365 : 270
   const previewMaxWidth = Math.min(isFullscreen ? 650 : 520, Math.round(previewMaxHeight * frameAspect))
   const previewStage = (
@@ -1641,6 +1714,7 @@ function StoryVisualPreview({
       className="relative mx-auto w-full overflow-hidden rounded-lg bg-slate-950"
       style={{
         aspectRatio: `${frameSize.width} / ${frameSize.height}`,
+        backgroundColor: storyBackgroundColor,
         maxHeight: previewMaxHeight,
         maxWidth: Math.max(180, previewMaxWidth),
       }}
@@ -1712,6 +1786,7 @@ function StoryVisualPreview({
         onVoiceProviderChange={onVoiceProviderChange}
         onFitFrames={onFitFrames}
         onExit={onExit}
+        onReload={onReload}
         onToggleFullscreen={() => setIsFullscreen((value) => !value)}
         onToggleTrackMute={toggleTrackMute}
         saving={saving}
@@ -1784,6 +1859,7 @@ function RemotionLikeEditor({
   onVoiceProviderChange,
   onFitFrames,
   onExit,
+  onReload,
   onToggleFullscreen,
   onToggleTrackMute,
   saving,
@@ -1816,6 +1892,7 @@ function RemotionLikeEditor({
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
   onFitFrames: () => void
   onExit: () => void
+  onReload: () => void
   onToggleFullscreen: () => void
   onToggleTrackMute: (trackId: string) => void
   saving: boolean
@@ -1995,7 +2072,6 @@ function RemotionLikeEditor({
       <ProCutTopToolbar
         fps={fps}
         isFullscreen={isFullscreen}
-        onDuplicate={duplicateScene}
         onExit={onExit}
         onExport={onExport}
         onGenerateVoice={onGenerateVoice}
@@ -2089,7 +2165,7 @@ function RemotionLikeEditor({
     <div
       className={isFullscreen
         ? "fixed inset-0 z-[80] flex h-screen w-screen flex-col overflow-hidden bg-[#f6f8ff] text-slate-950"
-        : "relative flex h-[760px] w-full flex-col overflow-hidden rounded-[8px] border border-[#dfe4f3] bg-[#f6f8ff] text-slate-950 shadow-sm"}
+        : "relative flex h-[calc(100vh-24px)] min-h-[760px] w-full flex-col overflow-hidden bg-[#f6f8ff] text-slate-950"}
       onClick={() => setAudioMenu(null)}
     >
       {addAudioType && (
@@ -2152,6 +2228,7 @@ function RemotionLikeEditor({
         onExport={onExport}
         onFitFrames={onFitFrames}
         onGenerateVoice={onGenerateVoice}
+        onReload={onReload}
         onPlayToggle={onPlayToggle}
         onResizeScene={resizeScene}
         onSeek={onSeek}
@@ -2211,6 +2288,7 @@ function StudioProductionShell({
   onExport,
   onFitFrames,
   onGenerateVoice,
+  onReload,
   onPlayToggle,
   onResizeScene,
   onSeek,
@@ -2265,6 +2343,7 @@ function StudioProductionShell({
   onExport: () => void
   onFitFrames: () => void
   onGenerateVoice: () => void
+  onReload: () => void
   onPlayToggle: () => void
   onResizeScene: (event: React.PointerEvent<HTMLButtonElement>) => void
   onSeek: (time: number) => void
@@ -2278,106 +2357,109 @@ function StudioProductionShell({
 }) {
   const progress = videoDuration ? Math.min(100, Math.max(0, (currentTime / videoDuration) * 100)) : 0
   const frameSize = normalizeVideoFrame(story.video)
-  const aspectLabel = `${frameSize.width}:${frameSize.height}`
+  const aspectLabel = `${frameSize.width}x${frameSize.height}`
   return (
     <>
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#dfe4f3] bg-white px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <button title="Quay lại" onClick={onExit} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] hover:bg-[#f5f7ff]">
-            <ArrowLeft size={15} />
-          </button>
+      <div className="shrink-0 px-3 pb-3 pt-3">
+        <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-black text-[#11183c]">{getStoryProjectName(story)}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-[10px] font-bold text-[#667097]">
-              <span>{scenes.length} scene</span>
-              <span>{formatStudioClock(videoDuration)}</span>
-              <span>{aspectLabel}</span>
-              <span>{fps} FPS</span>
+            <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#637097]">
+              <button title="Quay lại" onClick={onExit} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] shadow-sm hover:bg-[#f5f7ff]">
+                <ArrowLeft size={15} />
+              </button>
+              <span>Xưởng sản xuất video</span>
+              <ChevronDown size={13} className="-rotate-90 text-[#9aa4c3]" />
+              <span>Chi tiết dự án</span>
+            </div>
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid h-8 w-8 place-items-center rounded-[8px] bg-[#ede9fe] text-[#6247ff]">
+                <Clapperboard size={16} />
+              </div>
+              <h1 className="truncate text-[22px] font-black leading-tight text-[#11183c]">{getStoryProjectName(story)}</h1>
+              <span className="rounded-[8px] bg-[#d5f7e8] px-3 py-1 text-[11px] font-black uppercase text-[#069467]">Draft sẵn sàng</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 pl-11 text-[11px] font-bold text-[#4f5b7f]">
+              <span className="rounded bg-white px-2 py-1 shadow-sm">TikTok</span>
+              <span className="rounded bg-white px-2 py-1 shadow-sm">SocialContentHub</span>
+              <span className="rounded bg-white px-2 py-1 shadow-sm">{String(story.meta?.source || 'Ẩm thực')}</span>
+              <span className="rounded bg-white px-2 py-1 shadow-sm">{Math.round(videoDuration)}s</span>
+              <span className="rounded bg-white px-2 py-1 shadow-sm">{frameSize.width > frameSize.height ? '16:9' : '9:16'} · {aspectLabel}</span>
+              <span className="rounded bg-white px-2 py-1 shadow-sm">{fps} FPS</span>
+              <span>Tạo draft</span>
+              <span>ID {String(story.meta?.workflow_id || '').slice(0, 8) || 'draft'}</span>
             </div>
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onReload} className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[12px] font-bold text-[#27305b] shadow-sm hover:bg-[#f8faff]">
+              <Rewind size={13} /> Reload
+            </button>
+            <button className="grid h-9 w-9 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#27305b] shadow-sm hover:bg-[#f8faff]">
+              <span className="text-lg leading-none">...</span>
+            </button>
+            <button disabled={exporting} onClick={onExport} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#6247ff] px-4 text-[12px] font-black text-white shadow-lg shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
+              <Download size={14} /> {exporting ? 'Đang render...' : 'Xuất MP4'}
+            </button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button title="Nhân bản scene" onClick={onDuplicate} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff]">
-            <ArrowUpRight size={13} /> Nhân bản
-          </button>
-          <button title="Lưu chỉnh sửa" disabled={saving} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#b7c0ff] bg-white px-3 text-[11px] font-bold text-[#5b45ff] hover:bg-[#f5f2ff] disabled:opacity-50">
-            <Save size={13} /> {saving ? 'Đang lưu' : 'Lưu'}
-          </button>
-          <select
-            aria-label="Voice provider"
-            title="Voice provider"
-            value={voiceProvider}
-            disabled={voiceGenerating || saving || exporting}
-            onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
-            className="h-8 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-[11px] font-bold text-[#2d3463] outline-none disabled:opacity-50"
-          >
-            {voiceProviderOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <button disabled={voiceGenerating || saving || exporting} onClick={onGenerateVoice} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff] disabled:opacity-50">
-            <Mic2 size={13} /> {voiceGenerating ? 'Đang tạo' : 'Tạo Voice AI'}
-          </button>
-          <button disabled={fitting || saving || exporting || voiceGenerating} onClick={onFitFrames} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[11px] font-bold text-[#2d3463] hover:bg-[#f5f7ff] disabled:opacity-50">
-            <Wand2 size={13} /> Fit frame
-          </button>
-          <button title={isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'} onClick={onToggleFullscreen} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] hover:bg-[#f5f7ff]">
-            <Maximize2 size={14} />
-          </button>
-          <button disabled={exporting} onClick={onExport} className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[#6247ff] px-3 text-[11px] font-black text-white shadow-sm shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
-            <UploadCloud size={13} /> {exporting ? 'Đang render' : 'Render video'}
-          </button>
-        </div>
+        <StudioStageProgress progress={progress} voiceReady={Boolean(audioSrc)} exporting={exporting} />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(360px,1fr)_420px] gap-3 overflow-hidden p-3">
+      <div className="grid min-h-0 flex-1 grid-cols-[250px_minmax(320px,1fr)_380px_280px] gap-3 overflow-hidden px-3 pb-3">
         <StudioSceneRail scenes={scenes} sceneIndex={sceneIndex} videoDuration={videoDuration} onDuplicate={onDuplicate} onSeek={onSeek} onSelect={onSelect} />
-        <section className="flex min-w-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-[#e9edf8] p-3 shadow-sm">
-          <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-[#667097]">
-            <div className="flex gap-2">
+        <section className="relative flex min-w-0 flex-col overflow-hidden rounded-[8px] bg-[#d9deea] shadow-sm">
+          <div className="absolute left-4 top-20 z-10 grid gap-2 text-[12px] font-black text-[#27305b]">
               {videoAspectPresets.map((preset) => (
                 <button
                   key={preset.label}
                   onClick={() => onChange({ ...story, video: { ...(story.video || {}), width: preset.width, height: preset.height } })}
-                  className={`h-7 rounded-[8px] border px-3 ${frameSize.width === preset.width && frameSize.height === preset.height ? 'border-[#6247ff] bg-white text-[#4f36ee] ring-2 ring-[#6247ff]/15' : 'border-transparent bg-white/55 hover:bg-white'}`}
+                className={`h-9 w-16 rounded-[8px] border ${frameSize.width === preset.width && frameSize.height === preset.height ? 'border-[#6247ff] bg-[#eef2ff] text-[#4f36ee] ring-2 ring-[#6247ff]/15' : 'border-transparent bg-white/45 text-white hover:bg-white/60'}`}
                 >
                   {preset.label}
                 </button>
               ))}
-            </div>
-            <span>{Math.round(progress)}%</span>
           </div>
-          <div className="flex min-h-0 flex-1 items-center justify-center rounded-[8px] bg-[#d9dfec] p-5">
-            <div className="flex h-full max-h-[540px] w-full items-center justify-center">
+          <div className="flex min-h-0 flex-1 items-center justify-center p-8">
+            <div className="relative flex h-full max-h-[560px] w-full items-center justify-center">
+              <div className="absolute right-10 top-0 flex rounded-full bg-[#11183c]/80 p-1 text-white">
+                <button title={isFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'} onClick={onToggleFullscreen} className="grid h-8 w-8 place-items-center rounded-full bg-[#11183c]"><Maximize2 size={13} /></button>
+                <button title="Fit frame" disabled={fitting || saving || exporting || voiceGenerating} onClick={onFitFrames} className="grid h-8 w-8 place-items-center rounded-full text-white/70 disabled:opacity-50"><SlidersHorizontal size={13} /></button>
+              </div>
               {previewStage}
             </div>
           </div>
-          <div className="mt-3 rounded-[8px] bg-white/70 px-3 py-2">
-            <button
-              className="group flex h-3 w-full items-center rounded-full bg-[#d8dded]"
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect()
-                onSeek(((event.clientX - rect.left) / Math.max(1, rect.width)) * videoDuration)
-              }}
-            >
-              <span className="h-1.5 rounded-full bg-[#6247ff]" style={{ width: `${progress}%` }} />
-            </button>
-            <div className="mt-2 flex items-center justify-between text-[11px] font-black text-[#11183c]">
+          <div className="mx-3 mb-3 rounded-[14px] bg-white/40 px-3 py-2 backdrop-blur">
+            <div className="flex items-center justify-between text-[12px] font-black text-[#11183c]">
               <span>{formatStudioClock(currentTime)} / {formatStudioClock(videoDuration)}</span>
-              <div className="flex items-center gap-2">
-                <button title="Về đầu" onClick={() => onSeek(0)} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm"><SkipBack size={14} /></button>
-                <button title={playing ? 'Tạm dừng' : 'Phát'} onClick={onPlayToggle} className="grid h-10 w-10 place-items-center rounded-full bg-[#1d2452] text-white shadow-md">
+              <div className="flex items-center gap-3">
+                <button title="Về đầu" onClick={() => onSeek(0)} className="grid h-8 w-8 place-items-center rounded-full bg-white/80 text-[#27305b] shadow-sm"><SkipBack size={14} /></button>
+                <button title={playing ? 'Tạm dừng' : 'Phát'} onClick={onPlayToggle} className="grid h-10 w-10 place-items-center rounded-full bg-[#11183c] text-white shadow-md">
                   {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
                 </button>
-                <button title="Tới cuối" onClick={() => onSeek(videoDuration)} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm"><SkipForward size={14} /></button>
+                <button title="Tới cuối" onClick={() => onSeek(videoDuration)} className="grid h-8 w-8 place-items-center rounded-full bg-white/80 text-[#27305b] shadow-sm"><SkipForward size={14} /></button>
               </div>
-              <button title="Tắt/bật voice" onClick={() => onToggleTrackMute('audio-2')} className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#27305b] shadow-sm">
+              <button title="Tắt/bật voice" onClick={() => onToggleTrackMute('audio-2')} className="grid h-8 w-8 place-items-center rounded-full bg-white/80 text-[#27305b] shadow-sm">
                 {audio2Muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
               </button>
             </div>
           </div>
         </section>
-        <StudioInspector currentScene={currentScene} sceneIndex={sceneIndex} scenes={scenes} story={story} onChange={onChange} />
+        <StudioSceneEditorPanel currentScene={currentScene} sceneIndex={sceneIndex} scenes={scenes} story={story} videoDuration={videoDuration} onChange={onChange} />
+        <StudioInspector
+          audio1Muted={audio1Muted}
+          audio2Muted={audio2Muted}
+          currentScene={currentScene}
+          sceneIndex={sceneIndex}
+          scenes={scenes}
+          story={story}
+          voiceGenerating={voiceGenerating}
+          voiceProvider={voiceProvider}
+          onChange={onChange}
+          onGenerateVoice={onGenerateVoice}
+          onSave={onSave}
+          onSelect={onSelect}
+          onToggleTrackMute={onToggleTrackMute}
+          onVoiceProviderChange={onVoiceProviderChange}
+        />
       </div>
 
       <StudioTimelinePanel
@@ -2416,6 +2498,40 @@ function StudioProductionShell({
         onUpdateSubtitleTiming={onUpdateSubtitleTiming}
       />
     </>
+  )
+}
+
+function StudioStageProgress({ exporting, progress, voiceReady }: { exporting: boolean; progress: number; voiceReady: boolean }) {
+  const stages = [
+    { label: 'Kịch bản', state: 'done' as const },
+    { label: 'Draft', state: 'active' as const },
+    { label: 'Voice', state: voiceReady ? 'done' as const : 'idle' as const },
+    { label: 'Render', state: exporting ? 'active' as const : 'idle' as const },
+    { label: 'Hoàn tất', state: progress >= 100 ? 'done' as const : 'idle' as const },
+  ]
+  return (
+    <div className="mt-5">
+      <div className="mb-1 flex justify-end text-[12px] font-black text-[#11183c]">{Math.round(progress)}%</div>
+      <div className="relative h-12">
+        <div className="absolute left-0 right-0 top-2 h-1 rounded-full bg-[#d8ddef]">
+          <div className="h-full rounded-full bg-[#6247ff]" style={{ width: `${Math.max(28, Math.min(100, progress || 28))}%` }} />
+        </div>
+        <div className="relative grid grid-cols-5">
+          {stages.map((stage) => {
+            const active = stage.state === 'active'
+            const done = stage.state === 'done'
+            return (
+              <div key={stage.label} className="grid justify-items-center gap-1">
+                <span className={`grid h-5 w-5 place-items-center rounded-full border-2 ${done ? 'border-[#16b78f] bg-[#16b78f] text-white' : active ? 'border-[#6247ff] bg-[#6247ff] text-white' : 'border-[#b9c1d8] bg-white text-[#8a94b4]'}`}>
+                  {done ? <CheckCircle2 size={13} /> : <Circle size={9} fill="currentColor" />}
+                </span>
+                <span className={`text-[11px] font-black ${active ? 'text-[#6247ff]' : done ? 'text-[#16b78f]' : 'text-[#667097]'}`}>{stage.label}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -2480,27 +2596,26 @@ function StudioSceneRail({
   )
 }
 
-function StudioInspector({
+function StudioSceneEditorPanel({
   currentScene,
   sceneIndex,
   scenes,
   story,
+  videoDuration,
   onChange,
 }: {
   currentScene: GenerateVideoScene | undefined
   sceneIndex: number
   scenes: GenerateVideoScene[]
   story: GenerateVideoStory
+  videoDuration: number
   onChange: (story: GenerateVideoStory) => void
 }) {
-  const meta = story.meta || {}
-  const video = story.video || { width: 1080, height: 1920, fps: 30, background: '#05070b' }
-  const audio = story.audio || {}
+  const [activeTab, setActiveTab] = useState<'frame' | 'video'>('frame')
   const subtitleStyle = (currentScene?.text_style || {}) as Record<string, unknown>
   const fontSize = readNumericStyleValue(subtitleStyle.fontSize, 48)
-  const backgroundColor = normalizeColorValue(String(video.background || '#05070b'))
-  const updateMeta = (field: keyof NonNullable<GenerateVideoStory['meta']>, value: string) => onChange({ ...story, meta: { ...meta, [field]: value } })
-  const updateVideo = (patch: Partial<GenerateVideoStory['video']>) => onChange({ ...story, video: { ...video, ...patch } })
+  const titleText = story.meta?.title || getStoryProjectName(story)
+  const subtitleText = currentScene?.subtitle || ''
   const updateScene = (patch: Partial<GenerateVideoScene>) => currentScene && updateSceneAt(story, scenes, sceneIndex, patch, onChange)
   const updateSubtitleStyle = (patch: React.CSSProperties) => currentScene && updateScene({
     text_style: {
@@ -2508,103 +2623,351 @@ function StudioInspector({
       ...patch,
     },
   })
+  const applyFitAll = (fit: 'cover' | 'contain') => onChange(updateRenderScenes(story, scenes.map((scene) => ({ ...scene, fit }))))
+  const sceneStart = getSceneStart(scenes, sceneIndex)
+  const sceneEnd = getSceneEnd(scenes, sceneIndex)
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#e8ecf7] px-3">
+        <div className="text-[15px] font-black text-[#11183c]">Scene {sceneIndex + 1}/{scenes.length}</div>
+        <div className="text-[11px] font-black text-[#11183c]">{formatStudioClock(sceneStart)} - {formatStudioClock(sceneEnd || videoDuration)}</div>
+      </div>
+      <div className="grid h-10 shrink-0 grid-cols-2 border-b border-[#e8ecf7] text-[12px] font-black">
+        <button onClick={() => setActiveTab('frame')} className={activeTab === 'frame' ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#667097] hover:bg-[#f8faff]'}>Frame</button>
+        <button onClick={() => setActiveTab('video')} className={activeTab === 'video' ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#667097] hover:bg-[#f8faff]'}>Video</button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+        <div className="overflow-hidden rounded-[8px] border border-[#dfe4f3] bg-[#f3f6fd]">
+          <div className="h-36">
+            {currentScene ? <SceneMediaThumb scene={currentScene} className="h-full w-full object-cover" /> : null}
+          </div>
+          <div className="grid grid-cols-3 gap-2 border-t border-[#dfe4f3] bg-white p-2">
+            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><ImageIcon size={12} /> Thay ảnh</button>
+            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><Wand2 size={12} /> Tạo ảnh AI</button>
+            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><Film size={12} /> Chọn media</button>
+          </div>
+        </div>
+
+        <StudioSection title="Hiệu ứng chuyển động">
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { value: 'none', label: 'Để nguyên' },
+              { value: 'slow-zoom', label: 'Slow zoom' },
+              { value: 'pan-right', label: 'Pan right' },
+              { value: 'pan-left', label: 'Pan left' },
+              { value: 'push-in', label: 'Push in' },
+            ].map((effect) => (
+              <button
+                key={effect.value}
+                onClick={() => updateScene({ effect: effect.value })}
+                className={`h-8 rounded-[7px] border px-1 text-[10px] font-bold ${currentScene?.effect === effect.value ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
+              >
+                {effect.label}
+              </button>
+            ))}
+          </div>
+        </StudioSection>
+
+        <StudioSection title="Cách hiển thị">
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => applyFitAll('contain')} className="h-8 rounded-[7px] border border-[#6247ff] bg-[#f4f2ff] text-[11px] font-bold text-[#6247ff]">All</button>
+            <button onClick={() => updateScene({ fit: 'cover' })} className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === 'cover' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Làm đầy</button>
+            <button onClick={() => updateScene({ fit: 'contain' })} className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === 'contain' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Fit</button>
+          </div>
+        </StudioSection>
+
+        <StudioSection title="Nội dung hiển thị">
+          <StudioTextBlock
+            color={String(subtitleStyle.color || '#ffffff')}
+            fontSize={fontSize}
+            text={String(titleText || '')}
+            onColorChange={(color) => updateSubtitleStyle({ color })}
+            onFontSizeChange={(value) => updateSubtitleStyle({ fontSize: value })}
+            onTextChange={(value) => onChange({ ...story, meta: { ...(story.meta || {}), title: value } })}
+          />
+          <StudioTextBlock
+            color={String(subtitleStyle.accentColor || '#ffd43b')}
+            fontSize={Math.max(20, fontSize - 12)}
+            text={subtitleText}
+            onColorChange={(color) => updateSubtitleStyle({ accentColor: color, color })}
+            onFontSizeChange={(value) => updateSubtitleStyle({ fontSize: value })}
+            onTextChange={(value) => updateScene({ subtitle: value })}
+          />
+          <button type="button" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#c9c2ff] text-[12px] font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
+            <Plus size={14} /> Thêm text / sticker
+          </button>
+        </StudioSection>
+      </div>
+    </section>
+  )
+}
+
+function StudioTextBlock({
+  color,
+  fontSize,
+  text,
+  onColorChange,
+  onFontSizeChange,
+  onTextChange,
+}: {
+  color: string
+  fontSize: number
+  text: string
+  onColorChange: (color: string) => void
+  onFontSizeChange: (value: number) => void
+  onTextChange: (value: string) => void
+}) {
+  const normalizedColor = normalizeColorValue(color)
+  return (
+    <div className="rounded-[8px] border border-[#dfe4f3] bg-white p-2">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="grid h-6 w-6 place-items-center rounded-[6px] bg-[#f0edff] text-[#6247ff]"><Type size={13} /></span>
+        <input value={text} onChange={(event) => onTextChange(event.target.value)} className={`${studioInputClass} flex-1`} />
+      </div>
+      <div className="grid grid-cols-[1fr_64px_36px_36px_36px] gap-2">
+        <select className={studioInputClass} defaultValue="Be Vietnam Pro">
+          <option>Be Vietnam Pro</option>
+          <option>Inter</option>
+          <option>Arial</option>
+        </select>
+        <input type="number" min={12} max={96} value={fontSize} onChange={(event) => onFontSizeChange(Number(event.target.value) || 48)} className={studioInputClass} />
+        <input title="Màu chữ" type="color" value={normalizedColor} onChange={(event) => onColorChange(event.target.value)} className="h-9 w-9 rounded-[7px] border border-[#dfe4f3] bg-white p-1" />
+        <button title="Nghiêng" className="h-9 rounded-[7px] border border-[#dfe4f3] text-sm font-black italic text-[#27305b]">I</button>
+        <button title="In đậm" className="h-9 rounded-[7px] border border-[#dfe4f3] text-sm font-black text-[#27305b]">B</button>
+      </div>
+    </div>
+  )
+}
+
+function StudioInspector({
+  audio1Muted,
+  audio2Muted,
+  currentScene,
+  sceneIndex,
+  scenes,
+  story,
+  voiceGenerating,
+  voiceProvider,
+  onChange,
+  onGenerateVoice,
+  onSave,
+  onSelect,
+  onToggleTrackMute,
+  onVoiceProviderChange,
+}: {
+  audio1Muted: boolean
+  audio2Muted: boolean
+  currentScene: GenerateVideoScene | undefined
+  sceneIndex: number
+  scenes: GenerateVideoScene[]
+  story: GenerateVideoStory
+  voiceGenerating: boolean
+  voiceProvider: GenerateVideoVoiceProvider
+  onChange: (story: GenerateVideoStory) => void
+  onGenerateVoice: () => void
+  onSave: () => void
+  onSelect: (index: number) => void
+  onToggleTrackMute: (trackId: string) => void
+  onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+}) {
+  const [activeTab, setActiveTab] = useState<'info' | 'ai' | 'script'>('info')
+  const meta = story.meta || {}
+  const video = story.video || { width: 1080, height: 1920, fps: 30, background: '#05070b' }
+  const audio = story.audio || {}
+  const review = meta.ai_story_review
+  const reviewNotes = Array.isArray(review?.notes) ? review.notes.filter(Boolean) : []
+  const backgroundColor = normalizeColorValue(String(video.background || '#05070b'))
+  const updateMeta = (field: keyof NonNullable<GenerateVideoStory['meta']>, value: string) => onChange({ ...story, meta: { ...meta, [field]: value } })
+  const updateVideo = (patch: Partial<GenerateVideoStory['video']>) => onChange({ ...story, video: { ...video, ...patch } })
+  const updateScene = (patch: Partial<GenerateVideoScene>) => currentScene && updateSceneAt(story, scenes, sceneIndex, patch, onChange)
+  const updateSceneByIndex = (index: number, patch: Partial<GenerateVideoScene>) => updateSceneAt(story, scenes, index, patch, onChange)
+  const updateSubtitleStyle = (patch: React.CSSProperties) => currentScene && updateScene({
+    text_style: {
+      ...(currentScene.text_style || {}),
+      ...patch,
+    },
+  })
+  const applyReadableSubtitleStyle = () => updateSubtitleStyle({
+    color: '#ffffff',
+    fontSize: 56,
+    fontWeight: 900,
+    left: '50%',
+    top: '82%',
+    right: 'auto',
+    bottom: 'auto',
+    width: '86%',
+    transform: 'translate(-50%, -50%)',
+    textShadow: '0 8px 28px rgba(0,0,0,0.72)',
+  })
+  const copySubtitleToVoice = () => {
+    if (!currentScene) return
+    updateScene({ voice_text: currentScene.subtitle || currentScene.voice_text || '' })
+  }
+  const tabClass = (tab: 'info' | 'ai' | 'script') =>
+    activeTab === tab ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#56617f] hover:bg-[#f8faff] hover:text-[#27305b]'
   return (
     <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
       <div className="grid h-11 shrink-0 grid-cols-3 border-b border-[#e8ecf7] text-[12px] font-black text-[#56617f]">
-        <button className="border-b-2 border-[#6247ff] text-[#6247ff]">Thông tin</button>
-        <button>AI gợi ý</button>
-        <button>Script</button>
+        <button onClick={() => setActiveTab('info')} className={tabClass('info')}>Thông tin</button>
+        <button onClick={() => setActiveTab('ai')} className={tabClass('ai')}>AI gợi ý</button>
+        <button onClick={() => setActiveTab('script')} className={tabClass('script')}>Script</button>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
-        <StudioSection title="Story data">
-          <StudioField label="Tiêu đề">
-            <input value={meta.title || getStoryProjectName(story)} onChange={(event) => updateMeta('title', event.target.value)} className={studioInputClass} />
-          </StudioField>
-          <div className="grid grid-cols-2 gap-2">
-            <StudioField label="Series ID"><input value={meta.series_id || ''} onChange={(event) => updateMeta('series_id', event.target.value)} className={studioInputClass} /></StudioField>
-            <StudioField label="Workflow ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={studioInputClass} /></StudioField>
-          </div>
-        </StudioSection>
+        {activeTab === 'info' && (
+          <>
+            <StudioSection title="Story data">
+              <StudioField label="Tiêu đề">
+                <input value={meta.title || getStoryProjectName(story)} onChange={(event) => updateMeta('title', event.target.value)} className={studioInputClass} />
+              </StudioField>
+              <div className="grid grid-cols-2 gap-2">
+                <StudioField label="Series ID"><input value={meta.series_id || ''} onChange={(event) => updateMeta('series_id', event.target.value)} className={studioInputClass} /></StudioField>
+                <StudioField label="Workflow ID"><input value={meta.workflow_id || ''} onChange={(event) => updateMeta('workflow_id', event.target.value)} className={studioInputClass} /></StudioField>
+              </div>
+            </StudioSection>
 
-        <StudioSection title="Cấu hình sản xuất">
-          <div className="grid grid-cols-2 gap-2">
-            <StudioField label="Khung hình">
-              <select
-                value={`${video.width}x${video.height}`}
-                onChange={(event) => {
-                  const preset = videoAspectPresets.find((item) => `${item.width}x${item.height}` === event.target.value)
-                  if (preset) updateVideo({ width: preset.width, height: preset.height })
-                }}
-                className={studioInputClass}
-              >
-                {videoAspectPresets.map((preset) => <option key={preset.label} value={`${preset.width}x${preset.height}`}>{preset.label} · {preset.width}x{preset.height}</option>)}
-              </select>
-            </StudioField>
-            <StudioField label="FPS">
-              <select value={video.fps || 30} onChange={(event) => updateVideo({ fps: Number(event.target.value) || 30 })} className={studioInputClass}>
-                {fpsPresets.map((fps) => <option key={fps} value={fps}>{fps}</option>)}
-              </select>
-            </StudioField>
-          </div>
-          <StudioField label="Background">
-            <div className="flex gap-2">
-              <input type="color" value={backgroundColor} onChange={(event) => updateVideo({ background: event.target.value })} className="h-9 w-11 rounded-[7px] border border-[#dfe4f3] bg-white p-1" />
-              <input value={video.background || ''} onChange={(event) => updateVideo({ background: event.target.value })} className={studioInputClass} />
-            </div>
-          </StudioField>
-        </StudioSection>
+            <StudioSection title="Cấu hình sản xuất">
+              <div className="grid grid-cols-2 gap-2">
+                <StudioField label="Khung hình">
+                  <select
+                    value={`${video.width}x${video.height}`}
+                    onChange={(event) => {
+                      const preset = videoAspectPresets.find((item) => `${item.width}x${item.height}` === event.target.value)
+                      if (preset) updateVideo({ width: preset.width, height: preset.height })
+                    }}
+                    className={studioInputClass}
+                  >
+                    {videoAspectPresets.map((preset) => <option key={preset.label} value={`${preset.width}x${preset.height}`}>{preset.label} · {preset.width}x{preset.height}</option>)}
+                  </select>
+                </StudioField>
+                <StudioField label="FPS">
+                  <select value={video.fps || 30} onChange={(event) => updateVideo({ fps: Number(event.target.value) || 30 })} className={studioInputClass}>
+                    {fpsPresets.map((fps) => <option key={fps} value={fps}>{fps}</option>)}
+                  </select>
+                </StudioField>
+              </div>
+              <StudioField label="Background">
+                <div className="grid gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {backgroundPresets.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        title={color}
+                        onClick={() => updateVideo({ background: color })}
+                        className={`h-7 w-7 rounded-[7px] border ${backgroundColor === color ? 'border-[#6247ff] ring-2 ring-[#6247ff]/20' : 'border-[#dfe4f3]'}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input type="color" value={backgroundColor} onChange={(event) => updateVideo({ background: event.target.value })} className="h-9 w-11 rounded-[7px] border border-[#dfe4f3] bg-white p-1" />
+                    <input value={video.background || ''} onChange={(event) => updateVideo({ background: event.target.value })} className={studioInputClass} placeholder="#05070b" />
+                  </div>
+                </div>
+              </StudioField>
+            </StudioSection>
 
-        <StudioSection title={`Scene ${sceneIndex + 1}`}>
-          <StudioField label="Hiệu ứng chuyển động">
-            <div className="grid grid-cols-2 gap-2">
-              {['slow-zoom', 'pan-right', 'pan-left', 'push-in'].map((effect) => (
-                <button
-                  key={effect}
-                  onClick={() => updateScene({ effect })}
-                  className={`h-8 rounded-[7px] border px-2 text-[11px] font-bold ${currentScene?.effect === effect ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
-                >
-                  {effect}
+            <StudioSection title="Audio">
+              <StudioAudioPath label="Voice path" muted={audio2Muted} value={audio.voice || ''} onChange={(value) => updateAudio(story, onChange, { voice: value })} onToggleMute={() => onToggleTrackMute('audio-2')} />
+              <StudioAudioPath label="Music path" muted={audio1Muted} value={audio.music || ''} onChange={(value) => updateAudio(story, onChange, { music: value })} onToggleMute={() => onToggleTrackMute('audio-1')} />
+              <StudioVolume label="Voice volume" value={Number(audio.voiceVolume ?? 1)} onChange={(value) => updateAudio(story, onChange, { voiceVolume: value })} />
+              <StudioVolume label="Music volume" value={Number(audio.musicVolume ?? 0.12)} onChange={(value) => updateAudio(story, onChange, { musicVolume: value })} />
+            </StudioSection>
+
+            <StudioSection title="Yêu cầu sản xuất">
+              <StudioCheckbox label="Cần Voice AI" checked={Boolean(audio.voice)} />
+              <StudioCheckbox label="Cần Subtitles" checked={scenes.some((scene) => String(scene.subtitle || '').trim())} />
+              <StudioCheckbox label="Cần Background Media" checked={scenes.some((scene) => Boolean(scene.image))} />
+              <StudioCheckbox label="Nhất quán nhân vật" checked={false} />
+            </StudioSection>
+          </>
+        )}
+
+        {activeTab === 'ai' && (
+          <>
+            <StudioSection title="AI review">
+              {review ? (
+                <div className={`rounded-[8px] border px-3 py-2 text-[12px] font-bold ${review.action === 'REVISED' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{review.action === 'REVISED' ? 'AI đã chỉnh draft' : 'AI đã duyệt draft'}</span>
+                    {review.reviewed_at && <span className="text-[10px] opacity-75">{new Date(review.reviewed_at).toLocaleString()}</span>}
+                  </div>
+                  {reviewNotes.length ? <div className="mt-1 text-[11px] font-semibold opacity-90">{reviewNotes.join(' · ')}</div> : null}
+                </div>
+              ) : (
+                <div className="rounded-[8px] border border-dashed border-[#cfd6ea] bg-[#f8faff] px-3 py-3 text-[12px] font-semibold text-[#667097]">
+                  Chưa có kết quả AI review cho draft này.
+                </div>
+              )}
+            </StudioSection>
+
+            <StudioSection title={`Gợi ý nhanh cho scene ${sceneIndex + 1}`}>
+              <div className="grid gap-2">
+                <button type="button" onClick={() => updateScene({ effect: 'slow-zoom', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                  Slow zoom + làm đầy khung
                 </button>
-              ))}
-            </div>
-          </StudioField>
-          <StudioField label="Cách hiển thị">
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { value: 'contain', label: 'Để nguyên' },
-                { value: 'cover', label: 'Làm đầy' },
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => updateScene({ fit: item.value })}
-                  className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === item.value ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
-                >
-                  {item.label}
+                <button type="button" onClick={() => updateScene({ effect: 'pan-right', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                  Pan right cho ảnh có không gian ngang
                 </button>
-              ))}
-            </div>
-          </StudioField>
-          <StudioField label="Nội dung hiển thị">
-            <textarea value={currentScene?.subtitle || ''} onChange={(event) => updateScene({ subtitle: event.target.value })} className={`${studioInputClass} min-h-20 py-2`} />
-          </StudioField>
-          <div className="grid grid-cols-[1fr_86px_40px_40px] gap-2">
-            <select value={String(subtitleStyle.fontFamily || 'Be Vietnam Pro, Inter, system-ui, sans-serif')} onChange={(event) => updateSubtitleStyle({ fontFamily: event.target.value })} className={studioInputClass}>
-              <option value="Be Vietnam Pro, Inter, system-ui, sans-serif">Be Vietnam Pro</option>
-              <option value="Inter, system-ui, sans-serif">Inter</option>
-              <option value="Arial, Helvetica, sans-serif">Arial</option>
-            </select>
-            <input type="number" value={fontSize} min={12} max={96} onChange={(event) => updateSubtitleStyle({ fontSize: Number(event.target.value) || 48 })} className={studioInputClass} />
-            <button title="Màu chữ" onClick={() => updateSubtitleStyle({ color: '#ffffff' })} className="h-9 rounded-[7px] border border-[#dfe4f3] bg-black" />
-            <button title="In đậm" onClick={() => updateSubtitleStyle({ fontWeight: 900 })} className="h-9 rounded-[7px] border border-[#dfe4f3] text-sm font-black text-[#27305b]">B</button>
-          </div>
-        </StudioSection>
+                <button type="button" onClick={() => updateScene({ fit: 'contain' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                  Giữ nguyên ảnh, dùng background làm nền
+                </button>
+                <button type="button" onClick={applyReadableSubtitleStyle} className="h-9 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] px-3 text-left text-[12px] font-bold text-[#6247ff] hover:bg-[#f0edff]">
+                  Tối ưu chữ phụ đề cho mobile
+                </button>
+                <button type="button" onClick={copySubtitleToVoice} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                  Dùng subtitle hiện tại làm voice text
+                </button>
+              </div>
+            </StudioSection>
+          </>
+        )}
 
-        <StudioSection title="Audio">
-          <StudioField label="Voice path"><input value={audio.voice || ''} onChange={(event) => updateAudio(story, onChange, { voice: event.target.value })} className={studioInputClass} /></StudioField>
-          <StudioField label="Music path"><input value={audio.music || ''} onChange={(event) => updateAudio(story, onChange, { music: event.target.value })} className={studioInputClass} /></StudioField>
-          <StudioVolume label="Voice volume" value={Number(audio.voiceVolume ?? 1)} onChange={(value) => updateAudio(story, onChange, { voiceVolume: value })} />
-          <StudioVolume label="Music volume" value={Number(audio.musicVolume ?? 0.12)} onChange={(value) => updateAudio(story, onChange, { musicVolume: value })} />
-        </StudioSection>
+        {activeTab === 'script' && (
+          <>
+            <StudioSection title={`Script scene ${sceneIndex + 1}`}>
+              <StudioField label="Subtitle hiển thị">
+                <textarea value={currentScene?.subtitle || ''} onChange={(event) => updateScene({ subtitle: event.target.value })} className={`${studioInputClass} min-h-24 py-2`} />
+              </StudioField>
+              <StudioField label="Voice text">
+                <textarea value={currentScene?.voice_text || currentScene?.voice_subtitle || ''} onChange={(event) => updateScene({ voice_text: event.target.value })} className={`${studioInputClass} min-h-24 py-2`} />
+              </StudioField>
+            </StudioSection>
+
+            <StudioSection title="Toàn bộ script">
+              <div className="space-y-2">
+                {scenes.map((scene, index) => (
+                  <div key={`${scene.video_id || scene.text_id || index}-script`} className={`rounded-[8px] border p-2 ${index === sceneIndex ? 'border-[#6247ff] bg-[#f7f5ff]' : 'border-[#e3e8f4] bg-white'}`}>
+                    <button type="button" onClick={() => onSelect(index)} className="mb-1 flex w-full items-center justify-between text-left text-[11px] font-black text-[#27305b]">
+                      <span>Scene {index + 1}</span>
+                      <span>{formatStudioClock(getSceneStart(scenes, index))}</span>
+                    </button>
+                    <textarea value={scene.subtitle || ''} onChange={(event) => updateSceneByIndex(index, { subtitle: event.target.value })} className={`${studioInputClass} min-h-16 py-2`} />
+                  </div>
+                ))}
+              </div>
+            </StudioSection>
+          </>
+        )}
+      </div>
+      <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-[#e8ecf7] p-3">
+        <button onClick={onSave} className="h-9 rounded-[8px] border border-[#c9c2ff] bg-white text-[12px] font-black text-[#6247ff] hover:bg-[#f7f5ff]">
+          Lưu chỉnh sửa
+        </button>
+        <button onClick={onGenerateVoice} disabled={voiceGenerating} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] bg-[#6247ff] text-[12px] font-black text-white shadow-sm shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
+          <Mic2 size={14} /> {voiceGenerating ? 'Đang tạo' : 'Tạo Voice AI'}
+        </button>
+        <select
+          aria-label="Voice provider"
+          value={voiceProvider}
+          disabled={voiceGenerating}
+          onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
+          className="col-span-2 h-8 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-[11px] font-bold text-[#2d3463] outline-none disabled:opacity-50"
+        >
+          {voiceProviderOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
       </div>
     </aside>
   )
@@ -2639,6 +3002,43 @@ function StudioVolume({ label, value, onChange }: { label: string; value: number
         <span>{Math.round(normalized * 100)}%</span>
       </span>
       <input type="range" min={0} max={1} step={0.01} value={normalized} onChange={(event) => onChange(Number(event.target.value))} style={{ accentColor: '#6247ff' }} />
+    </label>
+  )
+}
+
+function StudioAudioPath({
+  label,
+  muted,
+  value,
+  onChange,
+  onToggleMute,
+}: {
+  label: string
+  muted: boolean
+  value: string
+  onChange: (value: string) => void
+  onToggleMute: () => void
+}) {
+  return (
+    <StudioField label={label}>
+      <div className="grid grid-cols-[1fr_32px_32px] gap-1.5">
+        <input value={value} onChange={(event) => onChange(event.target.value)} className={studioInputClass} />
+        <button type="button" onClick={onToggleMute} className="grid h-9 place-items-center rounded-[7px] border border-[#dfe4f3] text-[#6247ff]">
+          {muted ? <VolumeX size={14} /> : <Play size={13} fill="currentColor" />}
+        </button>
+        <button type="button" onClick={() => onChange('')} className="grid h-9 place-items-center rounded-[7px] border border-[#dfe4f3] text-[#27305b]">
+          <X size={14} />
+        </button>
+      </div>
+    </StudioField>
+  )
+}
+
+function StudioCheckbox({ checked, label }: { checked: boolean; label: string }) {
+  return (
+    <label className="flex items-center gap-2 text-[12px] font-bold text-[#27305b]">
+      <input type="checkbox" checked={checked} readOnly className="h-4 w-4 rounded border-[#c9c2ff]" style={{ accentColor: '#6247ff' }} />
+      <span>{label}</span>
     </label>
   )
 }
@@ -3024,7 +3424,6 @@ function ProCutTopToolbar({
   fitting,
   story,
   videoDuration,
-  onDuplicate,
   onExport,
   onGenerateVoice,
   onVoiceProviderChange,
@@ -3042,7 +3441,6 @@ function ProCutTopToolbar({
   fitting: boolean
   story: GenerateVideoStory
   videoDuration: number
-  onDuplicate: () => void
   onExport: () => void
   onGenerateVoice: () => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
@@ -3078,7 +3476,6 @@ function ProCutTopToolbar({
       <div className="flex shrink-0 items-center gap-3">
         <div className="flex items-start gap-1">
           <ToolbarIconButton label="Back" onClick={onExit}><FigmaIcon name="arrowLeft" size={14} /></ToolbarIconButton>
-          <ToolbarIconButton label="Duplicate" onClick={onDuplicate}><FigmaIcon name="arrowUpRight" size={14} /></ToolbarIconButton>
         </div>
         <ToolbarActionButton disabled={saving} onClick={onSave} icon={<FigmaIcon name="download" size={14} />} label={saving ? 'Saving' : 'Save'} />
         <select

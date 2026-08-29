@@ -8,15 +8,14 @@ import {
   Clapperboard,
   Database,
   FileCheck2,
-  Image,
   LayoutDashboard,
   LogOut,
   Megaphone,
   Newspaper,
+  Send,
   Settings,
   Sparkles,
   UserRound,
-  Wrench,
 } from 'lucide-react'
 import type { Tab } from './navigation'
 import { BrandMark, UserAvatar, type ApiUser, userDisplayName, userRoleLabel } from './social-ui'
@@ -47,6 +46,7 @@ const creatorSections: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
+      { key: 'publishedPosts', label: 'Bài đã đăng', icon: <Send size={17} /> },
     ],
   },
   {
@@ -78,6 +78,7 @@ const adminSections: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
+      { key: 'publishedPosts', label: 'Bài đã đăng', icon: <Send size={17} /> },
       { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
       { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
       { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
@@ -100,8 +101,6 @@ const adminSections: NavSection[] = [
 ]
 
 const quickLinks = [
-  { label: 'Kho media', icon: <Image size={16} /> },
-  { label: 'Công cụ', icon: <Wrench size={16} /> },
   { label: 'Phân tích', icon: <BarChart3 size={16} /> },
 ]
 

@@ -118,7 +118,7 @@ export type VideoWorkflowTask = {
 
 export type VideoWorkspaceSummary = {
   id: string
-  profile: { id: string; name: string; platform: string; avatar_url?: string | null }
+  profile: { id: string; name: string; platform: string; avatar?: string | null }
   series?: { id: string; title: string; status: string } | null
   primary_content?: {
     id: string
@@ -131,6 +131,9 @@ export type VideoWorkspaceSummary = {
     category?: string | null
     site_id?: string | null
     siteId?: string | null
+    thumbnail_url?: string | null
+    thumbnailUrl?: string | null
+    image_url?: string | null
   } | null
   title: string
   status: string
@@ -208,6 +211,16 @@ const defaultVideo = { width: 1080, height: 1920, fps: 30, background: '#05070b'
 const defaultAudio = { voiceVolume: 1, musicVolume: 0 }
 const renderJobRequestCache = new Map<string, Promise<{ job: GenerateVideoJob }>>()
 
+const normalizeSceneMediaType = (value?: string | null, src?: string | null): 'image' | 'video' => {
+  if (String(value || '').toLowerCase().includes('video')) return 'video'
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(src || ''))) return 'video'
+  return 'image'
+}
+
+const defaultMediaForType = (type: 'image' | 'video') => {
+  return type === 'video' ? '' : 'assets/images/001-signal-room.png'
+}
+
 const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTimeline => {
   let cursor = 0
   const video: NonNullable<GenerateVideoTimeline['video']> = []
@@ -216,13 +229,18 @@ const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTime
     const duration = Math.max(0.1, Number(scene.duration || 4))
     const start = cursor
     const end = cursor + duration
+    const mediaType = normalizeSceneMediaType(scene.media_type, scene.image)
+    const videoId = scene.video_id || `video-${index + 1}`
     video.push({
-      id: `video-${index + 1}`,
-      type: 'image',
+      id: videoId,
+      scene_index: scene.scene_index,
+      text_id: scene.text_id || `text-${index + 1}`,
+      text_ids: scene.text_ids || [scene.text_id || `text-${index + 1}`],
+      type: mediaType,
       start,
       end,
       duration,
-      src: scene.image,
+      src: scene.image || defaultMediaForType(mediaType),
       effect: scene.effect || 'slow-zoom',
       fit: scene.fit || 'contain',
     })
@@ -230,7 +248,10 @@ const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTime
       const textStart = typeof scene.subtitle_start === 'number' ? scene.subtitle_start : start
       const textDuration = typeof scene.subtitle_duration === 'number' ? scene.subtitle_duration : duration
       text.push({
-        id: `text-${index + 1}`,
+        id: scene.text_id || `text-${index + 1}`,
+        scene_index: scene.scene_index,
+        video_id: videoId,
+        video_ids: scene.video_ids || [videoId],
         type: 'subtitle',
         start: textStart,
         end: textStart + textDuration,
@@ -242,7 +263,42 @@ const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTime
     }
     cursor = end
   })
-  return { version: 1, duration: cursor, video, text, audio: [] }
+  return { version: 1, duration: cursor, video: collapseSharedVideoTimeline(video), text, audio: [] }
+}
+
+const collapseSharedVideoTimeline = (video: NonNullable<GenerateVideoTimeline['video']>) => {
+  const groups = new Map<string, NonNullable<GenerateVideoTimeline['video']>[number]>()
+  const order: string[] = []
+  const passthrough: NonNullable<GenerateVideoTimeline['video']> = []
+
+  video.forEach((clip) => {
+    if (clip.type !== 'video') {
+      passthrough.push(clip)
+      return
+    }
+    const key = `${clip.id}::${clip.src || ''}`
+    const existing = groups.get(key)
+    if (!existing) {
+      order.push(key)
+      groups.set(key, { ...clip })
+      return
+    }
+    const start = Math.min(Number(existing.start || 0), Number(clip.start || 0))
+    const end = Math.max(Number(existing.end || 0), Number(clip.end || 0))
+    const textIds = Array.from(
+      new Set([...(existing.text_ids || []), ...(clip.text_ids || []), clip.text_id].filter((item): item is string => Boolean(item))),
+    )
+    groups.set(key, {
+      ...existing,
+      start,
+      end,
+      duration: Math.max(0.1, end - start),
+      text_ids: textIds,
+      text_id: textIds[0] || existing.text_id,
+    })
+  })
+
+  return [...passthrough, ...order.map((key) => groups.get(key)!).filter(Boolean)].sort((left, right) => left.start - right.start || left.end - right.end)
 }
 
 export const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): GenerateVideoStory => {

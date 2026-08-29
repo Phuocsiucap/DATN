@@ -5,18 +5,20 @@ import logging
 import re
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from common.db.models import PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileStrategy, User
+from common.db.models import ContentItem, MediaWorkflow, PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, SocialProfileStrategy, User
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
 from app.schemas import api as schemas
 from app.services.tiktok_oauth import (
     build_tiktok_token_metadata,
     fetch_tiktok_user_info,
+    fetch_tiktok_video_list,
     granted_scopes,
     poll_tiktok_oauth_qr_session,
     requested_tiktok_scopes,
@@ -24,7 +26,18 @@ from app.services.tiktok_oauth import (
     stop_tiktok_oauth_qr_session,
 )
 from app.services import generate_video as video_pipeline
-from app.services.tiktok_posting import direct_post_video_to_tiktok, ensure_tiktok_access_token, upload_video_to_tiktok_inbox
+from app.services.tiktok_posting import (
+    direct_post_video_to_tiktok,
+    ensure_tiktok_access_token,
+    extract_tiktok_public_post_id,
+    fetch_tiktok_publish_status,
+    poll_tiktok_publish_status,
+    tiktok_publish_failure_reason,
+    tiktok_publish_is_complete,
+    tiktok_publish_is_failed,
+    tiktok_publish_status_value,
+    upload_video_to_tiktok_inbox,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -332,9 +345,11 @@ class SocialProfileService:
         db.refresh(profile)
         return profile
 
-    async def sync_profile(self, db: Session, profile: SocialProfile) -> SocialProfile:
+    async def sync_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
         self.ensure_tiktok_profile(profile)
         access_token = ensure_tiktok_access_token(profile)
+
+        # 1. Fetch profile & account stats from TikTok
         user_info = await fetch_tiktok_user_info(access_token)
         open_id = user_info.get("open_id")
         if profile.external_id and open_id and str(profile.external_id) != str(open_id):
@@ -343,9 +358,82 @@ class SocialProfileService:
             profile.external_id = open_id
         profile.status = "active"
         _apply_tiktok_user_info(profile, user_info)
+
+        now = datetime.now(timezone.utc)
+        # 2. Record Account Snapshot
+        snapshot = SocialProfileSnapshot(
+            profile_id=profile.id,
+            follower_count=profile.follower_count or 0,
+            following_count=profile.following_count or 0,
+            likes_count=profile.likes_count or 0,
+            video_count=profile.video_count or 0,
+            captured_at=now,
+        )
+        db.add(snapshot)
+
+        # 3. Fetch TikTok Video List & Video Stats
+        synced_videos_count = 0
+        try:
+            video_data = await fetch_tiktok_video_list(access_token, max_count=20)
+            videos = video_data.get("videos") or []
+            if isinstance(videos, list):
+                for v in videos:
+                    if not isinstance(v, dict):
+                        continue
+                    v_id = str(v.get("id") or "").strip()
+                    if not v_id:
+                        continue
+
+                    post = (
+                        db.query(SocialPost)
+                        .filter(SocialPost.profile_id == profile.id, SocialPost.platform_post_id == v_id)
+                        .first()
+                    )
+                    v_title = v.get("title") or v.get("video_description") or f"TikTok Video {v_id}"
+                    v_url = v.get("share_url")
+                    v_caption = v.get("video_description")
+                    v_created_time = v.get("create_time")
+                    pub_date = datetime.fromtimestamp(v_created_time, timezone.utc) if v_created_time else now
+
+                    if not post:
+                        post = SocialPost(
+                            profile_id=profile.id,
+                            title=v_title,
+                            post_url=v_url,
+                            platform_post_id=v_id,
+                            caption=v_caption,
+                            status="published",
+                            published_at=pub_date,
+                        )
+                        db.add(post)
+                        db.flush()
+                    else:
+                        post.title = v_title
+                        if v_url:
+                            post.post_url = v_url
+                        if v_caption:
+                            post.caption = v_caption
+
+                    metric = SocialPostMetric(
+                        post_id=post.id,
+                        views=int(v.get("view_count") or 0),
+                        likes=int(v.get("like_count") or 0),
+                        comments=int(v.get("comment_count") or 0),
+                        shares=int(v.get("share_count") or 0),
+                        captured_at=now,
+                    )
+                    db.add(metric)
+                    synced_videos_count += 1
+        except Exception as exc:
+            logger.warning("Không thể đồng bộ danh sách video TikTok cho profile %s: %s", profile.id, exc)
+
         db.commit()
         db.refresh(profile)
-        return profile
+        return {
+            "profile": self.serialize_profile(profile),
+            "synced_videos_count": synced_videos_count,
+            "synced_at": now.isoformat(),
+        }
 
     def get_or_create_strategy(self, db: Session, profile: SocialProfile) -> SocialProfileStrategy:
         if profile.strategy:
@@ -481,6 +569,72 @@ class SocialProfileService:
         )
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
+    def sync_rendered_workflows_to_queue(self, db: Session, user: User) -> None:
+        """
+        Tự động đồng bộ các MediaWorkflow đã RENDERED / VIDEO_APPROVED sang PublishingQueueItem
+        với trạng thái 'needs_approval' nếu chưa có trong queue.
+        """
+        query = db.query(MediaWorkflow).filter(
+            MediaWorkflow.status.in_(["RENDERED", "VIDEO_APPROVED", "QUEUED_FOR_PUBLISHING"])
+        )
+        if not self.is_system_user(user):
+            query = query.filter(MediaWorkflow.user_id == user.id)
+        workflows = query.all()
+        if not workflows:
+            return
+
+        changed = False
+        for wf in workflows:
+            metadata = dict(wf.metadata_json or {})
+            queued_id = metadata.get("queued_post_id")
+            if queued_id:
+                try:
+                    existing = db.get(PublishingQueueItem, uuid.UUID(str(queued_id)))
+                    if existing:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
+            final_video = next(
+                (item.get("uri") for item in artifacts if isinstance(item, dict) and item.get("uri") and item.get("type") == "FINAL_VIDEO"),
+                metadata.get("rendered_video") or metadata.get("final_video")
+            )
+            if not final_video and isinstance(wf.draft_json, dict):
+                story_artifacts = wf.draft_json.get("video_artifacts") if isinstance(wf.draft_json.get("video_artifacts"), dict) else {}
+                final_video = story_artifacts.get("final")
+
+            profile = db.get(SocialProfile, wf.profile_id)
+            if not profile:
+                continue
+
+            content = db.get(ContentItem, wf.primary_content_id) if wf.primary_content_id else None
+            article_link = content.canonical_url if content else None
+            article_title = wf.title or (content.canonical_title if content else "Video bài viết")
+
+            queue_item = PublishingQueueItem(
+                user_id=wf.user_id,
+                profile_id=wf.profile_id,
+                content_id=wf.primary_content_id,
+                article_link=article_link,
+                article_title=article_title,
+                platform=profile.platform or "tiktok",
+                generated_content=wf.title,
+                ai_reason="Được chuyển tự động từ Video đã hoàn thành render",
+                status="needs_approval",
+                scheduled_at=datetime.utcnow() + timedelta(hours=2),
+            )
+            db.add(queue_item)
+            db.flush()
+
+            metadata["queued_post_id"] = str(queue_item.id)
+            wf.metadata_json = metadata
+            db.add(wf)
+            changed = True
+
+        if changed:
+            db.commit()
+
     def list_user_queue(
         self,
         db: Session,
@@ -492,6 +646,7 @@ class SocialProfileService:
         scheduled_to: datetime | None = None,
         search: str | None = None,
     ) -> list[PublishingQueueItem]:
+        self.sync_rendered_workflows_to_queue(db, user)
         query = db.query(PublishingQueueItem).join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
         if not self.is_system_user(user):
             query = query.filter(SocialProfile.user_id == user.id)
@@ -568,6 +723,13 @@ class SocialProfileService:
         if item.status in {"published", "skipped"} and next_status != item.status:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item đã kết thúc không thể chuyển lại trạng thái duyệt")
         item.status = next_status
+        if next_status == "changes_requested":
+            self.mark_queue_workflow_changes_requested(
+                db,
+                item,
+                user,
+                note="Reviewer yêu cầu chỉnh sửa trước khi duyệt.",
+            )
         db.commit()
         db.refresh(item)
         return item
@@ -588,9 +750,68 @@ class SocialProfileService:
         message = (note or "").strip() or "Reviewer yêu cầu chỉnh sửa trước khi duyệt."
         item.ai_reason = _append_human_note(item.ai_reason, message)
         db.add(item)
+        self.mark_queue_workflow_changes_requested(db, item, user, note=message)
         db.commit()
         db.refresh(item)
         return item
+
+    def find_workflow_for_queue_item(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        user: User,
+    ) -> MediaWorkflow | None:
+        query = db.query(MediaWorkflow).filter(MediaWorkflow.metadata_json["queued_post_id"].astext == str(item.id))
+        if not self.is_system_user(user):
+            query = query.filter(MediaWorkflow.user_id == user.id)
+        workflow = query.order_by(MediaWorkflow.updated_at.desc()).first()
+        if workflow:
+            return workflow
+
+        if not item.content_id:
+            return None
+        fallback_query = db.query(MediaWorkflow).filter(
+            MediaWorkflow.profile_id == item.profile_id,
+            MediaWorkflow.primary_content_id == item.content_id,
+            MediaWorkflow.status.in_(["RENDERED", "VIDEO_APPROVED", "QUEUED_FOR_PUBLISHING", "PUBLISHED"]),
+        )
+        if not self.is_system_user(user):
+            fallback_query = fallback_query.filter(MediaWorkflow.user_id == user.id)
+        return fallback_query.order_by(MediaWorkflow.updated_at.desc()).first()
+
+    def mark_queue_workflow_changes_requested(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        user: User,
+        *,
+        note: str | None = None,
+    ) -> None:
+        workflow = self.find_workflow_for_queue_item(db, item, user)
+        if not workflow:
+            return
+
+        requested_at = datetime.now(timezone.utc).isoformat()
+        metadata = dict(workflow.metadata_json or {})
+        previous_review = metadata.get("module4_review") if isinstance(metadata.get("module4_review"), dict) else {}
+        metadata["video_approved"] = False
+        metadata.pop("video_approved_at", None)
+        metadata.pop("video_approved_by", None)
+        metadata["changes_requested_at"] = requested_at
+        metadata["changes_requested_by"] = str(user.id)
+        metadata["changes_requested_note"] = (note or "").strip() or "Reviewer yêu cầu chỉnh sửa trước khi duyệt."
+        metadata["module4_review"] = {
+            "decision": "changes_requested",
+            "mode": "manual",
+            "reviewed_by": str(user.id),
+            "reviewed_at": requested_at,
+            "note": metadata["changes_requested_note"],
+            "previous_decision": previous_review.get("decision"),
+        }
+        workflow.metadata_json = metadata
+        workflow.status = "EDITING"
+        workflow.current_stage = "EDITING"
+        db.add(workflow)
 
     def approve_and_publish_queue_item_now(
         self,
@@ -714,6 +935,173 @@ class SocialProfileService:
                     return candidate.astimezone(timezone.utc)
         return (now + timedelta(hours=1)).astimezone(timezone.utc)
 
+    def _tiktok_public_post_url(self, profile: SocialProfile, post_id: str | None, fallback: str | None = None) -> str | None:
+        post_id = (post_id or "").strip()
+        username = (profile.username or "").strip().lstrip("@")
+        if post_id and username:
+            return f"https://www.tiktok.com/@{username}/video/{post_id}"
+        return fallback
+
+    def _upsert_direct_tiktok_social_post(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        profile: SocialProfile,
+        publish_id: str,
+        post_id: str,
+        published_at: datetime,
+    ) -> SocialPost:
+        post = (
+            db.query(SocialPost)
+            .filter(
+                SocialPost.profile_id == profile.id,
+                or_(
+                    SocialPost.platform_post_id == post_id,
+                    SocialPost.platform_publish_id == publish_id,
+                ),
+            )
+            .first()
+        )
+        post_url = self._tiktok_public_post_url(profile, post_id, item.article_link)
+        if not post:
+            post = SocialPost(
+                profile_id=profile.id,
+                title=item.article_title,
+                post_url=post_url,
+                platform_post_id=post_id,
+                platform_publish_id=publish_id,
+                caption=item.generated_content,
+                status="published_to_tiktok",
+                published_at=published_at,
+            )
+            db.add(post)
+            db.flush()
+            return post
+
+        post.title = item.article_title or post.title
+        post.post_url = post_url or post.post_url
+        post.platform_post_id = post_id
+        post.platform_publish_id = publish_id
+        post.caption = item.generated_content or post.caption
+        post.status = "published_to_tiktok"
+        post.published_at = published_at
+        db.add(post)
+        return post
+
+    def _complete_direct_tiktok_publish(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        profile: SocialProfile,
+        publish_id: str,
+        status_data: dict,
+        source: str,
+    ) -> SocialPost | None:
+        post_id = extract_tiktok_public_post_id(status_data)
+        item.publish_status_jsonb = status_data
+        item.platform_publish_id = publish_id
+        if not post_id:
+            item.status = "publishing"
+            item.error = "TikTok đã PUBLISH_COMPLETE nhưng response thiếu publicaly_available_post_id/post_id."
+            item.ai_reason = f"TikTok Direct Post đã complete ({source}) nhưng chưa lấy được post_id. publish_id={publish_id}"
+            db.add(item)
+            return None
+
+        published_at = datetime.utcnow()
+        post = self._upsert_direct_tiktok_social_post(db, item, profile, publish_id, post_id, published_at)
+        item.status = "published"
+        item.published_at = published_at
+        item.error = None
+        item.ai_reason = f"TikTok Direct Post đã hoàn tất ({source}). publish_id={publish_id}; post_id={post_id}"
+        db.add_all([item, post])
+        return post
+
+    def refresh_tiktok_publish_status(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        source: str = "poller",
+        *,
+        poll_attempts: int = 1,
+        poll_interval_seconds: float = 0,
+    ) -> dict:
+        profile = item.profile
+        self.ensure_tiktok_profile(profile)
+        publish_id = (item.platform_publish_id or "").strip()
+        if not publish_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item chưa có TikTok publish_id để kiểm tra")
+
+        token = ensure_tiktok_access_token(profile)
+        status_data = (
+            poll_tiktok_publish_status(token, publish_id, max_attempts=poll_attempts, interval_seconds=poll_interval_seconds)
+            if poll_attempts > 1
+            else fetch_tiktok_publish_status(token, publish_id)
+        )
+        item.publish_status_jsonb = status_data
+        status_value = tiktok_publish_status_value(status_data) or "UNKNOWN"
+
+        post = None
+        if tiktok_publish_is_complete(status_data):
+            post = self._complete_direct_tiktok_publish(db, item, profile, publish_id, status_data, source)
+        elif tiktok_publish_is_failed(status_data):
+            item.status = "failed"
+            item.error = tiktok_publish_failure_reason(status_data) or f"TikTok publish failed: {status_value}"
+            item.ai_reason = f"TikTok Direct Post thất bại ({source}). publish_id={publish_id}; status={status_value}"
+            db.add(item)
+        else:
+            item.status = "publishing"
+            item.error = None
+            item.ai_reason = f"TikTok Direct Post đang xử lý ({source}). publish_id={publish_id}; status={status_value}"
+            db.add(item)
+
+        db.commit()
+        db.refresh(item)
+        if post:
+            db.refresh(post)
+        return {
+            "queue_item": self.serialize_queue_item(item),
+            "post": self.serialize_post(post) if post else None,
+            "tiktok": {
+                "publish_id": publish_id,
+                "post_id": extract_tiktok_public_post_id(status_data),
+                "mode": "direct",
+                "status": status_data,
+            },
+        }
+
+    def finalize_tiktok_publish_statuses(self, db: Session, limit: int = 10) -> dict[str, int]:
+        result = {"checked": 0, "completed": 0, "failed": 0, "pending": 0}
+        items = (
+            db.query(PublishingQueueItem)
+            .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+            .filter(
+                PublishingQueueItem.platform == "tiktok",
+                PublishingQueueItem.status == "publishing",
+                PublishingQueueItem.platform_publish_id.isnot(None),
+                SocialProfile.status == "active",
+                SocialProfile.access_token.isnot(None),
+            )
+            .order_by(PublishingQueueItem.updated_at.asc(), PublishingQueueItem.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        for item in items:
+            result["checked"] += 1
+            try:
+                response = self.refresh_tiktok_publish_status(db, item, "poller")
+                status_data = response.get("tiktok", {}).get("status") or {}
+                if tiktok_publish_is_complete(status_data) and response.get("post"):
+                    result["completed"] += 1
+                elif tiktok_publish_is_failed(status_data):
+                    result["failed"] += 1
+                else:
+                    result["pending"] += 1
+            except Exception as exc:
+                db.rollback()
+                logger.exception("TikTok publish status polling failed queue_item_id=%s: %s", item.id, exc)
+                result["failed"] += 1
+        return result
+
     def publish_queue_item_to_tiktok(
         self,
         db: Session,
@@ -752,6 +1140,8 @@ class SocialProfileService:
         profile = item.profile
         self.ensure_tiktok_profile(profile)
         mode = self.resolve_tiktok_publish_mode(profile, mode)
+        if item.status == "publishing" and item.platform_publish_id and mode == "direct":
+            return self.refresh_tiktok_publish_status(db, item, "manual", poll_attempts=3, poll_interval_seconds=5)
         video_path = self.resolve_rendered_video_path(item.article_link)
         action_label = "đăng trực tiếp" if mode == "direct" else "gửi inbox"
         item.status = "publishing"
@@ -793,32 +1183,72 @@ class SocialProfileService:
 
         publish_id = result["publish_id"]
         status_data = result.get("status") or {}
+        item.platform_publish_id = publish_id
+        item.publish_status_jsonb = status_data
         now = datetime.utcnow()
-        post = SocialPost(
-            profile_id=profile.id,
-            title=item.article_title,
-            post_url=item.article_link,
-            platform_post_id=publish_id,
-            caption=item.generated_content,
-            status="published_to_tiktok" if mode == "direct" else "sent_to_tiktok_inbox",
-            published_at=now,
-        )
-        item.status = "published"
-        item.published_at = now
-        item.error = None
+
+        if mode == "direct" and not (tiktok_publish_is_complete(status_data) or tiktok_publish_is_failed(status_data)):
+            status_data = poll_tiktok_publish_status(ensure_tiktok_access_token(profile), publish_id, max_attempts=3, interval_seconds=5)
+            item.publish_status_jsonb = status_data
+
+        if mode == "direct" and tiktok_publish_is_failed(status_data):
+            status_value = tiktok_publish_status_value(status_data) or "UNKNOWN"
+            item.status = "failed"
+            item.error = tiktok_publish_failure_reason(status_data) or f"TikTok publish failed: {status_value}"
+            item.ai_reason = f"TikTok Direct Post thất bại ({source}). publish_id={publish_id}; status={status_value}"
+            db.add_all([profile, item])
+            db.commit()
+            db.refresh(item)
+            return {
+                "queue_item": self.serialize_queue_item(item),
+                "post": None,
+                "tiktok": {
+                    "publish_id": publish_id,
+                    "post_id": None,
+                    "mode": mode,
+                    "privacy_level": result.get("privacy_level"),
+                    "status": status_data,
+                    "video_size": result.get("video_size"),
+                },
+            }
+
+        post = None
         if mode == "direct":
-            item.ai_reason = f"TikTok Direct Post đã gửi ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
+            if tiktok_publish_is_complete(status_data):
+                post = self._complete_direct_tiktok_publish(db, item, profile, publish_id, status_data, source)
+            if not post and not tiktok_publish_is_complete(status_data):
+                item.status = "publishing"
+                item.published_at = None
+                item.error = None
+                item.ai_reason = f"TikTok Direct Post đang xử lý ({source}). publish_id={publish_id}; status={tiktok_publish_status_value(status_data) or 'UNKNOWN'}"
         else:
+            post = SocialPost(
+                profile_id=profile.id,
+                title=item.article_title,
+                post_url=item.article_link,
+                platform_post_id=None,
+                platform_publish_id=publish_id,
+                caption=item.generated_content,
+                status="sent_to_tiktok_inbox",
+                published_at=now,
+            )
+            item.status = "published"
+            item.published_at = now
+            item.error = None
             item.ai_reason = f"TikTok upload sent to creator inbox ({source}). publish_id={publish_id}; status={status_data.get('status') or 'UNKNOWN'}"
-        db.add_all([profile, item, post])
+        db.add_all([profile, item])
+        if post:
+            db.add(post)
         db.commit()
         db.refresh(item)
-        db.refresh(post)
+        if post:
+            db.refresh(post)
         return {
             "queue_item": self.serialize_queue_item(item),
-            "post": self.serialize_post(post),
+            "post": self.serialize_post(post) if post else None,
             "tiktok": {
                 "publish_id": publish_id,
+                "post_id": extract_tiktok_public_post_id(status_data),
                 "mode": mode,
                 "privacy_level": result.get("privacy_level"),
                 "status": status_data,
@@ -1083,6 +1513,8 @@ class SocialProfileService:
             "generated_content": item.generated_content,
             "ai_reason": item.ai_reason,
             "status": item.status,
+            "platform_publish_id": getattr(item, "platform_publish_id", None),
+            "publish_status": getattr(item, "publish_status_jsonb", None) or {},
             "scheduled_at": item.scheduled_at,
             "published_at": item.published_at,
             "error": item.error,
@@ -1111,6 +1543,7 @@ class SocialProfileService:
             "title": post.title,
             "post_url": post.post_url,
             "platform_post_id": post.platform_post_id,
+            "platform_publish_id": getattr(post, "platform_publish_id", None),
             "caption": post.caption,
             "status": post.status,
             "published_at": post.published_at,

@@ -406,12 +406,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const handleSyncProfile = async (profileId: string) => {
     setSyncingProfileId(profileId)
     try {
-      const syncedProfile = await syncSocialProfileApi(profileId)
+      const res = await syncSocialProfileApi(profileId)
+      const syncedProfile = (res as any)?.profile || res
       setProfiles((prev) => prev.map((profile) => (profile.id === profileId ? syncedProfile : profile)))
       if (activeStrategyProfile?.id === profileId) {
         setActiveStrategyProfile((prev) => (prev ? { ...prev, ...syncedProfile } : null))
       }
-      toast.success('Đã đồng bộ thông tin TikTok profile.')
+      const videoMsg = res.synced_videos_count !== undefined ? ` và ${res.synced_videos_count} video` : ''
+      toast.success(`Đã đồng bộ thông tin & chỉ số TikTok profile${videoMsg}.`)
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể đồng bộ TikTok profile')
     } finally {

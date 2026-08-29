@@ -246,12 +246,56 @@ export const deleteSocialProfileApi = async (profileId: string | number) => {
   return data
 }
 
-export const syncSocialProfileApi = async (profileId: string | number): Promise<SocialProfile> => {
+export type SyncSocialProfileResponse = {
+  profile: SocialProfile
+  synced_videos_count?: number
+  synced_at?: string
+}
+
+export type SocialPostMetric = {
+  id: string
+  views: number
+  likes: number
+  comments: number
+  shares: number
+  captured_at: string
+}
+
+export type SocialPost = {
+  id: string
+  profile_id: string
+  title: string
+  post_url?: string | null
+  platform_post_id?: string | null
+  platform_publish_id?: string | null
+  caption?: string | null
+  status: string
+  published_at: string
+  created_at: string
+  latest_metric?: SocialPostMetric | null
+  growth?: {
+    views_1h?: number | null
+    views_24h?: number | null
+    views_7d?: number | null
+  } | null
+  metrics?: SocialPostMetric[]
+}
+
+export type SocialPostsResponse = {
+  items: SocialPost[]
+}
+
+export const syncSocialProfileApi = async (profileId: string | number): Promise<SyncSocialProfileResponse> => {
   const { data } = await api.post(`/social-profiles/${profileId}/sync`)
   return data
 }
 
-export const fetchSocialPostsApi = async (profileId: string | number) => {
+export const fetchProfileSnapshotsApi = async (profileId: string | number, days: number = 30) => {
+  const { data } = await api.get(`/social-profiles/${profileId}/snapshots`, { params: { days } })
+  return data
+}
+
+export const fetchSocialPostsApi = async (profileId: string | number): Promise<SocialPostsResponse> => {
   const { data } = await api.get(`/social-profiles/${profileId}/posts`)
   return data
 }

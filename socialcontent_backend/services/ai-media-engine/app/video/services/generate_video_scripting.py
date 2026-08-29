@@ -12,6 +12,7 @@ from app.video.services.generate_video_timeline import (
     _prevent_subtitle_overlap,
     collect_image_urls,
     collect_story_image_urls,
+    collect_video_urls,
     invalidate_story_voice,
     normalize_audio_clips,
     normalize_media_fit,
@@ -33,13 +34,14 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
         text = raw_article["content"]
     title = raw_article.get("title") or raw_article.get("canonical_title") or "Bản tin"
     images = collect_image_urls(raw_article)
+    source_videos = collect_video_urls(raw_article)
     target_duration = resolve_target_duration_seconds(raw_article)
     story_data = raw_article.get("story_data") if isinstance(raw_article.get("story_data"), list) else raw_article.get("scenes")
     if _has_direct_story_data(story_data):
-        return create_story_from_story_data(raw_article, story_data, title, images, target_duration)
+        return prioritize_source_videos(create_story_from_story_data(raw_article, story_data, title, images, target_duration), source_videos)
     parts = raw_article.get("parts") if isinstance(raw_article.get("parts"), list) else raw_article.get("script_parts")
     if _has_direct_script_parts(parts):
-        return create_story_from_script_parts(raw_article, parts, title, images, target_duration)
+        return prioritize_source_videos(create_story_from_script_parts(raw_article, parts, title, images, target_duration), source_videos)
     timeline_source = {
         "id": raw_article.get("id"),
         "workflow_id": raw_article.get("workflow_id"),
@@ -80,7 +82,100 @@ def create_story_from_raw(raw_article: dict[str, Any]) -> dict[str, Any]:
     }
     if series_decision:
         story["meta"]["series_decision"] = series_decision
+    story = prioritize_source_videos(story, source_videos)
     return normalize_story_for_project(story)
+
+
+def prioritize_source_videos(story: dict[str, Any], source_videos: list[str]) -> dict[str, Any]:
+    source_video = next((str(url).strip() for url in source_videos if str(url or "").strip()), "")
+    if not source_video:
+        return story
+
+    timeline = story.get("timeline") if isinstance(story.get("timeline"), dict) else {}
+    video_clips = timeline.get("video") if isinstance(timeline.get("video"), list) else []
+    text_clips = [clip for clip in timeline.get("text", []) if isinstance(clip, dict)]
+    text_ids = [str(clip.get("id")) for clip in text_clips if clip.get("id")]
+    if text_clips:
+        start = round_to_frame(min(float(clip.get("start") or 0.0) for clip in text_clips), 30)
+        end = round_to_frame(max(float(clip.get("end") or start + float(clip.get("duration") or 4)) for clip in text_clips), 30)
+    elif video_clips and isinstance(video_clips[0], dict):
+        start = round_to_frame(float(video_clips[0].get("start") or 0.0), 30)
+        end = round_to_frame(float(video_clips[0].get("end") or start + float(video_clips[0].get("duration") or 4)), 30)
+    else:
+        start = 0.0
+        end = round_to_frame(float(timeline.get("duration") or 4), 30)
+
+    source_video_clip = {
+        **(video_clips[0] if video_clips and isinstance(video_clips[0], dict) else {}),
+        "id": "video-1",
+        "scene_index": 0,
+        "type": "video",
+        "start": start,
+        "end": max(start + 1 / 30, end),
+        "duration": round_to_frame(max(1 / 30, end - start), 30),
+        "src": source_video,
+        "fit": (video_clips[0].get("fit") if video_clips and isinstance(video_clips[0], dict) else None) or "cover",
+        **({"text_ids": text_ids, "text_id": text_ids[0]} if text_ids else {}),
+    }
+    timeline["video"] = [source_video_clip]
+    for text_clip in text_clips:
+        text_clip["video_id"] = source_video_clip["id"]
+        text_clip["video_ids"] = [source_video_clip["id"]]
+    if text_clips:
+        timeline["text"] = text_clips
+
+    metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+    metadata["source_video_priority"] = {
+        "enabled": True,
+        "src": source_video,
+        "mode": "single_video_multiple_text",
+        "text_count": len(text_clips),
+    }
+    timeline["metadata"] = metadata
+    story["timeline"] = timeline
+
+    scenes = story.get("story_data") if isinstance(story.get("story_data"), list) else []
+    if scenes:
+        for index, scene in enumerate(scenes):
+            if not isinstance(scene, dict):
+                continue
+            scene.update(
+                {
+                    "image": source_video,
+                    "media_type": "video",
+                    "video_id": source_video_clip["id"],
+                    "scene_index": 0,
+                    "fit": scene.get("fit") or "cover",
+                }
+            )
+            if index < len(text_ids):
+                scene["text_id"] = text_ids[index]
+                scene["video_ids"] = [source_video_clip["id"]]
+        story["story_data"] = scenes
+    elif text_clips:
+        story["story_data"] = [
+            {
+                "subtitle": str(clip.get("text") or ""),
+                "voice_text": str(clip.get("voice_text") or clip.get("text") or ""),
+                "image": source_video,
+                "media_type": "video",
+                "video_id": source_video_clip["id"],
+                "text_id": str(clip.get("id") or f"text-{index + 1}"),
+                "scene_index": 0,
+                "fit": source_video_clip["fit"],
+                "effect": source_video_clip.get("effect") or "slow-zoom",
+                "duration": float(clip.get("duration") or (float(clip.get("end") or 0) - float(clip.get("start") or 0)) or 4),
+                "subtitle_start": clip.get("start"),
+                "subtitle_duration": clip.get("duration"),
+            }
+            for index, clip in enumerate(text_clips)
+        ]
+
+    story.setdefault("meta", {})
+    story["meta"]["source_video_used"] = True
+    story["meta"]["source_video"] = source_video
+    story["meta"]["source_video_mode"] = "single_video_multiple_text"
+    return story
 
 
 def _timeline_series_decision(timeline: dict[str, Any]) -> dict[str, Any] | None:
@@ -600,6 +695,12 @@ def sanitize_series_decision(value: Any, active_series: list[dict[str, Any]]) ->
         target_series_id = None
 
     series_title = str(value.get("series_title") or "").strip()
+    series_description = str(value.get("series_description") or "").strip()
+    series_type = str(value.get("series_type") or "NARRATIVE").strip().upper()
+    try:
+        total_parts = max(0, int(value.get("total_parts") or 0))
+    except (TypeError, ValueError):
+        total_parts = 0
     reason = str(value.get("reason") or "").strip()
     if action == "CREATE_NEW" and not series_title:
         action = "NONE"
@@ -608,6 +709,9 @@ def sanitize_series_decision(value: Any, active_series: list[dict[str, Any]]) ->
         "action": action,
         "target_series_id": target_series_id,
         "series_title": series_title or None,
+        "series_description": series_description or None,
+        "series_type": series_type if series_type in {"NARRATIVE", "EDUCATIONAL", "NEWS", "REVIEWS", "ENTERTAINMENT"} else "NARRATIVE",
+        "total_parts": total_parts,
         "reason": reason or None,
     }
 
@@ -648,6 +752,9 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
                 "action": "USE_EXISTING, CREATE_NEW, or NONE",
                 "target_series_id": "existing active series id when action is USE_EXISTING; otherwise null",
                 "series_title": "broad reusable series title when creating a new series; otherwise existing title or null",
+                "series_description": "detailed 1-2 sentence Vietnamese description of the series concept, core theme, and goal when creating a new series; otherwise null",
+                "series_type": "NARRATIVE, EDUCATIONAL, NEWS, REVIEWS, or ENTERTAINMENT when creating a new series; default NARRATIVE",
+                "total_parts": "integer number of expected parts (e.g. 3, 5, 10, or 0 for ongoing/unlimited) when creating a new series; default 0",
                 "reason": "short Vietnamese reason for the series choice",
             },
             "timeline": {
@@ -704,7 +811,7 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "Use allowed_effects only.",
             "Do not output scenes or story_data.",
             "Also decide series in the same JSON response. Use active_series and their 5 recent_items.",
-            "Prefer an active series with the same categoryId/category_id before comparing title or story content.",
+            "Match or create an active series based on topic relevance, story continuity, and reusable theme, without requiring a category match.",
             "If the new content naturally continues one active series, set series_decision.action=USE_EXISTING and target_series_id to that exact id.",
             "If it does not match any active series but should become a reusable topic, set action=CREATE_NEW and choose a broad long-lived Vietnamese series_title.",
             "Do not create a series_title from the exact one-off article title.",

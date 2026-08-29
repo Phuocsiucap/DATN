@@ -79,6 +79,9 @@ class AutoWorkflowPlanner:
                     "action": "USE_EXISTING, CREATE_NEW, or NONE",
                     "target_series_id": "existing active series id when action is USE_EXISTING; otherwise null",
                     "series_title": "broad reusable Vietnamese title when creating a new series; otherwise existing title or null",
+                    "series_description": "detailed 1-2 sentence Vietnamese description of the series concept, core theme, and goal when creating a new series; otherwise null",
+                    "series_type": "NARRATIVE, EDUCATIONAL, NEWS, REVIEWS, or ENTERTAINMENT when creating a new series; default NARRATIVE",
+                    "total_parts": "integer number of expected parts (e.g. 3, 5, 10, or 0 for ongoing/unlimited) when creating a new series; default 0",
                     "reason": "short Vietnamese reason",
                 },
                 "timeline": {
@@ -106,7 +109,7 @@ class AutoWorkflowPlanner:
                 "Do not invent facts outside source_content.full_text, title, summary, category, or tags.",
                 "If creating a workflow, timeline must be production-ready for a vertical Vietnamese short video.",
                 "Also decide series in the same JSON response. Use active_series and their 5 recent_items.",
-                "Prefer an active series with the same categoryId/category_id before comparing title or story content.",
+                "Match or create an active series based on topic relevance, story continuity, and reusable theme, without requiring a category match.",
                 "If the content naturally continues one active series, set series_decision.action=USE_EXISTING and target_series_id to that exact id.",
                 "If it should become a reusable topic but matches no active series, set action=CREATE_NEW with a broad long-lived Vietnamese series_title.",
                 "Do not create a series_title from the exact one-off article title.",

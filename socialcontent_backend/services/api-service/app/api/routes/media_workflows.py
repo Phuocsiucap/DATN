@@ -159,11 +159,13 @@ def list_video_workspace(
             MediaWorkflow.updated_at,
             SocialProfile.profile_name.label("profile_name"),
             SocialProfile.platform.label("profile_platform"),
+            SocialProfile.avatar_url.label("profile_avatar"),
             ContentSeries.title.label("series_title"),
             ContentSeries.status.label("series_status"),
             ContentItem.canonical_title.label("content_title"),
             ContentItem.summary.label("content_summary"),
             ContentItem.sources_jsonb.label("content_sources"),
+            ContentItem.media_jsonb.label("content_media"),
         )
         .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
@@ -626,12 +628,21 @@ def _serialize_workspace_summary(row, latest_task: dict | None) -> dict:
     if isinstance(primary_source, dict) and isinstance(primary_source.get("metadata_json"), dict):
         source_metadata = primary_source["metadata_json"]
     category_id = source_metadata.get("category_id")
+    media = row.content_media if isinstance(row.content_media, list) else []
+    first_media_url = None
+    for item in media:
+        if isinstance(item, dict):
+            first_media_url = item.get("thumbnail_url") or item.get("source_url") or item.get("storage_url")
+            if first_media_url:
+                break
+    thumbnail_url = source_metadata.get("thumbnail_url") or source_metadata.get("image_url") or first_media_url
     return {
         "id": str(row.id),
         "profile": {
             "id": str(row.profile_id),
             "name": row.profile_name,
             "platform": row.profile_platform,
+            "avatar": row.profile_avatar,
         },
         "series": {
             "id": str(row.series_id),
@@ -649,6 +660,8 @@ def _serialize_workspace_summary(row, latest_task: dict | None) -> dict:
             "category": source_metadata.get("category"),
             "site_id": source_metadata.get("site_id"),
             "siteId": source_metadata.get("site_id"),
+            "thumbnail_url": thumbnail_url,
+            "thumbnailUrl": thumbnail_url,
         } if row.primary_content_id else None,
         "title": row.title,
         "status": row.status,

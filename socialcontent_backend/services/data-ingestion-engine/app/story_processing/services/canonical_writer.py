@@ -1,7 +1,8 @@
 import hashlib
 import html
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -445,6 +446,7 @@ class CanonicalWriter:
                 "mime_type": item.get("mime_type"),
                 "embed_url": item.get("embed_url"),
                 "provider": item.get("provider"),
+                "video_id": item.get("video_id"),
                 "title": item.get("title"),
                 "description": item.get("description"),
                 "upload_date": item.get("upload_date"),
@@ -488,4 +490,21 @@ class CanonicalWriter:
         try:
             return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except ValueError:
+            pass
+
+        match = re.search(
+            r"(\d{1,2})/(\d{1,2})/(\d{4})\s*,\s*(\d{1,2}):(\d{2})(?::(\d{2}))?",
+            str(value),
+        )
+        if not match:
             return None
+        day, month, year, hour, minute, second = match.groups()
+        return datetime(
+            int(year),
+            int(month),
+            int(day),
+            int(hour),
+            int(minute),
+            int(second or 0),
+            tzinfo=timezone(timedelta(hours=7)),
+        )

@@ -750,7 +750,7 @@ function localPublicRelativePath(src) {
   if (!value) {
     return null;
   }
-  if (value.startsWith('assets/audio/')) {
+  if (value.startsWith('assets/audio/') || value.startsWith('assets/videos/')) {
     return value;
   }
   const strippingPrefixes = ['/public/', 'public/', '/api/v1/generate-video/media/', 'api/v1/generate-video/media/'];
@@ -765,7 +765,7 @@ function localPublicRelativePath(src) {
     if (!isLocalhost) {
       return null;
     }
-    if (parsed.pathname.startsWith('/assets/audio/') || parsed.pathname.startsWith('/assets/images/')) {
+    if (parsed.pathname.startsWith('/assets/audio/') || parsed.pathname.startsWith('/assets/images/') || parsed.pathname.startsWith('/assets/videos/')) {
       return decodeURIComponent(parsed.pathname.slice(1));
     }
     for (const prefix of ['/public/', '/api/v1/generate-video/media/']) {
@@ -854,6 +854,15 @@ function contentTypeFor(filePath) {
   }
   if (ext === '.m4a') {
     return 'audio/mp4';
+  }
+  if (ext === '.mp4' || ext === '.m4v') {
+    return 'video/mp4';
+  }
+  if (ext === '.webm') {
+    return 'video/webm';
+  }
+  if (ext === '.mov') {
+    return 'video/quicktime';
   }
   if (ext === '.png') {
     return 'image/png';

@@ -119,6 +119,7 @@ export type ContentSeries = {
   id: string
   content_plan_id?: string | null
   profile_id?: string | null
+  profileId?: string | null
   title: string
   description?: string | null
   series_type: string

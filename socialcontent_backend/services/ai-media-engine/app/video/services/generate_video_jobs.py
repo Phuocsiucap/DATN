@@ -7,6 +7,7 @@ from typing import Any
 from common.db.media_workflows import _image_urls, _serialize_source_content
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
+from app.video.services.generate_video_assets import hydrate_source_video_assets
 from app.video.services.generate_video_voice import DEFAULT_VOICE_SPEED
 from app.video.services.generate_video_rendering import export_final_video
 from app.video.services.generate_video_scripting import create_story_from_raw
@@ -46,6 +47,10 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         _update_task_progress(db, task, project, "LOADING_SOURCE", 10, project_status="SCRIPTING")
 
         source = _build_script_source_from_project(db, project, metadata)
+        source_video_assets = hydrate_source_video_assets(source)
+        if source_video_assets:
+            source.setdefault("content", {})["source_video_assets"] = source_video_assets
+            source.setdefault("raw_article", {}).setdefault("source_content", {})["source_video_assets"] = source_video_assets
         _update_task_progress(db, task, project, "GENERATING_DRAFT", 30, project_status="SCRIPTING")
         story = create_story_from_raw(source)
         _update_task_progress(db, task, project, "NORMALIZING_DRAFT", 72, project_status="SCRIPTING")
@@ -291,16 +296,23 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
             if not series:
                 content_context = source.get("content") if isinstance(source.get("content"), dict) else {}
                 source_content = source.get("source_content") if isinstance(source.get("source_content"), dict) else {}
+                desc = decision.get("series_description") or decision.get("reason") or source.get("summary")
+                series_type = str(decision.get("series_type") or "NARRATIVE").upper()
+                try:
+                    total_parts = max(0, int(decision.get("total_parts") or 0))
+                except (TypeError, ValueError):
+                    total_parts = 0
+
                 series = ContentSeries(
                     user_id=project.user_id,
                     profile_id=project.profile_id,
                     title=title,
-                    description=str(decision.get("reason") or source.get("summary") or "")[:1000] or None,
-                    series_type="NARRATIVE",
+                    description=str(desc)[:1000] if desc else None,
+                    series_type=series_type,
                     status="ACTIVE",
                     current_part=0,
-                    total_parts=0,
-                    context_json={"version": 1},
+                    total_parts=total_parts,
+                    context_json={"version": 1, "created_from": "generate_video_script"},
                     metadata_json={
                         "created_from": "generate_video_script",
                         "source": "llm_series_decision",

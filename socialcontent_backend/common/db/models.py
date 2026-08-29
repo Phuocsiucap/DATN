@@ -303,8 +303,23 @@ class SocialProfile(Base):
     strategy = relationship("SocialProfileStrategy", back_populates="profile", cascade="all, delete-orphan", uselist=False)
     queue_items = relationship("PublishingQueueItem", back_populates="profile", cascade="all, delete-orphan")
     posts = relationship("SocialPost", back_populates="profile", cascade="all, delete-orphan")
+    snapshots = relationship("SocialProfileSnapshot", back_populates="profile", cascade="all, delete-orphan")
     content_plans = relationship("MediaWorkflow", back_populates="profile", cascade="all, delete-orphan")
     content_links = relationship("ProfileContentLink", back_populates="profile", cascade="all, delete-orphan")
+
+
+class SocialProfileSnapshot(Base):
+    __tablename__ = "social_profile_snapshots"
+
+    id = uuid_pk()
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    follower_count = Column(Integer, default=0, nullable=False)
+    following_count = Column(Integer, default=0, nullable=False)
+    likes_count = Column(Integer, default=0, nullable=False)
+    video_count = Column(Integer, default=0, nullable=False)
+    captured_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False, index=True)
+
+    profile = relationship("SocialProfile", back_populates="snapshots")
 
 
 class SocialProfileStrategy(Base):
@@ -355,6 +370,8 @@ class PublishingQueueItem(Base):
     generated_content = Column(Text, nullable=True)
     ai_reason = Column(Text, nullable=True)
     status = Column(String(40), default="queued", nullable=False, index=True)
+    platform_publish_id = Column(String(255), nullable=True, index=True)
+    publish_status_jsonb = Column("publish_status", JSONB, nullable=False, default=dict)
     scheduled_at = Column(DateTime(timezone=True), nullable=True, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     error = Column(Text, nullable=True)
@@ -372,6 +389,7 @@ class SocialPost(Base):
     title = Column(String(255), nullable=False)
     post_url = Column(Text, nullable=True)
     platform_post_id = Column(String(255), nullable=True)
+    platform_publish_id = Column(String(255), nullable=True, index=True)
     caption = Column(Text, nullable=True)
     status = Column(String(40), default="published", nullable=False)
     published_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

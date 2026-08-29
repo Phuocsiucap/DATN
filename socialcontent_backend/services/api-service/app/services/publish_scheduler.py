@@ -22,7 +22,7 @@ DEFAULT_SCHEDULER_SETTINGS = {
 }
 
 _publish_queue_task: asyncio.Task | None = None
-_last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0}
+_last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
 
 
 def normalize_scheduler_settings(value: dict[str, Any] | None = None) -> dict[str, int]:
@@ -121,8 +121,13 @@ async def _publish_queue_scheduler_loop() -> None:
 
 def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
     service = SocialProfileService()
-    result = {"checked_at": datetime.utcnow().isoformat(), "published": 0, "failed": 0, "skipped": 0}
+    result = {"checked_at": datetime.utcnow().isoformat(), "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
     with SessionLocal() as db:
+        finalize_result = service.finalize_tiktok_publish_statuses(db, limit=limit * 2)
+        result["finalized"] += finalize_result["completed"]
+        result["failed"] += finalize_result["failed"]
+        result["pending"] += finalize_result["pending"]
+
         due_items = (
             db.query(PublishingQueueItem)
             .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)

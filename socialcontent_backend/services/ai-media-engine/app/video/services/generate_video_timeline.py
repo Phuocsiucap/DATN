@@ -48,7 +48,7 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
     if not timeline:
         timeline = timeline_from_legacy_scenes(story, fps)
 
-    video_clips = normalize_video_clips(timeline.get("video"), fps)
+    video_clips = collapse_shared_video_clips(normalize_video_clips(timeline.get("video"), fps), fps)
     text_clips = prevent_timeline_text_overlap(normalize_text_clips(timeline.get("text"), fps), fps)
     video_clips = fit_video_clips_to_text(video_clips, text_clips, fps)
     audio_clips = normalize_audio_clips(timeline.get("audio"), fps)
@@ -79,14 +79,20 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
     count = max(len(text_clips), len(video_clips))
     for idx in range(count):
         t_clip = text_clips[idx] if idx < len(text_clips) else {}
-        v_clip = video_clips[idx] if idx < len(video_clips) else {}
+        v_clip = _video_clip_for_text(video_clips, t_clip, idx) if t_clip else (video_clips[idx] if idx < len(video_clips) else {})
         text_str = str(t_clip.get("text") or "").strip()
         if not text_str and not v_clip.get("src"):
             continue
         scenes.append({
+            "scene_index": t_clip.get("scene_index") if t_clip.get("scene_index") is not None else v_clip.get("scene_index"),
+            "video_id": v_clip.get("id"),
+            "text_id": t_clip.get("id"),
+            **({"video_ids": _clip_video_ids(t_clip)} if _clip_video_ids(t_clip) else {}),
+            **({"text_ids": _clip_text_ids(v_clip)} if _clip_text_ids(v_clip) else {}),
             "subtitle": text_str,
             "voice_text": t_clip.get("voice_text") or text_str,
             "image": v_clip.get("src") or "",
+            "media_type": v_clip.get("type") or "image",
             "effect": v_clip.get("effect") or "slow-zoom",
             "fit": v_clip.get("fit") or "contain",
             "duration": t_clip.get("duration") or v_clip.get("duration") or 4,
@@ -95,6 +101,29 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
         })
     story["story_data"] = scenes
     story.pop("scenes", None)
+
+
+def _video_clip_for_text(video_clips: list[dict[str, Any]], text_clip: dict[str, Any], fallback_index: int) -> dict[str, Any]:
+    if not video_clips:
+        return {}
+
+    video_ids = _clip_video_ids(text_clip)
+    if video_ids:
+        matched = next((clip for clip in video_clips if str(clip.get("id") or "") in video_ids), None)
+        if matched:
+            return matched
+
+    text_id = str(text_clip.get("id") or "")
+    if text_id:
+        matched = next((clip for clip in video_clips if text_id in _clip_text_ids(clip)), None)
+        if matched:
+            return matched
+
+    matched = next((clip for clip in video_clips if _clip_overlap_seconds(clip, text_clip) > 0), None)
+    if matched:
+        return matched
+
+    return video_clips[fallback_index] if fallback_index < len(video_clips) else video_clips[-1]
 
 
 
@@ -113,11 +142,13 @@ def timeline_from_legacy_scenes(story: dict[str, Any], fps: int) -> dict[str, An
         end = round_to_frame(cursor + duration, fps)
         scene_index = _clip_scene_index(scene, index)
         text_id = str(scene.get("text_id") or f"text-{index + 1}")
+        video_id = str(scene.get("video_id") or scene.get("id") or f"video-{index + 1}")
+        media_type = normalize_visual_media_type(scene.get("media_type") or scene.get("type"), scene.get("image") or scene.get("src"))
         video.append(
             {
-                "id": str(scene.get("id") or f"video-{index + 1}"),
+                "id": video_id,
                 "scene_index": scene_index,
-                "type": "image",
+                "type": media_type,
                 "start": start,
                 "end": end,
                 "src": scene.get("image") or DEFAULT_IMAGES[index % len(DEFAULT_IMAGES)],
@@ -134,7 +165,8 @@ def timeline_from_legacy_scenes(story: dict[str, Any], fps: int) -> dict[str, An
                 {
                     "id": text_id,
                     "scene_index": scene_index,
-                    "video_id": str(scene.get("id") or f"video-{index + 1}"),
+                    "video_id": video_id,
+                    "video_ids": _clip_video_ids(scene) or [video_id],
                     "type": "subtitle",
                     "start": round_to_frame(float(text_start), fps),
                     "end": round_to_frame(float(text_start) + float(text_duration), fps),
@@ -179,9 +211,47 @@ def normalize_video_clips(value: Any, fps: int) -> list[dict[str, Any]]:
     return sorted(clips, key=lambda clip: (clip["start"], clip["end"]))
 
 
+def collapse_shared_video_clips(video_clips: list[dict[str, Any]], fps: int) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str]] = []
+    passthrough: list[dict[str, Any]] = []
+
+    for clip in video_clips:
+        if str(clip.get("type") or "").lower() != "video" or not clip.get("id"):
+            passthrough.append(clip)
+            continue
+        key = (str(clip.get("id")), str(clip.get("src") or ""))
+        existing = grouped.get(key)
+        if not existing:
+            grouped[key] = {**clip}
+            order.append(key)
+            continue
+        start = min(float(existing.get("start") or 0.0), float(clip.get("start") or 0.0))
+        end = max(float(existing.get("end") or 0.0), float(clip.get("end") or 0.0))
+        text_ids = list(dict.fromkeys([*(_clip_text_ids(existing)), *(_clip_text_ids(clip))]))
+        grouped[key] = {
+            **existing,
+            "start": round_to_frame(start, fps),
+            "end": round_to_frame(end, fps),
+            "duration": round_to_frame(max(1 / max(1, fps), end - start), fps),
+            **({"text_ids": text_ids, "text_id": text_ids[0]} if text_ids else {}),
+        }
+
+    return sorted([*passthrough, *[grouped[key] for key in order]], key=lambda clip: (clip["start"], clip["end"]))
+
+
 
 def normalize_media_fit(value: Any) -> str:
     return "cover" if str(value or "").lower() == "cover" else "contain"
+
+
+def normalize_visual_media_type(value: Any, src: Any = None) -> str:
+    media_type = str(value or "").lower()
+    if "video" in media_type:
+        return "video"
+    if re.search(r"\.(?:mp4|webm|mov|m4v)(?:[?#]|$)", str(src or ""), flags=re.IGNORECASE):
+        return "video"
+    return "image"
 
 
 def _clip_scene_index(item: dict[str, Any], fallback: int) -> int:
@@ -632,6 +702,28 @@ def collect_image_urls(source: dict[str, Any]) -> list[str]:
         if url and ("IMAGE" in media_type or "THUMBNAIL" in media_type or not media_type):
             images.append(url)
     return list(dict.fromkeys(images))
+
+
+def collect_video_urls(source: dict[str, Any]) -> list[str]:
+    videos: list[str] = []
+    source_assets = source.get("source_video_assets")
+    if isinstance(source_assets, list):
+        videos.extend(str(item) for item in source_assets if item)
+    for item in _collect_media_items(source):
+        if isinstance(item, str):
+            if re.search(r"\.(?:mp4|webm|mov|m4v)(?:[?#]|$)", item, flags=re.IGNORECASE):
+                videos.append(item)
+            continue
+        storage_url = str(item.get("storage_url") or "").strip()
+        url = storage_url or item.get("source_url") or item.get("url") or item.get("contentUrl")
+        mime_type = str(item.get("mime_type") or item.get("mimeType") or "").lower()
+        if url and (
+            storage_url.startswith("assets/videos/")
+            or mime_type.startswith("video/")
+            or re.search(r"\.(?:mp4|webm|mov|m4v)(?:[?#]|$)", str(url), flags=re.IGNORECASE)
+        ):
+            videos.append(str(url))
+    return list(dict.fromkeys(videos))
 
 
 

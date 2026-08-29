@@ -166,6 +166,7 @@ def _serialize_series(series: ContentSeries) -> dict:
     return {
         "id": series.id,
         "profile_id": series.profile_id,
+        "profileId": series.profile_id,
         "title": series.title,
         "description": series.description,
         "series_type": series.series_type,
