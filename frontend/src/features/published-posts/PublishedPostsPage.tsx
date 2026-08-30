@@ -20,6 +20,7 @@ import {
   type SocialPost,
   type SocialProfile,
 } from '@/commons/apis/api'
+import TikTokEmbedPlayer from '@/features/analytics/TikTokEmbedPlayer'
 import {
   AppButton,
   EmptyBlock,
@@ -210,7 +211,9 @@ export default function PublishedPostsPage() {
       )))
       await loadPosts(selectedProfileId)
       const countText = result.synced_videos_count !== undefined ? ` (${result.synced_videos_count} bài)` : ''
-      toast.success(`Đã đồng bộ bài đăng từ tài khoản${countText}.`)
+      const resolvedText = result.resolved_post_ids_count ? ` Đã bổ sung ${result.resolved_post_ids_count} post_id.` : ''
+      const snapshotText = result.snapshot_created ? 'Đã lưu snapshot chỉ số mới.' : 'Chỉ số tài khoản chưa đổi.'
+      toast.success(`Đã đồng bộ bài đăng từ tài khoản${countText}.${resolvedText} ${snapshotText}`)
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể đồng bộ tài khoản')
     } finally {
@@ -512,6 +515,10 @@ function PostDetailCard({ post }: { post: SocialPost | null }) {
         <InfoLine label="Ngày đăng" value={formatDateTime(post.published_at)} />
         <InfoLine label="Cập nhật chỉ số" value={formatDateTime(latestCapturedAt)} />
         <InfoLine label="Tăng view 24h" value={`${growth24h >= 0 ? '+' : ''}${formatMetric(growth24h)}`} />
+      </div>
+
+      <div className="mt-3">
+        <TikTokEmbedPlayer postId={post.platform_post_id} postUrl={post.post_url} title={post.title} />
       </div>
 
       {post.caption && (

@@ -454,6 +454,26 @@ def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRe
     }
 
 
+@router.delete("/{workflow_id:uuid}")
+def delete_media_workflow(
+    workflow_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = db.get(MediaWorkflow, workflow_id)
+    if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    db.query(KafkaTask).filter(
+        KafkaTask.reference_id == workflow.id,
+        KafkaTask.reference_type == "media_workflow",
+    ).delete(synchronize_session=False)
+
+    db.delete(workflow)
+    db.commit()
+    return {"message": "Workflow deleted successfully", "workflow_id": str(workflow_id)}
+
+
 @router.post("/from-crawl")
 def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = db.get(SocialProfile, payload.profile_id)

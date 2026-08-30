@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import {
   createGenerateVideoStoryFromProjectApi,
+  deleteVideoWorkspaceApi,
   fetchVideoWorkspacesApi,
   updateVideoWorkspaceApi,
   type VideoWorkspaceSummary,
@@ -204,6 +205,21 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       await loadWorkspaces()
     } catch (error) {
       toast.error(readApiError(error, 'Không xóa được series'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const deleteWorkflow = async (item: VideoWorkspaceSummary) => {
+    if (!window.confirm(`Xóa workflow "${item.title}"? Hành động này sẽ xóa vĩnh viễn kịch bản và không thể phục hồi.`)) return
+    setBusy(`delete-${item.id}`)
+    try {
+      await deleteVideoWorkspaceApi(item.id)
+      toast.success('Đã xóa workflow thành công!')
+      setItems((prev) => prev.filter((w) => w.id !== item.id))
+      await loadWorkspaces(true)
+    } catch (error) {
+      toast.error(readApiError(error, 'Không xóa được workflow'))
     } finally {
       setBusy(null)
     }
@@ -464,9 +480,9 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         </aside>
 
         {/* Workspaces Kanban */}
-        <div className="min-h-0 flex-1 overflow-auto pr-0.5">
+        <div className="min-h-0 flex-1 overflow-hidden pr-0.5">
         {loading ? (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid h-full gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
@@ -487,13 +503,16 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             </p>
           </div>
         ) : (
-          <div className="grid w-full gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid w-full h-full gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 overflow-hidden">
             {kanbanColumns(items).map((column, columnIndex) => (
-              <section key={column.id} className="flex min-h-[650px] flex-col rounded-[8px] border border-slate-200/90 bg-white shadow-xs">
-                <div className="flex h-11 items-center justify-between border-b border-slate-100 px-3">
+              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] flex-col rounded-[8px] border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+                <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3">
                   <div className="flex items-center gap-2">
                     <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
                     <h2 className="text-[13px] font-extrabold text-slate-900">{column.title}</h2>
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[10px] font-black text-slate-600">
+                      {column.items.length}
+                    </span>
                   </div>
                   <MoreHorizontal size={16} className="text-slate-400" />
                 </div>
@@ -513,6 +532,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                         setAssigningWorkflow(item)
                         setAssignSeriesId(item.series?.id || '')
                       }}
+                      onDelete={() => void deleteWorkflow(item)}
                     />
                   ))}
                   {column.items.length === 0 && (
@@ -521,7 +541,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                     </div>
                   )}
                 </div>
-                <button className="mx-3 mb-3 h-9 rounded-[8px] border border-slate-200 bg-white text-[12px] font-bold text-[#6d5dfc] hover:bg-[#f8faff]">
+                <button className="mx-3 my-3 shrink-0 h-9 rounded-[8px] border border-slate-200 bg-white text-[12px] font-bold text-[#6d5dfc] hover:bg-[#f8faff]">
                   + Thêm video
                 </button>
               </section>
@@ -603,6 +623,7 @@ function VideoKanbanCard({
   onRegenerate,
   onCopy,
   onAssign,
+  onDelete,
 }: {
   item: VideoWorkspaceSummary
   index: number
@@ -613,6 +634,7 @@ function VideoKanbanCard({
   onRegenerate: () => void
   onCopy: () => void
   onAssign: () => void
+  onDelete: () => void
 }) {
   const duration = item.status === 'RENDERING' ? '01:04' : index % 2 ? '00:57' : '01:15'
   return (
@@ -679,6 +701,9 @@ function VideoKanbanCard({
             {copied ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
           </button>
           <div className="flex items-center gap-1">
+            <button disabled={disabled} onClick={onDelete} title="Xóa workflow này" className="grid h-8 w-8 place-items-center rounded-[8px] border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 disabled:opacity-40 transition-colors">
+              <Trash2 size={13} />
+            </button>
             <button disabled={disabled} onClick={onRegenerate} title="Tạo lại draft" className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
               <RefreshCw size={13} className={busy ? 'animate-spin text-[#2556ea]' : ''} />
             </button>

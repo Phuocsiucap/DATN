@@ -14,6 +14,7 @@ import httpx
 from app.crawler.crawlers.base import BaseCrawler
 from app.normalization.cleaners.text import clean_text, normalize_title
 from app.normalization.validators.quality import score_quality, status_from_score
+from common.core.vnexpress_rss import resolve_vnexpress_rss_feeds
 
 
 class VNExpressCrawler(BaseCrawler):
@@ -46,7 +47,7 @@ class VNExpressCrawler(BaseCrawler):
 
         self.last_errors = []
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=headers) as client:
-            links = self.discover_links(client, source_url=source_url, limit=max(limit * 5, limit))
+            links = self.discover_links(client, source_url=source_url, limit=max(limit * 5, limit), configuration=configuration)
             seen: set[str] = set()
             documents: list[dict[str, Any]] = []
             for link in links:
@@ -67,17 +68,19 @@ class VNExpressCrawler(BaseCrawler):
                 documents.append(self.to_processed_document(job_id, source_type, article))
             return documents
 
-    def discover_links(self, client: httpx.Client, *, source_url: str | None, limit: int) -> list[str]:
+    def discover_links(self, client: httpx.Client, *, source_url: str | None, limit: int, configuration: dict[str, Any] | None = None) -> list[str]:
         if source_url and self._looks_like_article(source_url):
             return [source_url]
 
         rss_urls = []
+        rss_urls.extend(feed["url"] for feed in resolve_vnexpress_rss_feeds(configuration))
         if source_url and self._looks_like_rss(source_url):
             rss_urls.append(source_url)
         category_rss_url = self._rss_url_from_source_url(source_url)
         if category_rss_url:
             rss_urls.append(category_rss_url)
-        rss_urls.append(self.latest_rss_url)
+        if not rss_urls:
+            rss_urls.append(self.latest_rss_url)
 
         links: list[str] = []
         for url in self._dedupe_links(rss_urls):

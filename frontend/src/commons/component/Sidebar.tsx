@@ -16,6 +16,7 @@ import {
   Settings,
   Sparkles,
   UserRound,
+  Video,
 } from 'lucide-react'
 import type { Tab } from './navigation'
 import { BrandMark, UserAvatar, type ApiUser, userDisplayName, userRoleLabel } from './social-ui'
@@ -65,6 +66,13 @@ const creatorSections: NavSection[] = [
     ],
   },
   {
+    title: 'PHÂN TÍCH',
+    items: [
+      { key: 'analyticsAccounts', label: 'Theo tài khoản', icon: <BarChart3 size={17} /> },
+      { key: 'analyticsPosts', label: 'Theo bài đăng', icon: <Video size={17} /> },
+    ],
+  },
+  {
     title: 'QUẢN LÝ',
     items: [
       { key: 'settings', label: 'Kênh social', icon: <Megaphone size={17} /> },
@@ -74,34 +82,42 @@ const creatorSections: NavSection[] = [
 
 const adminSections: NavSection[] = [
   {
-    title: 'QUẢN LÝ',
+    title: 'TỔNG QUAN',
     items: [
       { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
       { key: 'publishedPosts', label: 'Bài đã đăng', icon: <Send size={17} /> },
-      { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
+    ],
+  },
+  {
+    title: 'NỘI DUNG',
+    items: [
       { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
+      { key: 'planning', label: 'AI đề xuất', icon: <Bot size={17} /> },
       { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
+      { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
     ],
   },
   {
     title: 'SẢN XUẤT',
     items: [
-      { key: 'planning', label: 'AI đề xuất', icon: <Bot size={17} /> },
       { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
     ],
   },
   {
-    title: 'CÀI ĐẶT',
+    title: 'PHÂN TÍCH',
     items: [
-      { key: 'settings', label: 'Cấu hình chiến lược', icon: <Settings size={17} /> },
-      { key: 'users', label: 'Thành viên', icon: <UserRound size={17} /> },
+      { key: 'analyticsAccounts', label: 'Theo tài khoản', icon: <BarChart3 size={17} /> },
+      { key: 'analyticsPosts', label: 'Theo bài đăng', icon: <Video size={17} /> },
     ],
   },
-]
-
-const quickLinks = [
-  { label: 'Phân tích', icon: <BarChart3 size={16} /> },
+  {
+    title: 'QUẢN LÝ HỆ THỐNG',
+    items: [
+      { key: 'settings', label: 'Cấu hình chiến lược', icon: <Settings size={17} /> },
+      { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
+    ],
+  },
 ]
 
 export default function Sidebar({
@@ -145,20 +161,6 @@ export default function Sidebar({
               </div>
             </div>
           ))}
-
-          {!isSystemUser && (
-            <div className="mb-5">
-              <div className="mb-2 px-1 text-[11px] font-extrabold text-[#526179]">TIỆN ÍCH</div>
-              <div className="space-y-1">
-                {quickLinks.map((item) => (
-                  <button key={item.label} className="flex h-10 w-full items-center gap-3 rounded-[8px] px-3 text-[13px] font-semibold text-[#34415a] hover:bg-[#f4f6ff]">
-                    <span className="text-[#718096]">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </nav>
 
         <div className="space-y-3">

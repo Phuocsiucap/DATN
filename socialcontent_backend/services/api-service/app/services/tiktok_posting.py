@@ -95,21 +95,41 @@ def tiktok_publish_is_failed(status_data: dict[str, Any] | None) -> bool:
 def extract_tiktok_public_post_id(status_data: dict[str, Any] | None) -> str | None:
     if not isinstance(status_data, dict):
         return None
+
+    def clean_id(value: Any) -> str | None:
+        text = str(value or "").strip().strip("[]").strip()
+        text = text.strip("\"'")
+        return text or None
+
+    def first_id(value: Any) -> str | None:
+        if isinstance(value, list):
+            for item in value:
+                resolved = first_id(item)
+                if resolved:
+                    return resolved
+            return None
+        if isinstance(value, dict):
+            for nested_key in ("id", "post_id", "video_id"):
+                resolved = first_id(value.get(nested_key))
+                if resolved:
+                    return resolved
+            return None
+        if value:
+            return clean_id(value)
+        return None
+
     candidate_keys = (
         "publicaly_available_post_id",
         "publicly_available_post_id",
+        "publicaly_available_post_ids",
+        "publicly_available_post_ids",
         "post_id",
         "video_id",
     )
     for key in candidate_keys:
-        value = status_data.get(key)
-        if value:
-            return str(value).strip()
-    public_posts = status_data.get("publicaly_available_post_ids") or status_data.get("publicly_available_post_ids")
-    if isinstance(public_posts, list):
-        for value in public_posts:
-            if value:
-                return str(value).strip()
+        post_id = first_id(status_data.get(key))
+        if post_id:
+            return post_id
     return None
 
 

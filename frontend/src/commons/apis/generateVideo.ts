@@ -461,3 +461,8 @@ export const updateVideoWorkspaceApi = async (workflowId: string, payload: Recor
   const { data } = await api.patch(`/media-workflows/${workflowId}`, payload)
   return data
 }
+
+export const deleteVideoWorkspaceApi = async (workflowId: string) => {
+  const { data } = await api.delete(`/media-workflows/${workflowId}`)
+  return data as { message: string; workflow_id: string }
+}

@@ -9,6 +9,7 @@ from common.db.models import Base
 from common.db.session import SessionLocal, engine
 from app.api.routes import (
     admin,
+    analytics,
     auth,
     media_workflows,
     content_series,
@@ -56,6 +57,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin-system"])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(social_profiles.router, prefix="/api/v1/social-profiles", tags=["social-profiles"])
 app.include_router(crawl_jobs.router, prefix="/api/v1/crawl-jobs", tags=["crawl-jobs"])

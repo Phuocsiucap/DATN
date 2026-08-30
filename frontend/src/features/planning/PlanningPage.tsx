@@ -39,12 +39,51 @@ import {
 import { updateVideoWorkspaceApi } from '@/commons/apis/generateVideo'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { MediaAssetPreview, mediaPlaybackUrl, mediaPreviewUrl, isImageMedia, isVideoMedia } from '@/commons/media'
+import { SocialProfileAvatar, platformLabel } from '@/commons/component/social-ui'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
 import { SeriesModal, TransferSeriesModal, type SeriesFormData } from '@/features/generate-video/components/SeriesModal'
 import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
+
+function planningRunTitle(job: PlanningRun) {
+  if (job.workflow_title) return job.workflow_title
+  if (job.selected_count > 0) return `Đã chọn ${job.selected_count} nội dung cho ${job.profile_name}`
+  if (job.eligible_count > 0) return `${job.eligible_count} nội dung đủ điều kiện chờ tạo workflow`
+  if (job.candidate_count > 0) return `Chưa có nội dung phù hợp từ ${job.crawl_job_name || 'crawl job'}`
+  return `Không có nội dung mới từ ${job.crawl_job_name || 'crawl job'}`
+}
+
+function planningRunOutcome(job: PlanningRun) {
+  if (job.status === 'FAILED') return job.error_message || 'Planning thất bại, cần kiểm tra cấu hình.'
+  if (job.selected_count > 0) return `Tạo ${job.selected_count} workflow từ ${job.eligible_count} nội dung đạt chuẩn.`
+  if (job.eligible_count > 0) return `${job.eligible_count}/${job.candidate_count} nội dung đạt ngưỡng, chưa tạo workflow.`
+  return `${job.candidate_count} nội dung đã được chấm, chưa có bài vượt ngưỡng.`
+}
+
+function triggerLabel(value: string) {
+  const key = value.toLowerCase()
+  if (key === 'crawl_job_completed') return 'Sau crawl'
+  return value.replace(/_/g, ' ')
+}
+
+function stageLabel(value?: string | null) {
+  const key = String(value || '').toUpperCase()
+  if (key === 'COMPLETED') return 'Hoàn tất'
+  if (key === 'SELECTING_CANDIDATES') return 'Đang chọn bài'
+  return value || 'Đang xử lý'
+}
+
+function humanPlanningReason(reason: string, job: PlanningRun) {
+  return reason
+    .replace(`profile ${job.profile_id}`, `profile ${job.profile_name}`)
+    .replace(/Evaluated (\d+) candidate items/i, 'Đã đánh giá $1 nội dung')
+    .replace(/with topic cosine threshold scoring\./i, 'bằng ngưỡng cosine theo chủ đề.')
+    .replace(/against strategy embedding vector\./i, 'theo vector chiến lược.')
+    .replace(/(\d+) candidates passed similarity threshold and avoid-topic filters\./i, '$1 nội dung vượt ngưỡng similarity và bộ lọc chủ đề tránh.')
+    .replace(/(\d+) candidates passed similarity threshold and topic filters\./i, '$1 nội dung vượt ngưỡng similarity và bộ lọc chủ đề.')
+}
 
 type PipelineStep = 'jobs' | 'plans' | 'series'
 
@@ -298,55 +337,72 @@ export default function PlanningPage({
                 <div
                   key={job.id}
                   onClick={() => handleOpenRunDetail(job)}
-                  className="workspace-card relative overflow-hidden p-4 hover:shadow-md transition-shadow cursor-pointer group"
+                  title={`Planning run ${job.id}`}
+                  className="workspace-card relative overflow-hidden p-0 hover:shadow-md transition-shadow cursor-pointer group"
                 >
-                  <div className="flex justify-between items-start mb-5">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-sm font-bold text-slate-700">#{shortId(job.id)}</span>
-                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase">{job.planning_mode}</span>
-                        <Badge value={job.status} />
-                      </div>
-                      <div className="mt-2 mb-1 text-sm font-bold text-[var(--accent)] group-hover:underline flex items-center gap-1.5">
-                        {job.workflow_title}
-                        <ChevronRight size={14} className="text-slate-400 group-hover:translate-x-0.5 transition-transform" />
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {job.profile_name} · {job.crawl_job_name || 'Crawl job'}
-                        {job.crawl_job_id ? <span className="font-mono"> #{shortId(job.crawl_job_id)}</span> : null}
+                  <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex min-w-0 flex-1 gap-3">
+                      <SocialProfileAvatar
+                        avatarUrl={job.profile_avatar_url}
+                        name={job.profile_name}
+                        platform={job.profile_platform || 'tiktok'}
+                        size="xl"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge value={job.status} />
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">{job.planning_mode}</span>
+                          {job.trigger && <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700">{triggerLabel(job.trigger)}</span>}
+                        </div>
+                        <h3 className="mt-2 line-clamp-2 text-base font-black leading-6 text-slate-900 group-hover:text-[var(--accent)]">
+                          {planningRunTitle(job)}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-500">
+                          <span className="truncate">
+                            {job.profile_name}
+                            {job.profile_username ? ` (@${job.profile_username})` : ''}
+                            {job.profile_platform ? ` · ${platformLabel(job.profile_platform)}` : ''}
+                          </span>
+                          <span className="truncate">Nguồn: {job.crawl_job_name || 'Crawl job'}</span>
+                        </div>
+                        <div className="mt-3 text-sm font-bold text-slate-700">
+                          {planningRunOutcome(job)}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
-                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">{job.current_stage}</div>
+                    <div className="flex shrink-0 items-start justify-between gap-3 lg:min-w-[190px] lg:flex-col lg:items-end">
+                      <div className="text-right">
+                        <div className="text-lg font-black text-slate-800">{Number(job.progress_percent).toFixed(0)}%</div>
+                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{stageLabel(job.current_stage)}</div>
+                      </div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           handleOpenRunDetail(job)
                         }}
-                        className="inline-flex items-center gap-1 rounded border border-[#d9e0ea] bg-white hover:bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors shadow-sm"
+                        className="inline-flex h-8 items-center gap-1 rounded-md border border-[#d9e0ea] bg-white px-2.5 text-[11px] font-bold text-slate-700 transition-colors shadow-sm hover:bg-slate-50"
                       >
-                        <FileText size={12} className="text-[#3525cd]" /> Xem chi tiết
+                        <FileText size={12} className="text-[#3525cd]" /> Chi tiết
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+                  <div className="grid gap-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3 sm:grid-cols-3">
                     <RunMetric label="Content đầu vào" value={job.candidate_count} />
                     <RunMetric label="Đủ điều kiện" value={job.eligible_count} />
-                    <RunMetric label="Được chọn" value={job.selected_count} accent />
+                    <RunMetric label="Đã tạo workflow" value={job.selected_count} accent />
                   </div>
-                  {job.selection_reasons.length > 0 && (
-                    <div className="mt-4 rounded-md bg-slate-50 px-3 py-2">
-                      <div className="text-[10px] font-black uppercase text-slate-400">Lý do chọn</div>
-                      {job.selection_reasons.map((reason) => (
-                        <div key={reason} className="mt-1 text-xs text-slate-600">{reason}</div>
+                  {(job.selection_reasons || []).length > 0 && (
+                    <div className="border-t border-slate-100 px-4 py-3">
+                      <div className="text-[10px] font-black uppercase text-slate-400">Tóm tắt xử lý</div>
+                      {(job.selection_reasons || []).slice(0, 2).map((reason) => (
+                        <div key={reason} className="mt-1 text-xs leading-5 text-slate-600">{humanPlanningReason(reason, job)}</div>
                       ))}
                     </div>
                   )}
                   {isTopicConfigError(job) && (
                     <div
-                      className="mt-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
+                      className="mx-4 mb-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
@@ -362,7 +418,14 @@ export default function PlanningPage({
                       </button>
                     </div>
                   )}
-                  <div className="mt-4 text-[11px] text-slate-400">Bắt đầu {formatDate(job.started_at || job.created_at)} · Hoàn tất {formatDate(job.completed_at)}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-[11px] text-slate-400">
+                    <span>Bắt đầu {formatDate(job.started_at || job.created_at)}</span>
+                    <span>Hoàn tất {formatDate(job.completed_at)}</span>
+                    <span className="inline-flex items-center gap-1">
+                      Mở chi tiết
+                      <ChevronRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

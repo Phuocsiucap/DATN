@@ -297,7 +297,25 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
         strategy = profile.strategy
         link = link_by_profile.get(profile.id)
         metadata = link.metadata_json if link and isinstance(link.metadata_json, dict) else {}
-        if strategy:
+        if strategy and link and _has_stored_embedding_match(metadata):
+            score = round(float(link.score or _metadata_float(metadata, "strategy_score", "score") or 0), 1)
+            similarity_threshold = _metadata_float(metadata, "similarity_threshold")
+            threshold = round(similarity_threshold * 100.0, 1) if similarity_threshold is not None else 70.0
+            match_metadata = metadata
+            matched_topics = _metadata_terms(metadata, "matched_topics")
+            avoided_topics = _metadata_terms(metadata, "avoided_topics")
+            topic_matches = _metadata_list(metadata, "topic_matches")
+            avoid_topic_matches = _metadata_list(metadata, "avoid_topic_matches")
+            embedding_similarity = _metadata_float(metadata, "embedding_similarity")
+            embedding_model = metadata.get("embedding_model") or _metadata_from_breakdown(metadata, "embedding_model")
+            passed_similarity_gate = metadata.get("passed_similarity_gate")
+            similarity_source = metadata.get("similarity_source") or _metadata_from_breakdown(metadata, "similarity_source")
+            top_topic_match = metadata.get("top_topic_match") or _metadata_from_breakdown(metadata, "top_topic_match")
+            avoid_similarity_threshold = _metadata_float(metadata, "avoid_similarity_threshold")
+            can_create_script = str(profile.status or "").lower() == "active" and bool(metadata.get("eligible_for_auto_workflow"))
+            recommendation_status = link.recommendation_status
+            relation_reason = link.relation_reason
+        elif strategy:
             match_score = matcher.score_candidate(db, content, strategy)
             score = match_score.score
             similarity_threshold = match_score.threshold
@@ -374,6 +392,42 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
             **selection,
         })
     return sorted(matches, key=lambda item: item["score"], reverse=True)
+
+
+def _has_stored_embedding_match(metadata: dict) -> bool:
+    return bool(
+        metadata.get("selection_algorithm")
+        or metadata.get("embedding_similarity") is not None
+        or _metadata_from_breakdown(metadata, "embedding_similarity") is not None
+    )
+
+
+def _metadata_from_breakdown(metadata: dict, key: str):
+    breakdown = metadata.get("score_breakdown")
+    if isinstance(breakdown, dict):
+        return breakdown.get(key)
+    return None
+
+
+def _metadata_float(metadata: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = metadata.get(key)
+        if value is None:
+            value = _metadata_from_breakdown(metadata, key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _metadata_list(metadata: dict, key: str) -> list:
+    value = metadata.get(key)
+    if value is None:
+        value = _metadata_from_breakdown(metadata, key)
+    return value if isinstance(value, list) else []
 
 
 def _profile_recommendation_status(link: ProfileContentLink | None, eligible: bool, blocked_by_avoid_topics: bool) -> str:

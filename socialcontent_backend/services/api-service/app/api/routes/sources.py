@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from common.db.models import CrawlJob, CrawlJobSource, User
 from common.db.session import get_db
+from common.core.vnexpress_rss import vnexpress_rss_catalog
 from app.api.deps import get_current_user, require_admin
 from app.schemas import api as schemas
 
@@ -15,8 +16,13 @@ router = APIRouter()
 def source_types(_: User = Depends(get_current_user)):
     return [
         {"type": "BILIBILI", "supports": ["keywords", "url", "playlist", "metadata"]},
-        {"type": "VNEXPRESS", "supports": ["keywords", "url", "rss", "category"]},
+        {"type": "VNEXPRESS", "supports": ["keywords", "url", "rss", "category"], "rss_feeds": vnexpress_rss_catalog()},
     ]
+
+
+@router.get("/source-types/vnexpress/rss-feeds")
+def vnexpress_rss_feeds(_: User = Depends(get_current_user)):
+    return {"items": vnexpress_rss_catalog()}
 
 
 @router.post("/crawl-sources")

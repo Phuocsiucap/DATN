@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from common.db.models import ContentItem, MediaWorkflow, PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, SocialProfileStrategy, User
@@ -19,6 +20,7 @@ from app.services.tiktok_oauth import (
     build_tiktok_token_metadata,
     fetch_tiktok_user_info,
     fetch_tiktok_video_list,
+    fetch_tiktok_video_stats,
     granted_scopes,
     poll_tiktok_oauth_qr_session,
     requested_tiktok_scopes,
@@ -106,6 +108,10 @@ def _apply_tiktok_user_info(profile: SocialProfile, user_info: dict, update_meta
 
 
 class SocialProfileService:
+    def _social_post_title(self, value: object, fallback: str = "TikTok Video") -> str:
+        title = str(value or fallback).strip() or fallback
+        return title[:255]
+
     def list_profiles(self, db: Session, user: User, platform: str | None = None) -> list[SocialProfile]:
         query = db.query(SocialProfile)
         if not self.is_system_user(user):
@@ -340,10 +346,45 @@ class SocialProfileService:
         profile.scopes_jsonb = scope_values
         profile.metadata_json = build_tiktok_token_metadata(token_data, user_info)
         _apply_tiktok_user_info(profile, user_info, update_metadata=False)
+        db.flush()
+        self.create_profile_snapshot_if_changed(db, profile, datetime.now(timezone.utc))
 
         db.commit()
         db.refresh(profile)
         return profile
+
+    def current_profile_stats(self, profile: SocialProfile) -> dict[str, int]:
+        return {
+            "follower_count": int(profile.follower_count or 0),
+            "following_count": int(profile.following_count or 0),
+            "likes_count": int(profile.likes_count or 0),
+            "video_count": int(profile.video_count or 0),
+        }
+
+    def latest_profile_snapshot(self, db: Session, profile: SocialProfile) -> SocialProfileSnapshot | None:
+        return (
+            db.query(SocialProfileSnapshot)
+            .filter(SocialProfileSnapshot.profile_id == profile.id)
+            .order_by(SocialProfileSnapshot.captured_at.desc())
+            .first()
+        )
+
+    def has_account_stats_changed(self, latest_snapshot: SocialProfileSnapshot | None, current_stats: dict[str, int]) -> bool:
+        if not latest_snapshot:
+            return True
+        return (
+            latest_snapshot.follower_count != current_stats.get("follower_count", 0)
+            or latest_snapshot.following_count != current_stats.get("following_count", 0)
+            or latest_snapshot.likes_count != current_stats.get("likes_count", 0)
+        )
+
+    def create_profile_snapshot_if_changed(self, db: Session, profile: SocialProfile, captured_at: datetime | None = None) -> bool:
+        stats = self.current_profile_stats(profile)
+        latest = self.latest_profile_snapshot(db, profile)
+        if not self.has_account_stats_changed(latest, stats):
+            return False
+        db.add(SocialProfileSnapshot(profile_id=profile.id, captured_at=captured_at or datetime.now(timezone.utc), **stats))
+        return True
 
     async def sync_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
         self.ensure_tiktok_profile(profile)
@@ -360,19 +401,13 @@ class SocialProfileService:
         _apply_tiktok_user_info(profile, user_info)
 
         now = datetime.now(timezone.utc)
-        # 2. Record Account Snapshot
-        snapshot = SocialProfileSnapshot(
-            profile_id=profile.id,
-            follower_count=profile.follower_count or 0,
-            following_count=profile.following_count or 0,
-            likes_count=profile.likes_count or 0,
-            video_count=profile.video_count or 0,
-            captured_at=now,
-        )
-        db.add(snapshot)
+        # 2. Record Account Snapshot only when account stats changed.
+        snapshot_created = self.create_profile_snapshot_if_changed(db, profile, now)
 
         # 3. Fetch TikTok Video List & Video Stats
         synced_videos_count = 0
+        resolved_post_ids_count = self.resolve_missing_tiktok_post_ids(db, profile, access_token)
+        profile_id = str(profile.id)
         try:
             video_data = await fetch_tiktok_video_list(access_token, max_count=20)
             videos = video_data.get("videos") or []
@@ -389,7 +424,7 @@ class SocialProfileService:
                         .filter(SocialPost.profile_id == profile.id, SocialPost.platform_post_id == v_id)
                         .first()
                     )
-                    v_title = v.get("title") or v.get("video_description") or f"TikTok Video {v_id}"
+                    v_title = self._social_post_title(v.get("title") or v.get("video_description"), f"TikTok Video {v_id}")
                     v_url = v.get("share_url")
                     v_caption = v.get("video_description")
                     v_created_time = v.get("create_time")
@@ -424,14 +459,19 @@ class SocialProfileService:
                     )
                     db.add(metric)
                     synced_videos_count += 1
+        except SQLAlchemyError as exc:
+            db.rollback()
+            logger.warning("Không thể đồng bộ danh sách video TikTok cho profile %s: %s", profile_id, exc)
         except Exception as exc:
-            logger.warning("Không thể đồng bộ danh sách video TikTok cho profile %s: %s", profile.id, exc)
+            logger.warning("Không thể đồng bộ danh sách video TikTok cho profile %s: %s", profile_id, exc)
 
         db.commit()
         db.refresh(profile)
         return {
             "profile": self.serialize_profile(profile),
             "synced_videos_count": synced_videos_count,
+            "resolved_post_ids_count": resolved_post_ids_count,
+            "snapshot_created": snapshot_created,
             "synced_at": now.isoformat(),
         }
 
@@ -936,11 +976,21 @@ class SocialProfileService:
         return (now + timedelta(hours=1)).astimezone(timezone.utc)
 
     def _tiktok_public_post_url(self, profile: SocialProfile, post_id: str | None, fallback: str | None = None) -> str | None:
-        post_id = (post_id or "").strip()
+        post_id = self._clean_tiktok_post_id(post_id)
         username = (profile.username or "").strip().lstrip("@")
         if post_id and username:
             return f"https://www.tiktok.com/@{username}/video/{post_id}"
         return fallback
+
+    def _clean_tiktok_post_id(self, post_id: str | None) -> str | None:
+        clean_post_id = str(post_id or "").strip().strip("[]").strip().strip("\"'")
+        return clean_post_id or None
+
+    def _tiktok_embed_url(self, post_id: str | None) -> str | None:
+        post_id = self._clean_tiktok_post_id(post_id)
+        if not post_id:
+            return None
+        return f"https://www.tiktok.com/player/v1/{post_id}?controls=1&description=1&music_info=1"
 
     def _upsert_direct_tiktok_social_post(
         self,
@@ -948,25 +998,25 @@ class SocialProfileService:
         item: PublishingQueueItem,
         profile: SocialProfile,
         publish_id: str,
-        post_id: str,
+        post_id: str | None,
         published_at: datetime,
     ) -> SocialPost:
-        post = (
-            db.query(SocialPost)
-            .filter(
-                SocialPost.profile_id == profile.id,
+        query = db.query(SocialPost).filter(SocialPost.profile_id == profile.id)
+        if post_id:
+            query = query.filter(
                 or_(
                     SocialPost.platform_post_id == post_id,
                     SocialPost.platform_publish_id == publish_id,
-                ),
+                )
             )
-            .first()
-        )
-        post_url = self._tiktok_public_post_url(profile, post_id, item.article_link)
+        else:
+            query = query.filter(SocialPost.platform_publish_id == publish_id)
+        post = query.first()
+        post_url = self._tiktok_public_post_url(profile, post_id, item.article_link if post_id else None)
         if not post:
             post = SocialPost(
                 profile_id=profile.id,
-                title=item.article_title,
+                title=self._social_post_title(item.article_title),
                 post_url=post_url,
                 platform_post_id=post_id,
                 platform_publish_id=publish_id,
@@ -978,15 +1028,73 @@ class SocialProfileService:
             db.flush()
             return post
 
-        post.title = item.article_title or post.title
+        post.title = self._social_post_title(item.article_title, post.title)
         post.post_url = post_url or post.post_url
-        post.platform_post_id = post_id
+        if post_id:
+            post.platform_post_id = post_id
         post.platform_publish_id = publish_id
         post.caption = item.generated_content or post.caption
         post.status = "published_to_tiktok"
         post.published_at = published_at
         db.add(post)
         return post
+
+    def resolve_missing_tiktok_post_ids(
+        self,
+        db: Session,
+        profile: SocialProfile,
+        access_token: str | None = None,
+        *,
+        limit: int = 50,
+    ) -> int:
+        token = access_token or ensure_tiktok_access_token(profile)
+        posts = (
+            db.query(SocialPost)
+            .filter(
+                SocialPost.profile_id == profile.id,
+                SocialPost.platform_post_id.is_(None),
+                SocialPost.platform_publish_id.isnot(None),
+            )
+            .order_by(SocialPost.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        resolved = 0
+        for post in posts:
+            publish_id = (post.platform_publish_id or "").strip()
+            if not publish_id:
+                continue
+            try:
+                status_data = fetch_tiktok_publish_status(token, publish_id)
+            except Exception as exc:
+                logger.warning("Không thể kiểm tra TikTok post_id cho publish_id=%s: %s", publish_id, exc)
+                continue
+            post_id = extract_tiktok_public_post_id(status_data)
+            if not post_id:
+                continue
+            post.platform_post_id = post_id
+            post.post_url = self._tiktok_public_post_url(profile, post_id, post.post_url)
+            post.status = "published_to_tiktok"
+            db.add(post)
+
+            queue_item = (
+                db.query(PublishingQueueItem)
+                .filter(
+                    PublishingQueueItem.profile_id == profile.id,
+                    PublishingQueueItem.platform_publish_id == publish_id,
+                )
+                .first()
+            )
+            if queue_item:
+                queue_item.publish_status_jsonb = status_data
+                queue_item.status = "published"
+                queue_item.error = None
+                if not queue_item.published_at:
+                    queue_item.published_at = post.published_at
+                queue_item.ai_reason = f"TikTok đã trả post_id sau khi public/moderation. publish_id={publish_id}; post_id={post_id}"
+                db.add(queue_item)
+            resolved += 1
+        return resolved
 
     def _complete_direct_tiktok_publish(
         self,
@@ -1000,19 +1108,18 @@ class SocialProfileService:
         post_id = extract_tiktok_public_post_id(status_data)
         item.publish_status_jsonb = status_data
         item.platform_publish_id = publish_id
-        if not post_id:
-            item.status = "publishing"
-            item.error = "TikTok đã PUBLISH_COMPLETE nhưng response thiếu publicaly_available_post_id/post_id."
-            item.ai_reason = f"TikTok Direct Post đã complete ({source}) nhưng chưa lấy được post_id. publish_id={publish_id}"
-            db.add(item)
-            return None
-
         published_at = datetime.utcnow()
         post = self._upsert_direct_tiktok_social_post(db, item, profile, publish_id, post_id, published_at)
         item.status = "published"
         item.published_at = published_at
         item.error = None
-        item.ai_reason = f"TikTok Direct Post đã hoàn tất ({source}). publish_id={publish_id}; post_id={post_id}"
+        if post_id:
+            item.ai_reason = f"TikTok Direct Post đã hoàn tất ({source}). publish_id={publish_id}; post_id={post_id}"
+        else:
+            item.ai_reason = (
+                f"TikTok Direct Post đã hoàn tất ({source}) nhưng TikTok chưa trả post_id. "
+                f"Đã lưu SocialPost theo publish_id={publish_id}; post_id sẽ được bổ sung khi có dữ liệu."
+            )
         db.add_all([item, post])
         return post
 
@@ -1099,6 +1206,78 @@ class SocialProfileService:
             except Exception as exc:
                 db.rollback()
                 logger.exception("TikTok publish status polling failed queue_item_id=%s: %s", item.id, exc)
+                result["failed"] += 1
+        return result
+
+    async def sync_recent_tiktok_post_metrics(
+        self,
+        db: Session,
+        *,
+        since_days: int = 30,
+        batch_size: int = 20,
+    ) -> dict[str, int]:
+        since = datetime.now(timezone.utc) - timedelta(days=since_days)
+        posts = (
+            db.query(SocialPost)
+            .join(SocialProfile, SocialProfile.id == SocialPost.profile_id)
+            .filter(
+                SocialProfile.platform == "tiktok",
+                SocialProfile.status == "active",
+                SocialProfile.access_token.isnot(None),
+                SocialPost.platform_post_id.isnot(None),
+                SocialPost.published_at >= since,
+            )
+            .order_by(SocialPost.published_at.desc())
+            .all()
+        )
+        result = {"profiles": 0, "videos": 0, "metrics": 0, "failed": 0}
+        posts_by_profile: dict[uuid.UUID, list[SocialPost]] = {}
+        for post in posts:
+            posts_by_profile.setdefault(post.profile_id, []).append(post)
+
+        for profile_id, profile_posts in posts_by_profile.items():
+            profile = db.get(SocialProfile, profile_id)
+            if not profile:
+                continue
+            result["profiles"] += 1
+            try:
+                access_token = ensure_tiktok_access_token(profile)
+                for offset in range(0, len(profile_posts), batch_size):
+                    batch = profile_posts[offset:offset + batch_size]
+                    ids = [str(post.platform_post_id) for post in batch if post.platform_post_id]
+                    if not ids:
+                        continue
+                    video_data = await fetch_tiktok_video_stats(access_token, ids)
+                    videos = video_data.get("videos") if isinstance(video_data, dict) else []
+                    videos_by_id = {
+                        str(video.get("id")): video
+                        for video in videos
+                        if isinstance(video, dict) and video.get("id")
+                    }
+                    for post in batch:
+                        video = videos_by_id.get(str(post.platform_post_id))
+                        if not video:
+                            continue
+                        if video.get("share_url"):
+                            post.post_url = video.get("share_url")
+                        if video.get("title") or video.get("video_description"):
+                            post.title = self._social_post_title(video.get("title") or video.get("video_description"), post.title)
+                            post.caption = video.get("video_description") or post.caption
+                        metric = SocialPostMetric(
+                            post_id=post.id,
+                            views=int(video.get("view_count") or 0),
+                            likes=int(video.get("like_count") or 0),
+                            comments=int(video.get("comment_count") or 0),
+                            shares=int(video.get("share_count") or 0),
+                            captured_at=datetime.now(timezone.utc),
+                        )
+                        db.add_all([post, metric])
+                        result["videos"] += 1
+                        result["metrics"] += 1
+                    db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.exception("TikTok video analytics sync failed profile_id=%s: %s", profile_id, exc)
                 result["failed"] += 1
         return result
 
@@ -1224,7 +1403,7 @@ class SocialProfileService:
         else:
             post = SocialPost(
                 profile_id=profile.id,
-                title=item.article_title,
+                title=self._social_post_title(item.article_title),
                 post_url=item.article_link,
                 platform_post_id=None,
                 platform_publish_id=publish_id,
@@ -1309,9 +1488,9 @@ class SocialProfileService:
         return sorted(result, key=lambda item: item["total_views"], reverse=True)
 
     def create_post(self, db: Session, profile: SocialProfile, payload: schemas.SocialPostCreateRequest) -> SocialPost:
-        title = payload.title.strip()
-        if not title:
+        if not payload.title.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title không được để trống")
+        title = self._social_post_title(payload.title)
         post = SocialPost(
             profile_id=profile.id,
             title=title,
@@ -1523,13 +1702,20 @@ class SocialProfileService:
         }
 
     def serialize_post(self, post: SocialPost) -> dict:
-        metrics = sorted(post.metrics, key=lambda metric: metric.captured_at)
+        def metric_time(metric: SocialPostMetric) -> datetime:
+            captured_at = metric.captured_at
+            if captured_at.tzinfo is None or captured_at.tzinfo.utcoffset(captured_at) is None:
+                return captured_at.replace(tzinfo=timezone.utc)
+            return captured_at.astimezone(timezone.utc)
+
+        metrics = sorted(post.metrics, key=metric_time)
         latest_metric = metrics[-1] if metrics else None
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         def metric_at_or_before(target_time: datetime):
-            candidates = [metric for metric in metrics if metric.captured_at <= target_time]
-            return max(candidates, key=lambda metric: metric.captured_at) if candidates else None
+            target = target_time if target_time.tzinfo else target_time.replace(tzinfo=timezone.utc)
+            candidates = [metric for metric in metrics if metric_time(metric) <= target]
+            return max(candidates, key=metric_time) if candidates else None
 
         def growth_since(delta: timedelta):
             if not latest_metric:
@@ -1542,8 +1728,9 @@ class SocialProfileService:
             "profile_id": post.profile_id,
             "title": post.title,
             "post_url": post.post_url,
-            "platform_post_id": post.platform_post_id,
+            "platform_post_id": self._clean_tiktok_post_id(post.platform_post_id) or post.platform_post_id,
             "platform_publish_id": getattr(post, "platform_publish_id", None),
+            "tiktok_embed_url": self._tiktok_embed_url(post.platform_post_id),
             "caption": post.caption,
             "status": post.status,
             "published_at": post.published_at,

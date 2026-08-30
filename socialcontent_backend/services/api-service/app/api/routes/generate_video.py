@@ -622,7 +622,7 @@ def save_story(
     payload.story.setdefault("meta", {})
     payload.story["meta"]["workflow_id"] = str(project.id)
     saved_story = pipeline.normalize_story_for_project(payload.story)
-    _persist_project_story(db, project, saved_story)
+    _persist_project_story(db, project, saved_story, status="EDITING")
     return {"story": _public_story(saved_story)}
 
 

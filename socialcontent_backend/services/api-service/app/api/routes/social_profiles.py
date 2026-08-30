@@ -209,6 +209,24 @@ def publish_queue_item_to_tiktok(
     )
 
 
+@router.post("/queue/items/{queue_item_id}/publish-status")
+def refresh_queue_item_publish_status(
+    queue_item_id: uuid.UUID,
+    view: str | None = None,
+    timezone: str | None = "Asia/Bangkok",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    item = service.get_owned_queue_item(db, queue_item_id, current_user)
+    result = service.refresh_tiktok_publish_status(db, item, "manual_poll")
+    queue_item = service.get_owned_queue_item(db, queue_item_id, current_user)
+    return {
+        **result,
+        "queue_item": _serialize_queue_response_item(db, service, queue_item, view, _resolve_timezone(timezone)),
+    }
+
+
 @router.post("/post-items/{post_id}/metrics")
 def create_social_post_metric(
     post_id: uuid.UUID,
@@ -465,8 +483,15 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
         "article_link": data["article_link"],
         "generated_content": data["generated_content"],
         "status": data["status"],
+        "profile_scopes": profile_scopes,
+        "platform_publish_id": data.get("platform_publish_id"),
+        "publish_status": data.get("publish_status") or {},
         "scheduled_at": data["scheduled_at"],
         "scheduled_at_local": scheduled_at_local,
+        "published_at": data["published_at"],
+        "error": data["error"],
+        "created_at": data["created_at"],
+        "updated_at": data["updated_at"],
         "can_upload_inbox": "video.upload" in profile_scopes,
         "can_publish_direct": "video.publish" in profile_scopes,
     }
@@ -508,6 +533,8 @@ def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneIn
         "caption": data["generated_content"] or data["article_title"],
         "ai_reason": data["ai_reason"],
         "status": data["status"],
+        "platform_publish_id": data.get("platform_publish_id"),
+        "publish_status": data.get("publish_status") or {},
         "scheduled_at": data["scheduled_at"],
         "scheduled_at_local": scheduled_at_local,
         "published_at": data["published_at"],

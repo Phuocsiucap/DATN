@@ -5,6 +5,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from common.core.vnexpress_rss import resolve_vnexpress_rss_feeds
 from common.db.models import AuditLog, CrawlJob, CrawlJobSource, KafkaTask, User
 from common.events.envelope import build_event
 from common.events.kafka import publish
@@ -31,12 +32,23 @@ class CrawlJobService:
             current_stage="DISCOVERING",
         )
         for source in payload.sources:
+            source_type = source.source_type.upper()
+            source_url = source.source_url
+            configuration = dict(source.configuration or {})
+            if source_type == "VNEXPRESS":
+                selected_feeds = resolve_vnexpress_rss_feeds(configuration)
+                if selected_feeds:
+                    configuration["rss_feed_keys"] = [feed["key"] for feed in selected_feeds]
+                    configuration["rss_feed_urls"] = [feed["url"] for feed in selected_feeds]
+                    configuration["rss_feeds"] = selected_feeds
+                    if not source_url and len(selected_feeds) == 1:
+                        source_url = selected_feeds[0]["url"]
             job.sources.append(
                 CrawlJobSource(
-                    source_type=source.source_type.upper(),
-                    source_url=source.source_url,
+                    source_type=source_type,
+                    source_url=source_url,
                     keywords=source.keywords,
-                    configuration=source.configuration,
+                    configuration=configuration,
                 )
             )
         db.add(job)

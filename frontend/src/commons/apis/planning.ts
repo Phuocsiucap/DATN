@@ -39,8 +39,11 @@ export type PlanningRun = {
   id: string
   profile_id: string
   profile_name: string
-  workflow_id: string
-  workflow_title: string
+  profile_username?: string | null
+  profile_platform?: string | null
+  profile_avatar_url?: string | null
+  workflow_id?: string | null
+  workflow_title?: string | null
   crawl_job_id?: string | null
   crawl_job_name?: string | null
   planning_mode: string

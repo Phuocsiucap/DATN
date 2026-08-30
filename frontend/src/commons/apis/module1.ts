@@ -287,9 +287,20 @@ export type QualitySummary = {
   failed_tasks: number
 }
 
+export type VnExpressRssFeed = {
+  key: string
+  label: string
+  url: string
+}
+
 export const fetchCrawlJobsApi = async (params?: Record<string, string>) => {
   const { data } = await api.get('/crawl-jobs', { params })
   return data as CrawlJob[]
+}
+
+export const fetchVnExpressRssFeedsApi = async () => {
+  const { data } = await api.get('/source-types/vnexpress/rss-feeds')
+  return data as { items: VnExpressRssFeed[] }
 }
 
 export const createCrawlJobApi = async (payload: Record<string, unknown>) => {

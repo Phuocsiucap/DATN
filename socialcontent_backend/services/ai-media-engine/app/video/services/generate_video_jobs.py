@@ -62,7 +62,7 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         if series_decision:
             story["meta"]["series_decision"] = series_decision
         public_story = public_story_payload(story)
-        public_story["project_status"] = "EDITING"
+        public_story["project_status"] = "DRAFT_READY"
         _update_task_progress(db, task, project, "SAVING_DRAFT", 95, project_status="SCRIPTING")
         _upsert_project_rendered_draft(project, public_story)
 
@@ -71,7 +71,7 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         task.current_stage = "DRAFT_READY"
         task.result_jsonb = {**metadata, "workflow_id": str(project.id), "draft_saved": True}
         task.completed_at = datetime.now(timezone.utc)
-        project.status = "EDITING"
+        project.status = "DRAFT_READY"
         project.current_stage = "DRAFT_READY"
         project.progress_percent = 100
         db.add_all([task, project])

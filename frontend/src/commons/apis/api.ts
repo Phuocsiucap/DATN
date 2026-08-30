@@ -1,6 +1,7 @@
 export { api } from './client'
 export * from './adminUsers'
 export * from './adminSettings'
+export * from './analytics'
 export * from './auth'
 export * from './dashboard'
 export * from './module1'

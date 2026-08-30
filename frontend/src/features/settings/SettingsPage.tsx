@@ -413,7 +413,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         setActiveStrategyProfile((prev) => (prev ? { ...prev, ...syncedProfile } : null))
       }
       const videoMsg = res.synced_videos_count !== undefined ? ` và ${res.synced_videos_count} video` : ''
-      toast.success(`Đã đồng bộ thông tin & chỉ số TikTok profile${videoMsg}.`)
+      const snapshotMsg = res.snapshot_created ? 'Đã ghi nhận snapshot chỉ số mới.' : 'Không có thay đổi chỉ số tài khoản.'
+      toast.success(`Đã đồng bộ thông tin TikTok profile${videoMsg}. ${snapshotMsg}`)
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể đồng bộ TikTok profile')
     } finally {

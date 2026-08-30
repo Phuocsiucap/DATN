@@ -9,7 +9,7 @@ from docx.table import Table
 
 
 SOURCE = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_Final.docx")
-OUTPUT = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_CodeUpdate_20260829.docx")
+OUTPUT = Path(r"D:\DATN\tài liệu\NguyenVanPhuoc_Chuong2_V2_CodeUpdate_20260829_NoTabs.docx")
 
 
 STORIES = [
@@ -638,6 +638,22 @@ def ensure_table_captions(document):
         raise ValueError(f"Expected {len(TABLE_CAPTIONS)} tables but found {table_index}.")
 
 
+def remove_tabs_from_table_cells(document):
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    ppr = paragraph._p.pPr
+                    if ppr is not None:
+                        for tabs in list(ppr.xpath("./w:tabs")):
+                            tabs.getparent().remove(tabs)
+                    for run in paragraph.runs:
+                        if "\t" in run.text:
+                            run.text = run.text.replace("\t", " ")
+                        for tab in list(run._element.xpath(".//w:tab")):
+                            tab.getparent().remove(tab)
+
+
 def main():
     doc = Document(SOURCE)
     tables = doc.tables
@@ -709,6 +725,7 @@ def main():
 
     normalize_legacy_terms(doc)
     ensure_table_captions(doc)
+    remove_tabs_from_table_cells(doc)
 
     doc.save(OUTPUT)
     print(OUTPUT)

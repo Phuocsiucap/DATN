@@ -19,6 +19,7 @@ GET_QRCODE_URL = "https://open.tiktokapis.com/v2/oauth/get_qrcode/"
 CHECK_QRCODE_URL = "https://open.tiktokapis.com/v2/oauth/check_qrcode/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
+VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
 logger = logging.getLogger(__name__)
 
 FULL_USER_FIELDS = (
@@ -26,6 +27,7 @@ FULL_USER_FIELDS = (
     "bio_description,profile_deep_link,profile_web_link,is_verified,username,"
     "follower_count,following_count,likes_count,video_count"
 )
+BASIC_USER_FIELDS = "open_id,union_id,avatar_url,avatar_url_100,avatar_large_url,display_name"
 REQUIRED_TIKTOK_SCOPES = (
     "user.info.basic",
     "user.info.profile",
@@ -115,6 +117,20 @@ def _json_payload(response: httpx.Response, fallback: str) -> dict[str, Any]:
 def _payload_data(payload: dict[str, Any]) -> dict[str, Any]:
     data = payload.get("data")
     return data if isinstance(data, dict) else payload
+
+
+def _is_tiktok_scope_error(exc: HTTPException) -> bool:
+    detail = str(exc.detail or "").lower()
+    return exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN, status.HTTP_502_BAD_GATEWAY} and any(
+        marker in detail
+        for marker in (
+            "scope",
+            "authorize",
+            "authoriz",
+            "permission",
+            "quyền",
+        )
+    )
 
 
 def _redacted_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -342,7 +358,10 @@ async def exchange_tiktok_authorization_code(code: str) -> dict[str, Any]:
 async def fetch_tiktok_user_info(access_token: str) -> dict[str, Any]:
     try:
         return await _fetch_tiktok_user_info(access_token, FULL_USER_FIELDS)
-    except HTTPException:
+    except HTTPException as exc:
+        if not _is_tiktok_scope_error(exc):
+            raise
+        logger.warning("TikTok full user info fields unavailable, retrying with basic fields: %s", exc.detail)
         return await _fetch_tiktok_user_info(access_token, BASIC_USER_FIELDS)
 
 
@@ -400,3 +419,23 @@ async def fetch_tiktok_video_list(access_token: str, max_count: int = 20, cursor
     data = payload.get("data")
     return data if isinstance(data, dict) else {}
 
+
+async def fetch_tiktok_video_stats(access_token: str, video_ids: list[str]) -> dict[str, Any]:
+    ids = [str(video_id).strip() for video_id in video_ids if str(video_id).strip()]
+    if not ids:
+        return {"videos": []}
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.post(
+            VIDEO_QUERY_URL,
+            params={"fields": VIDEO_FIELDS},
+            json={"filters": {"video_ids": ids}},
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        )
+    payload = _json_payload(response, "TikTok video query response không hợp lệ")
+    _log_tiktok_response("video_query", response, payload)
+    if response.status_code >= 400:
+        _raise_for_tiktok_error(payload, "Không lấy được chỉ số video TikTok")
+        raise HTTPException(status_code=response.status_code, detail="Không lấy được chỉ số video TikTok")
+    _raise_for_tiktok_error(payload, "Không lấy được chỉ số video TikTok")
+    data = payload.get("data")
+    return data if isinstance(data, dict) else {}

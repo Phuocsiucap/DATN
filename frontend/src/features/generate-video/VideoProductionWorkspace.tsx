@@ -47,6 +47,7 @@ import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
 import {
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
+  deleteVideoWorkspaceApi,
   editGenerateVideoStoryWithAiApi,
   fetchGenerateVideoJobApi,
   fetchVideoWorkflowProgressApi,
@@ -614,6 +615,22 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     }
   }
 
+  const deleteCurrentProject = async () => {
+    if (!selectedId || !selectedProject) return
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn workflow "${selectedProject.title}"? Hành động này không thể hoàn tác.`)) {
+      return
+    }
+    setBusy('delete-project')
+    try {
+      await deleteVideoWorkspaceApi(selectedId)
+      onBackToList()
+    } catch (error: any) {
+      setStatus(error?.response?.data?.detail || error?.message || 'Không xóa được workflow')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const isStudioDetail = activeStep === 'video' && Boolean(previewStory || story)
 
   return (
@@ -633,6 +650,18 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                 <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-800">
                   {inferProjectStatus(selectedProject, story)}
                 </span>
+              )}
+              {selectedProject && (
+                <button
+                  type="button"
+                  onClick={() => void deleteCurrentProject()}
+                  disabled={Boolean(busy)}
+                  title="Xóa workflow này"
+                  className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50/50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors disabled:opacity-40"
+                >
+                  <Trash2 size={14} />
+                  <span>Xóa Workflow</span>
+                </button>
               )}
             </div>
             

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
   Activity,
@@ -17,7 +17,7 @@ import {
   Send,
   UsersRound,
 } from 'lucide-react'
-import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
@@ -50,9 +50,13 @@ type QueueItem = {
   generated_content?: string | null
   ai_reason?: string | null
   status: string
+  platform_publish_id?: string | null
+  publish_status?: Record<string, unknown>
   scheduled_at?: string | null
   scheduled_at_local?: string | null
   published_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
   error?: string | null
 }
 
@@ -182,6 +186,12 @@ export default function SchedulePage() {
   const [quickItem, setQuickItem] = useState<QueueItem | null>(null)
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
 
+  const mergeQueueItem = useCallback((updated: QueueItem) => {
+    setItems((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item))
+    setQuickItem((current) => current?.id === updated.id ? { ...current, ...updated } : current)
+    setModalItem((current) => current?.id === updated.id ? { ...current, ...updated } : current)
+  }, [])
+
   const loadData = async () => {
     setLoading(true)
     try {
@@ -220,6 +230,39 @@ export default function SchedulePage() {
     void loadData()
   }, [selectedProfileId, selectedPlatform, selectedStatus, searchQuery, weekStart])
 
+  const publishingItemIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const item of items) {
+      if (normalizePlatform(item.platform) === 'tiktok' && item.status === 'publishing') ids.add(item.id)
+    }
+    if (quickItem && normalizePlatform(quickItem.platform) === 'tiktok' && quickItem.status === 'publishing') ids.add(quickItem.id)
+    if (modalItem && normalizePlatform(modalItem.platform) === 'tiktok' && modalItem.status === 'publishing') ids.add(modalItem.id)
+    return Array.from(ids).sort().join(',')
+  }, [items, quickItem, modalItem])
+
+  useEffect(() => {
+    if (!publishingItemIds) return
+    let cancelled = false
+    const ids = publishingItemIds.split(',').filter(Boolean)
+    const refreshPublishingItems = async () => {
+      const results = await Promise.allSettled(
+        ids.map((id) => refreshPublishingQueueItemPublishStatusApi(id, { view: 'schedule', timezone: 'Asia/Bangkok' })),
+      )
+      if (cancelled) return
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value?.queue_item) {
+          mergeQueueItem(result.value.queue_item)
+        }
+      }
+    }
+    void refreshPublishingItems()
+    const timer = window.setInterval(() => void refreshPublishingItems(), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [publishingItemIds, mergeQueueItem])
+
   const handleApprove = async (queueItemId: string) => {
     setLoading(true)
     try {
@@ -237,11 +280,12 @@ export default function SchedulePage() {
     setLoading(true)
     const mode = requestedMode || (hasTikTokScope(item, 'video.publish') ? 'direct' : 'inbox')
     try {
-      await publishPublishingQueueItemApi(item.id, {
+      const result = await publishPublishingQueueItemApi(item.id, {
         mode,
         privacy_level: mode === 'direct' ? 'SELF_ONLY' : undefined,
         is_aigc: true,
       })
+      if (result.queue_item) mergeQueueItem(result.queue_item)
       await loadData()
       toast.success(mode === 'direct' ? 'Đã gửi Direct Post lên TikTok.' : 'Đã gửi video vào inbox TikTok.')
     } catch (error: any) {

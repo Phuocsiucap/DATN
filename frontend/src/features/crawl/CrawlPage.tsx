@@ -6,11 +6,13 @@ import {
   createCrawlJobApi,
   fetchCrawlJobsApi,
   fetchContentDetailApi,
+  fetchVnExpressRssFeedsApi,
   retryCrawlJobApi,
   fetchFinalContentViewApi,
   type ContentDetail,
   type CrawlJob,
   type FinalContentItem,
+  type VnExpressRssFeed,
 } from '@/commons/apis/module1'
 import { ContentDetailSheet } from '@/features/content/ContentPage'
 import {
@@ -39,6 +41,20 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const [sourceUrl, setSourceUrl] = useState('')
   const [keywords, setKeywords] = useState('truyen ma, short drama')
   const [maxItems, setMaxItems] = useState(20)
+  const [vnexpressRssFeeds, setVnexpressRssFeeds] = useState<VnExpressRssFeed[]>([])
+  const [selectedVnexpressRssKeys, setSelectedVnexpressRssKeys] = useState<string[]>(['tin-moi-nhat'])
+
+  const updateSourceType = (nextSourceType: 'BILIBILI' | 'VNEXPRESS') => {
+    setSourceType(nextSourceType)
+    setJobName(isSystemUser
+      ? `Global ${nextSourceType === 'VNEXPRESS' ? 'VNExpress' : 'Bilibili'} Crawl`
+      : `Private ${nextSourceType === 'VNEXPRESS' ? 'VNExpress' : 'Bilibili'} Crawl`)
+    setSourceUrl('')
+    setKeywords(nextSourceType === 'VNEXPRESS' ? '' : 'truyen ma, short drama')
+    if (nextSourceType === 'VNEXPRESS' && selectedVnexpressRssKeys.length === 0) {
+      setSelectedVnexpressRssKeys(['tin-moi-nhat'])
+    }
+  }
 
   const loadCrawlData = async () => {
     setLoading(true)
@@ -55,6 +71,18 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   useEffect(() => {
     void loadCrawlData()
+    fetchVnExpressRssFeedsApi()
+      .then((data) => {
+        const feeds = data.items || []
+        setVnexpressRssFeeds(feeds)
+        setSelectedVnexpressRssKeys((current) => {
+          if (current.length) return current
+          return feeds.some((feed) => feed.key === 'tin-moi-nhat') ? ['tin-moi-nhat'] : feeds.slice(0, 1).map((feed) => feed.key)
+        })
+      })
+      .catch(() => {
+        toast.error('Không tải được danh sách RSS VNExpress')
+      })
   }, [])
 
   const metrics = useMemo(() => {
@@ -68,6 +96,12 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const createJob = async () => {
     setLoading(true)
     try {
+      const selectedVnexpressFeeds = sourceType === 'VNEXPRESS'
+        ? vnexpressRssFeeds.filter((feed) => selectedVnexpressRssKeys.includes(feed.key))
+        : []
+      const rssFeedUrls = selectedVnexpressFeeds.map((feed) => feed.url)
+      const rssFeedKeys = selectedVnexpressFeeds.map((feed) => feed.key)
+      const trimmedSourceUrl = sourceUrl.trim()
       await createCrawlJobApi({
         name: jobName,
         crawl_mode: 'ONE_TIME',
@@ -76,11 +110,16 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         priority: 5,
         sources: [{
           source_type: sourceType,
-          source_url: sourceUrl || null,
+          source_url: trimmedSourceUrl || null,
           keywords: keywords.split(',').map((item) => item.trim()).filter(Boolean),
           configuration: {
             max_items: maxItems,
             metadata_only: sourceType === 'BILIBILI',
+            ...(sourceType === 'VNEXPRESS' ? {
+              rss_feed_keys: rssFeedKeys,
+              rss_feed_urls: rssFeedUrls,
+              rss_feeds: selectedVnexpressFeeds,
+            } : {}),
           },
         }],
       })
@@ -157,7 +196,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       {showCreate && (
         <CreateDialog
           sourceType={sourceType}
-          setSourceType={setSourceType}
+          setSourceType={updateSourceType}
           jobName={jobName}
           setJobName={setJobName}
           sourceUrl={sourceUrl}
@@ -166,6 +205,9 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
           setKeywords={setKeywords}
           maxItems={maxItems}
           setMaxItems={setMaxItems}
+          vnexpressRssFeeds={vnexpressRssFeeds}
+          selectedVnexpressRssKeys={selectedVnexpressRssKeys}
+          setSelectedVnexpressRssKeys={setSelectedVnexpressRssKeys}
           onClose={() => setShowCreate(false)}
           onSubmit={() => void createJob()}
         />
@@ -275,10 +317,42 @@ function JobsTable({
   )
 }
 
-function CreateDialog(props: any) {
+function CreateDialog(props: {
+  sourceType: 'BILIBILI' | 'VNEXPRESS'
+  setSourceType: (value: 'BILIBILI' | 'VNEXPRESS') => void
+  jobName: string
+  setJobName: (value: string) => void
+  sourceUrl: string
+  setSourceUrl: (value: string) => void
+  keywords: string
+  setKeywords: (value: string) => void
+  maxItems: number
+  setMaxItems: (value: number) => void
+  vnexpressRssFeeds: VnExpressRssFeed[]
+  selectedVnexpressRssKeys: string[]
+  setSelectedVnexpressRssKeys: (value: string[]) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  const toggleRssFeed = (key: string) => {
+    props.setSelectedVnexpressRssKeys(
+      props.selectedVnexpressRssKeys.includes(key)
+        ? props.selectedVnexpressRssKeys.filter((item) => item !== key)
+        : [...props.selectedVnexpressRssKeys, key],
+    )
+  }
+
+  const selectAllRssFeeds = () => {
+    props.setSelectedVnexpressRssKeys(props.vnexpressRssFeeds.map((feed) => feed.key))
+  }
+
+  const clearRssFeeds = () => {
+    props.setSelectedVnexpressRssKeys([])
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" style={{ backgroundColor: 'rgba(9,20,38,0.5)' }}>
-      <div className="w-full max-w-lg rounded-lg border border-[var(--outline-variant)] bg-white p-5 shadow-xl">
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-[var(--outline-variant)] bg-white p-5 shadow-xl">
         <h3 className="text-lg font-bold text-[#0f172a] mb-5">Tạo Crawl Job</h3>
         <div className="space-y-4">
           <label className="block text-sm font-medium">
@@ -287,11 +361,55 @@ function CreateDialog(props: any) {
           </label>
           <label className="block text-sm font-medium">
             Nguồn
-            <select className="mt-1 w-full rounded-md border p-2 text-sm outline-none" value={props.sourceType} onChange={e => props.setSourceType(e.target.value)}>
+            <select className="mt-1 w-full rounded-md border p-2 text-sm outline-none" value={props.sourceType} onChange={e => props.setSourceType(e.target.value as 'BILIBILI' | 'VNEXPRESS')}>
               <option value="BILIBILI">Bilibili</option>
               <option value="VNEXPRESS">VNExpress</option>
             </select>
           </label>
+          {props.sourceType === 'VNEXPRESS' && (
+            <>
+              <label className="block text-sm font-medium">
+                URL VNExpress
+                <input
+                  type="url"
+                  className="mt-1 w-full rounded-md border p-2 text-sm outline-none"
+                  placeholder="https://vnexpress.net/rss/tin-moi-nhat.rss"
+                  value={props.sourceUrl}
+                  onChange={e => props.setSourceUrl(e.target.value)}
+                />
+              </label>
+              <div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-medium">Chuyên mục RSS VNExpress</span>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={selectAllRssFeeds} className="h-7 rounded-md border px-2 text-[11px] font-bold">Chọn tất cả</button>
+                    <button type="button" onClick={clearRssFeeds} className="h-7 rounded-md border px-2 text-[11px] font-bold">Bỏ chọn</button>
+                  </div>
+                </div>
+                <div className="grid max-h-[260px] gap-2 overflow-y-auto rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {props.vnexpressRssFeeds.length === 0 ? (
+                    <div className="col-span-full text-xs font-semibold text-[#64748b]">Đang tải danh sách RSS...</div>
+                  ) : props.vnexpressRssFeeds.map((feed) => {
+                    const checked = props.selectedVnexpressRssKeys.includes(feed.key)
+                    return (
+                      <label key={feed.key} className={`flex min-h-[54px] cursor-pointer items-start gap-2 rounded-[8px] border p-2 text-xs transition ${checked ? 'border-[#2556ea] bg-[#f2f6ff]' : 'border-[#edf1f7] bg-white hover:bg-[#f8faff]'}`}>
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => toggleRssFeed(feed.key)}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-extrabold text-[#111827]">{feed.label}</span>
+                          <span className="mt-0.5 block truncate font-mono text-[10px] text-[#64748b]">{feed.url.replace('https://vnexpress.net/rss/', '')}</span>
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            </>
+          )}
           <label className="block text-sm font-medium">
             Keywords
             <input type="text" className="mt-1 w-full rounded-md border p-2 text-sm outline-none" value={props.keywords} onChange={e => props.setKeywords(e.target.value)} />

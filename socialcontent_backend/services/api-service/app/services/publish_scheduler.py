@@ -23,6 +23,10 @@ DEFAULT_SCHEDULER_SETTINGS = {
 
 _publish_queue_task: asyncio.Task | None = None
 _last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
+_last_account_snapshot_run: datetime | None = None
+_last_video_analytics_run: datetime | None = None
+_last_account_snapshot_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "snapshots": 0, "failed": 0}
+_last_video_analytics_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "videos": 0, "metrics": 0, "failed": 0}
 
 
 def normalize_scheduler_settings(value: dict[str, Any] | None = None) -> dict[str, int]:
@@ -74,6 +78,10 @@ def scheduler_snapshot(db: Session) -> dict[str, Any]:
             "publish_queue": {"id": "api_publish_queue_scheduler", "interval_minutes": interval},
         },
         "last_run": _last_run,
+        "analytics": {
+            "account_snapshots": _last_account_snapshot_result,
+            "video_metrics": _last_video_analytics_result,
+        },
     }
 
 
@@ -106,6 +114,7 @@ async def _publish_queue_scheduler_loop() -> None:
             if settings.enable_scheduler:
                 result = await asyncio.to_thread(run_publish_queue_once)
                 _last_run.update(result)
+                await run_due_analytics_tracking()
                 with SessionLocal() as db:
                     interval_seconds = get_scheduler_settings(db)["publish_queue_interval_minutes"] * 60
             else:
@@ -157,4 +166,55 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
             except Exception as exc:
                 logger.exception("Auto publish failed queue_item_id=%s: %s", item.id, exc)
                 result["failed"] += 1
+    return result
+
+
+async def run_due_analytics_tracking() -> None:
+    global _last_account_snapshot_run, _last_video_analytics_run
+    now = datetime.utcnow()
+    if _last_account_snapshot_run is None or (now - _last_account_snapshot_run).total_seconds() >= 24 * 60 * 60:
+        _last_account_snapshot_run = now
+        result = await run_daily_account_snapshots()
+        _last_account_snapshot_result.update(result)
+
+    if _last_video_analytics_run is None or (now - _last_video_analytics_run).total_seconds() >= 60 * 60:
+        _last_video_analytics_run = now
+        result = await run_hourly_video_analytics()
+        _last_video_analytics_result.update(result)
+
+
+async def run_daily_account_snapshots(limit: int | None = None) -> dict[str, Any]:
+    service = SocialProfileService()
+    result = {"checked_at": datetime.utcnow().isoformat(), "profiles": 0, "snapshots": 0, "failed": 0}
+    with SessionLocal() as db:
+        query = (
+            db.query(SocialProfile)
+            .filter(
+                SocialProfile.platform == "tiktok",
+                SocialProfile.status == "active",
+                SocialProfile.access_token.isnot(None),
+            )
+            .order_by(SocialProfile.updated_at.asc(), SocialProfile.created_at.asc())
+        )
+        profiles = query.limit(limit).all() if limit else query.all()
+        for profile in profiles:
+            result["profiles"] += 1
+            try:
+                sync_result = await service.sync_profile(db, profile)
+                if sync_result.get("snapshot_created"):
+                    result["snapshots"] += 1
+            except Exception as exc:
+                db.rollback()
+                logger.exception("Daily TikTok account snapshot failed profile_id=%s: %s", profile.id, exc)
+                result["failed"] += 1
+    return result
+
+
+async def run_hourly_video_analytics() -> dict[str, Any]:
+    service = SocialProfileService()
+    result = {"checked_at": datetime.utcnow().isoformat(), "profiles": 0, "videos": 0, "metrics": 0, "failed": 0}
+    with SessionLocal() as db:
+        sync_result = await service.sync_recent_tiktok_post_metrics(db, since_days=30, batch_size=20)
+        result.update(sync_result)
+        result["checked_at"] = datetime.utcnow().isoformat()
     return result

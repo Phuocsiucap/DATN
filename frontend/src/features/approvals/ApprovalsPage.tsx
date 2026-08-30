@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   CalendarDays,
@@ -15,6 +15,7 @@ import {
   approveAndPublishQueueItemNowApi,
   fetchPublishingQueueApprovalItemApi,
   fetchPublishingQueueApi,
+  refreshPublishingQueueItemPublishStatusApi,
   requestPublishingQueueItemChangesApi,
   updatePublishingQueueItemApi,
 } from '@/commons/apis/api'
@@ -49,6 +50,8 @@ type ApprovalQueueItem = {
   caption?: string | null
   ai_reason?: string | null
   status: string
+  platform_publish_id?: string | null
+  publish_status?: Record<string, unknown>
   scheduled_at?: string | null
   scheduled_at_local?: string | null
   published_at?: string | null
@@ -113,6 +116,8 @@ const formatDuration = (seconds?: number | null) => {
 
 const statusLabel = (value?: string | null) => statusLabels[String(value || '').toLowerCase()] || value || '-'
 const isTerminalStatus = (value?: string | null) => ['published', 'skipped', 'rejected'].includes(String(value || '').toLowerCase())
+const isTikTokPublishingItem = (item?: ApprovalQueueItem | null) =>
+  String(item?.platform || '').toLowerCase() === 'tiktok' && String(item?.status || '').toLowerCase() === 'publishing'
 const statusTone = (value?: string | null): 'green' | 'amber' | 'red' | 'gray' => {
   const status = String(value || '').toLowerCase()
   if (['approved', 'queued', 'published'].includes(status)) return 'green'
@@ -149,6 +154,11 @@ export default function ApprovalsPage() {
   const [manualScheduledAt, setManualScheduledAt] = useState(toDateTimeInputValue())
   const [loading, setLoading] = useState(false)
 
+  const mergeQueueItem = useCallback((updated: ApprovalQueueItem) => {
+    setItems((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item))
+    setSelectedItem((current) => current?.id === updated.id ? { ...current, ...updated } : current)
+  }, [])
+
   const loadQueue = async () => {
     setLoading(true)
     try {
@@ -170,6 +180,38 @@ export default function ApprovalsPage() {
   useEffect(() => {
     void loadQueue()
   }, [])
+
+  const publishingItemIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const item of items) {
+      if (isTikTokPublishingItem(item)) ids.add(item.id)
+    }
+    if (selectedItem && isTikTokPublishingItem(selectedItem)) ids.add(selectedItem.id)
+    return Array.from(ids).sort().join(',')
+  }, [items, selectedItem])
+
+  useEffect(() => {
+    if (!publishingItemIds) return
+    let cancelled = false
+    const ids = publishingItemIds.split(',').filter(Boolean)
+    const refreshPublishingItems = async () => {
+      const results = await Promise.allSettled(
+        ids.map((id) => refreshPublishingQueueItemPublishStatusApi(id, { view: 'approval', timezone: 'Asia/Bangkok' })),
+      )
+      if (cancelled) return
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value?.queue_item) {
+          mergeQueueItem(result.value.queue_item)
+        }
+      }
+    }
+    void refreshPublishingItems()
+    const timer = window.setInterval(() => void refreshPublishingItems(), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [publishingItemIds, mergeQueueItem])
 
   const profiles = useMemo(() => {
     const map = new Map<string, string>()
@@ -292,7 +334,7 @@ export default function ApprovalsPage() {
         privacy_level: mode === 'direct' ? 'SELF_ONLY' : undefined,
         is_aigc: true,
       })
-      if (result.queue_item) setSelectedItem(result.queue_item)
+      if (result.queue_item) mergeQueueItem(result.queue_item)
       toast.success(mode === 'direct' ? 'Đã gửi đăng ngay TikTok.' : 'Đã gửi vào inbox TikTok.')
       await loadQueue()
     } catch (error: any) {

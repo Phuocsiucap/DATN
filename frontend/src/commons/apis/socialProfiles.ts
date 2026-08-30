@@ -236,6 +236,17 @@ export const publishPublishingQueueItemApi = async (
   return data
 }
 
+export const refreshPublishingQueueItemPublishStatusApi = async (
+  queueItemId: string | number,
+  params?: {
+    view?: 'schedule' | 'approval' | string
+    timezone?: string
+  },
+) => {
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/publish-status`, null, { params })
+  return data
+}
+
 export const createSocialProfileApi = async (payload: any): Promise<SocialProfile> => {
   const { data } = await api.post('/social-profiles', payload)
   return data
@@ -249,6 +260,8 @@ export const deleteSocialProfileApi = async (profileId: string | number) => {
 export type SyncSocialProfileResponse = {
   profile: SocialProfile
   synced_videos_count?: number
+  resolved_post_ids_count?: number
+  snapshot_created?: boolean
   synced_at?: string
 }
 
@@ -268,6 +281,7 @@ export type SocialPost = {
   post_url?: string | null
   platform_post_id?: string | null
   platform_publish_id?: string | null
+  tiktok_embed_url?: string | null
   caption?: string | null
   status: string
   published_at: string
