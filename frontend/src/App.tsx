@@ -24,6 +24,7 @@ import SettingsPage from '@/features/settings/SettingsPage'
 import TermsPage from '@/features/legal/TermsPage'
 import PrivacyPage from '@/features/legal/PrivacyPage'
 import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
+import OpenAiUsagePage from '@/features/admin/OpenAiUsagePage'
 
 import AuthPage from '@/features/auth/AuthPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
@@ -209,6 +210,7 @@ function AppContent() {
           {tab === 'analyticsAccounts' && <AccountAnalyticsPage />}
           {tab === 'analyticsPosts' && <PostAnalyticsPage />}
           {tab === 'users' && (isSystemUser ? <UsersPage currentUser={currentUser} /> : <DashboardPage currentUser={currentUser} />)}
+          {tab === 'openaiUsage' && (isSystemUser ? <OpenAiUsagePage /> : <DashboardPage currentUser={currentUser} />)}
           {tab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

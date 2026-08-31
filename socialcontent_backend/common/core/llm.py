@@ -42,6 +42,7 @@ def openai_chat_completion(
     messages: list[dict[str, str]],
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
+    max_tokens: int | None = None,
     timeout: int = 30,
 ) -> ChatCompletionResult:
     return chat_completion(
@@ -52,6 +53,7 @@ def openai_chat_completion(
         messages=messages,
         temperature=temperature,
         response_format=response_format,
+        max_tokens=max_tokens,
         timeout=timeout,
     )
 
@@ -64,6 +66,7 @@ def deepseek_chat_completion(
     messages: list[dict[str, str]],
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
+    max_tokens: int | None = None,
     timeout: int = 120,
 ) -> ChatCompletionResult:
     return chat_completion(
@@ -74,6 +77,7 @@ def deepseek_chat_completion(
         messages=messages,
         temperature=temperature,
         response_format=response_format,
+        max_tokens=max_tokens,
         timeout=timeout,
     )
 
@@ -87,6 +91,7 @@ def chat_completion(
     messages: list[dict[str, str]],
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
+    max_tokens: int | None = None,
     timeout: int = 120,
 ) -> ChatCompletionResult:
     if not api_key:
@@ -99,6 +104,8 @@ def chat_completion(
     }
     if response_format:
         payload["response_format"] = response_format
+    if max_tokens is not None:
+        payload["max_completion_tokens" if provider == "openai" else "max_tokens"] = max(1, int(max_tokens))
 
     start_time = time.time()
     raw_response = post_json(

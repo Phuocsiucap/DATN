@@ -3,10 +3,10 @@ from __future__ import annotations
 import uuid
 import logging
 import re
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_
@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from common.db.models import ContentItem, MediaWorkflow, PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, SocialProfileStrategy, User
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
+from common.planning.auto_draft_policy import auto_production_allowed, is_auto_workflow
+from common.planning.publishing_schedule import choose_publish_schedule, lock_schedule_profile, schedule_timezone
 from app.schemas import api as schemas
 from app.services.tiktok_oauth import (
     build_tiktok_token_metadata,
@@ -626,6 +628,8 @@ class SocialProfileService:
         changed = False
         for wf in workflows:
             metadata = dict(wf.metadata_json or {})
+            if not auto_production_allowed(metadata, wf.draft_json):
+                continue
             queued_id = metadata.get("queued_post_id")
             if queued_id:
                 try:
@@ -637,19 +641,21 @@ class SocialProfileService:
 
             artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
             final_video = next(
-                (item.get("uri") for item in artifacts if isinstance(item, dict) and item.get("uri") and item.get("type") == "FINAL_VIDEO"),
+                (item.get("uri") for item in reversed(artifacts) if isinstance(item, dict) and item.get("status") != "STALE" and item.get("uri") and (item.get("type") or item.get("artifact_type")) == "FINAL_VIDEO"),
                 metadata.get("rendered_video") or metadata.get("final_video")
             )
             if not final_video and isinstance(wf.draft_json, dict):
                 story_artifacts = wf.draft_json.get("video_artifacts") if isinstance(wf.draft_json.get("video_artifacts"), dict) else {}
                 final_video = story_artifacts.get("final")
+            if not final_video:
+                continue
 
             profile = db.get(SocialProfile, wf.profile_id)
             if not profile:
                 continue
 
             content = db.get(ContentItem, wf.primary_content_id) if wf.primary_content_id else None
-            article_link = content.canonical_url if content else None
+            article_link = final_video
             article_title = wf.title or (content.canonical_title if content else "Video bài viết")
 
             queue_item = PublishingQueueItem(
@@ -662,7 +668,8 @@ class SocialProfileService:
                 generated_content=wf.title,
                 ai_reason="Được chuyển tự động từ Video đã hoàn thành render",
                 status="needs_approval",
-                scheduled_at=datetime.utcnow() + timedelta(hours=2),
+                # This is only awaiting review, not a reserved publishing slot.
+                scheduled_at=None,
             )
             db.add(queue_item)
             db.flush()
@@ -762,6 +769,8 @@ class SocialProfileService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
         if item.status in {"published", "skipped"} and next_status != item.status:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item đã kết thúc không thể chuyển lại trạng thái duyệt")
+        if next_status in {"queued", "approved"}:
+            self.require_queue_draft_ready(db, item, user)
         item.status = next_status
         if next_status == "changes_requested":
             self.mark_queue_workflow_changes_requested(
@@ -828,7 +837,7 @@ class SocialProfileService:
         note: str | None = None,
     ) -> None:
         workflow = self.find_workflow_for_queue_item(db, item, user)
-        if not workflow:
+        if not workflow or workflow.status == "REJECTED":
             return
 
         requested_at = datetime.now(timezone.utc).isoformat()
@@ -853,6 +862,21 @@ class SocialProfileService:
         workflow.current_stage = "EDITING"
         db.add(workflow)
 
+    def require_queue_draft_ready(self, db: Session, item: PublishingQueueItem, user: User) -> None:
+        """Recheck the linked AUTO draft even for items queued before a later edit."""
+        workflow = self.find_workflow_for_queue_item(db, item, user)
+        if not workflow or not is_auto_workflow(workflow.metadata_json):
+            return
+        story = workflow.draft_json if isinstance(workflow.draft_json, dict) else {}
+        if workflow.status == "REJECTED" or not auto_production_allowed(workflow.metadata_json, story):
+            raise HTTPException(status_code=409, detail="Draft của video cần được duyệt lại trước khi lên lịch hoặc đăng bài.")
+        artifacts = workflow.artifacts_jsonb if isinstance(workflow.artifacts_jsonb, list) else []
+        final_video = next((artifact.get("uri") for artifact in reversed(artifacts) if isinstance(artifact, dict) and artifact.get("status") != "STALE" and (artifact.get("type") or artifact.get("artifact_type")) == "FINAL_VIDEO" and artifact.get("uri")), None)
+        if not final_video:
+            final_video = (story.get("video_artifacts") or {}).get("final") or (workflow.metadata_json or {}).get("rendered_video")
+        if not final_video or str(item.article_link or "") != str(final_video):
+            raise HTTPException(status_code=409, detail="Video trong queue không còn khớp draft hiện tại. Hãy render và đưa video mới vào queue.")
+
     def approve_and_publish_queue_item_now(
         self,
         db: Session,
@@ -869,6 +893,7 @@ class SocialProfileService:
         brand_organic_toggle: bool = False,
     ) -> dict:
         item = self.get_owned_queue_item(db, queue_item_id, user)
+        self.require_queue_draft_ready(db, item, user)
         if item.status in {"published", "skipped"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể đăng ngay")
         item.status = "approved"
@@ -903,6 +928,7 @@ class SocialProfileService:
         timezone_name: str | None = None,
     ) -> PublishingQueueItem:
         item = self.get_owned_queue_item(db, queue_item_id, user)
+        self.require_queue_draft_ready(db, item, user)
         if item.status in {"published", "skipped"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể lên lịch lại")
         if item.platform != "tiktok":
@@ -916,13 +942,18 @@ class SocialProfileService:
 
         tzinfo = self.resolve_schedule_timezone(timezone_name or getattr(item.profile.strategy, "schedule_timezone", None))
         if mode == "manual":
+            lock_schedule_profile(db, item.profile_id)
             if scheduled_at is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at bắt buộc khi chọn lịch thủ công")
             publish_at = self.normalize_scheduled_datetime(scheduled_at, tzinfo)
             reason = "Reviewer đã duyệt và chọn lịch đăng thủ công."
         else:
-            publish_at = self.pick_ai_schedule_time(item.profile, tzinfo)
-            reason = "Reviewer đã duyệt; AI chọn khung giờ đăng tiếp theo theo chiến lược của tài khoản."
+            try:
+                decision = choose_publish_schedule(db, item.profile, item, timezone_name=tzinfo.key)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            publish_at = decision.scheduled_at
+            reason = f"Reviewer đã duyệt. {decision.reason}"
 
         now = datetime.now(timezone.utc)
         if publish_at <= now:
@@ -938,42 +969,12 @@ class SocialProfileService:
         return item
 
     def resolve_schedule_timezone(self, timezone_name: str | None) -> ZoneInfo:
-        try:
-            return ZoneInfo(timezone_name or "Asia/Bangkok")
-        except ZoneInfoNotFoundError:
-            return ZoneInfo("Asia/Bangkok")
+        return schedule_timezone(timezone_name)
 
     def normalize_scheduled_datetime(self, value: datetime, tzinfo: ZoneInfo) -> datetime:
         if value.tzinfo is None:
             value = value.replace(tzinfo=tzinfo)
         return value.astimezone(timezone.utc)
-
-    def pick_ai_schedule_time(self, profile: SocialProfile, tzinfo: ZoneInfo) -> datetime:
-        strategy = profile.strategy
-        now = datetime.now(tzinfo)
-        if not strategy:
-            return (now + timedelta(hours=1)).astimezone(timezone.utc)
-        days = {
-            int(item)
-            for item in str(strategy.schedule_days or "0,1,2,3,4,5,6").split(",")
-            if item.strip().isdigit()
-        }
-        times = [item.strip() for item in str(strategy.schedule_times or "").split(",") if item.strip()]
-        if not times:
-            return (now + timedelta(hours=1)).astimezone(timezone.utc)
-        for day_offset in range(0, 8):
-            candidate_date = (now + timedelta(days=day_offset)).date()
-            if days and candidate_date.weekday() not in days:
-                continue
-            for value in times:
-                try:
-                    hour, minute = [int(part) for part in value.split(":", 1)]
-                except ValueError:
-                    continue
-                candidate = datetime.combine(candidate_date, time(hour=hour, minute=minute), tzinfo=tzinfo)
-                if candidate > now + timedelta(minutes=5):
-                    return candidate.astimezone(timezone.utc)
-        return (now + timedelta(hours=1)).astimezone(timezone.utc)
 
     def _tiktok_public_post_url(self, profile: SocialProfile, post_id: str | None, fallback: str | None = None) -> str | None:
         post_id = self._clean_tiktok_post_id(post_id)
@@ -1321,6 +1322,7 @@ class SocialProfileService:
         mode = self.resolve_tiktok_publish_mode(profile, mode)
         if item.status == "publishing" and item.platform_publish_id and mode == "direct":
             return self.refresh_tiktok_publish_status(db, item, "manual", poll_attempts=3, poll_interval_seconds=5)
+        self.require_queue_draft_ready(db, item, user)
         video_path = self.resolve_rendered_video_path(item.article_link)
         action_label = "đăng trực tiếp" if mode == "direct" else "gửi inbox"
         item.status = "publishing"

@@ -82,33 +82,10 @@ const creatorSections: NavSection[] = [
 
 const adminSections: NavSection[] = [
   {
-    title: 'TỔNG QUAN',
+    title: 'TỔNG QUAN HỆ THỐNG',
     items: [
       { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={17} /> },
-      { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
-      { key: 'publishedPosts', label: 'Bài đã đăng', icon: <Send size={17} /> },
-    ],
-  },
-  {
-    title: 'NỘI DUNG',
-    items: [
-      { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
-      { key: 'planning', label: 'AI đề xuất', icon: <Bot size={17} /> },
-      { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
-      { key: 'approvals', label: 'Duyệt bài', icon: <FileCheck2 size={17} />, badge: 12 },
-    ],
-  },
-  {
-    title: 'SẢN XUẤT',
-    items: [
-      { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
-    ],
-  },
-  {
-    title: 'PHÂN TÍCH',
-    items: [
-      { key: 'analyticsAccounts', label: 'Theo tài khoản', icon: <BarChart3 size={17} /> },
-      { key: 'analyticsPosts', label: 'Theo bài đăng', icon: <Video size={17} /> },
+      { key: 'openaiUsage', label: 'OpenAI Usage', icon: <BarChart3 size={17} /> },
     ],
   },
   {

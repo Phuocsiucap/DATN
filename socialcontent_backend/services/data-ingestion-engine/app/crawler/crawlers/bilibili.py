@@ -57,7 +57,7 @@ class BilibiliCrawler(BaseCrawler):
         configuration: dict[str, Any],
     ) -> list[dict[str, Any]]:
         self.last_errors = []
-        limit = max(1, min(int(configuration.get("max_items", configuration.get("limit", 10)) or 10), 50))
+        limit = max(1, min(int(configuration.get("max_items", configuration.get("limit", 10)) or 10), 200))
         max_duration_seconds = int(configuration.get("max_duration_seconds", 7200) or 7200)
         queries = self._queries(source_url, keywords, configuration)
         headers = self._headers(configuration)

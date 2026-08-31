@@ -138,7 +138,8 @@ def approve_and_schedule_queue_item(
         scheduled_at=payload.scheduled_at,
         timezone_name=payload.timezone,
     )
-    return _serialize_queue_response_item(db, service, item, "approval", _resolve_timezone(payload.timezone))
+    timezone_name = payload.timezone or getattr(item.profile.strategy, "schedule_timezone", None)
+    return _serialize_queue_response_item(db, service, item, "approval", _resolve_timezone(timezone_name))
 
 
 @router.post("/queue/items/{queue_item_id}/request-changes")

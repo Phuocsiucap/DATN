@@ -5,6 +5,7 @@ import {
   createAdminUserApi,
   deleteAdminUserApi,
   fetchAdminUsersApi,
+  fetchUsersAiUsageSummaryApi,
   updateAdminUserApi,
 } from '@/commons/apis/api'
 
@@ -41,6 +42,7 @@ const hasSystemRole = (roles: string[]) => roles.some((role) => {
 
 export default function UsersPage({ currentUser }: UsersPageProps) {
   const [users, setUsers] = useState<AdminUser[]>([])
+  const [usageSummary, setUsageSummary] = useState<Record<string, any>>({})
   const [createForm, setCreateForm] = useState(emptyCreateForm)
   const [loading, setLoading] = useState(false)
 
@@ -50,8 +52,18 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
   const loadUsers = async () => {
     setLoading(true)
     try {
-      const data = await fetchAdminUsersApi()
+      const [data, usageData] = await Promise.all([
+        fetchAdminUsersApi(),
+        fetchUsersAiUsageSummaryApi().catch(() => [])
+      ])
+      
       setUsers(data.items || [])
+      
+      const usageMap: Record<string, any> = {}
+      for (const item of (usageData || [])) {
+        usageMap[item.user_id] = item
+      }
+      setUsageSummary(usageMap)
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể tải danh sách user')
     } finally {
@@ -240,6 +252,8 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
                 <th className="px-5 py-3 font-medium">Email</th>
                 <th className="px-5 py-3 font-medium">Role</th>
                 <th className="px-5 py-3 font-medium">Trạng thái</th>
+                <th className="px-5 py-3 font-medium text-right">Tokens đã dùng</th>
+                <th className="px-5 py-3 font-medium text-right">Chi phí AI ($)</th>
                 <th className="px-5 py-3 font-medium">Ngày tạo</th>
                 <th className="px-5 py-3 font-medium text-right">Thao tác</th>
               </tr>
@@ -278,6 +292,16 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
                       >
                         {user.is_active ? 'Active' : 'Locked'}
                       </button>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <div className="font-medium" style={{ color: 'var(--on-surface)' }}>
+                        {usageSummary[user.id]?.total_tokens?.toLocaleString() || 0}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <div className="font-semibold text-emerald-600">
+                        ${usageSummary[user.id]?.total_cost_usd?.toFixed(4) || '0.0000'}
+                      </div>
                     </td>
                     <td className="px-5 py-4" style={{ color: 'var(--on-surface-variant)' }}>
                       {new Date(user.created_at).toLocaleString()}

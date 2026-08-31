@@ -1,15 +1,20 @@
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import case, exists, or_
 from sqlalchemy.orm import Session
 
 from common.db.media_workflows import _load_content_full_text, content_category_payload, serialize_workflow
+from common.db.content_series import lock_active_series, sync_series_current_part
 from common.db.models import ContentItem, ContentSeries, MediaWorkflow, CrawlJob, KafkaTask, SocialProfile, Story, User
 from common.db.session import get_db
+from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow, sync_compact_scenes
 from app.api.deps import get_current_user
+from app.schemas.video_workspace_list import VideoWorkspaceListResponse
+from app.services.video_workspace_list import ACTIVE_TASK_STATUSES, ACTIVE_TASK_STATUS_PRIORITY, build_video_workspace_list
 
 
 router = APIRouter()
@@ -37,8 +42,6 @@ VIDEO_RUN_TYPES = {
     "GENERATE_VIDEO_RENDER",
 }
 
-ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PROCESSING"}
-ACTIVE_TASK_STATUS_PRIORITY = {"RUNNING": 3, "PROCESSING": 2, "PENDING": 1}
 WORKSPACE_METADATA_KEYS = {
     "selection_mode",
     "note",
@@ -53,6 +56,15 @@ WORKSPACE_METADATA_KEYS = {
     "risk_level",
     "ai_reasoning",
     "production_requirements",
+    "production_gate",
+    "draft_quality",
+    "draft_quality_recheck",
+    "draft_review",
+    "draft_review_approved",
+    "pending_series_decision",
+    "series_decision",
+    "series_decision_error",
+    "risk_flags",
     "video_approved",
     "video_approved_at",
     "queued_post_id",
@@ -60,7 +72,6 @@ WORKSPACE_METADATA_KEYS = {
 }
 
 
-from sqlalchemy import exists
 def _visible_in_video_workspace_filter():
     return or_(
         MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES),
@@ -117,7 +128,7 @@ def list_media_workflows(
     return [serialize_workflow(workflow, db) for workflow in workflows]
 
 
-@router.get("/video-workspace")
+@router.get("/video-workspace", response_model=VideoWorkspaceListResponse, response_model_exclude_none=True)
 def list_video_workspace(
     profile_id: uuid.UUID | None = None,
     series_id: uuid.UUID | None = None,
@@ -149,40 +160,32 @@ def list_video_workspace(
             MediaWorkflow.id,
             MediaWorkflow.profile_id,
             MediaWorkflow.series_id,
-            MediaWorkflow.primary_content_id,
             MediaWorkflow.title,
             MediaWorkflow.status,
             MediaWorkflow.current_stage,
             MediaWorkflow.progress_percent,
-            MediaWorkflow.artifacts_jsonb,
             MediaWorkflow.created_at,
             MediaWorkflow.updated_at,
             SocialProfile.profile_name.label("profile_name"),
             SocialProfile.platform.label("profile_platform"),
             SocialProfile.avatar_url.label("profile_avatar"),
             ContentSeries.title.label("series_title"),
-            ContentSeries.status.label("series_status"),
-            ContentItem.canonical_title.label("content_title"),
-            ContentItem.summary.label("content_summary"),
-            ContentItem.sources_jsonb.label("content_sources"),
+            ContentItem.sources_jsonb[0]["metadata_json"]["category"].astext.label("source_category"),
+            ContentItem.sources_jsonb[0]["metadata_json"]["thumbnail_url"].astext.label("source_thumbnail"),
+            ContentItem.sources_jsonb[0]["metadata_json"]["image_url"].astext.label("source_image"),
             ContentItem.media_jsonb.label("content_media"),
         )
         .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
         .outerjoin(ContentItem, ContentItem.id == MediaWorkflow.primary_content_id)
         .filter(*filters)
-        .order_by(MediaWorkflow.updated_at.desc())
+        .order_by(MediaWorkflow.updated_at.desc(), MediaWorkflow.id.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
     tasks_by_workflow = _latest_tasks_by_workflow(db, [row.id for row in rows])
-    return {
-        "items": [_serialize_workspace_summary(row, tasks_by_workflow.get(row.id)) for row in rows],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    return build_video_workspace_list(rows, tasks_by_workflow, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{workflow_id:uuid}")
@@ -225,6 +228,8 @@ def get_video_workspace(
     has_draft = bool(draft.get("timeline") or draft.get("story_data") or draft.get("scenes"))
     has_voice = _draft_has_voice(draft)
     final_video = _final_video_uri(artifacts)
+    production_allowed = workflow.status != "REJECTED" and auto_production_allowed(metadata, draft)
+    auto_review_required = is_auto_workflow(metadata) and has_draft and not production_allowed
 
     return {
         "id": str(workflow.id),
@@ -253,12 +258,13 @@ def get_video_workspace(
         "final_video": final_video,
         "tasks": tasks,
         "capabilities": {
-            "can_generate_draft": bool(workflow.primary_content_id) and active_task is None,
-            "can_edit": has_draft and active_task is None,
-            "can_generate_voice": has_draft and active_task is None,
-            "can_render": has_draft and has_voice and active_task is None,
-            "can_approve": bool(final_video) and active_task is None,
-            "can_queue": bool(final_video) and bool(metadata.get("video_approved")) and active_task is None,
+            "can_generate_draft": bool(workflow.primary_content_id) and workflow.status != "REJECTED" and active_task is None,
+            "can_edit": has_draft and workflow.status != "REJECTED" and active_task is None,
+            "can_approve_draft": auto_review_required and workflow.status != "REJECTED" and active_task is None,
+            "can_generate_voice": has_draft and production_allowed and active_task is None,
+            "can_render": has_draft and has_voice and production_allowed and active_task is None,
+            "can_approve": bool(final_video) and production_allowed and active_task is None,
+            "can_queue": bool(final_video) and bool(metadata.get("video_approved")) and production_allowed and active_task is None,
         },
         "created_at": workflow.created_at,
         "updated_at": workflow.updated_at or workflow.created_at,
@@ -289,7 +295,7 @@ def get_video_workflow_progress(
     tasks = _workflow_tasks(db, workflow.id, limit=12)
     active_task = _select_active_task(tasks)
     latest_task = tasks[0] if tasks else None
-    effective_task = active_task or latest_task
+    effective_task = active_task
     return {
         "workflow_id": str(workflow.id),
         "status": workflow.status,
@@ -366,15 +372,24 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
 
 @router.post("/{workflow_id:uuid}/approve")
 def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.get(MediaWorkflow, workflow_id)
+    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
     if not workflow or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
+    from app.api.routes.generate_video import _ensure_no_active_video_task
+    _ensure_no_active_video_task(db, workflow, allow_rejected=True)
+    was_rejected = workflow.status == "REJECTED"
+    if was_rejected and workflow.series_id:
+        series = lock_active_series(db, workflow.series_id, profile_id=workflow.profile_id, workflow_id=workflow.id)
+        if not series:
+            raise HTTPException(status_code=409, detail="Series không còn active hoặc đã đủ số part. Hãy đổi hoặc bỏ series trước khi mở lại workflow.")
     was_approved = workflow.status == "APPROVED"
     metadata = dict(workflow.metadata_json or {})
     metadata.setdefault("approved_at", datetime.now(timezone.utc).isoformat())
     metadata["approved_by"] = str(user.id)
     workflow.metadata_json = metadata
     workflow.status = "APPROVED"
+    if was_rejected and is_auto_workflow(metadata) and workflow.draft_json:
+        workflow.current_stage = "DRAFT_REVIEW_REQUIRED"
     tasks = db.query(KafkaTask).filter(KafkaTask.reference_id == workflow.id, KafkaTask.task_type == "PLANNING", KafkaTask.status == "WAITING_REVIEW").all()
     for t in tasks:
         t.status = "COMPLETED"
@@ -384,6 +399,9 @@ def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = D
         feedback = PlanningFeedback(media_workflow_id=workflow.id, feedback_type="APPROVE", feedback_text=payload["feedback_text"], created_by=user.id)
         db.add(feedback)
     db.add(workflow)
+    if was_rejected and workflow.series_id:
+        db.flush()
+        sync_series_current_part(db, series)
     db.commit()
     db.refresh(workflow)
     return {"plan": serialize_workflow(workflow, db), "media_workflows": []}
@@ -391,20 +409,29 @@ def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = D
 
 @router.post("/{workflow_id:uuid}/reject")
 def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.get(MediaWorkflow, workflow_id)
+    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
     if not workflow or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
+    from app.api.routes.generate_video import _ensure_no_active_video_task
+    _ensure_no_active_video_task(db, workflow, allow_rejected=True)
     was_rejected = workflow.status == "REJECTED"
     metadata = dict(workflow.metadata_json or {})
     metadata.setdefault("rejected_at", datetime.now(timezone.utc).isoformat())
     metadata["rejected_by"] = str(user.id)
+    if is_auto_workflow(metadata):
+        metadata["draft_review_approved"] = False
+        metadata.pop("approved_script_signature", None)
+        metadata["draft_review"] = {"status": "REVIEW_REQUIRED", "reason": "WORKFLOW_REJECTED"}
     workflow.metadata_json = metadata
     workflow.status = "REJECTED"
+    series_id = workflow.series_id
     if payload.get("feedback_text") and not was_rejected:
         from common.db.models import PlanningFeedback
         feedback = PlanningFeedback(media_workflow_id=workflow.id, feedback_type="REJECT", feedback_text=payload["feedback_text"], created_by=user.id)
         db.add(feedback)
     db.add(workflow)
+    db.flush()
+    sync_series_current_part(db, series_id)
     db.commit()
     db.refresh(workflow)
     return serialize_workflow(workflow, db)
@@ -412,7 +439,7 @@ def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = De
 
 @router.patch("/{workflow_id:uuid}")
 def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.get(MediaWorkflow, workflow_id)
+    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
     if not workflow or workflow.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -421,28 +448,82 @@ def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRe
     has_series_id = "series_id" in data
     series_id = data.pop("series_id", None)
     draft_json = data.pop("draft_json", None)
+    if draft_json is not None:
+        from app.api.routes.generate_video import _ensure_no_active_video_task
+        _ensure_no_active_video_task(db, workflow)
 
     if title is not None:
         workflow.title = title.strip() or workflow.title
 
+    old_series_id = workflow.series_id
     if has_series_id:
         if series_id:
-            series = db.get(ContentSeries, series_id)
+            series = db.get(ContentSeries, series_id) if series_id == old_series_id else lock_active_series(db, series_id, profile_id=workflow.profile_id)
             if not series or series.user_id != user.id:
-                raise HTTPException(status_code=404, detail="Content series not found")
+                raise HTTPException(status_code=409, detail="Content series không tồn tại, không active hoặc đã đủ số part")
             workflow.series_id = series_id
         else:
             workflow.series_id = None
 
     if draft_json is not None:
+        previous_draft = workflow.draft_json if isinstance(workflow.draft_json, dict) else {}
+        draft_json = deepcopy(draft_json)
+        if isinstance(previous_draft.get("compact_scenes"), list) and not isinstance(draft_json.get("compact_scenes"), list):
+            draft_json["compact_scenes"] = deepcopy(previous_draft["compact_scenes"])
+        sync_compact_scenes(draft_json)
+        previous_signature = draft_script_signature(workflow.draft_json if isinstance(workflow.draft_json, dict) else {})
+        next_signature = draft_script_signature(draft_json)
         workflow.draft_json = draft_json
 
     metadata = dict(workflow.metadata_json or {})
     for key, value in data.items():
         metadata[key] = value
+    if has_series_id:
+        workflow.planning_mode = "SERIES" if workflow.series_id else "SINGLE"
+        metadata["planning_mode"] = workflow.planning_mode
+        metadata.pop("pending_series_decision", None)
+        metadata.pop("series_decision_error", None)
+        metadata["series_decision"] = {
+            "action": "USE_EXISTING" if workflow.series_id else "NONE",
+            "target_series_id": str(workflow.series_id) if workflow.series_id else None,
+            "series_title": series.title if workflow.series_id else None,
+            "reason": "MANUAL_SERIES_SELECTION",
+        }
+        if isinstance(workflow.draft_json, dict):
+            story = deepcopy(workflow.draft_json)
+            story_meta = dict(story.get("meta") or {})
+            story_meta["series_decision"] = metadata["series_decision"]
+            story_meta["series"] = {
+                "id": str(series.id), "title": series.title, "description": series.description,
+                "series_type": series.series_type, "status": series.status,
+                "current_part": int(series.current_part or 0), "total_parts": int(series.total_parts or 0),
+            } if workflow.series_id else None
+            story["meta"] = story_meta
+            workflow.draft_json = story
+            if draft_json is not None:
+                draft_json = story
+    if draft_json is not None and previous_signature != next_signature and is_auto_workflow(metadata):
+        workflow.metadata_json = metadata
+        invalidate_draft_media(workflow, draft_json)
+        metadata = dict(workflow.metadata_json or {})
+        metadata["draft_review_approved"] = False
+        metadata.pop("approved_script_signature", None)
+        metadata["draft_review"] = {
+            "status": "REVIEW_REQUIRED",
+            "reason": "DRAFT_CHANGED",
+            "script_signature": next_signature,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        workflow.status = "EDITING"
+        workflow.current_stage = "DRAFT_REVIEW_REQUIRED"
+        workflow.progress_percent = 80
     workflow.metadata_json = metadata
 
     db.add(workflow)
+    db.flush()
+    if old_series_id != workflow.series_id:
+        sync_series_current_part(db, old_series_id)
+        sync_series_current_part(db, workflow.series_id)
     db.commit()
     db.refresh(workflow)
     return {
@@ -464,12 +545,15 @@ def delete_media_workflow(
     if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
+    old_series_id = workflow.series_id
     db.query(KafkaTask).filter(
         KafkaTask.reference_id == workflow.id,
         KafkaTask.reference_type == "media_workflow",
     ).delete(synchronize_session=False)
 
     db.delete(workflow)
+    db.flush()
+    sync_series_current_part(db, old_series_id)
     db.commit()
     return {"message": "Workflow deleted successfully", "workflow_id": str(workflow_id)}
 
@@ -551,38 +635,31 @@ def _can_use_story(db: Session, story: Story, user: User) -> bool:
 def _latest_tasks_by_workflow(db: Session, workflow_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
     if not workflow_ids:
         return {}
+    # PostgreSQL DISTINCT ON returns at most one small row per workflow, not its
+    # entire task history. A still-active task wins over a newer completed task.
+    priority = case(ACTIVE_TASK_STATUS_PRIORITY, value=KafkaTask.status, else_=0)
     rows = (
         db.query(
-            KafkaTask.id,
             KafkaTask.reference_id,
             KafkaTask.task_type,
             KafkaTask.status,
             KafkaTask.current_stage,
             KafkaTask.progress_percent,
-            KafkaTask.error_message,
-            KafkaTask.created_at,
-            KafkaTask.started_at,
-            KafkaTask.completed_at,
         )
         .filter(
             KafkaTask.reference_type == "media_workflow",
             KafkaTask.reference_id.in_(workflow_ids),
             KafkaTask.task_type.in_(VIDEO_RUN_TYPES),
         )
-        .order_by(KafkaTask.reference_id, KafkaTask.created_at.desc())
+        .distinct(KafkaTask.reference_id)
+        .order_by(KafkaTask.reference_id, priority.desc(), KafkaTask.created_at.desc(), KafkaTask.id.desc())
         .all()
     )
-    latest: dict[uuid.UUID, dict] = {}
-    active: dict[uuid.UUID, dict] = {}
-    for row in rows:
-        payload = _serialize_task_row(row)
-        if row.reference_id not in latest:
-            latest[row.reference_id] = payload
-        if payload["status"] in ACTIVE_TASK_STATUSES:
-            current = active.get(row.reference_id)
-            if current is None or _active_task_sort_key(payload) > _active_task_sort_key(current):
-                active[row.reference_id] = payload
-    return {workflow_id: active.get(workflow_id) or latest_task for workflow_id, latest_task in latest.items()}
+    return {row.reference_id: {
+        "task_type": row.task_type,
+        "status": row.status, "current_stage": row.current_stage,
+        "progress_percent": float(row.progress_percent or 0),
+    } for row in rows}
 
 
 def _workflow_tasks(db: Session, workflow_id: uuid.UUID, *, limit: int) -> list[dict]:
@@ -637,60 +714,6 @@ def _serialize_task_row(row) -> dict:
         "created_at": row.created_at,
         "started_at": row.started_at,
         "completed_at": row.completed_at,
-    }
-
-
-def _serialize_workspace_summary(row, latest_task: dict | None) -> dict:
-    artifacts = row.artifacts_jsonb if isinstance(row.artifacts_jsonb, list) else []
-    source_metadata = {}
-    sources = row.content_sources if isinstance(row.content_sources, list) else []
-    primary_source = sources[0] if sources else {}
-    if isinstance(primary_source, dict) and isinstance(primary_source.get("metadata_json"), dict):
-        source_metadata = primary_source["metadata_json"]
-    category_id = source_metadata.get("category_id")
-    media = row.content_media if isinstance(row.content_media, list) else []
-    first_media_url = None
-    for item in media:
-        if isinstance(item, dict):
-            first_media_url = item.get("thumbnail_url") or item.get("source_url") or item.get("storage_url")
-            if first_media_url:
-                break
-    thumbnail_url = source_metadata.get("thumbnail_url") or source_metadata.get("image_url") or first_media_url
-    return {
-        "id": str(row.id),
-        "profile": {
-            "id": str(row.profile_id),
-            "name": row.profile_name,
-            "platform": row.profile_platform,
-            "avatar": row.profile_avatar,
-        },
-        "series": {
-            "id": str(row.series_id),
-            "title": row.series_title,
-            "status": row.series_status,
-        } if row.series_id else None,
-        "primary_content": {
-            "id": str(row.primary_content_id),
-            "title": row.content_title,
-            "summary": row.content_summary,
-            "article_id": source_metadata.get("article_id"),
-            "articleId": source_metadata.get("article_id"),
-            "category_id": category_id,
-            "categoryId": category_id,
-            "category": source_metadata.get("category"),
-            "site_id": source_metadata.get("site_id"),
-            "siteId": source_metadata.get("site_id"),
-            "thumbnail_url": thumbnail_url,
-            "thumbnailUrl": thumbnail_url,
-        } if row.primary_content_id else None,
-        "title": row.title,
-        "status": row.status,
-        "current_stage": (latest_task or {}).get("current_stage") or row.current_stage,
-        "progress_percent": (latest_task or {}).get("progress_percent") if (latest_task or {}).get("status") in ACTIVE_TASK_STATUSES else float(row.progress_percent or 0),
-        "latest_task": latest_task,
-        "final_video": _final_video_uri(artifacts),
-        "created_at": row.created_at,
-        "updated_at": row.updated_at or row.created_at,
     }
 
 
@@ -784,6 +807,7 @@ def _final_video_uri(artifacts: list[dict]) -> str | None:
         item for item in artifacts
         if isinstance(item, dict)
         and item.get("uri")
+        and item.get("status") != "STALE"
         and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
     ]
     if not candidates:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   AlertCircle,
@@ -37,19 +37,20 @@ import {
   type PlanningProfile,
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
+import { hasActiveVideoTask as hasActiveTask, videoWorkspaceSeriesKey } from '@/commons/apis/videoWorkspaceList'
 import { SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
 import { SeriesModal, TransferSeriesModal } from './components/SeriesModal'
+import { buildVideoKanbanColumns, isFailedVideoWorkspace } from './videoKanban'
 
 type GenerateVideoProjectsPageProps = {
   onOpenProject: (workflowId: string) => void
 }
 
-const activeTaskStatuses = new Set(['PENDING', 'RUNNING', 'PROCESSING'])
-
 export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVideoProjectsPageProps) {
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [series, setSeries] = useState<ContentSeries[]>([])
+  const seriesSnapshot = useRef('')
   const [items, setItems] = useState<VideoWorkspaceSummary[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
@@ -81,7 +82,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     let failed = 0
 
     items.forEach((item) => {
-      if (item.status === 'FAILED' || item.latest_task?.status === 'FAILED') {
+      if (isFailedVideoWorkspace(item)) {
         failed += 1
       } else if (['VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status)) {
         ready += 1
@@ -107,11 +108,16 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           search: search.trim() || undefined,
           limit: 100,
         }),
-        fetchContentSeriesApi(selectedProfileId),
+        quiet ? Promise.resolve(null) : fetchContentSeriesApi(selectedProfileId),
       ])
       setItems(workspaceData.items)
       setTotal(workspaceData.total)
-      setSeries(seriesData)
+      const nextSnapshot = `${selectedProfileId}:${videoWorkspaceSeriesKey(workspaceData.items)}`
+      // Quiet polling needs full series data only if an automatic job has
+      // changed the page's series references, not on every progress update.
+      const nextSeries = seriesData ?? (seriesSnapshot.current !== nextSnapshot ? await fetchContentSeriesApi(selectedProfileId) : null)
+      if (nextSeries) setSeries(nextSeries)
+      seriesSnapshot.current = nextSnapshot
     } catch (error) {
       toast.error(readApiError(error, 'Không tải được danh sách video workflow'))
     } finally {
@@ -394,6 +400,9 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             <option value="">Mọi trạng thái</option>
             <option value="SCRIPTING,EDITING,REVIEWING,VOICE_READY,RENDERING">Đang sản xuất</option>
             <option value="RENDERED">Chờ duyệt video</option>
+            <option value="VIDEO_APPROVED">Đã duyệt video</option>
+            <option value="QUEUED_FOR_PUBLISHING">Chờ đăng</option>
+            <option value="PUBLISHED">Đã đăng</option>
             <option value="FAILED">Thất bại</option>
           </select>
         </div>
@@ -480,7 +489,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         </aside>
 
         {/* Workspaces Kanban */}
-        <div className="min-h-0 flex-1 overflow-hidden pr-0.5">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden pr-0.5">
         {loading ? (
           <div className="grid h-full gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
@@ -503,9 +512,10 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             </p>
           </div>
         ) : (
-          <div className="grid w-full h-full gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 overflow-hidden">
-            {kanbanColumns(items).map((column, columnIndex) => (
-              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] flex-col rounded-[8px] border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+          <div className="h-full overflow-x-auto overflow-y-hidden pb-1">
+            <div className="flex h-full min-w-full gap-3">
+            {buildVideoKanbanColumns(items).map((column, columnIndex) => (
+              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] w-[280px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs sm:w-[300px] lg:w-[305px] xl:w-[320px]">
                 <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3">
                   <div className="flex items-center gap-2">
                     <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
@@ -517,11 +527,10 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                   <MoreHorizontal size={16} className="text-slate-400" />
                 </div>
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-                  {column.items.map((item, index) => (
+                  {column.items.map((item) => (
                     <VideoKanbanCard
                       key={item.id}
                       item={item}
-                      index={index + columnIndex}
                       copied={copiedId === item.id}
                       busy={busy === `regen-${item.id}`}
                       disabled={Boolean(busy) || hasActiveTask(item)}
@@ -546,6 +555,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                 </button>
               </section>
             ))}
+            </div>
           </div>
         )}
         </div>
@@ -594,28 +604,8 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   )
 }
 
-function kanbanColumns(items: VideoWorkspaceSummary[]) {
-  const buckets = [
-    { id: 'draft', title: 'Draft kịch bản', badgeClass: 'bg-[#f2f0ff] text-[#6d5dfc]', match: (item: VideoWorkspaceSummary) => ['SCRIPTING', 'READY', 'DRAFT_READY'].includes(item.status) },
-    { id: 'editing', title: 'Đang biên tập & Voice', badgeClass: 'bg-[#eef4ff] text-[#2556ea]', match: (item: VideoWorkspaceSummary) => ['EDITING', 'REVIEWING', 'VOICE_READY'].includes(item.status) },
-    { id: 'rendering', title: 'Đang render MP4', badgeClass: 'bg-[#fff3d6] text-[#f59e0b]', match: (item: VideoWorkspaceSummary) => ['RENDERING'].includes(item.status) || hasActiveTask(item) },
-    { id: 'review', title: 'Chờ duyệt video', badgeClass: 'bg-[#fff3d6] text-[#b76b00]', match: (item: VideoWorkspaceSummary) => ['RENDERED'].includes(item.status) },
-  ]
-
-  const assigned = new Set<string>()
-  const columns = buckets.map((bucket) => {
-    const columnItems = items.filter((item) => !assigned.has(item.id) && bucket.match(item))
-    columnItems.forEach((item) => assigned.add(item.id))
-    return { ...bucket, items: columnItems }
-  })
-  const fallback = items.filter((item) => !assigned.has(item.id))
-  columns[0].items.push(...fallback)
-  return columns
-}
-
-function VideoKanbanCard({
+export function VideoKanbanCard({
   item,
-  index,
   copied,
   busy,
   disabled,
@@ -626,7 +616,6 @@ function VideoKanbanCard({
   onDelete,
 }: {
   item: VideoWorkspaceSummary
-  index: number
   copied: boolean
   busy: boolean
   disabled: boolean
@@ -636,15 +625,13 @@ function VideoKanbanCard({
   onAssign: () => void
   onDelete: () => void
 }) {
-  const duration = item.status === 'RENDERING' ? '01:04' : index % 2 ? '00:57' : '01:15'
   return (
     <article className="group overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-xs transition hover:border-[#c8d0ff] hover:shadow-sm">
       <button onClick={onOpen} className="block w-full text-left">
         <Thumbnail
-          src={item.primary_content?.thumbnail_url || item.primary_content?.thumbnailUrl || item.primary_content?.image_url}
+          src={item.thumbnail_url}
           title={item.title}
           className="h-[138px] w-full rounded-none"
-          duration={duration}
         />
       </button>
       <div className="space-y-3 p-3">
@@ -664,15 +651,15 @@ function VideoKanbanCard({
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <StatusPill value={workflowStatusLabel(item.status)} tone={item.status === 'FAILED' ? 'red' : item.status === 'RENDERING' ? 'amber' : 'purple'} />
-          {item.primary_content?.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{item.primary_content.category}</span>}
+          <StatusPill value={item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'Cần duyệt draft' : workflowStatusLabel(item.status)} tone={isFailedVideoWorkspace(item) ? 'red' : item.status === 'RENDERING' || item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'amber' : 'purple'} />
+          {item.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{item.category}</span>}
         </div>
 
         {item.status === 'RENDERING' && (
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-500">{Math.round(Number(item.progress_percent || 45))}%</span>
+            <span className="text-[11px] font-bold text-slate-500">{Math.round(Number(item.progress_percent ?? 0))}%</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-[#f59e0b]" style={{ width: `${Math.max(8, Math.min(100, Number(item.progress_percent || 45)))}%` }} />
+              <div className="h-full rounded-full bg-[#f59e0b]" style={{ width: `${Math.max(0, Math.min(100, Number(item.progress_percent ?? 0)))}%` }} />
             </div>
           </div>
         )}
@@ -715,10 +702,6 @@ function VideoKanbanCard({
       </div>
     </article>
   )
-}
-
-function hasActiveTask(item: VideoWorkspaceSummary) {
-  return Boolean(item.latest_task && activeTaskStatuses.has(item.latest_task.status))
 }
 
 function workflowStatusLabel(value: string) {

@@ -193,7 +193,7 @@ export const approveAndScheduleQueueItemApi = async (
     timezone?: string
   },
 ) => {
-  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/approve-schedule`, payload)
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/approve-schedule`, payload, { timeout: 60000 })
   return data
 }
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from typing import Any
+from common.planning.auto_draft_policy import sync_compact_scenes
 
 from app.video.services.generate_video_constants import DEFAULT_EFFECTS, DEFAULT_IMAGES, DEFAULT_VOICE_PROVIDER
 
@@ -19,13 +21,20 @@ def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:
 
 def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
     normalized = normalize_story_for_project(story)
-    return {
+    sync_compact_scenes(normalized)
+    payload = {
         "meta": normalized.get("meta") or {},
         "video": normalized.get("video"),
         "audio": normalized.get("audio"),
         "timeline": normalized.get("timeline") or {},
         "video_artifacts": normalized.get("video_artifacts") or {},
+        "story_data": normalized.get("story_data") or [],
     }
+    if isinstance(normalized.get("compact_scenes"), list):
+        payload["compact_scenes"] = normalized["compact_scenes"]
+    if normalized.get("project_status") is not None:
+        payload["project_status"] = normalized.get("project_status")
+    return payload
 
 
 
@@ -53,6 +62,8 @@ def sync_story_timeline(story: dict[str, Any]) -> None:
     video_clips = fit_video_clips_to_text(video_clips, text_clips, fps)
     audio_clips = normalize_audio_clips(timeline.get("audio"), fps)
     timeline_metadata = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+    if "full_script" in timeline_metadata:
+        timeline_metadata = {**timeline_metadata, "full_script": " ".join(str(clip.get("voice_text") or clip.get("text") or "").strip() for clip in text_clips)}
     if not audio_clips:
         audio_clips = build_audio_timeline(story, fps)
     story["timeline"] = {
@@ -207,6 +218,10 @@ def normalize_video_clips(value: Any, fps: int) -> list[dict[str, Any]]:
             clip["scene_number"] = item.get("scene_number")
         if item.get("visual_direction"):
             clip["visual_direction"] = str(item.get("visual_direction"))
+        if isinstance(item.get("text_weights"), dict):
+            clip["text_weights"] = dict(item["text_weights"])
+        if type(item.get("source_media_index")) is int:
+            clip["source_media_index"] = item["source_media_index"]
         clips.append(clip)
     return sorted(clips, key=lambda clip: (clip["start"], clip["end"]))
 
@@ -297,6 +312,14 @@ def link_timeline_visual_text(video_clips: list[dict[str, Any]], text_clips: lis
         return
 
     text_by_id = {str(clip.get("id")): clip for clip in text_clips if clip.get("id")}
+    # Snapshot both directions before mutating either. Explicit IDs take priority
+    # over scene indexes, which cannot represent a many-to-many relationship.
+    reverse = {str(clip.get("id")): set(_clip_video_ids(clip)) for clip in text_clips}
+    forward = {str(clip.get("id")): set(_clip_text_ids(clip)) for clip in video_clips}
+    explicit_texts = {key for key, refs in reverse.items() if refs} | set().union(*forward.values())
+    for text_clip in text_clips:
+        text_clip.pop("video_id", None)
+        text_clip.pop("video_ids", None)
     text_by_scene: dict[int, list[dict[str, Any]]] = {}
     for index, text_clip in enumerate(text_clips):
         scene_index = _clip_scene_index(text_clip, index)
@@ -308,15 +331,18 @@ def link_timeline_visual_text(video_clips: list[dict[str, Any]], text_clips: lis
         scene_index = _clip_scene_index(video_clip, index)
         video_clip["scene_index"] = scene_index
         linked = [text_by_id[text_id] for text_id in _clip_text_ids(video_clip) if text_id in text_by_id]
-        if not linked:
-            linked = text_by_scene.get(scene_index, [])
-        if not linked:
+        has_forward = bool(forward.get(str(video_clip.get("id"))))
+        if not linked and not has_forward:
+            linked = [clip for clip in text_clips if str(video_clip.get("id")) in reverse.get(str(clip.get("id")), set())]
+        if not linked and not has_forward:
+            linked = [clip for clip in text_by_scene.get(scene_index, []) if str(clip.get("id")) not in explicit_texts]
+        if not linked and not has_forward:
             linked = [
                 text_clip
                 for text_clip in text_clips
-                if _clip_overlap_seconds(video_clip, text_clip) > 0
+                if str(text_clip.get("id")) not in explicit_texts and _clip_overlap_seconds(video_clip, text_clip) > 0
             ]
-        if not linked and index < len(text_clips):
+        if not linked and not has_forward and index < len(text_clips) and str(text_clips[index].get("id")) not in explicit_texts:
             linked = [text_clips[index]]
         text_ids = [str(text_clip.get("id")) for text_clip in linked if text_clip.get("id")]
         if not text_ids:
@@ -340,7 +366,7 @@ def link_timeline_visual_text(video_clips: list[dict[str, Any]], text_clips: lis
     last_ids = list(last_video.get("text_ids") or [])
     for text_clip in text_clips:
         text_id = str(text_clip.get("id") or "")
-        if not text_id or text_id in claimed_ids:
+        if not text_id or text_id in claimed_ids or text_id in explicit_texts:
             continue
         text_clip["scene_index"] = last_scene_index
         video_ids = _clip_video_ids(text_clip)
@@ -393,6 +419,10 @@ def normalize_text_clips(value: Any, fps: int) -> list[dict[str, Any]]:
             clip["video_id"] = video_ids[0]
         if item.get("voice_text"):
             clip["voice_text"] = str(item.get("voice_text"))
+        if item.get("role"):
+            clip["role"] = str(item.get("role"))
+        if isinstance(item.get("evidence_ids"), list):
+            clip["evidence_ids"] = [str(value) for value in item.get("evidence_ids") if str(value).strip()]
         if item.get("scene_number") is not None:
             clip["scene_number"] = item.get("scene_number")
         if isinstance(item.get("timing"), dict):
@@ -594,6 +624,34 @@ def fit_video_clips_to_text(video_value: Any, text_clips: list[dict[str, Any]], 
         for text_id in _clip_text_ids(video_clip):
             videos_by_text_id.setdefault(text_id, []).append(video_clip)
 
+    # Partition each text once, then join adjacent pieces belonging to the same
+    # visual. This also handles v1=[t1,t2], v2=[t2,t3] without duplicating t2.
+    ranges: dict[str, list[tuple[float, float]]] = {}
+    for text_id, siblings in videos_by_text_id.items():
+        text_clip = text_by_id.get(text_id)
+        if not text_clip:
+            continue
+        weights = []
+        for sibling in siblings:
+            stored = (sibling.get("text_weights") or {}).get(text_id)
+            if isinstance(stored, (int, float)) and math.isfinite(stored) and stored > 0:
+                weights.append(float(stored))
+            else:
+                overlap = _clip_overlap_seconds(sibling, text_clip)
+                weights.append(overlap or max(1 / fps, float(sibling.get("duration") or 1)))
+        total = sum(weights)
+        start = float(text_clip.get("start") or 0)
+        end = max(start + 1 / fps, float(text_clip.get("end") or start + 1))
+        cursor = start
+        for index, sibling in enumerate(siblings):
+            fraction = weights[index] / total
+            next_end = end if index == len(siblings) - 1 else cursor + (end - start) * fraction
+            ranges.setdefault(str(sibling.get("id")), []).append((cursor, next_end))
+            # Persist proportions so normalizing again or fitting to new voice
+            # timing does not progressively shift a mixed relationship.
+            sibling.setdefault("text_weights", {})[text_id] = fraction
+            cursor = next_end
+
     fitted: list[dict[str, Any]] = []
     last_end = 0.0
     for index, clip in enumerate(video_clips):
@@ -608,7 +666,12 @@ def fit_video_clips_to_text(video_value: Any, text_clips: list[dict[str, Any]], 
         if not linked_texts:
             fitted.append(clip)
             continue
-        start, end = _fit_video_range_for_linked_texts(clip, linked_texts, videos_by_text_id, last_end, fps)
+        portions = ranges.get(str(clip.get("id")), [])
+        if portions:
+            start = round_to_frame(max(last_end, min(item[0] for item in portions)), fps)
+            end = round_to_frame(max(start + 1 / fps, max(item[1] for item in portions)), fps)
+        else:
+            start, end = _fit_video_range_for_linked_texts(clip, linked_texts, videos_by_text_id, last_end, fps)
         text_ids = [str(text_clip.get("id")) for text_clip in linked_texts if text_clip.get("id")]
         next_clip = {
             **clip,
@@ -791,7 +854,9 @@ def word_similarity(left: str, right: str) -> float:
 
 
 def round_to_frame(seconds: float, fps: int) -> float:
-    return max(1 / fps, round(seconds * fps) / fps)
+    # Zero is a valid timestamp (especially voiceStart). Durations are clamped
+    # by the callers; adding a frame here shifts audio and every fitted clip.
+    return max(0.0, round(seconds * fps) / fps)
 
 
 

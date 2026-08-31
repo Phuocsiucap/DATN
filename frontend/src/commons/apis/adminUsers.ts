@@ -13,6 +13,11 @@ export const fetchAdminUsersApi = async () => {
   return normalizeUserList(data)
 }
 
+export const fetchUsersAiUsageSummaryApi = async () => {
+  const { data } = await api.get('/users/ai-usage-summary')
+  return data.users_ai_usage
+}
+
 export const createAdminUserApi = async (payload: any) => {
   const { data } = await api.post('/users', payload)
   return data

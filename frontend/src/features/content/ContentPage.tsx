@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays,
+  ChevronDown,
   Eye,
   ExternalLink,
   FileText,
@@ -44,11 +45,13 @@ const formatDate = (value?: string | null) => {
 }
 
 const formatScore = (value?: number | null) => {
+  if (value == null) return '-'
   const score = Number(value)
   return Number.isFinite(score) ? score.toFixed(1) : '-'
 }
 
 const formatSimilarity = (value?: number | null) => {
+  if (value == null) return '-'
   const score = Number(value)
   return Number.isFinite(score) ? `${(score * 100).toFixed(1)}%` : '-'
 }
@@ -376,7 +379,8 @@ export function ContentDetailSheet({
   const imageItems = mediaItems.filter((media) => /image/i.test(String(media.media_type || media.mime_type || '')))
   const sourceUrl = getSourceUrl(item)
   const profileMatches = item.profile_matches || []
-  const tiktokMatch = profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok')
+  const tiktokMatch = profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok' && match.can_create_script)
+    || profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok')
 
   return (
     <div className="fixed inset-0 z-[80]">
@@ -466,13 +470,13 @@ export function ContentDetailSheet({
           <div className="mb-3 flex items-center justify-between">
             <div>
               <div className="text-[15px] font-extrabold text-[#111827]">Phân tích phù hợp theo kênh social</div>
-              {item.ai_selection_summary && <p className="mt-1 text-[12px] font-semibold leading-5 text-[#526179]">{item.ai_selection_summary}</p>}
+              {profileMatches.length > 0 && <p className="mt-1 text-[12px] leading-5 text-[#64748b]">{profileMatches.length} kênh đã phân tích. Mở chi tiết từng kênh để xem lý do và thông số đối chiếu.</p>}
             </div>
           </div>
           {profileMatches.length > 0 ? (
             <div className="divide-y divide-[#edf1f7]">
               {profileMatches.map((match) => (
-                <ProfileMatchRow key={match.profile_id} match={match} onOpenModule2={onOpenModule2} />
+                <ProfileMatchRow key={`${item.id}-${match.profile_id}`} match={match} onOpenModule2={onOpenModule2} />
               ))}
             </div>
           ) : (
@@ -480,8 +484,12 @@ export function ContentDetailSheet({
           )}
         </section>
 
-        <section className="mt-4 rounded-[8px] border border-[var(--outline-variant)] p-4">
-          <div className="mb-3 text-[15px] font-extrabold text-[#111827]">TikTok preview</div>
+        <details key={item.id} className="group/preview mt-4 rounded-[8px] border border-[var(--outline-variant)] p-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14px] font-bold text-[#34415a] [&::-webkit-details-marker]:hidden">
+            Xem trước bài đăng TikTok
+            <ChevronDown size={16} className="shrink-0 transition-transform group-open/preview:rotate-180" />
+          </summary>
+          <p className="mb-4 mt-2 text-[12px] leading-5 text-[#64748b]">Bản mô phỏng giao diện, không phải kết quả đề xuất hay bài đã xuất bản.</p>
           {tiktokMatch ? (
             <SocialPostPreview
               post={{
@@ -495,9 +503,9 @@ export function ContentDetailSheet({
               }}
             />
           ) : (
-            <EmptyBlock label="Chưa có kênh social TikTok phù hợp để dựng preview." />
+            <EmptyBlock label="Chưa có kênh TikTok để xem trước." />
           )}
-        </section>
+        </details>
       </div>
 
       <div className="flex justify-end gap-3 border-t border-[var(--outline-variant)] bg-[#fbfcff] p-5">
@@ -519,19 +527,35 @@ function MetaCard({ label, value }: { label: string; value: string }) {
 }
 
 function ProfileMatchRow({ match, onOpenModule2 }: { match: ProfileContentMatch; onOpenModule2?: (jobId?: string) => void }) {
-  const score = Number(match.score || 0)
-  const threshold = Number(match.threshold || 70)
+  const score = Number(match.score ?? 0)
+  const threshold = Number(match.threshold ?? 70)
   const passedSimilarityGate = typeof match.passed_similarity_gate === 'boolean' ? match.passed_similarity_gate : score >= threshold
-  const tone = match.blocked_by_avoid_topics ? 'red' : passedSimilarityGate ? 'green' : 'amber'
-  const topics = [...(match.matched_topics || []), match.tone].filter((value): value is string => Boolean(value)).slice(0, 4)
-  const topicMatches = (match.topic_matches || []).slice(0, 4)
-  const avoidTopicMatches = (match.avoid_topic_matches || []).slice(0, 4)
+  const tone = match.blocked_by_avoid_topics || ['AI_REJECTED', 'HUMAN_REJECTED', 'AVOID_TOPIC_MATCH'].includes(match.recommendation_status)
+    ? 'red'
+    : ['REVIEW_REQUIRED', 'LOW_MATCH', 'DRAFT_FAILED', 'DRAFT_QUEUED'].includes(match.recommendation_status)
+      ? 'amber'
+      : ['RECOMMENDED', 'WORKFLOW_CREATED'].includes(match.recommendation_status) ? 'green' : 'gray'
+  const statusLabels: Record<string, string> = {
+    RECOMMENDED: 'Được đề xuất',
+    LOW_MATCH: 'Độ phù hợp thấp',
+    AVOID_TOPIC_MATCH: 'Khớp chủ đề cần tránh',
+    AI_REJECTED: 'AI không đề xuất',
+    HUMAN_REJECTED: 'Người dùng không sản xuất',
+    DRAFT_QUEUED: 'Đã duyệt, đang sinh draft',
+    DRAFT_FAILED: 'Sinh draft sau duyệt thất bại',
+    REVIEW_REQUIRED: 'Cần kiểm duyệt',
+    WORKFLOW_CREATED: 'Đã tạo quy trình',
+  }
+  const topicMatches = match.topic_matches || []
+  const avoidTopicMatches = match.avoid_topic_matches || []
   const topTopicMatch = match.top_topic_match || topicMatches[0]
-  const insights = match.fit_insights || []
-  const reason = match.selection_reason || match.ai_decision_reason || match.relation_reason || 'Chưa có lý do lựa chọn từ API.'
+  const reason = match.selection_reason || match.ai_decision_reason
+  const riskNotes = [...new Set(match.risk_notes || [])]
+  const showAngle = match.can_create_script && !match.blocked_by_avoid_topics
+    && ['RECOMMENDED', 'WORKFLOW_CREATED'].includes(match.recommendation_status)
   return (
     <div className="py-4">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_88px_minmax(150px,0.8fr)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 gap-3">
           <SocialProfileAvatar
             avatarUrl={match.avatar_url}
@@ -540,113 +564,85 @@ function ProfileMatchRow({ match, onOpenModule2 }: { match: ProfileContentMatch;
             size="lg"
           />
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-extrabold text-[#111827]">{match.profile_name} - {match.platform}</div>
-            <div className="mt-0.5 truncate text-[11px] font-semibold text-[#64748b]">{match.username ? `@${match.username}` : match.recommendation_status}</div>
-            {topics.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {topics.map((tag) => <span key={tag} className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{tag}</span>)}
-              </div>
-            )}
+            <div className="break-words text-[13px] font-extrabold text-[#111827]">{match.profile_name}</div>
+            <div className="mt-1 break-all text-[12px] text-[#64748b]">{match.username ? `@${match.username.replace(/^@/, '')} · ` : ''}{match.platform}</div>
           </div>
         </div>
-        <div className={match.blocked_by_avoid_topics ? 'text-right text-[18px] font-extrabold text-[#ef233c]' : passedSimilarityGate ? 'text-right text-[18px] font-extrabold text-[#16a34a]' : 'text-right text-[18px] font-extrabold text-[#f59e0b]'}>
-          {score.toFixed(1)}<span className="text-[12px]">/100</span>
-          {match.embedding_similarity !== undefined && match.embedding_similarity !== null && (
-            <div className="mt-0.5 text-[10px] font-bold text-[#64748b]">top cos {formatSimilarity(match.embedding_similarity)}</div>
+        <StatusPill value={statusLabels[match.recommendation_status] || 'Chưa có kết luận'} tone={tone} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[#f8fafc] px-3 py-2.5">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <div className="text-[12px] text-[#526179]">Điểm phù hợp <strong className="ml-1 text-[18px] text-[#111827]">{formatScore(match.score)}</strong><span className="text-[#64748b]">/100</span></div>
+          <div className="text-[12px] text-[#64748b]">Ngưỡng kênh: <span className="font-semibold text-[#34415a]">{formatScore(threshold)}/100</span></div>
+        </div>
+        {match.can_create_script && onOpenModule2 && (
+          <AppButton className="h-8 px-3" icon={<Wand2 size={14} />} onClick={() => onOpenModule2()}>Tạo kịch bản</AppButton>
+        )}
+      </div>
+      {topTopicMatch && <p className="mt-2 text-[12px] leading-5 text-[#64748b]">Chủ đề gần nhất: <span className="font-semibold text-[#34415a]">{topTopicMatch.topic}</span>{!passedSimilarityGate && ' · Chưa đạt ngưỡng tương đồng'}</p>}
+      {match.blocked_by_avoid_topics && <p className="mt-2 text-[12px] leading-5 text-[#c4253c]">Nội dung chạm chủ đề cần tránh{match.avoided_topics?.length ? `: ${match.avoided_topics.join(', ')}` : '.'}</p>}
+      <details className="group/match mt-3">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] font-semibold text-[#526179] hover:text-[#2556ea] [&::-webkit-details-marker]:hidden">
+          <ChevronDown size={15} className="transition-transform group-open/match:rotate-180" />
+          Chi tiết đánh giá
+        </summary>
+        <div className="mt-3 space-y-4 border-l-2 border-[#edf1f7] pl-3 text-[12px] leading-5 text-[#526179]">
+          <div>
+            <h4 className="font-bold text-[#34415a]">Lý do đánh giá</h4>
+            <p className="mt-1">{reason || 'Chưa có giải thích chi tiết từ hệ thống.'}</p>
+          </div>
+          {(topicMatches.length > 0 || match.similarity_threshold != null || match.embedding_similarity != null) && (
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-bold text-[#34415a]">Độ tương đồng chủ đề</h4>
+                <span className={passedSimilarityGate ? 'text-[#16813b]' : 'text-[#b76b00]'}>{passedSimilarityGate ? 'Đạt ngưỡng' : 'Chưa đạt ngưỡng'}</span>
+              </div>
+              <p className="mt-1 text-[#64748b]">So sánh ngữ nghĩa (cosine){match.similarity_threshold != null ? ` · Ngưỡng tối thiểu ${formatSimilarity(match.similarity_threshold)}` : ''}</p>
+              {topicMatches.length > 0 ? (
+                <dl className="mt-2 divide-y divide-[#edf1f7]">
+                  {topicMatches.map((topic) => (
+                    <div key={topic.topic_key || topic.topic} className="flex items-baseline justify-between gap-3 py-1.5">
+                      <dt className="min-w-0 break-words" title={topic.description || undefined}>{topic.topic}</dt>
+                      <dd className="shrink-0 font-semibold tabular-nums">{formatSimilarity(topic.similarity)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : match.embedding_similarity != null && <p className="mt-2">Cao nhất: {formatSimilarity(match.embedding_similarity)}</p>}
+            </div>
+          )}
+          {(avoidTopicMatches.length > 0 || match.blocked_by_avoid_topics) && (
+            <div>
+              <h4 className="font-bold text-[#34415a]">Đối chiếu chủ đề cần tránh</h4>
+              {match.avoid_similarity_threshold != null && <p className="mt-1 text-[#64748b]">Ngưỡng chặn: {formatSimilarity(match.avoid_similarity_threshold)}</p>}
+              <dl className="mt-2 divide-y divide-[#edf1f7]">
+                {avoidTopicMatches.map((topic) => (
+                  <div key={topic.topic_key || topic.topic} className="flex items-baseline justify-between gap-3 py-1.5">
+                    <dt className="min-w-0 break-words" title={topic.description || undefined}>{topic.topic}</dt>
+                    <dd className={`shrink-0 font-semibold tabular-nums ${topic.matched ? 'text-[#c4253c]' : ''}`}>{formatSimilarity(topic.similarity)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+          {(match.tone || match.target_audience || Boolean(match.matched_topics?.length)) && (
+            <div className="space-y-2 border-t border-[#edf1f7] pt-3">
+              <dl className="space-y-2">
+              {Boolean(match.matched_topics?.length) && <div><dt className="font-bold text-[#34415a]">Chủ đề khớp với kênh</dt><dd className="mt-1">{match.matched_topics?.join(', ')}</dd></div>}
+              {match.target_audience && <div><dt className="font-bold text-[#34415a]">Khán giả mục tiêu của kênh</dt><dd className="mt-1">{match.target_audience}</dd></div>}
+              {match.tone && <div><dt className="font-bold text-[#34415a]">Giọng điệu cấu hình</dt><dd className="mt-1">{match.tone}</dd></div>}
+              </dl>
+              {(match.target_audience || match.tone) && <p className="text-[11px] text-[#64748b]">Cấu hình kênh không phải kết luận bài viết phù hợp với khán giả hoặc giọng điệu.</p>}
+            </div>
+          )}
+          {showAngle && match.suggested_angle && <div><h4 className="font-bold text-[#34415a]">Góc triển khai tham khảo</h4><p className="mt-1">{match.suggested_angle}</p></div>}
+          {riskNotes.length > 0 && (
+            <div className="rounded-[8px] bg-[#fffbeb] p-3 text-[#92400e]">
+              <h4 className="font-bold">Lưu ý</h4>
+              <ul className="mt-1 list-disc space-y-1 pl-4">{riskNotes.map((note) => <li key={note}>{note}</li>)}</ul>
+            </div>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2">
-          <StatusPill value={match.recommendation_status} tone={tone} />
-          <AppButton className="h-8 px-3" icon={<Wand2 size={14} />} disabled={!match.can_create_script} onClick={() => onOpenModule2?.()}>Tạo kịch bản</AppButton>
-        </div>
-      </div>
-      <p className="mt-3 rounded-[8px] bg-[#fbfcff] px-3 py-2 text-[12px] font-semibold leading-5 text-[#526179]">
-        <span className="font-extrabold text-[#111827]">Vì sao phù hợp: </span>{reason}
-      </p>
-      {(topicMatches.length > 0 || avoidTopicMatches.length > 0 || match.similarity_threshold !== undefined || match.avoid_similarity_threshold !== undefined) && (
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-[8px] border border-[#dbe7ff] bg-[#f6f9ff] p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[11px] font-extrabold text-[#2556ea]">Topic cosine gate</div>
-              <span className={passedSimilarityGate ? 'rounded-[5px] bg-[#eaf8ef] px-2 py-0.5 text-[10px] font-extrabold text-[#16813b]' : 'rounded-[5px] bg-[#fff3d6] px-2 py-0.5 text-[10px] font-extrabold text-[#b76b00]'}>
-                {passedSimilarityGate ? 'PASSED' : 'FAILED'}
-              </span>
-            </div>
-            <div className="mt-1 text-[11px] font-semibold text-[#526179]">Cần ≥ {formatSimilarity(match.similarity_threshold)}</div>
-            {topTopicMatch && (
-              <div className="mt-1 text-[11px] font-semibold text-[#526179]">Cao nhất: {topTopicMatch.topic} {formatSimilarity(topTopicMatch.similarity)}</div>
-            )}
-            {topicMatches.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {topicMatches.map((item) => (
-                  <span
-                    key={`${match.profile_id}-topic-${item.topic}`}
-                    title={item.description || item.topic_key || item.topic}
-                    className={item.matched ? 'rounded-[5px] bg-white px-2 py-0.5 text-[10px] font-bold text-[#16813b]' : 'rounded-[5px] bg-white px-2 py-0.5 text-[10px] font-bold text-[#2556ea]'}
-                  >
-                    {item.topic} {formatSimilarity(item.similarity)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className={match.blocked_by_avoid_topics ? 'rounded-[8px] border border-[#ffd5da] bg-[#fff7f8] p-3' : 'rounded-[8px] border border-[#edf1f7] bg-[#fbfcff] p-3'}>
-            <div className={match.blocked_by_avoid_topics ? 'text-[11px] font-extrabold text-[#ef233c]' : 'text-[11px] font-extrabold text-[#64748b]'}>Avoid embedding</div>
-            <div className="mt-1 text-[11px] font-semibold text-[#526179]">Giới hạn {formatSimilarity(match.avoid_similarity_threshold)}</div>
-            {avoidTopicMatches.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {avoidTopicMatches.map((item) => (
-                  <span
-                    key={`${match.profile_id}-avoid-${item.topic}`}
-                    title={item.description || item.topic_key || item.topic}
-                    className="rounded-[5px] bg-white px-2 py-0.5 text-[10px] font-bold text-[#ef233c]"
-                  >
-                    {item.topic} {formatSimilarity(item.similarity)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      {insights.length > 0 && (
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          {insights.map((insight) => (
-            <MatchInsightCard key={`${match.profile_id}-${insight.label}`} insight={insight} />
-          ))}
-        </div>
-      )}
-      {match.suggested_angle && (
-        <div className="mt-3 rounded-[8px] border border-[#edf1f7] p-3">
-          <div className="text-[11px] font-extrabold text-[#64748b]">Gợi ý góc triển khai</div>
-          <div className="mt-1 text-[12px] font-semibold leading-5 text-[#34415a]">{match.suggested_angle}</div>
-        </div>
-      )}
-      {match.risk_notes && match.risk_notes.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {match.risk_notes.map((note) => (
-            <span key={note} className="rounded-[5px] bg-[#fff3d6] px-2 py-0.5 text-[10px] font-bold text-[#b76b00]">{note}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MatchInsightCard({ insight }: { insight: NonNullable<ProfileContentMatch['fit_insights']>[number] }) {
-  const colors: Record<string, string> = {
-    green: 'border-[#d7f2df] bg-[#f4fbf6] text-[#16813b]',
-    blue: 'border-[#dbe7ff] bg-[#f6f9ff] text-[#2556ea]',
-    amber: 'border-[#ffe4a8] bg-[#fff9ea] text-[#b76b00]',
-    red: 'border-[#ffd5da] bg-[#fff7f8] text-[#ef233c]',
-    purple: 'border-[#ded8ff] bg-[#f8f6ff] text-[#6d5dfc]',
-    gray: 'border-[#edf1f7] bg-[#fbfcff] text-[#526179]',
-  }
-  const picked = colors[String(insight.tone || 'gray')] || colors.gray
-  return (
-    <div className={`min-w-0 rounded-[8px] border p-2.5 ${picked}`}>
-      <div className="text-[10px] font-extrabold text-[#64748b]">{insight.label}</div>
-      <div className="mt-1 line-clamp-2 text-[11px] font-bold leading-4">{insight.value || '-'}</div>
+      </details>
     </div>
   )
 }

@@ -69,3 +69,155 @@ def run_publish_queue_now(_: User = Depends(require_system_admin), db: Session =
     snapshot = scheduler_snapshot(db)
     snapshot["last_run"] = result
     return snapshot
+
+
+
+@router.get("/system/openai-usage/costs-by-day")
+async def get_openai_usage_costs_by_day(
+    start_time: int | None = None,
+    end_time: int | None = None,
+    _: User = Depends(require_system_admin),
+):
+    import time
+    
+    settings = get_settings()
+    if not settings.openai_admin_key:
+        raise HTTPException(status_code=400, detail="OPENAI_ADMIN_KEY not configured in .env")
+        
+    now = int(time.time())
+    if not start_time:
+        start_time = now - 7 * 24 * 3600
+        
+    url = "https://api.openai.com/v1/organization/costs"
+    headers = {
+        "Authorization": f"Bearer {settings.openai_admin_key}",
+        "Content-Type": "application/json"
+    }
+    params = {
+        "start_time": start_time,
+        "bucket_width": "1d"
+    }
+    # OpenAI costs API excludes the current day's bucket if end_time is before the bucket's end_time.
+    # By omitting end_time, it defaults to returning all available buckets up to now.
+    
+    return await _fetch_openai_usage_paginated(url, headers, params)
+
+async def _fetch_openai_usage_paginated(url: str, headers: dict, params: dict):
+    import httpx
+    
+    current_params = params.copy()
+    current_params["limit"] = 31  # Maximum allowed for bucket_width=1d is 31
+    all_buckets = {}
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while True:
+            response = await client.get(url, headers=headers, params=current_params)
+            if response.status_code != 200:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+            data = response.json()
+            for bucket in data.get("data", []):
+                st = bucket["start_time"]
+                if st not in all_buckets:
+                    all_buckets[st] = bucket
+                else:
+                    all_buckets[st]["results"].extend(bucket.get("results", []))
+                    
+            if not data.get("has_more") or not data.get("next_page"):
+                break
+                
+            current_params["after"] = data["next_page"]
+            
+    return {"object": "page", "data": list(all_buckets.values())}
+
+
+@router.get("/system/openai-usage/completions")
+async def get_openai_usage_completions(
+    start_time: int | None = None,
+    end_time: int | None = None,
+    group_by: str | None = None,
+    _: User = Depends(require_system_admin),
+):
+    import time
+    
+    settings = get_settings()
+    if not settings.openai_admin_key:
+        raise HTTPException(status_code=400, detail="OPENAI_ADMIN_KEY not configured in .env")
+        
+    now = int(time.time())
+    if not start_time:
+        start_time = now - 7 * 24 * 3600
+        
+    url = "https://api.openai.com/v1/organization/usage/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.openai_admin_key}",
+        "Content-Type": "application/json"
+    }
+    params = {
+        "start_time": start_time,
+    }
+    if group_by:
+        params["group_by"] = group_by
+    
+    return await _fetch_openai_usage_paginated(url, headers, params)
+
+@router.get("/system/openai-usage/embeddings")
+async def get_openai_usage_embeddings(
+    start_time: int | None = None,
+    end_time: int | None = None,
+    group_by: str | None = None,
+    _: User = Depends(require_system_admin),
+):
+    import time
+    
+    settings = get_settings()
+    if not settings.openai_admin_key:
+        raise HTTPException(status_code=400, detail="OPENAI_ADMIN_KEY not configured in .env")
+        
+    now = int(time.time())
+    if not start_time:
+        start_time = now - 7 * 24 * 3600
+        
+    url = "https://api.openai.com/v1/organization/usage/embeddings"
+    headers = {
+        "Authorization": f"Bearer {settings.openai_admin_key}",
+        "Content-Type": "application/json"
+    }
+    params = {
+        "start_time": start_time,
+    }
+    if group_by:
+        params["group_by"] = group_by
+    
+    return await _fetch_openai_usage_paginated(url, headers, params)
+
+@router.get("/system/openai-usage/audio-transcriptions")
+async def get_openai_usage_audio_transcriptions(
+    start_time: int | None = None,
+    end_time: int | None = None,
+    group_by: str | None = None,
+    _: User = Depends(require_system_admin),
+):
+    import time
+    
+    settings = get_settings()
+    if not settings.openai_admin_key:
+        raise HTTPException(status_code=400, detail="OPENAI_ADMIN_KEY not configured in .env")
+        
+    now = int(time.time())
+    if not start_time:
+        start_time = now - 7 * 24 * 3600
+        
+    url = "https://api.openai.com/v1/organization/usage/audio_transcriptions"
+    headers = {
+        "Authorization": f"Bearer {settings.openai_admin_key}",
+        "Content-Type": "application/json"
+    }
+    params = {
+        "start_time": start_time,
+    }
+    if group_by:
+        params["group_by"] = group_by
+    
+    return await _fetch_openai_usage_paginated(url, headers, params)

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
 from common.db.media_workflows import _image_urls, _serialize_source_content
+from common.db.content_series import (
+    find_active_series_by_title,
+    lock_active_series,
+    lock_profile_series_scope,
+    sync_series_current_part,
+)
+from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
 from app.video.services.generate_video_assets import hydrate_source_video_assets
@@ -22,6 +30,25 @@ def _update_task_progress(db, task, project, stage: str, percent: float, *, proj
     if project_status:
         project.status = project_status
     db.add_all([task, project])
+    db.commit()
+
+
+def _mark_video_task_failed(db, task, project, error: Exception) -> None:
+    failure_stage = task.current_stage or getattr(project, "current_stage", None) or "ERROR"
+    if failure_stage == "FAILED":
+        failure_stage = getattr(project, "current_stage", None) or "ERROR"
+    if failure_stage == "FAILED":
+        failure_stage = "ERROR"
+
+    task.status = "FAILED"
+    task.current_stage = failure_stage
+    task.error_message = str(error)[-2000:]
+    task.completed_at = datetime.now(timezone.utc)
+    if project:
+        project.status = "FAILED"
+        project.current_stage = failure_stage
+        db.add(project)
+    db.add(task)
     db.commit()
 
 
@@ -58,7 +85,14 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
         _update_task_progress(db, task, project, "APPLYING_SERIES", 86, project_status="SCRIPTING")
-        series_decision = _apply_story_series_decision(db, project, story, source)
+        if is_auto_workflow(project.metadata_json):
+            series_decision = _story_series_decision(story)
+            project_metadata = dict(project.metadata_json or {})
+            if series_decision and series_decision.get("action") in {"CREATE_NEW", "USE_EXISTING"}:
+                project_metadata["pending_series_decision"] = series_decision
+                project.metadata_json = project_metadata
+        else:
+            series_decision = _apply_story_series_decision(db, project, story, source)
         if series_decision:
             story["meta"]["series_decision"] = series_decision
         public_story = public_story_payload(story)
@@ -66,14 +100,16 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         _update_task_progress(db, task, project, "SAVING_DRAFT", 95, project_status="SCRIPTING")
         _upsert_project_rendered_draft(project, public_story)
 
+        requires_review = _mark_auto_draft_for_human_review(project, public_story, reason="DRAFT_REGENERATED")
+
         task.status = "COMPLETED"
         task.progress_percent = 100
         task.current_stage = "DRAFT_READY"
         task.result_jsonb = {**metadata, "workflow_id": str(project.id), "draft_saved": True}
         task.completed_at = datetime.now(timezone.utc)
-        project.status = "DRAFT_READY"
-        project.current_stage = "DRAFT_READY"
-        project.progress_percent = 100
+        project.status = "EDITING" if requires_review else "DRAFT_READY"
+        project.current_stage = "DRAFT_REVIEW_REQUIRED" if requires_review else "DRAFT_READY"
+        project.progress_percent = 80 if requires_review else 100
         db.add_all([task, project])
         db.commit()
         _maybe_enqueue_auto_voice_or_render(db, project, public_story, trigger="script_completed")
@@ -81,18 +117,8 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
         if task:
-            task.status = "FAILED"
-            task.current_stage = "FAILED"
-            task.error_message = str(error)[-2000:]
-            task.completed_at = datetime.now(timezone.utc)
-            if task.reference_id:
-                project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-                if project:
-                    project.status = "FAILED"
-                    project.current_stage = "FAILED"
-                    db.add(project)
-            db.add(task)
-            db.commit()
+            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
+            _mark_video_task_failed(db, task, project, error)
     finally:
         db.close()
 
@@ -142,7 +168,8 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
         "summary": content.summary or project_meta.get("note") or "",
         "full_text": full_text,
         "content": content_context,
-        "target_duration_seconds": metadata.get("target_duration_seconds") or project_meta.get("target_duration_seconds") or 60,
+        "target_duration_seconds": (metadata.get("target_duration_seconds") or project_meta.get("target_duration_seconds")
+                                    or (None if project_meta.get("draft_generation_mode") == "compact-v2" else 60)),
         "images": _image_urls(media),
         "media": media,
         "series": _current_series_context(project),
@@ -270,6 +297,8 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
     if category_id and not getattr(project, "series_id", None):
         series = _find_active_series_by_category_id(db, project.profile_id, category_id)
         if series:
+            series = lock_active_series(db, series.id, profile_id=project.profile_id, workflow_id=project.id)
+        if series:
             action = "USE_EXISTING"
             decision = {
                 "action": action,
@@ -286,13 +315,12 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
         if not series:
             target_series_id = _as_uuid(decision.get("target_series_id"))
             if target_series_id:
-                candidate = db.get(ContentSeries, target_series_id)
-                if candidate and candidate.profile_id == project.profile_id and candidate.status == "ACTIVE":
-                    series = candidate
+                series = lock_active_series(db, target_series_id, profile_id=project.profile_id, workflow_id=project.id)
     elif action == "CREATE_NEW":
         title = _clean_series_title(decision.get("series_title"))
         if title:
-            series = _find_active_series_by_title(db, project.profile_id, title)
+            lock_profile_series_scope(db, project.profile_id)
+            series = find_active_series_by_title(db, project.profile_id, title)
             if not series:
                 content_context = source.get("content") if isinstance(source.get("content"), dict) else {}
                 source_content = source.get("source_content") if isinstance(source.get("source_content"), dict) else {}
@@ -330,6 +358,8 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
                 )
                 db.add(series)
                 db.flush()
+            else:
+                series = lock_active_series(db, series.id, profile_id=project.profile_id, workflow_id=project.id)
 
     normalized_decision = {
         "action": action if action in {"USE_EXISTING", "CREATE_NEW", "NONE"} else "NONE",
@@ -342,8 +372,13 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
     project.metadata_json = metadata
 
     if series:
+        old_series_id = project.series_id
         project.series_id = series.id
         project.planning_mode = "SERIES"
+        db.flush()
+        sync_series_current_part(db, series)
+        if old_series_id and old_series_id != series.id:
+            sync_series_current_part(db, old_series_id)
         story.setdefault("meta", {})
         story["meta"]["series"] = _series_context_payload(series)
     return normalized_decision
@@ -479,6 +514,78 @@ def _draft_with_source_context(db: Any, project: Any, story: dict[str, Any]) -> 
     return next_story
 
 
+def _preserve_compact_scenes(original: dict[str, Any], updated: dict[str, Any]) -> None:
+    compact = original.get("compact_scenes") if isinstance(original.get("compact_scenes"), list) else None
+    if compact is not None and not isinstance(updated.get("compact_scenes"), list):
+        updated["compact_scenes"] = compact
+    if compact is not None:
+        for key in ("draft_generation_mode", "prompt_version", "creative_plan", "source_facts", "source_coverage"):
+            if key in (original.get("meta") or {}):
+                updated.setdefault("meta", {})[key] = original["meta"][key]
+
+
+def _mark_auto_draft_for_human_review(project: Any, story: dict[str, Any], *, reason: str) -> bool:
+    metadata = dict(project.metadata_json or {})
+    if not is_auto_workflow(metadata):
+        return False
+    metadata["draft_review_approved"] = False
+    metadata.pop("approved_script_signature", None)
+    metadata["draft_review"] = {
+        "status": "REVIEW_REQUIRED",
+        "reason": reason,
+        "script_signature": draft_script_signature(story),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    project.metadata_json = metadata
+    return True
+
+
+def _recheck_auto_compact_quality(project: Any, story: dict[str, Any]) -> None:
+    metadata = dict(project.metadata_json or {})
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    linked = meta.get("draft_generation_mode") == "compact-v2"
+    if not is_auto_workflow(metadata) or (not linked and not isinstance(story.get("compact_scenes"), list)):
+        return
+    from app.planning.services.auto_draft_compact import evaluate_compact_draft, normalize_compact_draft
+
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    source_facts = meta.get("source_facts") if isinstance(meta.get("source_facts"), list) else []
+    compact = normalize_compact_draft(
+        {
+            "confidence_score": metadata.get("confidence_score"),
+            "risk_flags": metadata.get("risk_flags") or meta.get("risk_flags") or [],
+            "plan": meta.get("creative_plan") or {},
+            "series_decision": metadata.get("pending_series_decision") or metadata.get("series_decision") or {},
+            "scenes": story.get("compact_scenes") or [],
+            **({"version": "compact-v2", "timeline": story.get("timeline") or {}} if linked else {}),
+        }
+    )
+    recheck = evaluate_compact_draft(compact, source_facts, risk_tolerance=str(metadata.get("risk_level") or "")).to_dict()
+    metadata["draft_quality_recheck"] = recheck
+    review = dict(metadata.get("draft_review") or {})
+    review["automated_recheck_status"] = recheck.get("status")
+    review["automated_recheck_score"] = recheck.get("score")
+    metadata["draft_review"] = review
+    project.metadata_json = metadata
+
+
+def _cancel_blocked_auto_production(db: Any, task: Any, project: Any) -> bool:
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if auto_production_allowed(metadata, story):
+        return False
+    task.status = "CANCELLED"
+    task.current_stage = "DRAFT_REVIEW_REQUIRED"
+    task.error_message = "Auto production blocked until the current draft is explicitly approved"
+    task.completed_at = datetime.now(timezone.utc)
+    project.status = "EDITING"
+    project.current_stage = "DRAFT_REVIEW_REQUIRED"
+    project.progress_percent = 80
+    db.add_all([task, project])
+    db.commit()
+    return True
+
+
 def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
     from common.db.models import KafkaTask, MediaWorkflow
     from common.db.session import SessionLocal
@@ -495,7 +602,7 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
             return
 
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
-        story = project.draft_json
+        story = deepcopy(project.draft_json)
         prompt = metadata.get("prompt") or ""
         if not isinstance(story, dict):
             raise RuntimeError("Missing story payload for generate-video edit run")
@@ -514,12 +621,14 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
         edited = edit_story_with_ai(_draft_with_source_context(db, project, story), prompt)
         _update_task_progress(db, task, project, "NORMALIZING_DRAFT", 82, project_status="EDITING")
         edited = normalize_story_for_project(edited)
+        _preserve_compact_scenes(story, edited)
         edited.setdefault("meta", {})
         edited["meta"]["workflow_id"] = str(project.id)
         public_story = public_story_payload(edited)
         public_story["project_status"] = "EDITING"
         _update_task_progress(db, task, project, "SAVING_DRAFT", 95, project_status="EDITING")
         _upsert_project_rendered_draft(project, public_story)
+        requires_review = _mark_auto_draft_for_human_review(project, public_story, reason="AI_EDIT_COMPLETED")
 
         task.status = "COMPLETED"
         task.progress_percent = 100
@@ -527,26 +636,16 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
         task.result_jsonb = {"workflow_id": str(project.id), "draft_saved": True}
         task.completed_at = datetime.now(timezone.utc)
         project.status = "EDITING"
-        project.current_stage = "DRAFT_READY"
-        project.progress_percent = 100
+        project.current_stage = "DRAFT_REVIEW_REQUIRED" if requires_review else "DRAFT_READY"
+        project.progress_percent = 80 if requires_review else 100
         db.add_all([task, project])
         db.commit()
     except Exception as error:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
         if task:
-            task.status = "FAILED"
-            task.current_stage = "FAILED"
-            task.error_message = str(error)[-2000:]
-            task.completed_at = datetime.now(timezone.utc)
-            if task.reference_id:
-                project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-                if project:
-                    project.status = "FAILED"
-                    project.current_stage = "FAILED"
-                    db.add(project)
-            db.add(task)
-            db.commit()
+            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
+            _mark_video_task_failed(db, task, project, error)
     finally:
         db.close()
 
@@ -567,7 +666,7 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
             return
 
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
-        story = project.draft_json
+        story = deepcopy(project.draft_json)
         instructions = metadata.get("instructions")
         if not isinstance(story, dict):
             raise RuntimeError("Missing story payload for generate-video review run")
@@ -586,12 +685,15 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
         reviewed = review_story_with_ai(_draft_with_source_context(db, project, story), instructions)
         _update_task_progress(db, task, project, "NORMALIZING_DRAFT", 82, project_status="REVIEWING")
         reviewed = normalize_story_for_project(reviewed)
+        _preserve_compact_scenes(story, reviewed)
         reviewed.setdefault("meta", {})
         reviewed["meta"]["workflow_id"] = str(project.id)
         public_story = public_story_payload(reviewed)
         public_story["project_status"] = "REVIEWING"
         _update_task_progress(db, task, project, "SAVING_DRAFT", 95, project_status="REVIEWING")
         _upsert_project_rendered_draft(project, public_story)
+        requires_review = _mark_auto_draft_for_human_review(project, public_story, reason="AI_REVIEW_COMPLETED")
+        _recheck_auto_compact_quality(project, public_story)
 
         task.status = "COMPLETED"
         task.progress_percent = 100
@@ -602,27 +704,17 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
             "review": (public_story.get("meta") or {}).get("ai_story_review"),
         }
         task.completed_at = datetime.now(timezone.utc)
-        project.status = "REVIEWING"
-        project.current_stage = "REVIEW_COMPLETE"
-        project.progress_percent = 100
+        project.status = "EDITING" if requires_review else "REVIEWING"
+        project.current_stage = "DRAFT_REVIEW_REQUIRED" if requires_review else "REVIEW_COMPLETE"
+        project.progress_percent = 80 if requires_review else 100
         db.add_all([task, project])
         db.commit()
     except Exception as error:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
         if task:
-            task.status = "FAILED"
-            task.current_stage = "FAILED"
-            task.error_message = str(error)[-2000:]
-            task.completed_at = datetime.now(timezone.utc)
-            if task.reference_id:
-                project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-                if project:
-                    project.status = "FAILED"
-                    project.current_stage = "FAILED"
-                    db.add(project)
-            db.add(task)
-            db.commit()
+            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
+            _mark_video_task_failed(db, task, project, error)
     finally:
         db.close()
 
@@ -643,9 +735,11 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
         if not project:
             return
+        if _cancel_blocked_auto_production(db, task, project):
+            return
 
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
-        story = project.draft_json
+        story = deepcopy(project.draft_json)
         voice_id = metadata.get("voice_id")
         voice_speed = float(metadata.get("voice_speed") or DEFAULT_VOICE_SPEED)
         voice_provider = metadata.get("voice_provider")
@@ -674,6 +768,7 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
             fit_error = str(error)
 
         result_story = normalize_story_for_project(result_story)
+        _preserve_compact_scenes(story, result_story)
         result_story.setdefault("meta", {})
         result_story["meta"]["workflow_id"] = str(project.id)
         public_story = public_story_payload(result_story)
@@ -694,9 +789,10 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
             "fit_frame_error": fit_error,
         }
         task.completed_at = datetime.now(timezone.utc)
-        project.status = "VOICE_READY"
-        project.current_stage = "VOICE_READY"
-        project.progress_percent = 100
+        ready = auto_production_allowed(project.metadata_json, public_story)
+        project.status = "VOICE_READY" if ready else "EDITING"
+        project.current_stage = "VOICE_READY" if ready else "DRAFT_REVIEW_REQUIRED"
+        project.progress_percent = 100 if ready else 80
         db.add_all([task, project])
         db.commit()
         _maybe_enqueue_auto_generate_video_render(db, project, public_story, trigger="voice_completed")
@@ -704,18 +800,8 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
         if task:
-            task.status = "FAILED"
-            task.current_stage = "FAILED"
-            task.error_message = str(error)[-2000:]
-            task.completed_at = datetime.now(timezone.utc)
-            if task.reference_id:
-                project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-                if project:
-                    project.status = "FAILED"
-                    project.current_stage = "FAILED"
-                    db.add(project)
-            db.add(task)
-            db.commit()
+            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
+            _mark_video_task_failed(db, task, project, error)
     finally:
         db.close()
 
@@ -725,6 +811,9 @@ def process_generate_video_render_run(task_id: uuid.UUID | str) -> None:
 
 
 def _maybe_enqueue_auto_voice_or_render(db, project, story: dict[str, Any], *, trigger: str) -> None:
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if not auto_production_allowed(metadata, story):
+        return
     if _story_has_voice(story):
         _maybe_enqueue_auto_generate_video_render(db, project, story, trigger=trigger)
         return
@@ -749,6 +838,10 @@ def _maybe_enqueue_auto_generate_video_voice(db, project, *, trigger: str) -> No
     profile = db.get(SocialProfile, project.profile_id)
     strategy = getattr(profile, "strategy", None) if profile else None
     if getattr(strategy, "video_render_mode", "manual") != "auto":
+        return
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if not auto_production_allowed(metadata, story):
         return
 
     existing = (
@@ -812,6 +905,9 @@ def _maybe_enqueue_auto_generate_video_render(db, project, story: dict[str, Any]
     strategy = getattr(profile, "strategy", None) if profile else None
     if getattr(strategy, "video_render_mode", "manual") != "auto":
         return
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if not auto_production_allowed(metadata, story):
+        return
 
     existing = (
         db.query(KafkaTask)
@@ -867,6 +963,8 @@ def _project_render_worker(task_id: str) -> None:
         project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
         if not project:
             return
+        if _cancel_blocked_auto_production(db, task, project):
+            return
 
         blocking_task = (
             db.query(KafkaTask)
@@ -909,6 +1007,7 @@ def _project_render_worker(task_id: str) -> None:
         _update_task_progress(db, task, project, "RENDERING_VIDEO", 30, project_status="RENDERING")
         result = export_final_video(story, render_job_id=str(task.id))
         result_story = result.get("story") or story
+        _preserve_compact_scenes(story, result_story)
         artifact_path = str(result.get("artifact_path") or "")
         public_story = public_story_payload(result_story)
         public_story.setdefault("meta", {})
@@ -946,26 +1045,15 @@ def _project_render_worker(task_id: str) -> None:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(task_id))
         if task:
-            task.status = "FAILED"
-            task.current_stage = "FAILED"
-            task.error_message = str(error)[-2000:]
-            task.completed_at = datetime.now(timezone.utc)
-            if task.reference_id:
-                project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-                if project:
-                    project.status = "FAILED"
-                    project.current_stage = "FAILED"
-                    db.add(project)
-            db.add(task)
-            db.commit()
+            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
+            _mark_video_task_failed(db, task, project, error)
     finally:
         db.close()
 
 
 def _apply_module4_policy_after_render(db, project, rendered_video: str, story: dict[str, Any]) -> None:
-    from datetime import timedelta
-
     from common.db.models import PublishingQueueItem, SocialProfile
+    from common.planning.publishing_schedule import choose_publish_schedule, lock_schedule_profile, utc_datetime
 
     profile = db.get(SocialProfile, project.profile_id)
     strategy = getattr(profile, "strategy", None) if profile else None
@@ -975,6 +1063,14 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "checks": ["final_video_exists", "render_task_completed"],
     }
+
+    if not auto_production_allowed(metadata, story):
+        metadata["video_approved"] = False
+        metadata["module4_review"] = {"decision": "waiting_human_review", "reason": "DRAFT_REVIEW_REQUIRED"}
+        project.metadata_json = metadata
+        project.status = "EDITING"
+        project.current_stage = "DRAFT_REVIEW_REQUIRED"
+        return
 
     if not strategy or getattr(strategy, "approval_mode", "manual") != "auto":
         metadata["module4_review"] = {
@@ -1003,6 +1099,7 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
 
     queued_status = "approved"
     queued_reason = "Module 4 auto queue từ video render đã được duyệt tự động"
+    lock_schedule_profile(db, profile.id)
     existing_id = metadata.get("queued_post_id")
     item = None
     if existing_id:
@@ -1021,20 +1118,29 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             generated_content=_default_module4_caption(project, story),
             ai_reason=queued_reason,
             status=queued_status,
-            scheduled_at=_next_strategy_scheduled_at(strategy) if strategy else datetime.utcnow() + timedelta(hours=1),
         )
-        db.add(item)
-        db.flush()
     else:
         item.article_link = rendered_video
         item.article_title = project.title
         item.generated_content = item.generated_content or _default_module4_caption(project, story)
         item.ai_reason = queued_reason
         item.status = queued_status
-        item.scheduled_at = item.scheduled_at or (_next_strategy_scheduled_at(strategy) if strategy else datetime.utcnow() + timedelta(hours=1))
         item.error = None
-        db.add(item)
-        db.flush()
+
+    if not item.scheduled_at or utc_datetime(item.scheduled_at) <= datetime.now(timezone.utc):
+        try:
+            decision = choose_publish_schedule(db, profile, item)
+            item.scheduled_at = decision.scheduled_at
+            queued_reason = f"{queued_reason}. {decision.reason}"
+        except ValueError as exc:
+            # A full calendar must not mark a successfully rendered video as
+            # failed, nor cause it to publish at an invented fallback time.
+            item.scheduled_at = None
+            item.status = "needs_approval"
+            queued_reason = f"{queued_reason}. Cần chọn lịch: {exc}"
+    item.ai_reason = queued_reason
+    db.add(item)
+    db.flush()
 
     metadata["queued_post_id"] = str(item.id)
     metadata["queued_at"] = datetime.now(timezone.utc).isoformat()
@@ -1049,33 +1155,6 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
     project.current_stage = "QUEUED_FOR_PUBLISHING"
 
 
-def _next_strategy_scheduled_at(strategy) -> datetime:
-    from datetime import timedelta
-
-    now = datetime.utcnow()
-    times = [item.strip() for item in str(getattr(strategy, "schedule_times", "") or "").split(",") if item.strip()]
-    days = {
-        int(item)
-        for item in str(getattr(strategy, "schedule_days", "0,1,2,3,4,5,6") or "").split(",")
-        if item.strip().isdigit()
-    }
-    if not getattr(strategy, "schedule_enabled", True) or not times:
-        return now + timedelta(hours=1)
-    for day_offset in range(0, 8):
-        candidate_day = now + timedelta(days=day_offset)
-        if days and candidate_day.weekday() not in days:
-            continue
-        for value in times:
-            try:
-                hour, minute = [int(part) for part in value.split(":", 1)]
-            except ValueError:
-                continue
-            candidate = candidate_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if candidate > now:
-                return candidate
-    return now + timedelta(hours=1)
-
-
 def _default_module4_caption(project, story: dict[str, Any]) -> str:
     meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
     title = str(meta.get("title") or project.title or "").strip()
@@ -1083,6 +1162,10 @@ def _default_module4_caption(project, story: dict[str, Any]) -> str:
 
 
 def _upsert_project_rendered_draft(project, story: dict[str, Any]) -> None:
+    previous = project.draft_json if isinstance(project.draft_json, dict) else {}
+    if previous and is_auto_workflow(project.metadata_json) and draft_script_signature(previous) != draft_script_signature(story):
+        invalidate_draft_media(project, story)
+        _mark_auto_draft_for_human_review(project, story, reason="DRAFT_CHANGED")
     story.setdefault("meta", {})
     story["meta"]["workflow_id"] = str(project.id)
 

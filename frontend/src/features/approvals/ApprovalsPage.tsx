@@ -297,11 +297,10 @@ export default function ApprovalsPage() {
       const updated = await approveAndScheduleQueueItemApi(selectedItem.id, {
         schedule_mode: scheduleMode,
         scheduled_at: scheduleMode === 'manual' && manualScheduledAt ? new Date(manualScheduledAt).toISOString() : null,
-        timezone: 'Asia/Bangkok',
       })
       setSelectedItem(updated)
       setManualScheduledAt(toDateTimeInputValue(updated.scheduled_at_local || updated.scheduled_at))
-      toast.success(scheduleMode === 'ai' ? 'Đã duyệt và AI đã chọn giờ đăng.' : 'Đã duyệt và lên lịch theo giờ bạn chọn.')
+      toast.success(scheduleMode === 'ai' ? 'Đã duyệt và chọn khung giờ đăng còn trống.' : 'Đã duyệt và lên lịch theo giờ bạn chọn.')
       await loadQueue()
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể duyệt và lên lịch bài TikTok')
@@ -564,7 +563,7 @@ function ApprovalDetail({
                 />
               ) : (
                 <div className="flex min-h-10 items-center rounded-[8px] border border-[#edf1f7] bg-white px-3 text-[12px] font-semibold leading-5 text-[#526179]">
-                  AI chọn slot tiếp theo dựa trên ngày đăng, giờ đăng và timezone trong cấu hình profile.
+                  DeepSeek chọn giờ dựa trên thời gian hiện tại, múi giờ tài khoản, các bài đã trong hàng đợi và giới hạn bài/ngày. Nếu AI không khả dụng, hệ thống chọn giờ trống gần nhất theo quy tắc; các bài cách nhau ít nhất 30 phút.
                 </div>
               )}
             </div>

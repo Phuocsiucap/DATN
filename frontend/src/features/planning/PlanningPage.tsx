@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import {
   AlertTriangle,
   ArrowRightLeft,
-  CheckCircle2,
   ChevronRight,
   ExternalLink,
   FileText,
@@ -18,7 +17,7 @@ import {
 } from 'lucide-react'
 
 import {
-  approveContentPlanApi,
+  restoreContentPlanApi,
   createContentSeriesApi,
   deleteContentSeriesApi,
   fetchPlanningRunDetailApi,
@@ -32,6 +31,7 @@ import {
   type PlanningProfile,
   type PlanningRun,
   type PlanningRunDetail,
+  type PlanningCandidateReviewResult,
   type ProfileSeriesReview,
   type ReviewSourceContent,
   type StoryScene,
@@ -43,6 +43,7 @@ import { SocialProfileAvatar, platformLabel } from '@/commons/component/social-u
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
 import { SeriesModal, TransferSeriesModal, type SeriesFormData } from '@/features/generate-video/components/SeriesModal'
 import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
+import { OpenDraftWorkspaceButton } from './OpenDraftWorkspaceButton'
 
 const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
@@ -108,6 +109,7 @@ export default function PlanningPage({
   const [selectedRun, setSelectedRun] = useState<PlanningRun | null>(null)
   const [runDetail, setRunDetail] = useState<PlanningRunDetail | null>(null)
   const [runDetailLoading, setRunDetailLoading] = useState(false)
+  const runDetailRequest = useRef(0)
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string>('')
@@ -120,6 +122,25 @@ export default function PlanningPage({
   const [regeneratePlan, setRegeneratePlan] = useState<ContentPlan | null>(null)
   const [regenerateInstructions, setRegenerateInstructions] = useState('')
   const [regenerateSubmitting, setRegenerateSubmitting] = useState(false)
+  const restoringWorkflow = useRef(false)
+  const [restoreSubmitting, setRestoreSubmitting] = useState(false)
+
+  const restoreRejectedPlan = async (plan: ContentPlan) => {
+    if (plan.status !== 'REJECTED' || restoringWorkflow.current) return
+    restoringWorkflow.current = true
+    setRestoreSubmitting(true)
+    try {
+      await restoreContentPlanApi(plan.workflow_id || plan.id)
+      toast.success('Đã khôi phục workflow. Draft auto vẫn cần được duyệt trong trình sửa trước khi sản xuất.')
+      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
+    } catch (error: unknown) {
+      const failure = error as { response?: { data?: { detail?: string } } }
+      toast.error(failure.response?.data?.detail || 'Không khôi phục được workflow.')
+    } finally {
+      restoringWorkflow.current = false
+      setRestoreSubmitting(false)
+    }
+  }
 
   const [editingSeries, setEditingSeries] = useState<ContentSeries | null>(null)
   const [seriesModalOpen, setSeriesModalOpen] = useState(false)
@@ -179,18 +200,59 @@ export default function PlanningPage({
   }
 
   const handleOpenRunDetail = async (run: PlanningRun) => {
+    const request = ++runDetailRequest.current
     setSelectedRun(run)
     setRunDetail(null)
     setRunDetailLoading(true)
     try {
       const detail = await fetchPlanningRunDetailApi(run.id)
-      setRunDetail(detail)
+      if (request === runDetailRequest.current) setRunDetail(detail)
     } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Không thể tải chi tiết Planning Run')
+      if (request === runDetailRequest.current) toast.error(error?.response?.data?.detail || error?.message || 'Không thể tải chi tiết Planning Run')
     } finally {
-      setRunDetailLoading(false)
+      if (request === runDetailRequest.current) setRunDetailLoading(false)
     }
   }
+
+  const handleCandidateChanged = async (result?: PlanningCandidateReviewResult) => {
+    if (!selectedRun) return
+    const request = runDetailRequest.current
+    if (result) setRunDetail(current => {
+      if (current?.id !== selectedRun.id) return current
+      const applyReview = <T extends { id: string; workflow_id?: string | null }>(candidate: T) => candidate.id === result.candidate_id
+        ? { ...candidate, review: result.review, workflow_id: result.workflow_id || candidate.workflow_id } : candidate
+      return current.schema_version === 3
+        ? { ...current, candidates: current.candidates.map(applyReview) }
+        : { ...current, candidates: current.candidates.map(applyReview) }
+    })
+    const [detail, nextRuns] = await Promise.all([fetchPlanningRunDetailApi(selectedRun.id), fetchPlanningRunsApi()])
+    if (request === runDetailRequest.current) {
+      setRunDetail(detail)
+      setJobs(nextRuns.items)
+    }
+  }
+
+  const hasPendingCandidate = runDetail?.id === selectedRun?.id && runDetail?.candidates.some(candidate => candidate.review?.status === 'QUEUED')
+  useEffect(() => {
+    if (!selectedRun || !hasPendingCandidate) return
+    const runId = selectedRun.id
+    const request = runDetailRequest.current
+    let cancelled = false
+    let fetching = false
+    const timer = setInterval(async () => {
+      if (fetching) return
+      fetching = true
+      try {
+        const [detail, nextRuns] = await Promise.all([fetchPlanningRunDetailApi(runId), fetchPlanningRunsApi()])
+        if (!cancelled && request === runDetailRequest.current) {
+          setRunDetail(detail)
+          setJobs(nextRuns.items)
+        }
+      } catch { /* Keep the current result; the next poll can recover. */ }
+      finally { fetching = false }
+    }, 3000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [selectedRun, hasPendingCandidate])
 
   const [loading, setLoading] = useState(true)
   const [plansLoading, setPlansLoading] = useState(false)
@@ -574,29 +636,18 @@ export default function PlanningPage({
                                 >
                                   <RefreshCcw size={15} /> Viết lại
                                 </button>
+                                <OpenDraftWorkspaceButton workflowId={article.plan.workflow_id || article.plan.id} onOpenWorkflow={onOpenGenerateVideo}
+                                  reviewRequired={article.plan.current_stage ? article.plan.current_stage === 'DRAFT_REVIEW_REQUIRED' : undefined}
+                                  rejected={article.plan.status === 'REJECTED'} />
+                                {article.plan.status === 'REJECTED' && <button type="button" disabled={restoreSubmitting}
+                                  onClick={event => { event.stopPropagation(); void restoreRejectedPlan(article.plan!) }}
+                                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-bold text-amber-800 disabled:opacity-50"
+                                >Khôi phục workflow</button>}
                                 <button
                                   onClick={async (event) => {
                                     event.stopPropagation()
                                     try {
-                                      const result = await approveContentPlanApi(article.plan!.id)
-                                      toast.success('Đã phê duyệt kịch bản!')
-                                      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
-                                      const workflowId = result.media_workflows?.[0]?.id
-                                      if (!workflowId) throw new Error('Backend did not return workflow_id')
-                                      onOpenGenerateVideo?.(workflowId)
-                                    } catch (err: any) {
-                                      toast.error(err?.response?.data?.detail || 'Lỗi phê duyệt!')
-                                    }
-                                  }}
-                                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700"
-                                >
-                                  <CheckCircle2 size={15} /> Duyệt
-                                </button>
-                                <button
-                                  onClick={async (event) => {
-                                    event.stopPropagation()
-                                    try {
-                                      await rejectContentPlanApi(article.plan!.id, 'Không đạt yêu cầu')
+                                      await rejectContentPlanApi(article.plan!.workflow_id || article.plan!.id, 'Không đạt yêu cầu')
                                       toast.success('Đã từ chối kịch bản.')
                                       if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
                                     } catch (err: any) {
@@ -654,6 +705,7 @@ export default function PlanningPage({
         open={!!selectedReviewArticle}
         onOpenChange={(open) => !open && setSelectedReviewArticle(null)}
         onOpenSource={(source) => setSelectedSourceContent(source)}
+        onOpenWorkflow={onOpenGenerateVideo}
       />
 
       <SourceContentSheet
@@ -706,10 +758,17 @@ export default function PlanningPage({
       </Sheet>
 
       <PlanningRunDetailSheet
+        onCandidateChanged={handleCandidateChanged}
+        onOpenWorkflow={onOpenGenerateVideo}
         run={selectedRun}
         detail={runDetail}
         loading={runDetailLoading}
-        onClose={() => setSelectedRun(null)}
+        onClose={() => {
+          runDetailRequest.current += 1
+          setSelectedRun(null)
+          setRunDetail(null)
+          setRunDetailLoading(false)
+        }}
         onOpenProfileSettings={onOpenProfileSettings}
       />
     </div>
@@ -721,11 +780,13 @@ function ArticleReviewSheet({
   open,
   onOpenChange,
   onOpenSource,
+  onOpenWorkflow,
 }: {
   selection: { article: ProfileSeriesReview['articles'][number]; seriesTitle: string } | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onOpenSource: (source: ReviewSourceContent) => void
+  onOpenWorkflow?: (id: string) => void
 }) {
   if (!selection) return null
 
@@ -746,6 +807,13 @@ function ArticleReviewSheet({
             </div>
             <h2 className="text-xl font-black leading-tight text-[#0f172a]">{article.plan?.title || source?.canonical_title || 'Bài chưa liên kết kế hoạch'}</h2>
             <p className="mt-2 text-xs font-semibold text-[#64748b]">{seriesTitle}</p>
+            {article.plan && <div className="mt-3 space-y-2">
+              <OpenDraftWorkspaceButton workflowId={article.plan.workflow_id || article.plan.id}
+                reviewRequired={article.plan.current_stage ? article.plan.current_stage === 'DRAFT_REVIEW_REQUIRED' : undefined}
+                rejected={article.plan.status === 'REJECTED'}
+                onOpenWorkflow={onOpenWorkflow ? id => { onOpenChange(false); onOpenWorkflow(id) } : undefined} />
+              <p className="text-xs text-slate-500">Đây là bản xem nhanh. Mở trình sửa để xem đầy đủ lời thoại, liên kết ảnh/video và duyệt đúng phiên bản draft.</p>
+            </div>}
           </div>
 
           <div className="detail-body">

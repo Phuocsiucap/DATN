@@ -1049,7 +1049,7 @@ class VNExpressCrawler(BaseCrawler):
 
     def _limit(self, configuration: dict[str, Any]) -> int:
         value = configuration.get("max_items", configuration.get("limit", 10))
-        return max(1, min(int(value or 10), 30))
+        return max(1, min(int(value or 10), 200))
 
     def _terms(self, value: Any) -> list[str]:
         if isinstance(value, str):

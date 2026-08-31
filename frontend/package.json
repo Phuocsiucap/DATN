@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test:planning-detail": "node --test tests/planning-run-detail.test.mjs",
+    "test:draft-links": "node --test tests/draft-media-links.test.mjs",
+    "test:video-list": "node --test tests/video-workspace-list.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

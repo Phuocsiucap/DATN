@@ -102,7 +102,7 @@ class QueueStatusRequest(BaseModel):
 class QueueApproveScheduleRequest(BaseModel):
     schedule_mode: str = "ai"
     scheduled_at: datetime | None = None
-    timezone: str | None = "Asia/Bangkok"
+    timezone: str | None = None
 
 
 class QueueRequestChangesRequest(BaseModel):

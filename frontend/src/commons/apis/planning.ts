@@ -63,27 +63,6 @@ export type PlanningRun = {
   updated_at?: string | null
 }
 
-export type PlanningAiDecision = {
-  status?: string | null
-  should_create_workflow?: boolean | null
-  reason?: string | null
-  confidence_score?: number | null
-  provider?: string | null
-  model?: string | null
-  workflow_id?: string | null
-  content_id?: string | null
-  candidate_id?: string | null
-  plan_title?: string | null
-  content_angle?: string | null
-  target_audience?: string | null
-  tone?: string | null
-  planning_mode?: string | null
-  risk_flags?: unknown[]
-  reasoning?: string[]
-  series_decision?: Record<string, unknown> | null
-  error_message?: string | null
-}
-
 export type PlanningCandidate = {
   id: string
   planning_run_id: string
@@ -190,6 +169,7 @@ export type ContentPlan = {
   confidence_score: number
   risk_level?: string | null
   status: string
+  current_stage?: string | null
   version: number
   ai_reasoning: string[]
   production_requirements: Record<string, unknown>
@@ -379,11 +359,12 @@ export const fetchContentPlanApi = async (planId: string) => {
     tone: (wf.metadata?.tone as string) || null,
     format: (wf.metadata?.format as string) || null,
     planning_mode: wf.planning_mode || 'SINGLE',
-    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || 60,
+    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || (wf.metadata?.draft_generation_mode === 'compact-v2' ? null : 60),
     recommended_part_count: (wf.metadata?.recommended_part_count as number) || 1,
     confidence_score: (wf.metadata?.confidence_score as number) || 0,
     risk_level: (wf.metadata?.risk_level as string) || null,
     status: wf.status,
+    current_stage: wf.current_stage,
     version: 1,
     ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
     production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
@@ -410,11 +391,12 @@ export const fetchAllContentPlansApi = async () => {
     tone: (wf.metadata?.tone as string) || null,
     format: (wf.metadata?.format as string) || null,
     planning_mode: wf.planning_mode || 'SINGLE',
-    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || 60,
+    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || (wf.metadata?.draft_generation_mode === 'compact-v2' ? null : 60),
     recommended_part_count: (wf.metadata?.recommended_part_count as number) || 1,
     confidence_score: (wf.metadata?.confidence_score as number) || 0,
     risk_level: (wf.metadata?.risk_level as string) || null,
     status: wf.status,
+    current_stage: wf.current_stage,
     version: 1,
     ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
     production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
@@ -425,7 +407,9 @@ export const fetchAllContentPlansApi = async () => {
   })) as ContentPlan[]
 }
 
-export const approveContentPlanApi = async (planId: string, feedbackText?: string) => {
+// Legacy workflow approval only restores a rejected workflow; it does not approve
+// draft quality or a final video. Draft approval lives in generateVideo.ts.
+export const restoreContentPlanApi = async (planId: string, feedbackText?: string) => {
   const { data } = await api.post(`/media-workflows/${planId}/approve`, { feedback_text: feedbackText })
   if (data?.plan) return data as { plan: ContentPlan; media_workflows: MediaWorkflow[] }
   return { plan: data as ContentPlan, media_workflows: [] }
@@ -539,32 +523,218 @@ export const createMediaWorkflowFromSourcesApi = async (payload: {
   return data as MediaWorkflow
 }
 
-export type PlanningRunDetail = PlanningRun & {
-  profile?: { id: string; name: string } | null
-  workflow?: { id: string; title: string } | null
-  input?: Record<string, unknown>
-  output?: Record<string, unknown> & {
-    ai_decision?: PlanningAiDecision | null
-    ai_decisions?: PlanningAiDecision[]
-  }
-  reason?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-  candidates?: Array<{
-    id: string
-    content_id?: string | null
-    workflow_id?: string | null
-    media_workflow_id?: string | null
-    title?: string | null
-    summary?: string | null
-    rank_order?: number | null
-    score: number
-    selected: boolean
+export type PlanningTopic = {
+  id: string
+  kind: 'CONTENT' | 'AVOID'
+  name: string
+  key: string | null
+  description: string | null
+}
+
+export type PlanningTopicScore = {
+  topic_id: string
+  similarity: number | null
+  threshold: number | null
+  matched: boolean
+  source: string | null
+}
+
+export type PlanningDraftIssue = {
+  code: string
+  message: string | null
+  severity: string | null
+  scene_indexes: number[]
+  details: Record<string, unknown>
+}
+
+export type PlanningCandidateDetail = {
+  id: string
+  content_id: string | null
+  title: string | null
+  summary: string | null
+  rank: number | null
+  selected: boolean
+  workflow_id: string | null
+  review?: PlanningCandidateReview | null
+  matching: {
     eligible: boolean
-    reason?: Record<string, unknown>
-    metadata?: Record<string, unknown>
-    ai_decision?: PlanningAiDecision | null
-    created_at?: string | null
-  }>
+    score: number
+    source_quality_score: number | null
+    similarity: number | null
+    similarity_threshold: number | null
+    avoid_threshold: number | null
+    passed_similarity_gate: boolean | null
+    blocked_by_avoid_topics: boolean | null
+    require_video: boolean | null
+    has_required_video: boolean | null
+    embedding_model: string | null
+    source: string | null
+    topics: PlanningTopicScore[]
+    avoid_topics: PlanningTopicScore[]
+    selection_reasons: string[]
+    rejection_reasons: string[]
+  }
+  decision: {
+    status: string | null
+    production: {
+      status: string | null
+      source: string | null
+      reason_code: string | null
+      reason: string | null
+      confidence_score: number | null
+    } | null
+    draft: {
+      title: string | null
+      angle: string | null
+      format: string | null
+      hook_type: string | null
+      cta_mode: string | null
+      tone: string | null
+      target_audience: string | null
+      confidence_score: number | null
+      quality: {
+        status: string | null
+        score: number | null
+        word_count: number | null
+        scene_count: number | null
+        retry_count: number | null
+        retry_error: string | null
+        issues: PlanningDraftIssue[]
+      } | null
+      risk_flags: Array<{ type: string | null; severity: string | null; message: string | null }>
+    } | null
+    series: {
+      action: string | null
+      target_series_id: string | null
+      title: string | null
+      description: string | null
+      series_type: string | null
+      total_parts: number | null
+      reason: string | null
+      followup_angles: string[]
+    } | null
+    provider: string | null
+    model: string | null
+    token_usage: {
+      input_tokens: number | null
+      output_tokens: number | null
+      creative_call_count: number | null
+      fit_judge_call_count: number | null
+    } | null
+    error_message: string | null
+    legacy_reason: string | null
+    notes: string[]
+  } | null
+}
+
+export type PlanningCandidateReview = {
+  status: string | null
+  action: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  reason: string | null
+  task_id: string | null
+  error_message: string | null
+  can_approve: boolean
+  can_reject: boolean
+  can_retry: boolean
+  original_production: NonNullable<PlanningCandidateDetail['decision']>['production']
+}
+
+export type PlanningCandidateSource = {
+  id: string
+  title: string
+  summary: string | null
+  full_text: string
+  source_url: string | null
+}
+
+export type PlanningCandidateReviewResult = { candidate_id: string; workflow_id: string | null; review: PlanningCandidateReview }
+
+export const reviewPlanningCandidateApi = async (runId: string, candidateId: string, action: 'APPROVE' | 'REJECT' | 'RETRY', reason: string) => {
+  const { data } = await api.post(`/planning-runs/${runId}/candidates/${candidateId}/review`, { action, reason })
+  return data as PlanningCandidateReviewResult
+}
+
+export const fetchPlanningCandidateSourceApi = async (runId: string, candidateId: string) => {
+  const { data } = await api.get(`/planning-runs/${runId}/candidates/${candidateId}/source`)
+  return data as PlanningCandidateSource
+}
+
+export type PlanningWorkflowState = {
+  id: string
+  title: string | null
+  status: string | null
+  current_stage: string | null
+  series: { id: string; name: string | null } | null
+  pending_series: boolean
+  series_error: string | null
+  updated_at: string | null
+}
+
+export type PlanningRunDiagnostics = {
+  schema_version: 2
+  id: string
+  profile: { id: string; name: string | null } | null
+  crawl_job: { id: string; name: string | null } | null
+  planning_mode: string
+  status: string
+  trigger: string | null
+  algorithm: string | null
+  similarity_threshold: number | null
+  error_code: string | null
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  summary: {
+    candidate_count: number
+    eligible_count: number
+    filtered_count: number
+    selected_count: number
+    workflow_count: number
+    production: Record<string, number>
+    draft_quality: Record<string, number>
+  }
+  topics: PlanningTopic[]
+  candidates: PlanningCandidateDetail[]
+  workflows: PlanningWorkflowState[]
+}
+
+export type PlanningCandidateSummary = {
+  id: string
+  content_id?: string | null
+  title?: string | null
+  rank?: number | null
+  status: string
+  reason: string
+  reason_code?: string | null
+  similarity?: number | null
+  workflow_id?: string | null
+  review?: PlanningCandidateReview | null
+}
+
+export type PlanningRunCompactDetail = Omit<PlanningRunDiagnostics, 'schema_version' | 'topics' | 'candidates'> & {
+  schema_version: 3
+  candidates: PlanningCandidateSummary[]
+}
+export type PlanningRunDetail = PlanningRunDiagnostics | PlanningRunCompactDetail
+
+export type PlanningCandidateDiagnostics = {
+  schema_version: 3
+  run_id: string
+  candidate: PlanningCandidateDetail
+  topics: PlanningTopic[]
+  workflow: PlanningWorkflowState | null
+}
+
+export const fetchPlanningCandidateDiagnosticsApi = async (runId: string, candidateId: string, signal?: AbortSignal) => {
+  const { data } = await api.get(`/planning-runs/${runId}/candidates/${candidateId}/diagnostics`, { signal })
+  if (data?.schema_version !== 3 || data.run_id !== runId || data.candidate?.id !== candidateId) {
+    throw new Error('Chi tiết ứng viên không khớp yêu cầu. Hãy tải lại.')
+  }
+  return data as PlanningCandidateDiagnostics
 }
 
 export const fetchPlanningRunsApi = async (params: {
@@ -579,5 +749,8 @@ export const fetchPlanningRunsApi = async (params: {
 
 export const fetchPlanningRunDetailApi = async (runId: string) => {
   const { data } = await api.get(`/planning-runs/${runId}`)
+  if (data?.schema_version !== 2 && data?.schema_version !== 3) {
+    throw new Error('API chi tiết plan chưa đồng bộ phiên bản. Hãy cập nhật API và tải lại trang.')
+  }
   return data as PlanningRunDetail
 }

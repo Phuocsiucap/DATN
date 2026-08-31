@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
 from common.db.models import AuditLog, ContentSeries, MediaWorkflow, SocialProfile, User
+from common.db.content_series import find_active_series_by_title, lock_profile_series_scope, sync_series_current_part
 from common.db.mongo import series_contexts
 from common.db.session import get_db
 
@@ -46,6 +47,9 @@ def create_content_series(
         if not profile or profile.user_id != user.id:
             raise HTTPException(status_code=404, detail="Social Profile không tồn tại hoặc không thuộc về người dùng")
 
+    lock_profile_series_scope(db, profile_id)
+    if str(payload.status or "ACTIVE").upper() == "ACTIVE" and find_active_series_by_title(db, profile_id, payload.title):
+        raise HTTPException(status_code=409, detail="Profile đã có series active cùng tên")
     series = ContentSeries(
         user_id=user.id,
         profile_id=profile_id,
@@ -75,10 +79,17 @@ def get_content_series(series_id: uuid.UUID, user: User = Depends(get_current_us
 @router.patch("/{series_id}", response_model=schemas.ContentSeriesResponse)
 def update_content_series(series_id: uuid.UUID, payload: schemas.ContentSeriesUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     series = _get_owned_series(db, series_id, user)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        if field == "context_version":
+    lock_profile_series_scope(db, series.profile_id)
+    updates = payload.model_dump(exclude_unset=True)
+    if str(updates.get("status") or series.status).upper() == "ACTIVE":
+        existing = find_active_series_by_title(db, series.profile_id, updates.get("title") or series.title)
+        if existing and existing.id != series.id:
+            raise HTTPException(status_code=409, detail="Profile đã có series active cùng tên")
+    for field, value in updates.items():
+        if field in {"context_version", "current_part"}:
             continue
         setattr(series, field, value)
+    sync_series_current_part(db, series)
     db.add(AuditLog(actor_id=user.id, action="content_series.updated", target_type="content_series", target_id=str(series.id)))
     db.commit()
     db.refresh(series)

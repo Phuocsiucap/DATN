@@ -12,8 +12,11 @@ from common.core.config import get_settings
 from app.video.services.generate_video_constants import PUBLIC_DIR
 from app.video.services.generate_video_timeline import (
     _prevent_subtitle_overlap,
+    fit_video_clips_to_text,
     get_words,
     normalize_story_for_project,
+    normalize_audio_clips,
+    prevent_timeline_text_overlap,
     round_to_frame,
     strip_voice_tags,
     sync_story_timeline,
@@ -43,7 +46,7 @@ def fit_frames_with_whisper(story: dict[str, Any]) -> dict[str, Any]:
     if not text_clips:
         raise RuntimeError("Story has no timeline text clips to fit")
 
-    scene_texts = [strip_voice_tags(str(clip.get("text") or "")) for clip in text_clips]
+    scene_texts = [strip_voice_tags(str(clip.get("voice_text") or clip.get("text") or "")) for clip in text_clips]
     transcription = transcribe_whisper(api_key, audio_path)
     segments = transcription.get("segments") if isinstance(transcription.get("segments"), list) else []
     words = transcription.get("words") if isinstance(transcription.get("words"), list) else []
@@ -120,6 +123,8 @@ def fit_frames_with_whisper(story: dict[str, Any]) -> dict[str, Any]:
         voice_clip["end"] = round_to_frame(timeline_audio_end, fps)
         story["timeline"]["audio"] = normalize_audio_clips(timeline_audio, fps)
     sync_story_timeline(story)
+    story["timeline"].setdefault("metadata", {})["timing_mode"] = "voice_aligned"
+    story.setdefault("meta", {})["timing_mode"] = "voice_aligned"
     debug = {
         "expected_text": "\n".join(scene_texts),
         "transcription": transcription,

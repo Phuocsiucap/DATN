@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from common.core.config import get_settings
+from common.planning.auto_draft_policy import sync_compact_scenes
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -58,7 +59,8 @@ except ImportError:
 
         def public_story_payload(story: dict[str, Any]) -> dict[str, Any]:
             normalized = normalize_story_for_project(story)
-            return {
+            sync_compact_scenes(normalized)
+            payload = {
                 "meta": normalized.get("meta") or {},
                 "video": normalized.get("video"),
                 "audio": normalized.get("audio"),
@@ -66,6 +68,9 @@ except ImportError:
                 "video_artifacts": normalized.get("video_artifacts") or {},
                 "story_data": normalized.get("story_data") or [],
             }
+            if isinstance(normalized.get("compact_scenes"), list):
+                payload["compact_scenes"] = normalized["compact_scenes"]
+            return payload
 
 
 try:

@@ -1,4 +1,6 @@
 import { api } from './client'
+import { normalizeVideoWorkspaceList } from './videoWorkspaceList'
+export type { VideoWorkspaceSummary } from './videoWorkspaceList'
 
 export type GenerateVideoScene = {
   scene_index?: number
@@ -6,6 +8,8 @@ export type GenerateVideoScene = {
   video_ids?: string[]
   text_id?: string
   text_ids?: string[]
+  text_weights?: Record<string, number>
+  source_media_index?: number
   start?: number
   end?: number
   duration: number
@@ -24,14 +28,18 @@ export type GenerateVideoScene = {
   text_style?: Record<string, unknown>
   voice_subtitle?: string
   voice_text?: string
+  role?: string
+  evidence_ids?: string[]
+  visual_query?: string
   timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number }
 }
 
 export type GenerateVideoTimeline = {
   version?: number
   duration?: number
-  video?: Array<{ id: string; scene_index?: number; text_id?: string; text_ids?: string[]; type: string; start: number; end: number; duration?: number; src?: string; effect?: string; fit?: 'cover' | 'contain' | string; scale?: number; opacity?: number; position_x?: number; position_y?: number; rotation?: number }>
-  text?: Array<{ id: string; scene_index?: number; video_id?: string; video_ids?: string[]; type: string; start: number; end: number; duration?: number; text: string; voice_text?: string; style?: Record<string, unknown>; timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number } }>
+  metadata?: Record<string, unknown>
+  video?: Array<{ id: string; scene_index?: number; text_id?: string; text_ids?: string[]; text_weights?: Record<string, number>; source_media_index?: number; visual_direction?: string; type: string; start: number; end: number; duration?: number; src?: string; effect?: string; fit?: 'cover' | 'contain' | string; scale?: number; opacity?: number; position_x?: number; position_y?: number; rotation?: number }>
+  text?: Array<{ id: string; scene_index?: number; video_id?: string; video_ids?: string[]; type: string; start: number; end: number; duration?: number; text: string; voice_text?: string; role?: string; evidence_ids?: string[]; style?: Record<string, unknown>; timing?: { start?: number; end?: number; voice_start?: number; voice_end?: number } }>
   audio?: Array<{ id: string; type: 'voice' | 'music' | 'sfx' | 'audio' | string; start: number; end?: number | null; src?: string; volume?: number }>
 }
 
@@ -48,6 +56,8 @@ export type GenerateVideoStory = {
     source?: string
     ai_story_review?: GenerateVideoStoryReview | null
     voice_invalidated_by_story_review?: boolean
+    quality?: Record<string, unknown>
+    draft_review?: Record<string, unknown>
   }
   video: { width: number; height: number; fps: number; background: string }
   audio?: {
@@ -72,6 +82,14 @@ export type GenerateVideoStory = {
   source?: Record<string, unknown>
   scenes?: GenerateVideoScene[]
   story_data?: GenerateVideoScene[]
+  compact_scenes?: Array<{
+    text_id?: string
+    role?: string
+    voice_text?: string
+    evidence_ids?: string[]
+    visual_query?: string
+    source_media_index?: number
+  }>
 }
 
 export type GenerateVideoStoryReview = {
@@ -116,35 +134,6 @@ export type VideoWorkflowTask = {
   completed_at?: string | null
 }
 
-export type VideoWorkspaceSummary = {
-  id: string
-  profile: { id: string; name: string; platform: string; avatar?: string | null }
-  series?: { id: string; title: string; status: string } | null
-  primary_content?: {
-    id: string
-    title?: string | null
-    summary?: string | null
-    article_id?: string | null
-    articleId?: string | null
-    category_id?: string | null
-    categoryId?: string | null
-    category?: string | null
-    site_id?: string | null
-    siteId?: string | null
-    thumbnail_url?: string | null
-    thumbnailUrl?: string | null
-    image_url?: string | null
-  } | null
-  title: string
-  status: string
-  current_stage?: string | null
-  progress_percent: number
-  latest_task?: VideoWorkflowTask | null
-  final_video?: string | null
-  created_at: string
-  updated_at: string
-}
-
 export type VideoWorkspaceDetail = {
   id: string
   profile?: { id: string; name: string; platform: string } | null
@@ -163,6 +152,7 @@ export type VideoWorkspaceDetail = {
   capabilities: {
     can_generate_draft: boolean
     can_edit: boolean
+    can_approve_draft: boolean
     can_generate_voice: boolean
     can_render: boolean
     can_approve: boolean
@@ -258,6 +248,8 @@ const storyDataToTimeline = (storyData: GenerateVideoScene[]): GenerateVideoTime
         duration: textDuration,
         text: scene.subtitle,
         voice_text: scene.voice_text || scene.voice_subtitle,
+        role: scene.role,
+        evidence_ids: scene.evidence_ids,
         timing: scene.timing,
       })
     }
@@ -311,6 +303,7 @@ export const normalizeStoryResponse = (data: Partial<GenerateVideoStory>): Gener
     timeline,
     source: data.source,
     story_data: storyData,
+    compact_scenes: data.compact_scenes,
   }
 }
 
@@ -323,7 +316,7 @@ export const saveGenerateVideoStoryApi = async (story: GenerateVideoStory) => {
   const workflowId = story.meta?.workflow_id
   if (!workflowId) throw new Error('Missing workflow_id')
   const { data } = await api.post(`${basePath}/save-story`, { workflow_id: workflowId, story })
-  return data as { story: GenerateVideoStory }
+  return data as { story: GenerateVideoStory; script_signature: string }
 }
 
 export const editGenerateVideoStoryWithAiApi = async (workflowId: string, prompt: string) => {
@@ -342,15 +335,28 @@ export const generateFinalVideoApi = async (workflowId: string) => {
 }
 
 export const approveGenerateVideoProjectApi = async (workflowId: string) => {
-  const { data } = await api.post(`${basePath}/projects/${workflowId}/approve-video`)
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/approve-video`, undefined, { timeout: 60000 })
   return data as { workflow_id: string; status: string; rendered_video: string }
+}
+
+export const approveGenerateVideoDraftApi = async (workflowId: string, scriptSignature: string) => {
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/approve-draft`, { script_signature: scriptSignature })
+  return data as {
+    workflow_id: string
+    status: string
+    current_stage: string
+    series_id?: string | null
+    series_applied: boolean
+    series_warning?: string | null
+    job?: GenerateVideoJob | null
+  }
 }
 
 export const queueGenerateVideoProjectApi = async (
   workflowId: string,
   payload: { scheduled_at?: string | null; caption?: string | null; status?: 'queued' | 'needs_approval' | 'approved' } = {},
 ) => {
-  const { data } = await api.post(`${basePath}/projects/${workflowId}/queue-post`, payload)
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/queue-post`, payload, { timeout: 60000 })
   return data as { workflow_id: string; status: string; queue_item: Record<string, unknown> }
 }
 
@@ -444,7 +450,7 @@ export const fetchVideoWorkspacesApi = async (params: {
   offset?: number
 } = {}) => {
   const { data } = await api.get('/media-workflows/video-workspace', { params })
-  return data as { items: VideoWorkspaceSummary[]; total: number; limit: number; offset: number }
+  return normalizeVideoWorkspaceList(data)
 }
 
 export const fetchVideoWorkspaceApi = async (workflowId: string) => {

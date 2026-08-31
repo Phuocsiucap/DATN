@@ -22,6 +22,7 @@ const stageLabels: Record<string, string> = {
   APPLYING_SERIES: 'Đang chọn & cập nhật series',
   SAVING_DRAFT: 'Đang lưu draft',
   DRAFT_READY: 'Draft đã sẵn sàng',
+  DRAFT_REVIEW_REQUIRED: 'Draft cần người dùng duyệt',
   QUEUED_EDIT: 'Đang chờ AI chỉnh sửa',
   EDITING_DRAFT: 'AI đang chỉnh sửa draft',
   QUEUED_REVIEW: 'Đang chờ AI review',
@@ -258,15 +259,15 @@ function computeWorkflowState(progress: VideoWorkflowProgress) {
   const task = activeTask || progress.tasks[0] || null
   const running = Boolean(activeTask)
   const failed = task?.status === 'FAILED' || progress.status === 'FAILED'
-  const stage = (task?.current_stage || progress.current_stage || progress.status || '').toUpperCase()
+  const stage = (activeTask?.current_stage || progress.current_stage || progress.status || '').toUpperCase()
   const wfStatus = (progress.status || '').toUpperCase()
 
   const isDone =
     ['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(wfStatus) ||
     stage === 'RENDERED'
-  const isRendering = /RENDER/.test(stage) || task?.task_type === 'GENERATE_VIDEO_RENDER'
+  const isRendering = /RENDER/.test(stage) || activeTask?.task_type === 'GENERATE_VIDEO_RENDER'
   const isVoiceReady = stage === 'VOICE_READY'
-  const isGeneratingVoice = /VOICE/.test(stage) || task?.task_type === 'GENERATE_VIDEO_VOICE'
+  const isGeneratingVoice = /VOICE/.test(stage) || activeTask?.task_type === 'GENERATE_VIDEO_VOICE'
   const isDraftReady = stage === 'DRAFT_READY' || stage === 'REVIEW_COMPLETE'
   const isDrafting =
     /DRAFT|SCRIPT|EDIT|REVIEW/.test(stage) ||
@@ -359,4 +360,3 @@ function taskStatusClass(value: string) {
   if (['PENDING', 'RUNNING', 'PROCESSING'].includes(value)) return 'shrink-0 font-bold text-blue-700'
   return 'shrink-0 font-bold text-slate-500'
 }
-

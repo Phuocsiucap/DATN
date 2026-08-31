@@ -9,6 +9,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
+from common.db.content_series import (
+    find_active_series_by_title,
+    lock_active_series,
+    lock_profile_series_scope,
+    sync_series_current_part,
+)
 from common.db.idempotency import claim_event
 from common.db.media_workflows import content_category_payload
 from common.db.models import (
@@ -25,11 +31,12 @@ from common.db.session import SessionLocal
 from common.events.kafka import consumer
 from common.events.topics import CRAWL_JOB_COMPLETED
 from common.planning.embedding_matcher import StrategyCandidateScore, StrategyEmbeddingMatcher
+from common.planning.auto_draft_policy import draft_script_signature
 from app.planning.services.auto_workflow_planner import AutoWorkflowDecision, AutoWorkflowPlanner
 from app.video.services.generate_video_jobs import _maybe_enqueue_auto_voice_or_render
 
 logger = logging.getLogger(__name__)
-AUTO_SELECTION_ALGORITHM = "topic_cosine_threshold_ai_workflow_v2"
+AUTO_SELECTION_ALGORITHM = "production_gate_compact_draft_v3"
 
 
 def run_crawl_job_completed_consumer() -> None:
@@ -244,7 +251,7 @@ def _process_profile_auto_workflows(
             ai_decisions.append(decision_payload)
             db.commit()
             print(
-                f"[planning-orchestrator] AI rejected auto workflow for content {score.content.id} profile {profile.id}: {decision.reason}"
+                f"[planning-orchestrator] Production gate stopped auto workflow for content {score.content.id} profile {profile.id}: {decision.reason}"
             )
             continue
 
@@ -264,7 +271,13 @@ def _process_profile_auto_workflows(
 
         db.commit()
         db.refresh(workflow)
-        _maybe_enqueue_auto_voice_or_render(db, workflow, workflow.draft_json or {}, trigger="auto_planning_draft_ready")
+        decision_quality = decision.metadata.get("quality") if isinstance(decision.metadata, dict) else {}
+        if isinstance(decision_quality, dict) and decision_quality.get("status") == "PASS":
+            _maybe_enqueue_auto_voice_or_render(db, workflow, workflow.draft_json or {}, trigger="auto_planning_draft_ready")
+        else:
+            print(
+                f"[planning-orchestrator] Kept workflow {workflow.id} for review; compact draft quality did not pass"
+            )
         print(
             f"[planning-orchestrator] Created auto workflow {workflow.id} for content {score.content.id} profile {profile.id}"
         )
@@ -312,6 +325,8 @@ def _create_auto_workflow_from_decision(
     plan_title = str(decision_meta.get("plan_title") or content.canonical_title or "Auto workflow").strip()
     story = dict(decision.story or {})
     story.setdefault("meta", {})
+    quality = decision_meta.get("quality") if isinstance(decision_meta.get("quality"), dict) else {}
+    quality_passed = quality.get("status") == "PASS"
     metadata = {
         "selection_mode": "AUTO",
         "selection_algorithm": AUTO_SELECTION_ALGORITHM,
@@ -319,9 +334,12 @@ def _create_auto_workflow_from_decision(
         "content_angle": decision_meta.get("content_angle"),
         "target_audience": decision_meta.get("target_audience") or strategy.target_audience,
         "tone": decision_meta.get("tone") or strategy.tone,
-        "format": "NARRATED_STORY",
+        "format": decision_meta.get("format") or "EXPLAINER",
+        "hook_type": decision_meta.get("hook_type"),
+        "cta_mode": decision_meta.get("cta_mode"),
         "planning_mode": decision_meta.get("planning_mode") or "SINGLE",
-        "target_duration_seconds": story.get("meta", {}).get("target_duration_seconds") or 60,
+        "target_duration_seconds": (None if story.get("meta", {}).get("draft_generation_mode") == "compact-v2"
+                                    else story.get("meta", {}).get("target_duration_seconds") or 60),
         "recommended_part_count": 1,
         "confidence_score": decision.confidence_score,
         "risk_level": strategy.risk_level,
@@ -329,6 +347,11 @@ def _create_auto_workflow_from_decision(
         "ai_reasoning": decision_meta.get("reasoning") or [decision.reason],
         "production_requirements": {"requires_voice": True, "requires_subtitles": True, "requires_background_media": True},
         "ai_decision": _decision_payload(decision),
+        "production_gate": decision_meta.get("production_gate"),
+        "draft_quality": quality,
+        "draft_generation_mode": decision_meta.get("draft_generation_mode"),
+        "prompt_version": decision_meta.get("prompt_version"),
+        "token_usage": decision_meta.get("token_usage"),
         "candidate": score.metadata,
         **content_category_payload(content),
     }
@@ -339,8 +362,8 @@ def _create_auto_workflow_from_decision(
         status="EDITING",
         planning_mode=str(metadata["planning_mode"]).upper(),
         primary_content_id=content.id,
-        current_stage="DRAFT_READY",
-        progress_percent=100,
+        current_stage="DRAFT_READY" if quality_passed else "DRAFT_REVIEW_REQUIRED",
+        progress_percent=100 if quality_passed else 80,
         metadata_json={key: value for key, value in metadata.items() if value not in (None, "", [])},
         inputs_jsonb=[
             {
@@ -361,9 +384,19 @@ def _create_auto_workflow_from_decision(
     db.add(workflow)
     db.flush()
 
-    series = _apply_series_decision(db, workflow, decision.series_decision, content)
+    proposed_series_decision = decision.series_decision if isinstance(decision.series_decision, dict) else None
+    series_action = str((proposed_series_decision or {}).get("action") or "NONE").upper()
+    series_decision_to_apply = proposed_series_decision
+    if not quality_passed and series_action in {"USE_EXISTING", "CREATE_NEW"}:
+        series_decision_to_apply = None
+        pending_metadata = dict(workflow.metadata_json or {})
+        pending_metadata["pending_series_decision"] = proposed_series_decision
+        workflow.metadata_json = pending_metadata
+    series = _apply_series_decision(db, workflow, series_decision_to_apply, content)
     if series:
         workflow.series_id = series.id
+        db.flush()
+        sync_series_current_part(db, series)
         workflow.planning_mode = "SERIES"
         metadata = dict(workflow.metadata_json or {})
         metadata["planning_mode"] = "SERIES"
@@ -372,11 +405,22 @@ def _create_auto_workflow_from_decision(
         story.setdefault("meta", {})
         story["meta"]["series_decision"] = metadata["series_decision"]
         story["meta"]["series"] = _series_context_payload(series)
+    else:
+        workflow.planning_mode = "SINGLE"
+        metadata = dict(workflow.metadata_json or {})
+        metadata["planning_mode"] = "SINGLE"
+        if quality_passed and series_action in {"CREATE_NEW", "USE_EXISTING"}:
+            metadata["series_decision_error"] = "SERIES_UNAVAILABLE_OR_FULL"
+        workflow.metadata_json = metadata
 
     story.setdefault("meta", {})
     story["meta"]["workflow_id"] = str(workflow.id)
     story["meta"]["content_id"] = str(content.id)
     workflow.draft_json = story
+    metadata = dict(workflow.metadata_json or {})
+    if quality_passed:
+        metadata["quality_script_signature"] = draft_script_signature(story)
+    workflow.metadata_json = metadata
     db.add(workflow)
     return workflow
 
@@ -394,23 +438,17 @@ def _apply_series_decision(
         series_id = _as_uuid(decision.get("target_series_id"))
         if not series_id:
             return None
-        series = db.get(ContentSeries, series_id)
-        if series and series.profile_id == workflow.profile_id and series.status == "ACTIVE":
-            return series
-        return None
+        return lock_active_series(db, series_id, profile_id=workflow.profile_id)
     if action != "CREATE_NEW":
         return None
 
     title = _clean_series_title(decision.get("series_title"))
     if not title:
         return None
-    existing = (
-        db.query(ContentSeries)
-        .filter(ContentSeries.profile_id == workflow.profile_id, ContentSeries.status == "ACTIVE", ContentSeries.title == title)
-        .first()
-    )
+    lock_profile_series_scope(db, workflow.profile_id)
+    existing = find_active_series_by_title(db, workflow.profile_id, title)
     if existing:
-        return existing
+        return lock_active_series(db, existing.id, profile_id=workflow.profile_id)
 
     category_payload = content_category_payload(content)
     desc = decision.get("series_description") or decision.get("reason") or content.summary
@@ -429,7 +467,12 @@ def _apply_series_decision(
         status="ACTIVE",
         current_part=0,
         total_parts=total_parts,
-        context_json={"version": 1, "created_from": "auto_planning"},
+        context_json={
+            "version": 1,
+            "created_from": "auto_planning",
+            "core_theme": str(desc)[:1000] if desc else None,
+            "reusable_followup_angles": decision.get("reusable_followup_angles") or [],
+        },
         metadata_json={
             "created_from": "auto_planning",
             "source": "llm_series_decision",
@@ -504,7 +547,9 @@ def _mark_existing_auto_workflow_link(
     selection_reasons = list(existing_metadata.get("selection_reasons") or score.selection_reasons)
     if skip_reason not in selection_reasons:
         selection_reasons.append(skip_reason)
-    link.recommendation_status = "WORKFLOW_CREATED"
+    link.recommendation_status = (
+        "REVIEW_REQUIRED" if str(workflow.current_stage or "").upper() == "DRAFT_REVIEW_REQUIRED" else "WORKFLOW_CREATED"
+    )
     link.relation_reason = "AUTO_WORKFLOW_ALREADY_EXISTS"
     link.metadata_json = {
         **existing_metadata,
@@ -520,9 +565,11 @@ def _mark_existing_auto_workflow_link(
 
 def _recommendation_status(score: StrategyCandidateScore, decision: AutoWorkflowDecision | None) -> str:
     if decision and decision.should_create_workflow:
-        return "WORKFLOW_CREATED"
+        metadata = decision.metadata if isinstance(decision.metadata, dict) else {}
+        return "WORKFLOW_CREATED" if metadata.get("status") == "AI_APPROVED" else "REVIEW_REQUIRED"
     if decision and not decision.should_create_workflow:
-        return "AI_REJECTED"
+        metadata = decision.metadata if isinstance(decision.metadata, dict) else {}
+        return "REVIEW_REQUIRED" if metadata.get("status") == "REVIEW_REQUIRED" else "AI_REJECTED"
     if score.avoided_topics:
         return "AVOID_TOPIC_MATCH"
     return "RECOMMENDED" if score.eligible else "LOW_MATCH"
@@ -539,11 +586,11 @@ def _record_candidate_ai_decision(candidate: PlanningCandidate, decision_payload
     rejection_reasons = list(reason.get("rejection_reasons") or [])
     llm_reason = str(decision_payload.get("reason") or decision_payload.get("error_message") or "").strip()
     if decision_payload.get("should_create_workflow"):
-        note = f"LLM approved auto workflow: {llm_reason}" if llm_reason else "LLM approved auto workflow."
+        note = f"Production gate approved auto workflow: {llm_reason}" if llm_reason else "Production gate approved auto workflow."
         if note not in selection_reasons:
             selection_reasons.append(note)
     else:
-        note = f"LLM rejected auto workflow: {llm_reason}" if llm_reason else "LLM rejected auto workflow."
+        note = f"Production gate stopped auto workflow: {llm_reason}" if llm_reason else "Production gate stopped auto workflow."
         if note not in rejection_reasons:
             rejection_reasons.append(note)
     reason["selection_reasons"] = selection_reasons
@@ -570,6 +617,10 @@ def _workflow_ai_decision_payload(workflow: MediaWorkflow, content_id: uuid.UUID
         "risk_flags": decision.get("risk_flags") or metadata.get("risk_flags") or [],
         "reasoning": decision.get("reasoning") or metadata.get("ai_reasoning") or [],
         "series_decision": decision.get("series_decision") or metadata.get("series_decision"),
+        "production_gate": decision.get("production_gate") or metadata.get("production_gate"),
+        "quality": decision.get("quality") or metadata.get("draft_quality"),
+        "format": decision.get("format") or metadata.get("format"),
+        "token_usage": decision.get("token_usage") or metadata.get("token_usage"),
         "error_message": decision.get("error_message"),
     }
 
@@ -593,6 +644,12 @@ def _decision_payload(decision: AutoWorkflowDecision | None) -> dict[str, Any]:
         "risk_flags": metadata.get("risk_flags") or [],
         "reasoning": metadata.get("reasoning") or [],
         "series_decision": decision.series_decision,
+        "production_gate": metadata.get("production_gate"),
+        "quality": metadata.get("quality"),
+        "format": metadata.get("format"),
+        "hook_type": metadata.get("hook_type"),
+        "cta_mode": metadata.get("cta_mode"),
+        "token_usage": metadata.get("token_usage"),
         "error_message": decision.error_message,
     }
 

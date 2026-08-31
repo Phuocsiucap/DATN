@@ -55,13 +55,17 @@ def ensure_content_embeddings(db: Session, contents: list[ContentItem]) -> dict[
     for batch in embedding_batches(rows_to_embed):
         texts = [text for _, text in batch]
         first_content = batch[0][0]
-        result = embed_texts(
-            texts,
-            user_id=str(first_content.owner_user_id) if first_content.owner_user_id else None,
-            reference_id=str(first_content.crawl_job_id or first_content.id),
-            run_type="CREATE_EMBEDDING",
-            step_name="content_embedding_batch",
-        )
+        try:
+            result = embed_texts(
+                texts,
+                user_id=str(first_content.owner_user_id) if first_content.owner_user_id else None,
+                reference_id=str(first_content.crawl_job_id or first_content.id),
+                run_type="CREATE_EMBEDDING",
+                step_name="content_embedding_batch",
+            )
+        except Exception as exc:
+            print(f"[embedding-service] Warning: Embedding generation failed (batch skipped): {exc}")
+            continue
         upsert_rows = []
         for (content, text), vector in zip(batch, result.embeddings):
             if not vector:

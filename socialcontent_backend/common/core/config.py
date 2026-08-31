@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     embedding_request_timeout_seconds: int = Field(default=120, validation_alias=AliasChoices("EMBEDDING_REQUEST_TIMEOUT_SECONDS"))
     embedding_similarity_threshold: float = 0.62
     openai_api_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_API_KEY"))
+    openai_admin_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_ADMIN_KEY"))
     openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("OPENAI_MODEL"))
     deepseek_api_key: str = Field(default="", validation_alias=AliasChoices("ACD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"))
     deepseek_base_url: str = Field(default="https://api.deepseek.com", validation_alias=AliasChoices("ACD_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"))

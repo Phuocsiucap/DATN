@@ -155,14 +155,16 @@ def _source_refs_from_payload(payload: dict[str, Any]) -> list[Any]:
     return []
 
 
-def _serialize_source_content(content: ContentItem | None) -> dict[str, Any] | None:
+def _serialize_source_content(
+    content: ContentItem | None, *, allow_description_fallback: bool = True,
+) -> dict[str, Any] | None:
     if not content:
         return None
 
     sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
     primary_source = sources[0] if sources else {}
     source_metadata = _source_metadata(primary_source)
-    full_text = _load_content_full_text(content.mongo_normalized_id)
+    full_text = _load_content_full_text(content.mongo_normalized_id, allow_description_fallback=allow_description_fallback)
     category_id = source_metadata.get("category_id")
     article_id = source_metadata.get("article_id")
     site_id = source_metadata.get("site_id")
@@ -233,7 +235,7 @@ def content_category_payload(content: ContentItem | None) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value not in (None, "", [])}
 
 
-def _load_content_full_text(mongo_normalized_id: str | None) -> str | None:
+def _load_content_full_text(mongo_normalized_id: str | None, *, allow_description_fallback: bool = True) -> str | None:
     try:
         from bson import ObjectId
         from common.db.mongo import processed_documents
@@ -244,7 +246,9 @@ def _load_content_full_text(mongo_normalized_id: str | None) -> str | None:
                 proc_doc = proc_coll.find_one({"_id": ObjectId(mongo_normalized_id)})
                 normalized = proc_doc.get("normalized") if isinstance(proc_doc, dict) else None
                 if isinstance(normalized, dict):
-                    full_text = normalized.get("content") or normalized.get("description")
+                    full_text = normalized.get("content")
+                    if not full_text and allow_description_fallback:
+                        full_text = normalized.get("description")
                     if full_text:
                         return str(full_text)
             except Exception:

@@ -9,6 +9,7 @@ from common.db.models import Base
 from common.db.session import SessionLocal, engine
 from common.workers import run_thread_worker_forever
 from app.planning.consumers.crawl_job_completed import run_crawl_job_completed_consumer
+from app.planning.consumers.candidate_review import run_candidate_review_worker
 
 
 @asynccontextmanager
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
         print(f"[planning-orchestrator] Base.metadata.create_all warning: {e}")
     tasks = []
     if get_settings().enable_workers:
+        tasks.append(asyncio.create_task(run_thread_worker_forever("planning:reviewed-candidates", run_candidate_review_worker)))
         tasks.append(asyncio.create_task(run_thread_worker_forever("planning-orchestrator:crawl-job-completed", run_crawl_job_completed_consumer)))
     yield
     for task in tasks:

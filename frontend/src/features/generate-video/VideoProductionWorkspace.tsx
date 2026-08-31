@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
 import {
+  approveGenerateVideoDraftApi,
   approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
   deleteVideoWorkspaceApi,
@@ -278,6 +279,13 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const canRenderMp4 = Boolean(activeStory || storyText.trim())
   const workflowRunning = Boolean(activeProgressTask(workflowProgress))
   const actionsLocked = Boolean(busy) || workflowRunning
+  const draftQuality = selectedProject?.metadata?.draft_quality as { status?: string; score?: number; issues?: Array<{ code?: string; message?: string; severity?: string }> } | undefined
+  const draftRecheck = selectedProject?.metadata?.draft_quality_recheck as { status?: string; score?: number; issues?: Array<{ code?: string; message?: string; severity?: string }> } | undefined
+  const visibleDraftQuality = draftRecheck || draftQuality
+  const draftReviewRequired = Boolean(
+    selectedProject?.capabilities.can_approve_draft
+    || selectedProject?.current_stage === 'DRAFT_REVIEW_REQUIRED',
+  )
 
   const beginAction = (key: string) => {
     if (actionLocksRef.current[key]) return false
@@ -438,11 +446,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       const { story_data: storyData, ...metadata } = payload
       await updateVideoWorkspaceApi(selectedId, {
         ...metadata,
-        draft_json: {
-          ...(selectedProject?.draft || {}),
-          story_data: storyData,
-        },
       })
+      if (story || previewStory) {
+        await saveGenerateVideoStoryApi(updateRenderScenes(currentStoryForAction(), storyData as GenerateVideoScene[]))
+      }
       const workflow = await fetchVideoWorkspaceApi(selectedId)
       setSelectedProject(workflow)
       setPlanDraft(planDraftFromProject(workflow))
@@ -464,8 +471,9 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       updateStory(result.story)
       setPreviewStory(result.story)
       setPreviewVersion(Date.now())
-      const review = result.story.meta?.ai_story_review
-      setStatus(review?.action === 'REVISED' ? 'Đã lưu. AI reviewer đã sửa draft cho khớp kịch bản.' : 'Đã lưu. AI reviewer đã duyệt draft.')
+      const workflow = await fetchVideoWorkspaceApi(selectedId)
+      setSelectedProject(workflow)
+      setStatus(workflow.capabilities.can_approve_draft ? 'Đã lưu draft. Cần duyệt phiên bản hiện tại trước khi tạo voice/render.' : 'Đã lưu kịch bản.')
     } catch (error: any) {
       setStatus(error?.response?.data?.detail || error?.message || 'JSON story không hợp lệ')
     } finally {
@@ -522,11 +530,18 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   }
 
   const generateVoice = async () => {
+    if (selectedProject && !selectedProject.capabilities.can_generate_voice) {
+      setStatus('Draft cần được duyệt trước khi tạo voice.')
+      return
+    }
     if (!beginAction('voice')) return
     setBusy('voice')
     try {
       const parsed = currentStoryForAction()
       await saveGenerateVideoStoryApi(parsed)
+      const savedWorkflow = await fetchVideoWorkspaceApi(selectedId)
+      setSelectedProject(savedWorkflow)
+      if (!savedWorkflow.capabilities.can_generate_voice) throw new Error('Draft vừa thay đổi, cần duyệt lại trước khi tạo voice.')
       const result = await generateVideoVoiceApi(selectedId, voiceId || undefined, voiceSpeed, voiceProvider)
       const completedJob = await waitForGenerateVideoJob(result.job.id, (job) => {
         setWorkflowProgress(progressFromJob(selectedId, job))
@@ -548,11 +563,18 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   }
 
   const exportVideo = async () => {
+    if (selectedProject && !selectedProject.capabilities.can_render) {
+      setStatus(draftReviewRequired ? 'Draft cần được duyệt trước khi render.' : 'Workflow chưa sẵn sàng để render.')
+      return
+    }
     if (!beginAction('export-video')) return
     setBusy('export-video')
     try {
       const parsed = currentStoryForAction()
       await saveGenerateVideoStoryApi(parsed)
+      const savedWorkflow = await fetchVideoWorkspaceApi(selectedId)
+      setSelectedProject(savedWorkflow)
+      if (!savedWorkflow.capabilities.can_render) throw new Error('Hãy duyệt draft và tạo voice mới trước khi render.')
       const result = await generateFinalVideoApi(selectedId)
       setActiveStep('preview')
       setStatus(`Đã đưa vào hàng đợi render (${result.job.id.slice(0, 8)})`)
@@ -589,6 +611,28 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       setStatus(error?.response?.data?.detail || error?.message || 'Không duyệt được video')
     } finally {
       endAction('approve-video')
+      setBusy(null)
+    }
+  }
+
+  const approveDraft = async () => {
+    if (!selectedId || !beginAction('approve-draft')) return
+    setBusy('approve-draft')
+    try {
+      const saved = await saveGenerateVideoStoryApi(currentStoryForAction())
+      const result = await approveGenerateVideoDraftApi(selectedId, saved.script_signature)
+      await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
+      setStatus(
+        result.series_warning
+          ? 'Đã duyệt draft. Series đề xuất đã đầy hoặc không còn khả dụng; bạn có thể chọn series khác.'
+          : result.job
+          ? `Đã duyệt draft${result.series_applied ? ' và áp dụng series' : ''}; auto-production đã được xếp hàng.`
+          : `Đã duyệt draft${result.series_applied ? ' và áp dụng series' : ''}.`,
+      )
+    } catch (error: any) {
+      setStatus(error?.response?.data?.detail || error?.message || 'Không duyệt được draft')
+    } finally {
+      endAction('approve-draft')
       setBusy(null)
     }
   }
@@ -635,6 +679,49 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
 
   return (
     <div className={isStudioDetail ? "min-h-[calc(100vh-24px)] bg-[#f6f8ff]" : "workspace-page"}>
+      {draftReviewRequired && (
+        <div className="mx-3 mb-3 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-black">
+              <ShieldCheck size={17} /> Draft cần người dùng duyệt
+              {typeof visibleDraftQuality?.score === 'number' && (
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs text-amber-800">Quality {visibleDraftQuality.score}/100</span>
+              )}
+            </div>
+            <p className="mt-1 text-xs font-medium text-amber-800">
+              Voice và render đang bị khóa. Hãy đối chiếu bài gốc, sửa nếu cần, rồi duyệt phiên bản lời thoại hiện tại.
+            </p>
+            <p className="mt-1 text-xs text-amber-800">
+              Duyệt sẽ lưu bản đang sửa và có thể xếp hàng tạo voice/video theo cấu hình auto. Đây không phải duyệt video để đăng mạng xã hội.
+            </p>
+            {visibleDraftQuality?.issues?.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-900">
+                {visibleDraftQuality.issues.slice(0, 4).map((issue, index) => (
+                  <li key={`${issue.code || 'issue'}-${index}`}>{issue.message || issue.code}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {contentId && <button type="button" onClick={() => setShowContentDetailId(contentId)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 text-xs font-bold text-amber-900">
+              <Newspaper size={15} /> Xem bài gốc
+            </button>}
+            <button
+              type="button"
+              onClick={() => void approveDraft()}
+              disabled={actionsLocked || !selectedProject?.capabilities.can_approve_draft}
+              className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 text-xs font-black text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              <CheckCircle2 size={15} /> {busy === 'approve-draft' ? 'Đang duyệt...' : 'Duyệt draft hiện tại'}
+            </button>
+          </div>
+        </div>
+      )}
+      {isStudioDetail && (loadError || status) && <div role="status" aria-live="polite"
+        className={`mx-3 mb-3 rounded-lg border p-3 text-sm ${loadError ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+        {loadError || status}
+      </div>}
       {!isStudioDetail && (
       <div className="mb-4 flex flex-col gap-4">
         <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-start md:justify-between">
@@ -787,7 +874,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
               <button disabled={!hasStoryInput || actionsLocked} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
                 <Save size={14} /> Lưu kịch bản
               </button>
-              <button disabled={!hasStoryInput || actionsLocked} onClick={() => { setActiveStep('video'); void generateVoice() }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+              <button disabled={!hasStoryInput || actionsLocked || selectedProject?.capabilities.can_generate_voice === false} onClick={() => { setActiveStep('video'); void generateVoice() }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
                 <Mic2 size={14} /> Tạo Voice AI
               </button>
               {contentId && (
@@ -850,6 +937,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
 
       {activeStep === 'video' && (
         <StoryVisualPreview
+          draftReviewRequired={draftReviewRequired}
           story={previewStory || story}
           version={previewVersion}
           audioSrc={audioSrc}
@@ -878,7 +966,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           <Panel title="3. Export MP4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
               <div className="space-y-3">
-                <button disabled={!canRenderMp4 || actionsLocked} onClick={() => void exportVideo()} className="h-8 w-full rounded-md bg-[var(--error)] px-3 text-xs font-semibold text-white disabled:opacity-50">
+                <button disabled={!canRenderMp4 || actionsLocked || selectedProject?.capabilities.can_render === false} onClick={() => void exportVideo()} className="h-8 w-full rounded-md bg-[var(--error)] px-3 text-xs font-semibold text-white disabled:opacity-50">
                   {busy === 'export-video' ? 'Đang render MP4...' : 'Render ra file MP4'}
                 </button>
                 <p className="text-sm text-slate-500">Bấm render để backend gọi Remotion và ghi file MP4 vào `data_demo/video_gen_demo/out`.</p>
@@ -1482,6 +1570,7 @@ function StoryDataEditor({
 }
 
 function StoryVisualPreview({
+  draftReviewRequired,
   story,
   version,
   audioSrc,
@@ -1499,6 +1588,7 @@ function StoryVisualPreview({
   onReload,
   onChange,
 }: {
+  draftReviewRequired: boolean
   story: GenerateVideoStory | null
   version: number
   audioSrc: string
@@ -1791,6 +1881,7 @@ function StoryVisualPreview({
   return (
     <div className="grid gap-3">
       <RemotionLikeEditor
+        draftReviewRequired={draftReviewRequired}
         key={version}
         story={story}
         scenes={scenes}
@@ -1865,6 +1956,7 @@ function StoryVisualPreview({
 }
 
 function RemotionLikeEditor({
+  draftReviewRequired,
   story,
   scenes,
   sceneIndex,
@@ -1898,6 +1990,7 @@ function RemotionLikeEditor({
   fitting,
   onChange,
 }: {
+  draftReviewRequired: boolean
   story: GenerateVideoStory | null
   scenes: GenerateVideoScene[]
   sceneIndex: number
@@ -2005,24 +2098,27 @@ function RemotionLikeEditor({
       onSeek(getSceneEnd(nextScenes, drag.index))
   }
   const updateSubtitleTiming = (index: number, start: number, duration: number) => {
-    const sceneStart = getSceneStart(scenes, index)
-    const sceneEnd = getSceneEnd(scenes, index)
-    const previousEnd = index > 0 ? getSubtitleStart(scenes, index - 1) + getSubtitleDuration(scenes, index - 1) : 0
-    const nextStart = index < scenes.length - 1 ? getSubtitleStart(scenes, index + 1) : videoDuration
+    const current = scenes[index]
+    const ids = new Set([...(current.video_ids || []), ...(current.video_id ? [current.video_id] : [])])
+    const visuals = scenes.filter(scene => scene.video_id && ids.has(scene.video_id))
+    const sceneStart = visuals.length ? Math.min(...visuals.map(scene => Number(scene.start || 0))) : getSceneStart(scenes, index)
+    const sceneEnd = visuals.length ? Math.max(...visuals.map(scene => Number(scene.end || 0))) : getSceneEnd(scenes, index)
+    const uniqueTexts = collapseTextScenes(scenes)
+    const textIndex = uniqueTexts.findIndex(scene => scene.text_id === current.text_id)
+    const previous = uniqueTexts[textIndex - 1]
+    const next = uniqueTexts[textIndex + 1]
+    const previousEnd = previous ? Number(previous.subtitle_start || 0) + Number(previous.subtitle_duration || 0) : 0
+    const nextStart = next ? Number(next.subtitle_start || 0) : videoDuration
     const minStart = Math.max(sceneStart, previousEnd)
     const maxEnd = Math.max(minStart + 0.1, Math.min(sceneEnd, nextStart))
     const nextStartValue = clampNumber(start, minStart, Math.max(minStart, maxEnd - 0.1))
     const nextDurationValue = clampNumber(duration, 0.1, Math.max(0.1, maxEnd - nextStartValue))
-    const nextScenes = scenes.map((item, currentIndex) => currentIndex === index
-      ? {
-          ...item,
-          subtitle_start: roundToFrame(nextStartValue, fps),
-          subtitle_duration: roundToFrame(nextDurationValue, fps),
-        }
-      : item)
-    onChange(updateRenderScenes(story, nextScenes))
+    updateSceneAt(story, scenes, index, {
+      subtitle_start: roundToFrame(nextStartValue, fps),
+      subtitle_duration: roundToFrame(nextDurationValue, fps),
+    }, onChange)
     onSelect(index)
-    onSeek(getSubtitleStart(nextScenes, index))
+    onSeek(nextStartValue)
   }
 
   const insertSceneAfter = (scenePatch: Partial<GenerateVideoScene> = {}) => {
@@ -2214,6 +2310,7 @@ function RemotionLikeEditor({
         />
       )}
       <StudioProductionShell
+        draftReviewRequired={draftReviewRequired}
         audioMenu={audioMenu}
         audioSrc={audioSrc}
         audio1Muted={audio1Muted}
@@ -2274,6 +2371,7 @@ function RemotionLikeEditor({
 }
 
 function StudioProductionShell({
+  draftReviewRequired,
   audioMenu,
   audioSrc,
   audio1Muted,
@@ -2329,6 +2427,7 @@ function StudioProductionShell({
   onUpdateSubtitleTiming,
   onVoiceProviderChange,
 }: {
+  draftReviewRequired: boolean
   audioMenu: { x: number; y: number; kind: 'legacy-music' | 'track'; trackId?: string } | null
   audioSrc: string
   audio1Muted: boolean
@@ -2405,7 +2504,9 @@ function StudioProductionShell({
                 <Clapperboard size={16} />
               </div>
               <h1 className="truncate text-[22px] font-black leading-tight text-[#11183c]">{getStoryProjectName(story)}</h1>
-              <span className="rounded-[8px] bg-[#d5f7e8] px-3 py-1 text-[11px] font-black uppercase text-[#069467]">Draft sẵn sàng</span>
+              <span className={`rounded-[8px] px-3 py-1 text-[11px] font-black uppercase ${draftReviewRequired ? 'bg-amber-100 text-amber-800' : 'bg-[#d5f7e8] text-[#069467]'}`}>
+                {draftReviewRequired ? 'Cần duyệt draft' : 'Đã có draft'}
+              </span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 pl-11 text-[11px] font-bold text-[#4f5b7f]">
               <span className="rounded bg-white px-2 py-1 shadow-sm">TikTok</span>
@@ -2966,7 +3067,7 @@ function StudioInspector({
             <StudioSection title="Toàn bộ script">
               <div className="space-y-2">
                 {scenes.map((scene, index) => (
-                  <div key={`${scene.video_id || scene.text_id || index}-script`} className={`rounded-[8px] border p-2 ${index === sceneIndex ? 'border-[#6247ff] bg-[#f7f5ff]' : 'border-[#e3e8f4] bg-white'}`}>
+                  <div key={`${scene.video_id || 'no-media'}:${scene.text_id || index}-script`} className={`rounded-[8px] border p-2 ${index === sceneIndex ? 'border-[#6247ff] bg-[#f7f5ff]' : 'border-[#e3e8f4] bg-white'}`}>
                     <button type="button" onClick={() => onSelect(index)} className="mb-1 flex w-full items-center justify-between text-left text-[11px] font-black text-[#27305b]">
                       <span>Scene {index + 1}</span>
                       <span>{formatStudioClock(getSceneStart(scenes, index))}</span>
@@ -4911,11 +5012,19 @@ function SceneMediaThumb({ scene, className }: { scene: GenerateVideoScene; clas
   return <img src={src} alt="" className={`${className} ${fitClass}`} />
 }
 
-function updateSceneAt(story: GenerateVideoStory, scenes: GenerateVideoScene[], index: number, patch: Partial<GenerateVideoScene>, onChange: (story: GenerateVideoStory) => void) {
-  onChange(updateRenderScenes(story, scenes.map((scene, currentIndex) => currentIndex === index ? { ...scene, ...patch } : scene)))
+export function updateSceneAt(story: GenerateVideoStory, scenes: GenerateVideoScene[], index: number, patch: Partial<GenerateVideoScene>, onChange: (story: GenerateVideoStory) => void) {
+  const target = scenes[index]
+  const textKeys = new Set(['subtitle', 'voice_text', 'role', 'evidence_ids', 'subtitle_start', 'subtitle_duration', 'text_style', 'timing'])
+  onChange(updateRenderScenes(story, scenes.map((scene, currentIndex) => {
+    if (currentIndex === index) return { ...scene, ...patch }
+    const sharedPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => textKeys.has(key)
+      ? target?.text_id && target.text_id === scene.text_id
+      : target?.video_id && target.video_id === scene.video_id))
+    return { ...scene, ...sharedPatch }
+  })))
 }
 
-function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
+export function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
   const timeline = story.timeline || {}
   const video = timeline.video || []
   const text = timeline.text || []
@@ -4941,6 +5050,8 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
         fit: 'contain',
         subtitle: String(textClip.text || ''),
         voice_text: textClip.voice_text,
+        role: textClip.role,
+        evidence_ids: textClip.evidence_ids,
         subtitle_start: start,
         subtitle_duration: duration,
         text_style: textClip.style || {},
@@ -4948,21 +5059,21 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
       }
     })
   }
-  const count = Math.max(video.length, text.length)
-  return Array.from({ length: count }, (_, index) => {
-    const textClip = text[index]
-    const textStart = typeof textClip?.start === 'number' ? textClip.start : undefined
-    const textEnd = typeof textClip?.end === 'number' ? textClip.end : undefined
-    const clip = video[index] || video.find((item) => {
-      if (textStart === undefined || textEnd === undefined) return false
-      const overlap = Math.min(Number(item.end || 0), textEnd) - Math.max(Number(item.start || 0), textStart)
-      return overlap > 0
-    }) || [...video].reverse().find((item) => Number(item.start || 0) <= Number(textStart ?? 0)) || video[video.length - 1]
+  // One editable row per actual link, not a positional zip of unequal tracks.
+  type LinkedRow = { clip: typeof video[number]; matchedTextClip?: typeof text[number]; index: number }
+  const pairs = video.flatMap<LinkedRow>((clip, index) => {
+    const forward = clip.text_ids || (clip.text_id ? [clip.text_id] : [])
+    let matches = text.filter(item => forward.includes(item.id)
+      || (item.video_ids || (item.video_id ? [item.video_id] : [])).includes(clip.id))
+    if (!matches.length && !forward.length) {
+      matches = text.filter(item => !item.video_ids?.length && !item.video_id
+        && Math.min(item.end, clip.end) > Math.max(item.start, clip.start))
+    }
+    return matches.length ? matches.map(matchedTextClip => ({ clip, matchedTextClip, index }))
+      : [{ clip, matchedTextClip: undefined, index }]
+  })
+  return pairs.map(({ clip, matchedTextClip, index }) => {
     const mediaType = normalizeSceneMediaType(clip.type, String(clip.src || ''))
-    const matchedTextClip = textClip || text.find((item) => {
-      const overlap = Math.min(Number(item.end || 0), Number(clip.end || 0)) - Math.max(Number(item.start || 0), Number(clip.start || 0))
-      return overlap > 0
-    })
     const start = typeof clip?.start === 'number'
       ? Number(clip.start)
       : typeof matchedTextClip?.start === 'number'
@@ -4981,8 +5092,11 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
       scene_index: typeof clip.scene_index === 'number' ? clip.scene_index : typeof matchedTextClip?.scene_index === 'number' ? matchedTextClip.scene_index : index,
       video_id: clip.id,
       text_id: matchedTextClip?.id,
-      video_ids: Array.isArray(matchedTextClip?.video_ids) ? matchedTextClip.video_ids : matchedTextClip?.video_id ? [matchedTextClip.video_id] : undefined,
-      text_ids: Array.isArray(clip.text_ids) ? clip.text_ids : clip.text_id ? [clip.text_id] : undefined,
+      video_ids: matchedTextClip ? listUnique(pairs.filter(pair => pair.matchedTextClip?.id === matchedTextClip.id).map(pair => pair.clip.id)) : undefined,
+      text_ids: listUnique(pairs.filter(pair => pair.clip.id === clip.id).flatMap(pair => pair.matchedTextClip ? [pair.matchedTextClip.id] : [])),
+      text_weights: clip.text_weights,
+      source_media_index: clip.source_media_index,
+      visual_query: clip.visual_direction,
       start,
       end,
       duration,
@@ -4997,6 +5111,8 @@ function storyTimelineScenes(story: GenerateVideoStory): GenerateVideoScene[] {
       rotation: typeof clip.rotation === 'number' ? clip.rotation : undefined,
       subtitle: String(matchedTextClip?.text || ''),
       voice_text: matchedTextClip?.voice_text,
+      role: matchedTextClip?.role,
+      evidence_ids: matchedTextClip?.evidence_ids,
       subtitle_start: subtitleStart,
       subtitle_duration: Math.max(0.1, subtitleEnd - subtitleStart),
       text_style: matchedTextClip?.style || {},
@@ -5202,7 +5318,7 @@ function StorySceneMediaPreview({ scene, index, onSelect }: { scene: GenerateVid
   )
 }
 
-function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScene[]): GenerateVideoStory {
+export function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScene[]): GenerateVideoStory {
   const fps = story.video?.fps || 30
   let cursor = 0
   let previousTextEnd = 0
@@ -5217,6 +5333,9 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
       id: scene.video_id || story.timeline?.video?.[index]?.id || `video-${index + 1}`,
       ...(typeof scene.scene_index === 'number' ? { scene_index: scene.scene_index } : { scene_index: index }),
       ...(scene.text_ids?.length ? { text_ids: scene.text_ids, text_id: scene.text_ids[0] } : {}),
+      ...(scene.text_weights ? { text_weights: scene.text_weights } : {}),
+      ...(typeof scene.source_media_index === 'number' ? { source_media_index: scene.source_media_index } : {}),
+      ...(scene.visual_query ? { visual_direction: scene.visual_query } : {}),
       type: mediaType,
       start,
       end: clipEnd,
@@ -5258,6 +5377,8 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
       duration: roundToFrame(end - start, fps),
       text: subtitle,
       ...(scene.voice_text ? { voice_text: scene.voice_text } : {}),
+      ...(scene.role ? { role: scene.role } : {}),
+      ...(scene.evidence_ids ? { evidence_ids: scene.evidence_ids } : {}),
       style: scene.text_style || story.timeline?.text?.[index]?.style || {},
       ...(scene.timing ? { timing: scene.timing } : {}),
     }]
@@ -5272,6 +5393,7 @@ function updateRenderScenes(story: GenerateVideoStory, scenes: GenerateVideoScen
   return {
     ...rest,
     timeline: {
+      ...story.timeline,
       version: 1,
       duration: roundToFrame(duration || 1, fps),
       video,
@@ -5298,7 +5420,7 @@ function collapseVisualScenes(scenes: GenerateVideoScene[]) {
         start,
         end,
         duration: Math.max(0.1, end - start),
-        text_ids: [...(scene.text_ids || []), ...textIds],
+        text_ids: listUnique([...(scene.text_ids || []), ...textIds]),
       })
       return
     }
@@ -5405,11 +5527,10 @@ function getSceneEnd(scenes: GenerateVideoScene[], index: number) {
   return getSceneStart(scenes, index) + Number(scene.duration || 0)
 }
 
-function storyTimelineDuration(story: GenerateVideoStory, scenes: GenerateVideoScene[]) {
+export function storyTimelineDuration(story: GenerateVideoStory, scenes: GenerateVideoScene[]) {
   return Math.max(
     Number(story.timeline?.duration || 0),
     ...scenes.map((_, index) => getSceneEnd(scenes, index)),
-    scenes.reduce((total, scene) => total + Number(scene.duration || 0), 0),
     0,
   )
 }
@@ -5447,7 +5568,7 @@ function sceneIndexAtTime(scenes: GenerateVideoScene[], time: number) {
 
 function updateAudio(story: GenerateVideoStory, onChange: (story: GenerateVideoStory) => void, patch: NonNullable<GenerateVideoStory['audio']>) {
   const nextStory = { ...story, audio: { ...(story.audio || {}), ...patch } }
-  const duration = story.timeline?.duration || storyTimelineScenes(story).reduce((total, scene) => total + Number(scene.duration || 0), 0)
+  const duration = storyTimelineDuration(story, storyTimelineScenes(story))
   onChange({
     ...nextStory,
     timeline: {
@@ -5470,7 +5591,7 @@ function updateAudioTrack(
     volume: number
   }>,
 ) {
-  const videoDuration = story.timeline?.duration || storyTimelineScenes(story).reduce((total, scene) => total + Number(scene.duration || 0), 0)
+  const videoDuration = storyTimelineDuration(story, storyTimelineScenes(story))
   const tracks = storyAudioTracks(story, videoDuration)
   updateAudio(story, onChange, {
     tracks: tracks.map((track) => track.id === trackId ? { ...track, ...patch } : track),
@@ -5478,7 +5599,7 @@ function updateAudioTrack(
 }
 
 function removeAudioTrack(story: GenerateVideoStory, onChange: (story: GenerateVideoStory) => void, trackId: string) {
-  const videoDuration = story.timeline?.duration || storyTimelineScenes(story).reduce((total, scene) => total + Number(scene.duration || 0), 0)
+  const videoDuration = storyTimelineDuration(story, storyTimelineScenes(story))
   const tracks = storyAudioTracks(story, videoDuration).filter((track) => track.id !== trackId)
   const nextTimelineAudio = (story.timeline?.audio || []).filter((clip) => clip.id !== trackId)
   const removed = story.timeline?.audio?.find((clip) => clip.id === trackId)
@@ -5598,6 +5719,7 @@ function workflowStory(workflow: VideoWorkspaceDetail | null): GenerateVideoStor
 }
 
 function inferProjectStatus(workflow: VideoWorkspaceDetail | null, story: GenerateVideoStory | null) {
+  if (workflow?.current_stage === 'DRAFT_REVIEW_REQUIRED') return 'CẦN DUYỆT DRAFT'
   const projectStatus = workflow?.status || ''
   if (projectStatus) return projectStatus
   if (getWorkflowArtifacts(workflow)?.final) return 'RENDERED'
@@ -5620,7 +5742,7 @@ function getWorkflowArtifacts(workflow: VideoWorkspaceDetail | null) {
 }
 
 function roundToFrame(value: number, fps: number) {
-  return Math.max(0.5, Math.round(value * fps) / fps)
+  return Math.max(0, Math.round(value * fps) / fps)
 }
 
 function clampNumber(value: number, min: number, max: number) {

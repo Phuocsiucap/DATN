@@ -362,6 +362,7 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
             matched_topics=matched_topics,
             avoided_topics=avoided_topics,
             metadata={**metadata, **match_metadata},
+            recommendation_status=recommendation_status,
         )
         matches.append({
             "profile_id": profile.id,
@@ -431,7 +432,7 @@ def _metadata_list(metadata: dict, key: str) -> list:
 
 
 def _profile_recommendation_status(link: ProfileContentLink | None, eligible: bool, blocked_by_avoid_topics: bool) -> str:
-    if link and link.recommendation_status in {"WORKFLOW_CREATED", "AI_REJECTED"}:
+    if link and link.recommendation_status in {"WORKFLOW_CREATED", "AI_REJECTED", "REVIEW_REQUIRED", "HUMAN_REJECTED", "DRAFT_QUEUED", "DRAFT_FAILED"}:
         return link.recommendation_status
     if blocked_by_avoid_topics:
         return "AVOID_TOPIC_MATCH"
@@ -456,6 +457,7 @@ def _profile_selection_explanation(
     matched_topics: list[str],
     avoided_topics: list[str],
     metadata: dict,
+    recommendation_status: str,
 ) -> dict:
     tags = [str(tag).strip() for tag in source_metadata.get("tags", []) if str(tag).strip()] if isinstance(source_metadata.get("tags"), list) else []
     category = str(source_metadata.get("category") or "").strip()
@@ -468,49 +470,53 @@ def _profile_selection_explanation(
     threshold_text = f"{round(threshold, 1)}/100"
 
     topic_value = ", ".join(matched_topics[:3]) or category or ", ".join(tags[:3]) or "Chưa có chủ đề rõ"
-    topic_tone = "green" if matched_topics else ("blue" if category or tags else "gray")
+    topic_tone = "green" if matched_topics else "gray"
     audience_value = audience or "Chưa cấu hình persona"
     tone_value = tone or "Chưa cấu hình tone"
 
     reason_parts: list[str] = []
+    if recommendation_status == "AI_REJECTED":
+        reason_parts.append("Không được đề xuất sau bước đánh giá AI.")
+    elif recommendation_status == "HUMAN_REJECTED":
+        reason_parts.append("Người dùng đã quyết định không sản xuất bài này.")
+    elif recommendation_status == "DRAFT_QUEUED":
+        reason_parts.append("Người dùng đã duyệt bài; job đang chờ hoặc đang sinh draft.")
+    elif recommendation_status == "DRAFT_FAILED":
+        reason_parts.append("Bài đã được duyệt nhưng sinh draft thất bại; xem chi tiết plan để thử lại.")
+    elif recommendation_status == "REVIEW_REQUIRED":
+        reason_parts.append("Cần kiểm duyệt trước khi tiếp tục.")
+    elif avoided_topics:
+        reason_parts.append(f"Không đề xuất vì khớp chủ đề cần tránh: {', '.join(avoided_topics[:4])}.")
+    if score >= threshold:
+        reason_parts.append(f"Điểm phù hợp {score_text} đạt ngưỡng {threshold_text} của kênh {profile.profile_name}.")
+    else:
+        reason_parts.append(f"Điểm phù hợp {score_text} chưa đạt ngưỡng {threshold_text} của kênh {profile.profile_name}.")
     if metadata_reason:
         reason_parts.append(metadata_reason)
-    if score >= threshold:
-        reason_parts.append(f"AI chọn vì điểm phù hợp {score_text} vượt ngưỡng {threshold_text} của tài khoản {profile.profile_name}.")
-    else:
-        reason_parts.append(f"AI không đề xuất cho tài khoản {profile.profile_name} vì điểm phù hợp {score_text} chưa đạt ngưỡng {threshold_text}.")
     if matched_topics:
         reason_parts.append(f"Nội dung khớp chủ đề ưu tiên: {', '.join(matched_topics[:4])}.")
-    elif content_topics and score >= threshold:
-        reason_parts.append("Chưa khớp trực tiếp keyword ưu tiên, nhưng độ phù hợp ngữ nghĩa (Cosine Similarity) vẫn đủ để đề xuất.")
-    elif content_topics:
-        reason_parts.append("Chưa khớp trực tiếp keyword ưu tiên và điểm tương đồng ngữ nghĩa (Cosine Similarity) chưa đạt yêu cầu.")
-    elif category or tags:
-        reason_parts.append(f"Chủ đề được suy ra từ chuyên mục/tag: {topic_value}.")
-    if tone:
-        reason_parts.append(f"Tone triển khai phù hợp với cấu hình: {tone}.")
-    if audience:
-        reason_parts.append(f"Tệp người xem mục tiêu: {audience}.")
-    if avoided_topics:
-        reason_parts.append(f"Cần rà soát thêm vì chạm chủ đề nên tránh: {', '.join(avoided_topics[:4])}.")
 
     risk_notes = []
     if score < threshold:
-        risk_notes.append("Điểm phù hợp thấp hơn ngưỡng xuất bản tự động.")
+        risk_notes.append("Điểm phù hợp thấp hơn ngưỡng lựa chọn nội dung của kênh.")
     if avoided_topics:
         risk_notes.append(f"Có chủ đề nên tránh: {', '.join(avoided_topics[:4])}.")
     if not matched_topics and content_topics:
-        risk_notes.append("Không tìm thấy keyword ưu tiên trong tiêu đề, tóm tắt hoặc tag.")
+        risk_notes.append("Chưa ghi nhận chủ đề ưu tiên khớp với bài viết.")
 
     return {
         "selection_reason": " ".join(reason_parts),
-        "ai_decision_reason": f"Điểm {score_text} so với ngưỡng {threshold_text}, tính từ điểm chất lượng, chủ đề/tag, tone và chiến lược của profile.",
+        "ai_decision_reason": metadata_reason or None,
         "fit_insights": [
-            {"label": "Trúng chủ đề", "value": topic_value, "tone": topic_tone},
-            {"label": "Đúng tệp khán giả", "value": audience_value, "tone": "green" if audience else "gray"},
-            {"label": "Phù hợp tone", "value": tone_value, "tone": "green" if tone else "gray"},
+            {"label": "Chủ đề khớp với kênh" if matched_topics else "Chuyên mục / thẻ bài viết", "value": topic_value, "tone": topic_tone},
+            {"label": "Khán giả mục tiêu của kênh", "value": audience_value, "tone": "gray"},
+            {"label": "Giọng điệu cấu hình", "value": tone_value, "tone": "gray"},
         ],
-        "suggested_angle": _profile_suggested_angle(title, profile.platform, topic_value, tone),
+        "suggested_angle": (
+            _profile_suggested_angle(title, profile.platform, topic_value, tone)
+            if recommendation_status in {"RECOMMENDED", "WORKFLOW_CREATED"} and score >= threshold and not avoided_topics
+            else None
+        ),
         "risk_notes": risk_notes,
         "source_evidence": [value for value in [category, *tags[:5]] if value],
     }
