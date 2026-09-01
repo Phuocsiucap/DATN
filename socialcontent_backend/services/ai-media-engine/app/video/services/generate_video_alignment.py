@@ -11,10 +11,8 @@ from typing import Any
 from common.core.config import get_settings
 from app.video.services.generate_video_constants import PUBLIC_DIR
 from app.video.services.generate_video_timeline import (
-    _prevent_subtitle_overlap,
     fit_video_clips_to_text,
     get_words,
-    normalize_story_for_project,
     normalize_audio_clips,
     prevent_timeline_text_overlap,
     round_to_frame,

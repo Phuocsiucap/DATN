@@ -47,30 +47,30 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  # api-service:
-  #   build:
-  #     context: ..
-  #     dockerfile: socialcontent_backend/services/api-service/Dockerfile
-  #   working_dir: /app/services/api-service
-  #   command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-  #   depends_on:
-  #     - postgres
-  #     - mongodb
-  #     - kafka
-  #     - embedding-service
-  #     - ai-media-planning-worker
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-  #     MONGO_URI: mongodb://mongodb:27017
-  #     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-  #     PLANNING_ORCHESTRATOR_URL: http://ai-media-planning-worker:8050
-  #     EMBEDDING_SERVICE_URL: http://embedding-service:8075
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - socialcontent_generate_video:/app/data_demo/video_gen_demo
+  api-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/api-service/Dockerfile
+    working_dir: /app/services/api-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+      - embedding-service
+      - ai-media-planning-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_SERVICE_URL: http://embedding-service:8075
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
+      - ./data_demo/video_gen_demo/out:/app/data_demo/video_gen_demo/out
 
   data-ingestion-worker:
     build:

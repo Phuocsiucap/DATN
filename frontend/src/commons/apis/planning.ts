@@ -264,57 +264,6 @@ export type ProfileSeriesReview = {
   }>
 }
 
-export type SeriesCharacterContext = {
-  name: string
-  role?: string
-  personality?: string
-  status?: string
-}
-
-export type SeriesEventContext = {
-  part_number: number
-  summary: string
-  key_developments?: string[]
-}
-
-export type MongoSeriesContextDoc = {
-  _id?: string
-  series_id: string
-  version: number
-  title?: string
-  content_angle?: string
-  tone?: string
-  story_summary?: {
-    premise?: string
-    world_building?: string
-    theme?: string
-  }
-  characters?: SeriesCharacterContext[]
-  story_events?: SeriesEventContext[]
-  open_questions?: string[]
-  created_at?: string
-}
-
-export type SeriesContextResponse = {
-  series_id: string
-  context_version: number
-  contexts: MongoSeriesContextDoc[]
-}
-
-export type ConsistencyWarning = {
-  type: string
-  severity: string
-  message: string
-  part_id?: string
-}
-
-export type ConsistencyCheck = {
-  series_id: string
-  passed: boolean
-  warning_count: number
-  warnings: ConsistencyWarning[]
-}
-
 export type PromptRun = {
   id: string
   workflow_run_id: string
@@ -328,18 +277,6 @@ export type PromptRun = {
   status: string
   error_message?: string | null
   created_at: string
-}
-
-export const fetchMediaWorkflowsApi = async (params: { videoWorkspaceOnly?: boolean } = {}) => {
-  const { data } = await api.get('/media-workflows', {
-    params: params.videoWorkspaceOnly ? { video_workspace_only: true } : undefined,
-  })
-  return data as MediaWorkflow[]
-}
-
-export const fetchMediaWorkflowApi = async (workflowId: string) => {
-  const { data } = await api.get(`/media-workflows/${workflowId}`)
-  return data as MediaWorkflow
 }
 
 export const fetchContentPlanApi = async (planId: string) => {
@@ -373,38 +310,6 @@ export const fetchContentPlanApi = async (planId: string) => {
     created_at: wf.created_at,
     updated_at: wf.updated_at || wf.created_at,
   } as ContentPlan
-}
-
-export const fetchAllContentPlansApi = async () => {
-  const { data } = await api.get('/media-workflows')
-  return (data as MediaWorkflow[]).map((wf) => ({
-    id: wf.id,
-    workflow_id: wf.id,
-    profile_id: wf.profile_id,
-    series_id: wf.series_id || null,
-    source_content: wf.source_content || null,
-    primary_content_id: wf.primary_content_id,
-    primary_story_id: wf.primary_story_id,
-    title: wf.title,
-    content_angle: (wf.metadata?.content_angle as string) || null,
-    target_audience: (wf.metadata?.target_audience as string) || null,
-    tone: (wf.metadata?.tone as string) || null,
-    format: (wf.metadata?.format as string) || null,
-    planning_mode: wf.planning_mode || 'SINGLE',
-    target_duration_seconds: (wf.metadata?.target_duration_seconds as number) || (wf.metadata?.draft_generation_mode === 'compact-v2' ? null : 60),
-    recommended_part_count: (wf.metadata?.recommended_part_count as number) || 1,
-    confidence_score: (wf.metadata?.confidence_score as number) || 0,
-    risk_level: (wf.metadata?.risk_level as string) || null,
-    status: wf.status,
-    current_stage: wf.current_stage,
-    version: 1,
-    ai_reasoning: (wf.metadata?.ai_reasoning as string[]) || [],
-    production_requirements: (wf.metadata?.production_requirements as Record<string, unknown>) || {},
-    draft_json: wf.draft_json || {},
-    story_data: wf.draft_json?.story_data || [],
-    created_at: wf.created_at,
-    updated_at: wf.updated_at || wf.created_at,
-  })) as ContentPlan[]
 }
 
 // Legacy workflow approval only restores a rejected workflow; it does not approve
@@ -478,49 +383,6 @@ export const updateContentSeriesApi = async (
 export const deleteContentSeriesApi = async (seriesId: string) => {
   const { data } = await api.delete(`/content-series/${seriesId}`)
   return data as { message: string; id: string }
-}
-
-export const regenerateContentSeriesApi = async (seriesId: string, instructions?: string) => {
-  const workflows = await fetchMediaWorkflowsApi()
-  const workflow = workflows.find((item) => item.series_id === seriesId)
-  if (!workflow) {
-    throw new Error('Series này chưa có kịch bản liên kết để tạo luồng chạy mới.')
-  }
-  const { data } = await api.post('/generate-video/edit-story', {
-    workflow_id: workflow.id,
-    prompt: instructions?.trim() || 'Viết lại kịch bản và draft, giữ đúng ngữ cảnh series hiện tại.',
-  })
-  return data
-}
-
-export const fetchSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/context`)
-  return data as SeriesContextResponse
-}
-
-export const rebuildSeriesContextApi = async (seriesId: string) => {
-  const { data } = await api.post(`/content-series/${seriesId}/context/rebuild`)
-  return data as { series_id: string; context_id: string; context_version: number; mongo_document_id?: string | null }
-}
-
-export const fetchSeriesConsistencyApi = async (seriesId: string) => {
-  const { data } = await api.get(`/content-series/${seriesId}/consistency-check`)
-  return data as ConsistencyCheck
-}
-
-export const createMediaWorkflowFromSourcesApi = async (payload: {
-  profile_id: string
-  content_ids?: string[]
-  story_ids?: string[]
-  episode_ids?: string[]
-  selection_mode?: string
-  candidate_limit?: number
-  title?: string
-  note?: string
-  filters?: Record<string, unknown>
-}) => {
-  const { data } = await api.post('/media-workflows/from-sources', payload)
-  return data as MediaWorkflow
 }
 
 export type PlanningTopic = {

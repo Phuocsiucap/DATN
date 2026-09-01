@@ -3,13 +3,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import JSONB
 
-from common.db.models import ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User, KafkaTask
+from common.db.models import ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User
 from common.db.session import get_db
-from common.events.envelope import build_event
-from common.events.kafka import publish
-from common.events.topics import CONTENT_DEDUPLICATION_REQUESTED, CONTENT_NORMALIZATION_REQUESTED
 from common.db.media_workflows import _load_content_full_text
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
 from app.api.deps import get_current_user, require_admin
@@ -702,51 +698,3 @@ def update_content(content_id: uuid.UUID, payload: schemas.ContentUpdateRequest,
     db.commit()
     db.refresh(content)
     return _content_response(content)
-
-
-@router.post("/{content_id}/reprocess")
-def reprocess_content(content_id: uuid.UUID, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    content = db.get(ContentItem, content_id)
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    task = KafkaTask(
-        reference_id=str(content.id),
-        task_type="AI_NORMALIZATION",
-        status="PENDING",
-        payload_jsonb={"content_id": str(content.id)}
-    )
-    db.add(task)
-    db.commit()
-    
-    publish(
-        CONTENT_NORMALIZATION_REQUESTED,
-        build_event(
-            event_type=CONTENT_NORMALIZATION_REQUESTED,
-            source="api-service",
-            payload={"content_id": str(content.id), "task_id": str(task.id)},
-        ),
-    )
-    return {"requested": True, "processing_run_id": task.id}
-
-
-@router.post("/{content_id}/mark-duplicate")
-def mark_duplicate(content_id: uuid.UUID, duplicate_content_id: uuid.UUID, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    primary = db.get(ContentItem, content_id)
-    duplicate = db.get(ContentItem, duplicate_content_id)
-    if not primary or not duplicate:
-        raise HTTPException(status_code=404, detail="Content not found")
-        
-    duplicate.duplicate_count += 1
-    db.add(duplicate)
-    db.commit()
-    
-    publish(
-        CONTENT_DEDUPLICATION_REQUESTED,
-        build_event(
-            event_type=CONTENT_DEDUPLICATION_REQUESTED,
-            source="api-service",
-            payload={"primary_content_id": str(primary.id), "duplicate_content_id": str(duplicate.id)},
-        ),
-    )
-    return {"marked": True, "duplicate_id": duplicate.id}

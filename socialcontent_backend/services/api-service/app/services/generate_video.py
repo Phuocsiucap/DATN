@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
+import base64
+import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
-from common.core.config import get_settings
 from common.planning.auto_draft_policy import sync_compact_scenes
 
 
@@ -15,15 +15,6 @@ RENDER_WORKSPACE_ROOT = PROJECT_ROOT / "data_demo" / "video_gen_demo"
 PUBLIC_DIR = RENDER_WORKSPACE_ROOT / "public"
 AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_OUT_DIR = RENDER_WORKSPACE_ROOT / "out"
-
-import json
-
-def get_elevenlabs_api_key(settings=None) -> str:
-    current_settings = settings or get_settings()
-    api_key = current_settings.elevenlabs_api_key or os.getenv("ELEVENLABS_API_KEY") or os.getenv("ACD_ELEVENLABS_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="Missing ELEVENLABS_API_KEY")
-    return api_key
 
 try:
     from app.video.services.generate_video_timeline import (
@@ -73,29 +64,23 @@ except ImportError:
             return payload
 
 
-try:
-    from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice
-except ImportError:
-    try:
-        import sys
-        from pathlib import Path
-        engine_path = str(Path(__file__).resolve().parents[3] / "ai-media-engine")
-        if engine_path not in sys.path:
-            sys.path.insert(0, engine_path)
-        from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice
-    except ImportError:
-        def enhance_emotion_and_generate_voice(
-            story: dict[str, Any],
-            voice_id: str | None = None,
-            voice_speed: float = 1.0,
-            voice_provider: str | None = None,
-        ) -> dict[str, Any]:
-            return {"story": normalize_story_for_project(story)}
+def save_uploaded_audio(original_filename: str, content: bytes) -> str:
+    suffix = Path(original_filename or "").suffix.lower()
+    if suffix not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".webm"}:
+        raise ValueError("Unsupported audio format")
+    if not content:
+        raise ValueError("Audio file is empty")
+
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(original_filename).stem).strip("-") or "audio"
+    filename = f"upload-{uuid.uuid4().hex[:12]}-{safe_stem}{suffix}"
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    (AUDIO_DIR / filename).write_bytes(content)
+    return f"assets/audio/{filename}"
 
 
-def fit_frames_with_whisper(story: dict[str, Any]) -> dict[str, Any]:
+def save_uploaded_audio_base64(original_filename: str, content_base64: str) -> str:
     try:
-        from app.video.services.generate_video_voice import fit_frames_with_whisper as _fit
-        return _fit(story)
-    except Exception:
-        return {"story": normalize_story_for_project(story)}
+        content = base64.b64decode(content_base64, validate=True)
+    except (ValueError, TypeError) as error:
+        raise ValueError("Invalid base64 audio payload") from error
+    return save_uploaded_audio(original_filename, content)

@@ -13,11 +13,6 @@ from app.services.users import UserService, to_user_response
 router = APIRouter()
 
 
-@router.get("/me", response_model=schemas.UserResponse)
-def me(user: User = Depends(get_current_user)):
-    return to_user_response(user)
-
-
 @router.get("/me/ai-usage")
 def get_my_ai_usage(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get AI consumption billing and token usage breakdown for current user."""

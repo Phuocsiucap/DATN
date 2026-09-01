@@ -15,6 +15,8 @@ from common.db.content_series import (
 from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
+from app.video.services.generate_video_assets import hydrate_source_video_assets
+from app.video.services.generate_video_scripting import create_story_from_raw
 from app.video.services.generate_video_voice import DEFAULT_VOICE_SPEED
 from app.video.services.generate_video_timeline import normalize_story_for_project, public_story_payload
 

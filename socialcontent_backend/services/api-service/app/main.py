@@ -15,7 +15,6 @@ from app.api.routes import (
     content_series,
     contents,
     crawl_jobs,
-    data_quality,
     media_proxy,
     generate_video,
     planning_runs,
@@ -65,7 +64,6 @@ app.include_router(sources.router, prefix="/api/v1", tags=["sources"])
 app.include_router(contents.router, prefix="/api/v1/contents", tags=["contents"])
 app.include_router(media_proxy.router, prefix="/api/v1/media-proxy", tags=["media-proxy"])
 app.include_router(stories.router, prefix="/api/v1", tags=["stories"])
-app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["data-quality"])
 app.include_router(planning_runs.router, prefix="/api/v1/planning-runs", tags=["planning-runs"])
 app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["profile-planning"])
 app.include_router(media_workflows.router, prefix="/api/v1/media-workflows", tags=["media-workflows"])

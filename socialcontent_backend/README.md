@@ -42,7 +42,6 @@ API service runs at `http://localhost:8000`.
 - `GET /api/v1/social-profiles/{profile_id}/posts`
 - `POST /api/v1/crawl-jobs`
 - `GET /api/v1/crawl-jobs/{job_id}/events`
-- `GET /api/v1/crawl-jobs/{job_id}/logs`
 - `GET /api/v1/contents`
 - `GET /api/v1/stories`
 

@@ -10,5 +10,5 @@ python-dotenv==1.0.1
 PyJWT==2.10.1
 bcrypt==4.2.1
 httpx==0.28.1
-edge-tts==7.2.8
 alembic==1.14.0
+tzdata>=2025.2

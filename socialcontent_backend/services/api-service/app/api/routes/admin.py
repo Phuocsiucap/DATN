@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
-from common.db.models import AuditLog, Role, User
+from common.db.models import AuditLog, User
 from common.db.session import get_db
 from app.schemas import api as schemas
 from app.api.deps import require_system_admin

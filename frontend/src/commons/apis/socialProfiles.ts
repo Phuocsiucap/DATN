@@ -102,42 +102,6 @@ export const updateSocialProfileStrategyApi = async (profileId: string | number,
   return data
 }
 
-export const fetchStrategyTopicDescriptionsApi = async (topics: string): Promise<StrategyTopicDetail[]> => {
-  const { data } = await api.get('/social-profiles/topic-descriptions', { params: { topics } })
-  return data
-}
-
-export const fetchSocialProfileStrategyTopicsApi = async (profileId: string | number, kind: 'content' | 'avoid' = 'content'): Promise<StrategyTopicDetail[]> => {
-  const { data } = await api.get(`/social-profiles/${profileId}/strategy/topics`, { params: { kind } })
-  return data
-}
-
-export const addSocialProfileStrategyTopicApi = async (
-  profileId: string | number,
-  payload: { kind?: 'content' | 'avoid'; topic: string; description?: string | null },
-): Promise<SocialProfileStrategy> => {
-  const { data } = await api.post(`/social-profiles/${profileId}/strategy/topics`, payload)
-  return data
-}
-
-export const updateSocialProfileStrategyTopicApi = async (
-  profileId: string | number,
-  topicKey: string,
-  payload: { kind?: 'content' | 'avoid'; topic?: string | null; description?: string | null },
-): Promise<SocialProfileStrategy> => {
-  const { data } = await api.put(`/social-profiles/${profileId}/strategy/topics/${encodeURIComponent(topicKey)}`, payload)
-  return data
-}
-
-export const deleteSocialProfileStrategyTopicApi = async (
-  profileId: string | number,
-  topicKey: string,
-  kind: 'content' | 'avoid' = 'content',
-): Promise<SocialProfileStrategy> => {
-  const { data } = await api.delete(`/social-profiles/${profileId}/strategy/topics/${encodeURIComponent(topicKey)}`, { params: { kind } })
-  return data
-}
-
 export type PublishingQueueFilters = {
   queue_status?: string
   status?: string
@@ -250,7 +214,7 @@ export const refreshPublishingQueueItemPublishStatusApi = async (
   return data
 }
 
-export const createSocialProfileApi = async (payload: any): Promise<SocialProfile> => {
+export const createSocialProfileApi = async (payload: { platform?: string; profile_name: string; username?: string }): Promise<SocialProfile> => {
   const { data } = await api.post('/social-profiles', payload)
   return data
 }
@@ -307,42 +271,20 @@ export const syncSocialProfileApi = async (profileId: string | number): Promise<
   return data
 }
 
-export const fetchProfileSnapshotsApi = async (profileId: string | number, days: number = 30) => {
-  const { data } = await api.get(`/social-profiles/${profileId}/snapshots`, { params: { days } })
-  return data
-}
-
 export const fetchSocialPostsApi = async (profileId: string | number): Promise<SocialPostsResponse> => {
   const { data } = await api.get(`/social-profiles/${profileId}/posts`)
   return data
 }
 
-export const fetchSocialPostOverviewApi = async () => {
-  const { data } = await api.get('/social-profiles/posts/overview')
-  return data
-}
-
-export const createSocialPostApi = async (profileId: string | number, payload: any) => {
-  const { data } = await api.post(`/social-profiles/${profileId}/posts`, payload)
-  return data
-}
-
-export const deleteSocialPostApi = async (postId: string | number) => {
-  const { data } = await api.delete(`/social-profiles/post-items/${postId}`)
-  return data
-}
-
-export const createSocialPostMetricApi = async (postId: string | number, payload: any) => {
-  const { data } = await api.post(`/social-profiles/post-items/${postId}/metrics`, payload)
-  return data
-}
-
-export const startPendingTikTokQrLoginApi = async (payload: any) => {
+export const startPendingTikTokQrLoginApi = async (payload: { profile_name?: string; username?: string }) => {
   const { data } = await api.post('/social-profiles/tiktok/qr/start', payload)
   return data
 }
 
-export const getPendingTikTokQrLoginStatusApi = async (sessionId: string, params?: any) => {
+export const getPendingTikTokQrLoginStatusApi = async (
+  sessionId: string,
+  params?: { profile_name?: string; username?: string },
+) => {
   const { data } = await api.get(`/social-profiles/tiktok/qr/${sessionId}/status`, { params })
   return data
 }

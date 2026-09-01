@@ -10,7 +10,6 @@ from common.core.llm import deepseek_chat_completion
 from common.db.prompt_runs import log_prompt_run
 from app.video.services.generate_video_constants import DEFAULT_EFFECTS, DEFAULT_IMAGES
 from app.video.services.generate_video_timeline import (
-    _prevent_subtitle_overlap,
     collect_image_urls,
     collect_story_image_urls,
     collect_video_urls,

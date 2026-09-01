@@ -74,14 +74,6 @@ async def crawl_job_events(job_id: uuid.UUID, user: User = Depends(get_current_u
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@router.get("/{job_id}/logs")
-def crawl_job_logs(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    _get_owned_job(db, job_id, user)
-    # Crawl logs have been migrated out of Postgres to prevent WAL bloat.
-    # Return empty list to prevent frontend from breaking until frontend switches to new Log API (e.g. Loki)
-    return []
-
-
 def _get_owned_job(db: Session, job_id: uuid.UUID, user: User) -> CrawlJob:
     job = db.get(CrawlJob, job_id)
     if not job or (not user.is_system_admin and job.requested_by != user.id):

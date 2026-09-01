@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from jwt import PyJWTError
 from sqlalchemy.orm import Session
 
-from common.db.models import Role, User
+from common.db.models import User
 from common.db.session import get_db
 from common.security.jwt import create_access_token
 from common.security.jwt import decode_access_token

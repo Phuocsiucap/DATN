@@ -7,7 +7,7 @@ import unicodedata
 from typing import Any
 from common.planning.auto_draft_policy import sync_compact_scenes
 
-from app.video.services.generate_video_constants import DEFAULT_EFFECTS, DEFAULT_IMAGES, DEFAULT_VOICE_PROVIDER
+from app.video.services.generate_video_constants import DEFAULT_EFFECTS, DEFAULT_IMAGES
 
 
 def normalize_story_for_project(story: dict[str, Any]) -> dict[str, Any]:

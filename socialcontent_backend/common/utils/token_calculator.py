@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 # Pricing per 1,000,000 tokens (USD)
 PRICING_TABLE: dict[str, dict[str, float]] = {
     "deepseek-v4-flash": {"input": 0.14, "output": 0.28},

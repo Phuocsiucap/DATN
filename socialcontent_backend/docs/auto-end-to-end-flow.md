@@ -346,7 +346,7 @@ AUTO dùng Edge TTS nên không chạy DeepSeek emotion tagging. Nếu người 
 
 **Cập nhật H4 ngày 31/08:** đã bổ sung ba import `prevent_timeline_text_overlap`, `fit_video_clips_to_text`, `normalize_audio_clips`; sửa mốc 0 không cộng một frame và căn theo `voice_text` nếu khác subtitle. Test mock transcript đã đi qua đường này và giữ liên kết media/text. Chưa gọi Whisper thật; lỗi API/audio vẫn có thể tạo `fit_frame_error` như trước.
 
-Nguồn: [voice/render jobs](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_jobs.py:726), [TTS](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_voice.py:38), [alignment](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_alignment.py:25), [renderer](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_rendering.py:54), [Remotion settings](/D:/DATN/socialcontent_backend/data_demo/video_gen_demo/scripts/render-story.mjs).
+Nguồn: [voice/render jobs](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_jobs.py:726), [TTS](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_voice.py:38), [alignment](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/video/services/generate_video_alignment.py:25), [Remotion worker](/D:/DATN/socialcontent_backend/services/remotion-worker/src/worker.mjs), [Remotion settings](/D:/DATN/socialcontent_backend/data_demo/video_gen_demo/scripts/render-story.mjs).
 
 ## I. Duyệt video → tạo queue → scheduler đến giờ
 

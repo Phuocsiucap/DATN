@@ -40,7 +40,7 @@ Bilibili legacy crawler integration:
 Operational hardening added after reviewing `.agents/structure_professional.drawio.xml`:
 
 - `crawl_logs` records discovery, crawling, normalization, grouping, skipped URLs, errors, and terminal status.
-- `GET /api/v1/crawl-jobs/{job_id}/logs` exposes audit/debug logs.
+- `crawl_logs` remains available to operators for direct audit/debug queries.
 - Crawler tasks support retry/backoff with `configuration.max_attempts` and `configuration.retry_backoff_seconds`.
 - Permanent crawler and normalization failures emit `dead-letter.content`.
 - Job finalization sets `SUCCEEDED`, `PARTIAL_SUCCESS`, or `FAILED` only after active tasks finish and normalized documents are saved canonically or accounted for as failed.

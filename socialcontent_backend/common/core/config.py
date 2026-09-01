@@ -10,8 +10,6 @@ ENV_FILE = BACKEND_ROOT / ".env"
 
 class Settings(BaseSettings):
     environment: str = "development"
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
     database_url: str = "postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/socialcontent"
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db: str = "socialcontent"
@@ -31,8 +29,6 @@ class Settings(BaseSettings):
     )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
-    planning_orchestrator_url: str = "http://localhost:8050"
-    generate_video_service_url: str = "http://localhost:8070"
     embedding_service_url: str = Field(default="http://localhost:8075", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))
     embedding_model_name: str = Field(default="text-embedding-3-small", validation_alias=AliasChoices("EMBEDDING_MODEL_NAME", "OPENAI_EMBEDDING_MODEL"))
     embedding_dimensions: int = Field(default=512, validation_alias=AliasChoices("EMBEDDING_DIMENSIONS", "OPENAI_EMBEDDING_DIMENSIONS"))
@@ -46,15 +42,6 @@ class Settings(BaseSettings):
     deepseek_api_key: str = Field(default="", validation_alias=AliasChoices("ACD_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"))
     deepseek_base_url: str = Field(default="https://api.deepseek.com", validation_alias=AliasChoices("ACD_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"))
     elevenlabs_api_key: str = Field(default="", validation_alias=AliasChoices("ELEVENLABS_API_KEY"))
-    generate_video_npm_path: str = Field(
-        default="",
-        validation_alias=AliasChoices("GENERATE_VIDEO_NPM_PATH", "NPM_BINARY", "NPM_PATH"),
-    )
-    generate_video_node_path: str = Field(
-        default="",
-        validation_alias=AliasChoices("GENERATE_VIDEO_NODE_PATH", "NODE_BINARY", "NODE_PATH"),
-    )
-
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), env_file_encoding="utf-8", extra="ignore")
 
 

@@ -172,30 +172,6 @@ export type VideoWorkflowProgress = {
   updated_at?: string | null
 }
 
-export type ElevenLabsSharedVoice = {
-  voice_id: string
-  name: string
-  description?: string | null
-  preview_url?: string | null
-  accent?: string | null
-  gender?: string | null
-  age?: string | null
-  descriptive?: string | null
-  use_case?: string | null
-  category?: string | null
-  language?: string | null
-  locale?: string | null
-  cloned_by_count?: number | null
-  usage_character_count_7d?: number | null
-  verified_languages?: Array<{
-    language?: string
-    model_id?: string
-    accent?: string
-    locale?: string
-    preview_url?: string
-  }>
-}
-
 const basePath = '/generate-video'
 const defaultVideo = { width: 1080, height: 1920, fps: 30, background: '#05070b' }
 const defaultAudio = { voiceVolume: 1, musicVolume: 0 }
@@ -399,18 +375,6 @@ export const uploadGenerateVideoAudioApi = async (file: File) => {
     content_base64: window.btoa(binary),
   })
   return data as { asset_path: string }
-}
-
-export const fetchElevenLabsSharedVoicesApi = async (params: { search?: string; sort?: string; page_size?: number; page?: number } = {}) => {
-  const { data } = await api.get(`${basePath}/voices`, {
-    params: {
-      sort: params.sort || 'trending',
-      page_size: params.page_size || 30,
-      page: params.page || 0,
-      ...(params.search ? { search: params.search } : {}),
-    },
-  })
-  return data as { voices: ElevenLabsSharedVoice[]; has_more?: boolean; total_count?: number }
 }
 
 export const generateVideoMediaUrl = (assetPath: string) => {

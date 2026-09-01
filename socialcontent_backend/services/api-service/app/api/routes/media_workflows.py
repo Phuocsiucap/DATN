@@ -4,12 +4,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import case, exists, or_
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from common.db.media_workflows import _load_content_full_text, content_category_payload, serialize_workflow
 from common.db.content_series import lock_active_series, sync_series_current_part
-from common.db.models import ContentItem, ContentSeries, MediaWorkflow, CrawlJob, KafkaTask, SocialProfile, Story, User
+from common.db.models import ContentItem, ContentSeries, MediaWorkflow, KafkaTask, SocialProfile, Story, User
 from common.db.session import get_db
 from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow, sync_compact_scenes
 from app.api.deps import get_current_user
@@ -85,16 +85,6 @@ class MediaWorkflowFromSourcesRequest(BaseModel):
     title: str | None = None
     note: str | None = None
     selection_mode: str = "MANUAL"
-    filters: dict = Field(default_factory=dict)
-
-
-class MediaWorkflowFromCrawlRequest(BaseModel):
-    profile_id: uuid.UUID
-    crawl_job_id: uuid.UUID
-    candidate_limit: int = 20
-    min_quality_score: float | None = None
-    title: str | None = None
-    note: str | None = None
     filters: dict = Field(default_factory=dict)
 
 
@@ -554,59 +544,6 @@ def delete_media_workflow(
     sync_series_current_part(db, old_series_id)
     db.commit()
     return {"message": "Workflow deleted successfully", "workflow_id": str(workflow_id)}
-
-
-@router.post("/from-crawl")
-def create_media_workflow_from_crawl(payload: MediaWorkflowFromCrawlRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    profile = db.get(SocialProfile, payload.profile_id)
-    if not profile or profile.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    crawl_job = db.get(CrawlJob, payload.crawl_job_id)
-    if not crawl_job or (not user.is_system_admin and crawl_job.requested_by != user.id):
-        raise HTTPException(status_code=404, detail="Crawl job not found")
-    min_quality = payload.min_quality_score
-    query = (
-        db.query(ContentItem)
-        .filter(
-            ContentItem.crawl_job_id == payload.crawl_job_id,
-            ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
-        )
-    )
-
-    if min_quality is not None:
-        query = query.filter(ContentItem.quality_score >= min_quality)
-    content_types = payload.filters.get("content_types") if isinstance(payload.filters, dict) else None
-    if content_types:
-        query = query.filter(ContentItem.content_type.in_([str(value).upper() for value in content_types]))
-    languages = payload.filters.get("languages") if isinstance(payload.filters, dict) else None
-    if languages:
-        query = query.filter(ContentItem.language.in_(languages))
-    items = query.order_by(ContentItem.quality_score.desc(), ContentItem.updated_at.desc()).limit(payload.candidate_limit).all()
-    primary_category_payload = content_category_payload(items[0]) if items else {}
-    workflow = MediaWorkflow(
-        user_id=user.id,
-        profile_id=profile.id,
-        title=payload.title or payload.note or "Auto content workflow",
-        status="READY" if items else "NEEDS_REVIEW",
-        metadata_json={
-            "selection_mode": "AUTO",
-            "note": payload.note,
-            "filters": payload.filters,
-            "crawl_job_id": str(payload.crawl_job_id),
-            **primary_category_payload,
-        },
-    )
-    db.add(workflow)
-    db.flush()
-    inputs = []
-    for item in items:
-        inputs.append({"type": "content", "id": str(item.id), "score": float(item.quality_score or 0), **content_category_payload(item)})
-        if not workflow.primary_content_id:
-            workflow.primary_content_id = item.id
-    workflow.inputs_jsonb = inputs
-    db.commit()
-    db.refresh(workflow)
-    return serialize_workflow(workflow, db)
 
 
 def _source_workflow_title(db: Session, payload: MediaWorkflowFromSourcesRequest, user: User) -> str | None:

@@ -246,47 +246,6 @@ export type FinalContentView = {
   series_items: FinalContentItem[]
 }
 
-export type Story = {
-  id: string
-  canonical_name: string
-  normalized_name: string
-  language: string
-  total_episodes: number
-  completion_status: string
-  grouping_confidence: number
-  created_at: string
-}
-
-export type Episode = {
-  id: string
-  story_id: string
-  episode_number?: number | null
-  sequence_order?: number | null
-  episode_title?: string | null
-  duration_seconds?: number | null
-  is_missing: boolean
-}
-
-export type CrawlLog = {
-  id: string
-  job_id: string
-  task_id?: string | null
-  source_type?: string | null
-  stage: string
-  level: string
-  message: string
-  metadata_json: Record<string, unknown>
-  created_at: string
-}
-
-export type QualitySummary = {
-  total_content: number
-  ready: number
-  needs_review: number
-  average_quality_score: number
-  failed_tasks: number
-}
-
 export type VnExpressRssFeed = {
   key: string
   label: string
@@ -318,16 +277,6 @@ export const retryCrawlJobApi = async (jobId: string) => {
   return data as CrawlJob
 }
 
-export const fetchCrawlJobLogsApi = async (jobId: string) => {
-  const { data } = await api.get(`/crawl-jobs/${jobId}/logs`)
-  return data as CrawlLog[]
-}
-
-export const fetchContentsApi = async (params?: Record<string, string>) => {
-  const { data } = await api.get('/contents', { params })
-  return data as ContentItem[]
-}
-
 export const fetchContentDetailApi = async (contentId: string) => {
   const { data } = await api.get(`/contents/${contentId}/detail`)
   return data as ContentDetail
@@ -336,29 +285,4 @@ export const fetchContentDetailApi = async (contentId: string) => {
 export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string; view?: string }) => {
   const { data } = await api.get('/contents/final-view', { params })
   return data as FinalContentView
-}
-
-export const fetchStoriesApi = async () => {
-  const { data } = await api.get('/stories')
-  return data as Story[]
-}
-
-export const fetchStoryEpisodesApi = async (storyId: string) => {
-  const { data } = await api.get(`/stories/${storyId}/episodes`)
-  return data as Episode[]
-}
-
-export const regroupStoryApi = async (storyId: string) => {
-  const { data } = await api.post(`/stories/${storyId}/regroup`)
-  return data
-}
-
-export const fetchQualitySummaryApi = async () => {
-  const { data } = await api.get('/data-quality/summary')
-  return data as QualitySummary
-}
-
-export const fetchQualityIssuesApi = async () => {
-  const { data } = await api.get('/data-quality/issues')
-  return data
 }

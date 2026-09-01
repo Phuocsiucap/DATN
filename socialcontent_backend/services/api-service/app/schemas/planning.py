@@ -23,10 +23,6 @@ class MediaWorkflowReviewRequest(BaseModel):
     feedback_text: str | None = None
 
 
-class MediaWorkflowRegenerateRequest(BaseModel):
-    instructions: str | None = None
-
-
 class MediaWorkflowResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,29 +132,3 @@ class ProfileSeriesReviewArticleResponse(BaseModel):
 class ProfileSeriesReviewResponse(BaseModel):
     series: ContentSeriesResponse
     articles: list[ProfileSeriesReviewArticleResponse] = Field(default_factory=list)
-
-
-class MediaWorkflowSummaryResponse(BaseModel):
-    id: uuid.UUID | str
-    title: str
-    status: str | None = None
-    timeline_duration: float | None = None
-    rendered_video: str | None = None
-    updated_at: datetime | str | None = None
-
-
-class KafkaTaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    task_type: str
-    status: str
-    current_stage: str | None
-    progress_percent: float
-    reference_id: uuid.UUID | None
-    reference_type: str | None
-    attempt_count: int
-    error_message: str | None
-    created_at: datetime
-    started_at: datetime | None
-    completed_at: datetime | None

@@ -17,12 +17,3 @@ class StoryResponse(BaseModel):
     completion_status: str
     grouping_confidence: float
     created_at: datetime
-
-
-class EpisodeUpdateRequest(BaseModel):
-    episode_number: int | None = None
-    chapter_number: int | None = None
-    season_number: int | None = None
-    sequence_order: int | None = None
-    episode_title: str | None = None
-    is_missing: bool | None = None

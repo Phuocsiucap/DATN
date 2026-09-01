@@ -4,8 +4,7 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -59,15 +58,6 @@ PRE_RENDER_TASK_TYPES = {
     "GENERATE_VIDEO_VOICE",
 }
 
-DEFAULT_SHARED_VOICE = {
-    "voice_id": "pNInz6obpgDQGcFmaJgB",
-    "name": "Adam",
-    "description": "Default fallback voice. ElevenLabs shared voice discovery is currently unavailable.",
-    "category": "premade",
-    "language": "vi",
-}
-
-
 class StoryRequest(BaseModel):
     story: dict
     workflow_id: uuid.UUID
@@ -115,45 +105,6 @@ class QueueRenderedVideoRequest(BaseModel):
     scheduled_at: datetime | None = None
     caption: str | None = None
     status: str | None = None
-
-
-@router.get("/voices")
-def list_elevenlabs_shared_voices(
-    search: str | None = None,
-    sort: str = "trending",
-    page_size: int = Query(default=30, ge=1, le=100),
-    page: int = Query(default=0, ge=0),
-):
-    params = {
-        "sort": sort,
-        "page_size": page_size,
-        "page": page,
-        "explore_source": "tts_explore_tab",
-    }
-    if search:
-        params["search"] = search
-    headers = {}
-    api_key = pipeline.get_elevenlabs_api_key()
-    if api_key:
-        headers["xi-api-key"] = api_key
-    try:
-        response = httpx.get(
-            "https://api.us.elevenlabs.io/v1/shared-voices",
-            params=params,
-            headers=headers,
-            timeout=20,
-        )
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPError as error:
-        detail = error.response.text if getattr(error, "response", None) is not None else str(error)
-        return {
-            "voices": [DEFAULT_SHARED_VOICE],
-            "has_more": False,
-            "total_count": 1,
-            "fallback": True,
-            "error": detail,
-        }
 
 
 @router.post("/projects/{workflow_id}/create-story")

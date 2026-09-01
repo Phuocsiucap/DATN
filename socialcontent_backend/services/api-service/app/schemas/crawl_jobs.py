@@ -43,17 +43,3 @@ class CrawlJobResponse(BaseModel):
     progress_percent: float
     created_at: datetime
     updated_at: datetime
-
-
-class CrawlLogResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    job_id: uuid.UUID
-    task_id: uuid.UUID | None = None
-    source_type: str | None
-    stage: str
-    level: str
-    message: str
-    metadata_json: dict[str, Any]
-    created_at: datetime

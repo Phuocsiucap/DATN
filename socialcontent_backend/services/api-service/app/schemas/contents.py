@@ -114,26 +114,3 @@ class ContentDetailResponse(ContentResponse):
     sources_jsonb: list[Any] = Field(default_factory=list)
     profile_matches: list[ProfileContentMatchResponse] = Field(default_factory=list)
     ai_selection_summary: str | None = None
-
-
-class FinalSeriesInfoResponse(BaseModel):
-    id: uuid.UUID
-    canonical_name: str
-    completion_status: str
-    total_episodes: int
-    grouping_confidence: float
-
-
-class FinalContentItemResponse(ContentResponse):
-    source_type: str | None = None
-    source_url: str | None = None
-    published_at: datetime | None = None
-    media_jsonb: list[Any] = Field(default_factory=list)
-    story_id: uuid.UUID | None = None
-    episode_order: int | None = None
-    series: FinalSeriesInfoResponse | None = None
-
-
-class FinalContentViewResponse(BaseModel):
-    normal_items: list[FinalContentItemResponse]
-    series_items: list[FinalContentItemResponse]
