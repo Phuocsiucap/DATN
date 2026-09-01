@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
   Bookmark,
-  CalendarDays,
   Download,
   Eye,
   Heart,
@@ -36,7 +35,8 @@ import {
   type AccountTopTopics,
   type SocialProfile,
 } from '@/commons/apis/api'
-import { AppButton, EmptyBlock, PageHeader, SelectControl, SocialProfileAvatar, StatusPill, platformLabel } from '@/commons/component/social-ui'
+import { AppButton, DateInput, PageLayout, platformLabel } from '@/commons/component/social-ui'
+import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { cn } from '@/commons/lib/utils'
 
 const compactNumber = new Intl.NumberFormat('vi-VN', { notation: 'compact', maximumFractionDigits: 1 })
@@ -65,6 +65,7 @@ const tabs = ['Tổng quan', 'Hiệu quả nội dung', 'Chủ đề', 'Thời g
 
 export default function AccountAnalyticsPage() {
   const [profiles, setProfiles] = useState<SocialProfile[]>([])
+  const [loadingProfiles, setLoadingProfiles] = useState(true)
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [startDate, setStartDate] = useState(() => formatDateInput(addDays(new Date(), -6)))
   const [endDate, setEndDate] = useState(() => formatDateInput(new Date()))
@@ -119,7 +120,7 @@ export default function AccountAnalyticsPage() {
     loadProfiles().catch((error: any) => {
       setLoading(false)
       toast.error(error?.response?.data?.detail || 'Không tải được tài khoản social')
-    })
+    }).finally(() => setLoadingProfiles(false))
   }, [])
 
   useEffect(() => {
@@ -129,29 +130,22 @@ export default function AccountAnalyticsPage() {
   const metrics = overview?.metrics || {}
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Phân tích theo tài khoản"
-        description="Tổng hợp tăng trưởng kênh, hiệu quả nội dung và chủ đề dựa trên snapshot TikTok."
-        actions={
-          <>
-            <DateInput value={startDate} onChange={setStartDate} />
-            <DateInput value={endDate} onChange={setEndDate} />
-            <SelectControl value={selectedProfileId} onChange={setSelectedProfileId} className="w-full sm:w-[280px]">
-              {profiles.length === 0 && <option value="">Chưa có tài khoản</option>}
-              {profiles.map((profile) => (
-                <option key={profile.id} value={String(profile.id)}>{profile.profile_name}</option>
-              ))}
-            </SelectControl>
-            <AppButton variant="secondary" icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />} onClick={() => void loadAnalytics()} disabled={loading || !selectedProfileId}>
-              Tải lại
-            </AppButton>
-            <AppButton variant="secondary" icon={<Download size={15} />} disabled={!overview}>
-              Xuất báo cáo
-            </AppButton>
-          </>
-        }
-      />
+    <PageLayout
+      title="Phân tích theo tài khoản"
+      description="Tổng hợp tăng trưởng kênh, hiệu quả nội dung và chủ đề dựa trên snapshot TikTok."
+      actions={
+        <>
+          <DateInput label="Từ" value={startDate} onChange={setStartDate} className="w-full sm:w-[165px]" />
+          <DateInput label="Đến" value={endDate} onChange={setEndDate} className="w-full sm:w-[165px]" />
+          <AppButton variant="secondary" icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />} onClick={() => void loadAnalytics()} disabled={loading || !selectedProfileId}>
+            Tải lại
+          </AppButton>
+          <AppButton variant="secondary" icon={<Download size={15} />} disabled={!overview}>
+            Xuất báo cáo
+          </AppButton>
+        </>
+      }
+    >
 
       <div className="flex gap-6 overflow-x-auto border-b border-[var(--outline-variant)]">
         {tabs.map((tab) => (
@@ -166,16 +160,10 @@ export default function AccountAnalyticsPage() {
         ))}
       </div>
 
-      {profiles.length === 0 && !loading ? (
-        <EmptyBlock label="Chưa có tài khoản social để phân tích." />
-      ) : (
-        <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {profiles.map((profile) => (
-              <ProfileCard key={profile.id} profile={profile} active={String(profile.id) === selectedProfileId} onClick={() => setSelectedProfileId(String(profile.id))} />
-            ))}
-          </section>
+      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} loading={loadingProfiles} emptyLabel="Chưa có tài khoản social để phân tích." />
 
+      {profiles.length > 0 && (
+        <>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <MetricTile icon={<Eye size={18} />} label="Tổng lượt xem" metric={metrics.views} tint="#2556ea" />
             <MetricTile icon={<Heart size={18} />} label="Tổng lượt thích" metric={metrics.likes} tint="#db2777" />
@@ -238,32 +226,7 @@ export default function AccountAnalyticsPage() {
           </section>
         </>
       )}
-    </div>
-  )
-}
-
-function DateInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="relative w-full sm:w-[160px]">
-      <CalendarDays size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#718096]" />
-      <input className="app-input w-full pl-9" type="date" value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  )
-}
-
-function ProfileCard({ profile, active, onClick }: { profile: SocialProfile; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn('flex min-h-[82px] items-center gap-3 rounded-[8px] border bg-white p-3 text-left shadow-sm transition hover:bg-[#f8faff]', active ? 'border-[#818cf8] bg-[#f8f7ff]' : 'border-[var(--outline-variant)]')}
-    >
-      <SocialProfileAvatar avatarUrl={profile.avatar_url} name={profile.profile_name} platform={profile.platform} size="lg" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-extrabold text-[#111827]">{profile.profile_name}</div>
-        <div className="truncate text-xs font-semibold text-[#64748b]">{profile.username ? `@${profile.username}` : platformLabel(profile.platform)}</div>
-        <div className="mt-1"><StatusPill value={profile.status || 'active'} /></div>
-      </div>
-    </button>
+    </PageLayout>
   )
 }
 

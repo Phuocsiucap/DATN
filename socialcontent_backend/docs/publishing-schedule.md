@@ -4,6 +4,61 @@
 đưa video đã duyệt vào queue, và auto queue sau khi render. Không tự sửa lịch các
 bài cũ khi triển khai thay đổi này.
 
+## Công tắc tự động đăng
+
+Trang tạo video có bốn cột sản xuất: Draft kịch bản, Biên tập & Voice, Render MP4,
+Video hoàn tất. Các bước duyệt video thành phẩm và chọn lịch nằm ở Approvals.
+Video lỗi/trạng thái lạ được hiển thị trong khu vực Cần xử lý, không bị mất khỏi UI.
+
+- **Duyệt** gọi `POST /social-profiles/queue/items/{id}/approve`: duyệt video,
+  đồng bộ workflow, đặt `scheduled_at = null` kể cả bài cũ đã có giờ tự gán.
+  Không gọi AI chọn lịch, không upload TikTok, không phụ thuộc `auto_queue_enabled`.
+- **Duyệt & lên lịch / Lên lịch đăng** mở bước chọn lịch, mặc định thủ công.
+  Người dùng nhập giờ tương lai và xác nhận; frontend gửi timestamp UTC cùng múi
+  giờ thiết bị. API giữ đúng thời điểm này, không gọi AI hoặc fallback sang giờ khác.
+- **AI chọn giờ** là lựa chọn chủ động, cần xác nhận riêng trước khi gọi planner.
+  API `approve-schedule` mặc định `schedule_mode=manual`; thiếu giờ trả lỗi.
+- Khi mở Approvals, video đã duyệt được giữ `approved`, không phải duyệt lần hai.
+  Việc đưa video hoàn tất vào danh sách duyệt không tự gán lịch đăng.
+- Bài đang upload hoặc đã kết thúc không thể duyệt/lên lịch lại.
+
+Approvals chỉ có ba tab, phân loại theo trạng thái **và** `scheduled_at`:
+
+| Tab | Điều kiện / thao tác |
+| --- | --- |
+| Chờ duyệt | `needs_approval`; Duyệt riêng hoặc Duyệt & lên lịch |
+| Đã duyệt | `approved` / `queued`, chưa có giờ; nút Lên lịch ngay trên từng bài |
+| Cần xử lý | Từ chối, cần chỉnh sửa, đăng thất bại |
+
+Bài `approved` / `queued` đã có giờ và bài đang `publishing` được quản lý ở trang
+Lịch đăng; `published` ở trang Bài đã đăng. Không tạo hai tab trùng chức năng trong
+Approvals, cũng không gom các bài này vào tab Tất cả. Sau khi lên lịch thành công,
+bài tự rời danh sách Approvals; nút Xem lịch đăng mở trang quản lý lịch.
+
+Strategy vẫn giữ các bước độc lập: duyệt thủ công → Chờ duyệt; tự duyệt nhưng
+`auto_queue_enabled=false` → Đã duyệt, không gọi planner; tự duyệt và bật tự lên
+lịch → chọn giờ, chuyển sang trang Lịch đăng. Nút Duyệt thủ công ở Approvals luôn chỉ
+duyệt, không tự đặt lịch dù strategy bật tự động. Lên lịch cho bài đã tự duyệt giữ
+nguyên thông tin người/chế độ/thời điểm duyệt ban đầu. Chi tiết bài hiển thị cấu
+hình strategy hiện tại, không suy diễn nguồn duyệt từ cấu hình đó.
+
+Profile chỉ dùng `auto_publish_enabled` (mặc định `false`), tương ứng công tắc
+**Tự động đăng theo lịch**. Khi tắt, lịch vẫn được lưu/đề xuất và người dùng vẫn có
+thể đăng thủ công; scheduler không tự gửi bài mới lên TikTok. Điều kiện duyệt bài,
+profile active, token và quyền TikTok vẫn được kiểm tra như trước. Việc theo dõi
+trạng thái bài đã gửi lên TikTok vẫn tiếp tục khi tắt công tắc.
+
+`schedule_enabled` của profile đã bị bỏ khỏi model và API; request cũ chứa trường
+này trả lỗi validation, yêu cầu tải lại frontend và dùng `auto_publish_enabled`.
+`source.configuration.schedule_enabled` của lịch crawl không thay đổi.
+
+Khi triển khai, dừng API/worker cũ, chạy `alembic upgrade head` từ backend root,
+rồi khởi động API và worker với code mới. Migration `e64f0a7c2b93` gộp dữ liệu bằng
+`auto_publish_enabled = auto_publish_enabled AND schedule_enabled` trước khi bỏ
+cột cũ, nên không tự bật đăng cho profile đang tắt một trong hai công tắc. Ngày,
+giờ, múi giờ và lịch bài đã lưu không thay đổi. Downgrade tạo lại cờ lịch bằng
+`true`, giữ nguyên trạng thái tự đăng đã gộp; không khôi phục hai giá trị cũ riêng lẻ.
+
 ## Thời gian và hàng đợi
 
 - Lấy giờ UTC thực tế trên máy chủ tại thời điểm xử lý; đổi sang
@@ -42,8 +97,8 @@ Kiểm tra lại đồng hồ sau khi nhận kết quả. `ai_reason` lưu cách
 múi giờ, lịch chọn và số bài đã xét; lượt gọi thành công được ghi vào `PromptRun`.
 
 Nếu không còn chỗ trong 90 ngày, API trả lỗi rõ ràng thay vì chọn ngoài chiến lược.
-Worker render giữ video trong queue chờ duyệt với `scheduled_at = null`, không đánh
-dấu render thất bại. Lịch thủ công vẫn là lựa chọn chủ động của người dùng và không
+Worker render giữ video ở trạng thái đã duyệt với `scheduled_at = null`, không bắt
+duyệt lại hoặc đánh dấu render thất bại. Lịch thủ công là lựa chọn chủ động và không
 gọi AI. Các lịch đã lưu vẫn được giữ khi đưa lại cùng video vào queue; chỉ lịch đã
 quá hạn/chưa có mới được chọn lại tự động.
 

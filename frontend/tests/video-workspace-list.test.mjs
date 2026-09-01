@@ -4,7 +4,7 @@ import { createServer } from 'vite'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-let server, normalizeVideoWorkspaceList, hasActiveVideoTask, videoWorkspaceSeriesKey, VideoKanbanCard, buildVideoKanbanColumns, classifyVideoWorkspace
+let server, normalizeVideoWorkspaceList, hasActiveVideoTask, videoWorkspaceSeriesKey, VideoKanbanCard, VideoRenderingIndicator, DraftGenerationIndicator, VoiceGenerationIndicator, buildVideoKanbanColumns, classifyVideoWorkspace
 before(async () => {
   server = await createServer({
     cacheDir: 'node_modules/.vite-workspace-list-tests',
@@ -14,6 +14,9 @@ before(async () => {
   ;({ normalizeVideoWorkspaceList, hasActiveVideoTask, videoWorkspaceSeriesKey } = await server.ssrLoadModule('/src/commons/apis/videoWorkspaceList.ts'))
   ;({ buildVideoKanbanColumns, classifyVideoWorkspace } = await server.ssrLoadModule('/src/features/generate-video/videoKanban.ts'))
   ;({ VideoKanbanCard } = await server.ssrLoadModule('/src/features/generate-video/GenerateVideoProjectsPage.tsx'))
+  ;({ default: VideoRenderingIndicator } = await server.ssrLoadModule('/src/commons/component/VideoRenderingIndicator.tsx'))
+  ;({ default: DraftGenerationIndicator } = await server.ssrLoadModule('/src/commons/component/DraftGenerationIndicator.tsx'))
+  ;({ default: VoiceGenerationIndicator } = await server.ssrLoadModule('/src/commons/component/VoiceGenerationIndicator.tsx'))
 })
 after(async () => { await server?.close() })
 
@@ -111,9 +114,122 @@ test('running card preserves zero progress and disables destructive actions', ()
   const item = normalizeVideoWorkspaceList(input).items[0]
   const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item, copied: false, busy: false, disabled: hasActiveVideoTask(item) }))
   assert.match(html, /0%/)
+  assert.match(html, /Đang render video/)
+  assert.match(html, /role="progressbar"[^>]*aria-valuenow="0"/)
   assert.doesNotMatch(html, /45%|width:8%|01:04/)
   assert.match(html, /disabled=""[^>]*title="Xóa workflow này"/)
   assert.match(html, /disabled=""[^>]*title="Tạo lại draft"/)
+})
+
+test('render placeholder distinguishes queued jobs from running and legacy rendering jobs', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  for (const task_status of ['PENDING', 'RUNNING', 'PROCESSING', null]) {
+    const item = { ...base, status: 'RENDERING', task_status, progress_percent: 32 }
+    const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item, copied: false, busy: false, disabled: true }))
+    assert.ok(html.includes(task_status === 'PENDING' ? 'Đang chờ render' : 'Đang render video'))
+    assert.ok(html.includes(`data-state="${task_status === 'PENDING' ? 'queued' : 'rendering'}"`))
+    assert.match(html, /aria-valuenow="32"/)
+    assert.match(html, /32%/)
+  }
+})
+
+test('render placeholder is removed for terminal jobs and does not animate scripting or voice work', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  for (const [status, task_status] of [
+    ['RENDERING', 'FAILED'], ['RENDERING', 'CANCELLED'], ['RENDERING', 'COMPLETED'],
+    ['FAILED', 'RUNNING'], ['RENDERED', 'RUNNING'], ['VIDEO_APPROVED', 'RUNNING'],
+    ['QUEUED_FOR_PUBLISHING', 'RUNNING'], ['PUBLISHED', 'RUNNING'],
+    ['SCRIPTING', 'RUNNING'], ['EDITING', 'RUNNING'], ['VOICE_READY', 'RUNNING'],
+  ]) {
+    const item = { ...base, status, task_status }
+    const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item, copied: false, busy: false, disabled: false }))
+    assert.doesNotMatch(html, /Đang render video|Đang chờ render|role="progressbar"/, `${status}/${task_status}`)
+    assert.match(html, /src="\/thumb"/)
+  }
+})
+
+test('all generation indicators bound actual progress and never invent a percentage for missing progress', () => {
+  for (const Indicator of [VideoRenderingIndicator, DraftGenerationIndicator, VoiceGenerationIndicator]) {
+    for (const [progress, expected] of [[0, 0], [32.4, 32], [-10, 0], [150, 100]]) {
+      const html = renderToStaticMarkup(createElement(Indicator, { progress }))
+      assert.ok(html.includes(`aria-valuenow="${expected}"`))
+      assert.ok(html.includes(`width:${expected}%`))
+    }
+    for (const progress of [undefined, null, NaN, Infinity]) {
+      const html = renderToStaticMarkup(createElement(Indicator, { progress }))
+      assert.match(html, /role="progressbar"/)
+      assert.match(html, /Đang xử lý/)
+      assert.doesNotMatch(html, /aria-valuenow|NaN|Infinity|\d+%/)
+    }
+  }
+})
+
+test('draft and voice cards show the correct activity throughout their processing stages', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  const cases = [
+    ...['LOADING_SOURCE', 'GENERATING_DRAFT', 'NORMALIZING_DRAFT', 'APPLYING_SERIES', 'SAVING_DRAFT'].map(current_stage => ({
+      status: 'SCRIPTING', current_stage, label: 'Đang tạo draft',
+    })),
+    ...['PREPARING_VOICE', 'GENERATING_VOICE', 'ALIGNING_VOICE', 'SAVING_VOICE'].map(current_stage => ({
+      status: 'EDITING', current_stage, label: 'Đang tạo voice',
+    })),
+    { status: 'RENDERING', current_stage: 'GENERATING_VOICE', label: 'Đang tạo voice' },
+  ]
+  for (const { status, current_stage, label } of cases) {
+    for (const task_status of ['RUNNING', 'PROCESSING', null]) {
+      const item = { ...base, status, current_stage, task_status, progress_percent: 30 }
+      const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item, disabled: true }))
+      assert.ok(html.includes(`aria-label="${label}"`), `${status}/${current_stage}/${task_status}`)
+      assert.match(html, /aria-valuenow="30"/)
+      assert.equal((html.match(/role="progressbar"/g) || []).length, 1)
+      assert.doesNotMatch(html, /Đang render video/)
+    }
+  }
+})
+
+test('queued draft and voice jobs show a waiting placeholder until their worker starts', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  for (const [status, current_stage, label] of [
+    ['SCRIPTING', 'QUEUED_SCRIPT', 'Đang chờ tạo draft'],
+    ['EDITING', 'QUEUED_VOICE', 'Đang chờ tạo voice'],
+    ['EDITING', 'GENERATING_VOICE', 'Đang chờ tạo voice'],
+  ]) {
+    const item = { ...base, status, current_stage, task_status: 'PENDING' }
+    const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item, disabled: true }))
+    assert.match(html, /data-state="queued"/)
+    assert.ok(html.includes(`aria-label="${label}"`))
+    assert.match(html, /aria-valuenow="0"/)
+  }
+})
+
+test('draft and voice illustrations stop after completion, failure or cancellation even with stale stages', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  for (const [status, current_stage] of [['SCRIPTING', 'GENERATING_DRAFT'], ['EDITING', 'GENERATING_VOICE']]) {
+    for (const task_status of ['COMPLETED', 'FAILED', 'CANCELLED']) {
+      const item = { ...base, status, current_stage, task_status }
+      const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item }))
+      assert.doesNotMatch(html, /role="progressbar"|Đang tạo draft|Đang tạo voice/)
+      assert.match(html, /src="\/thumb"/)
+    }
+  }
+  for (const status of ['FAILED', 'RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED']) {
+    const item = { ...base, status, current_stage: 'GENERATING_VOICE', task_status: 'RUNNING' }
+    assert.doesNotMatch(renderToStaticMarkup(createElement(VideoKanbanCard, { item })), /role="progressbar"/)
+  }
+})
+
+test('manual editing, AI review and ready-to-review or ready-voice states are not displayed as generation', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  for (const [status, current_stage] of [
+    ['EDITING', 'DRAFT_REVIEW_REQUIRED'], ['SCRIPTING', 'DRAFT_READY'],
+    ['EDITING', 'EDITING_DRAFT'], ['EDITING', 'NORMALIZING_DRAFT'],
+    ['REVIEWING', 'REVIEWING_DRAFT'], ['REVIEWING', 'REVIEW_COMPLETE'],
+    ['VOICE_READY', 'VOICE_READY'], ['EDITING', null],
+  ]) {
+    const item = { ...base, status, current_stage, task_status: 'RUNNING' }
+    const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item }))
+    assert.doesNotMatch(html, /role="progressbar"/, `${status}/${current_stage}`)
+  }
 })
 
 test('series refresh key ignores card order/count but changes for new or renamed series', () => {
@@ -124,7 +240,7 @@ test('series refresh key ignores card order/count but changes for new or renamed
   assert.equal(videoWorkspaceSeriesKey([{ series: null }]), '[]')
 })
 
-test('kanban puts queued and failed workspaces in their own columns', () => {
+test('production board has exactly four columns and completed videos stop at the fourth', () => {
   const input = {
     schema_version: 2,
     total: 4,
@@ -144,8 +260,24 @@ test('kanban puts queued and failed workspaces in their own columns', () => {
   const byId = Object.fromEntries(columns.map((column) => [column.id, column.items.map((item) => item.id)]))
 
   assert.deepEqual(byId.draft, [])
-  assert.deepEqual(byId.queued, ['queued'])
+  assert.deepEqual(columns.map(column => column.id), ['draft', 'editing', 'rendering', 'review', 'failed'])
+  assert.deepEqual(byId.review, ['queued'])
   assert.deepEqual(byId.failed, ['failed-1', 'failed-2', 'failed-3'])
+  assert.deepEqual(items.filter(item => classifyVideoWorkspace(item) === 'failed').map(item => item.id), ['failed-1', 'failed-2', 'failed-3'])
+  assert.equal(columns.flatMap(column => column.items).length, items.length)
+})
+
+test('approved and published videos remain visible without publishing columns', () => {
+  const base = normalizeVideoWorkspaceList(fixture()).items[0]
+  const items = ['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].map(status => ({ ...base, id: status, status }))
+  const columns = buildVideoKanbanColumns(items)
+  assert.deepEqual(columns[3].items.map(item => item.id), items.map(item => item.id))
+  const html = renderToStaticMarkup(createElement(VideoKanbanCard, { item: items[0], copied: false, busy: false, disabled: false }))
+  assert.match(html, /href="\/approvals\?profile_id=p"/)
+  const scheduledHtml = renderToStaticMarkup(createElement(VideoKanbanCard, { item: items[2], copied: false, busy: false, disabled: false }))
+  assert.match(scheduledHtml, /href="\/schedule\?profile_id=p"/)
+  const publishedHtml = renderToStaticMarkup(createElement(VideoKanbanCard, { item: items[3], copied: false, busy: false, disabled: false }))
+  assert.match(publishedHtml, /href="\/published-posts\?profile_id=p"/)
 })
 
 test('kanban classifies known terminal statuses before active task fallback', () => {

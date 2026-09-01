@@ -613,8 +613,8 @@ class SocialProfileService:
 
     def sync_rendered_workflows_to_queue(self, db: Session, user: User) -> None:
         """
-        Tự động đồng bộ các MediaWorkflow đã RENDERED / VIDEO_APPROVED sang PublishingQueueItem
-        với trạng thái 'needs_approval' nếu chưa có trong queue.
+        Đưa video hoàn tất vào Approvals khi chưa có bản ghi, không đặt lịch.
+        Video đã duyệt giữ trạng thái approved để không phải duyệt hai lần.
         """
         query = db.query(MediaWorkflow).filter(
             MediaWorkflow.status.in_(["RENDERED", "VIDEO_APPROVED", "QUEUED_FOR_PUBLISHING"])
@@ -635,6 +635,21 @@ class SocialProfileService:
                 try:
                     existing = db.get(PublishingQueueItem, uuid.UUID(str(queued_id)))
                     if existing:
+                        # Older intake mislabeled already-approved videos as
+                        # pending review. Only repair its untouched, unscheduled
+                        # records; never activate an existing reserved slot.
+                        if (
+                            metadata.get("video_approved")
+                            and existing.user_id == wf.user_id
+                            and existing.profile_id == wf.profile_id
+                            and existing.status == "needs_approval"
+                            and existing.scheduled_at is None
+                            and existing.ai_reason == "Được chuyển tự động từ Video đã hoàn thành render"
+                        ):
+                            existing.status = "approved"
+                            existing.ai_reason = "Video đã duyệt được chuyển sang Approvals, chưa lên lịch đăng"
+                            db.add(existing)
+                            changed = True
                         continue
                 except (ValueError, TypeError):
                     pass
@@ -666,9 +681,9 @@ class SocialProfileService:
                 article_title=article_title,
                 platform=profile.platform or "tiktok",
                 generated_content=wf.title,
-                ai_reason="Được chuyển tự động từ Video đã hoàn thành render",
-                status="needs_approval",
-                # This is only awaiting review, not a reserved publishing slot.
+                ai_reason="Video hoàn tất được chuyển sang Approvals, chưa lên lịch đăng",
+                status="approved" if metadata.get("video_approved") else "needs_approval",
+                # An Approvals record is not a reserved publishing slot.
                 scheduled_at=None,
             )
             db.add(queue_item)
@@ -755,6 +770,8 @@ class SocialProfileService:
         return item
 
     def update_queue_status(self, db: Session, queue_item_id: uuid.UUID, user: User, next_status: str) -> PublishingQueueItem:
+        if next_status == "approved":
+            return self.approve_queue_item(db, queue_item_id, user)
         if next_status not in {"queued", "needs_approval", "approved", "skipped", "changes_requested"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trạng thái queue không hợp lệ")
         item = (
@@ -917,26 +934,69 @@ class SocialProfileService:
             brand_organic_toggle=brand_organic_toggle,
         )
 
+    def approve_queue_item(self, db: Session, queue_item_id: uuid.UUID, user: User) -> PublishingQueueItem:
+        """Approve without reserving a slot or starting an upload, including old queued items."""
+        item = self.get_owned_queue_item(db, queue_item_id, user)
+        if item.status in {"publishing", "published", "skipped", "rejected"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bài đang đăng hoặc đã kết thúc không thể duyệt lại")
+        self.require_queue_draft_ready(db, item, user)
+        item.status = "approved"
+        # Old queue entries may already have an automatically assigned time.
+        # A plain approval must never make such an entry eligible for publishing.
+        item.scheduled_at = None
+        item.error = None
+        item.ai_reason = _append_human_note(item.ai_reason, "Reviewer đã duyệt video, chưa lên lịch đăng.")
+        db.add(item)
+        self.mark_queue_workflow_approved(db, item, user)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def mark_queue_workflow_approved(self, db: Session, item: PublishingQueueItem, user: User, *, record_review: bool = True) -> None:
+        workflow = self.find_workflow_for_queue_item(db, item, user)
+        if not workflow or workflow.status == "REJECTED":
+            return
+        reviewed_at = datetime.now(timezone.utc).isoformat()
+        metadata = dict(workflow.metadata_json or {})
+        # Selecting a time for an approved video must preserve who approved it,
+        # including an automatic approval performed by the render worker.
+        if record_review or not metadata.get("video_approved"):
+            metadata.update(video_approved=True, video_approved_at=reviewed_at, video_approved_by=str(user.id))
+            metadata["module4_review"] = {
+                "decision": "approved", "mode": "manual", "reviewed_by": str(user.id), "reviewed_at": reviewed_at,
+            }
+        metadata["queued_post_id"] = str(item.id)
+        metadata["module4_queue"] = {
+            "status": item.status,
+            "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
+            "reason": item.ai_reason,
+        }
+        workflow.metadata_json = metadata
+        workflow.status = "QUEUED_FOR_PUBLISHING" if item.scheduled_at else "VIDEO_APPROVED"
+        workflow.current_stage = "QUEUED_FOR_PUBLISHING" if item.scheduled_at else "VIDEO_APPROVED"
+        db.add(workflow)
+
     def approve_and_schedule_queue_item(
         self,
         db: Session,
         queue_item_id: uuid.UUID,
         user: User,
         *,
-        schedule_mode: str = "ai",
+        schedule_mode: str = "manual",
         scheduled_at: datetime | None = None,
         timezone_name: str | None = None,
     ) -> PublishingQueueItem:
         item = self.get_owned_queue_item(db, queue_item_id, user)
         self.require_queue_draft_ready(db, item, user)
-        if item.status in {"published", "skipped"}:
+        if item.status in {"publishing", "published", "skipped", "rejected"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item này đã kết thúc, không thể lên lịch lại")
         if item.platform != "tiktok":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Luồng duyệt này chỉ hỗ trợ TikTok")
         if not item.profile:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item thiếu thông tin profile")
 
-        mode = (schedule_mode or "ai").strip().lower()
+        mode = (schedule_mode or "manual").strip().lower()
+        already_approved = item.status in {"approved", "queued"}
         if mode not in {"ai", "manual"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_mode phải là ai hoặc manual")
 
@@ -946,14 +1006,14 @@ class SocialProfileService:
             if scheduled_at is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at bắt buộc khi chọn lịch thủ công")
             publish_at = self.normalize_scheduled_datetime(scheduled_at, tzinfo)
-            reason = "Reviewer đã duyệt và chọn lịch đăng thủ công."
+            reason = "Reviewer chọn lịch đăng thủ công cho video đã duyệt." if already_approved else "Reviewer đã duyệt và chọn lịch đăng thủ công."
         else:
             try:
                 decision = choose_publish_schedule(db, item.profile, item, timezone_name=tzinfo.key)
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
             publish_at = decision.scheduled_at
-            reason = f"Reviewer đã duyệt. {decision.reason}"
+            reason = f"Reviewer chọn lịch cho video đã duyệt. {decision.reason}" if already_approved else f"Reviewer đã duyệt. {decision.reason}"
 
         now = datetime.now(timezone.utc)
         if publish_at <= now:
@@ -964,6 +1024,7 @@ class SocialProfileService:
         item.error = None
         item.ai_reason = _append_human_note(item.ai_reason, reason)
         db.add(item)
+        self.mark_queue_workflow_approved(db, item, user, record_review=not already_approved)
         db.commit()
         db.refresh(item)
         return item
@@ -1585,7 +1646,6 @@ class SocialProfileService:
             "target_audience": strategy.target_audience,
             "post_frequency_per_day": strategy.post_frequency_per_day,
             "active_hours": strategy.active_hours,
-            "schedule_enabled": strategy.schedule_enabled,
             "schedule_days": strategy.schedule_days,
             "schedule_times": strategy.schedule_times,
             "schedule_timezone": strategy.schedule_timezone,

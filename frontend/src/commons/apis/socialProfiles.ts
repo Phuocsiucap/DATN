@@ -9,7 +9,6 @@ export type SocialProfileStrategyPayload = {
   target_audience?: string | null
   post_frequency_per_day?: number | null
   active_hours?: string | null
-  schedule_enabled?: boolean | null
   schedule_days?: string | null
   schedule_times?: string | null
   schedule_timezone?: string | null
@@ -23,7 +22,7 @@ export type SocialProfileStrategyPayload = {
   video_render_mode?: string | null
   max_system_recommendations?: number | null
   auto_queue_enabled?: boolean | null
-  auto_publish_enabled?: boolean | null
+  auto_publish_enabled?: boolean
 }
 
 export type StrategyTopicDetail = {
@@ -46,7 +45,6 @@ export type SocialProfileStrategy = {
   target_audience: string
   post_frequency_per_day: number
   active_hours: string
-  schedule_enabled: boolean
   schedule_days: string
   schedule_times: string
   schedule_timezone: string
@@ -182,6 +180,11 @@ export const fetchPublishingQueueApprovalItemApi = async (queueItemId: string | 
 
 export const updatePublishingQueueItemApi = async (queueItemId: string | number, status: string) => {
   const { data } = await api.patch(`/social-profiles/queue/items/${queueItemId}`, { status })
+  return data
+}
+
+export const approvePublishingQueueItemApi = async (queueItemId: string | number) => {
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/approve`)
   return data
 }
 

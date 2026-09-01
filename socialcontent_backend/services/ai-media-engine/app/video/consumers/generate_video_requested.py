@@ -6,14 +6,12 @@ from common.core.config import get_settings
 from common.events.kafka import consumer
 from common.events.topics import (
     GENERATE_VIDEO_EDIT_REQUESTED,
-    GENERATE_VIDEO_RENDER_REQUESTED,
     GENERATE_VIDEO_REVIEW_REQUESTED,
     GENERATE_VIDEO_SCRIPT_REQUESTED,
     GENERATE_VIDEO_VOICE_REQUESTED,
 )
 from app.video.services.generate_video_jobs import (
     process_generate_video_edit_run,
-    process_generate_video_render_run,
     process_generate_video_review_run,
     process_generate_video_script_run,
     process_generate_video_voice_run,
@@ -24,7 +22,6 @@ TASK_TOPIC_MAP = {
     "GENERATE_VIDEO_EDIT": GENERATE_VIDEO_EDIT_REQUESTED,
     "GENERATE_VIDEO_REVIEW": GENERATE_VIDEO_REVIEW_REQUESTED,
     "GENERATE_VIDEO_VOICE": GENERATE_VIDEO_VOICE_REQUESTED,
-    "GENERATE_VIDEO_RENDER": GENERATE_VIDEO_RENDER_REQUESTED,
 }
 
 TOPIC_PROCESSORS = {
@@ -32,7 +29,6 @@ TOPIC_PROCESSORS = {
     GENERATE_VIDEO_EDIT_REQUESTED: process_generate_video_edit_run,
     GENERATE_VIDEO_REVIEW_REQUESTED: process_generate_video_review_run,
     GENERATE_VIDEO_VOICE_REQUESTED: process_generate_video_voice_run,
-    GENERATE_VIDEO_RENDER_REQUESTED: process_generate_video_render_run,
 }
 
 
@@ -94,8 +90,6 @@ def process_pending_tasks_from_db(task_types: set[str] | None = None) -> None:
                     process_generate_video_review_run(task.id)
                 elif task.task_type == "GENERATE_VIDEO_VOICE":
                     process_generate_video_voice_run(task.id)
-                elif task.task_type == "GENERATE_VIDEO_RENDER":
-                    process_generate_video_render_run(task.id)
             except Exception as exc:
                 print(f"[Worker DB Sweep Error] Task {task.id} failed: {exc}")
     except Exception as exc:

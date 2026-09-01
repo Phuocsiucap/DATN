@@ -19,7 +19,7 @@ import {
   AppButton,
   AppCard,
   EmptyBlock,
-  PageHeader,
+  PageLayout,
   SearchField,
   SelectControl,
   StatusPill,
@@ -147,17 +147,16 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   }
 
   return (
-    <div className="app-page">
-      <PageHeader
-        title="Thu thập dữ liệu"
-        description="Tạo và quản lý các job crawl dữ liệu từ nhiều nguồn khác nhau."
-        actions={
-          <>
-            <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
-            <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
-          </>
-        }
-      />
+    <PageLayout
+      title="Thu thập dữ liệu"
+      description="Tạo và quản lý các job crawl dữ liệu từ nhiều nguồn khác nhau."
+      actions={
+        <>
+          <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
+          <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
+        </>
+      }
+    >
 
       <section className="min-w-0">
         {loading && (
@@ -218,7 +217,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         onClose={() => setSelectedJob(null)}
         onOpenModule2={onOpenModule2}
       />
-    </div>
+    </PageLayout>
   )
 }
 

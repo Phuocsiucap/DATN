@@ -122,6 +122,18 @@ def update_queue_item_status(
     return service.serialize_queue_item(item)
 
 
+@router.post("/queue/items/{queue_item_id}/approve")
+def approve_queue_item(
+    queue_item_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    item = service.approve_queue_item(db, queue_item_id, current_user)
+    timezone_name = getattr(item.profile.strategy, "schedule_timezone", None)
+    return _serialize_queue_response_item(db, service, item, "approval", _resolve_timezone(timezone_name))
+
+
 @router.post("/queue/items/{queue_item_id}/approve-schedule")
 def approve_and_schedule_queue_item(
     queue_item_id: uuid.UUID,
@@ -500,6 +512,7 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
 
 def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneInfo) -> dict:
     profile = item.profile
+    strategy = getattr(profile, "strategy", None) if profile else None
     profile_scopes = data["profile_scopes"] or []
     content = db.get(ContentItem, item.content_id) if item.content_id else None
     content_metadata = _content_metadata(content)
@@ -527,6 +540,11 @@ def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneIn
         "profile_username": profile.username if profile else None,
         "profile_avatar_url": profile.avatar_url if profile else None,
         "profile_scopes": profile_scopes,
+        "profile_strategy": {
+            "approval_mode": getattr(strategy, "approval_mode", "manual"),
+            "auto_queue_enabled": bool(getattr(strategy, "auto_queue_enabled", True)),
+            "auto_publish_enabled": bool(getattr(strategy, "auto_publish_enabled", False)),
+        } if strategy else None,
         "platform": data["platform"],
         "content_id": data["content_id"],
         "article_title": data["article_title"],

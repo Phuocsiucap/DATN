@@ -21,6 +21,8 @@ router = APIRouter()
 
 
 VIDEO_WORKSPACE_STATUSES = {
+    "DRAFT",
+    "READY",
     "APPROVED",
     "PRODUCTION_READY",
     "SCRIPTING",
@@ -29,9 +31,8 @@ VIDEO_WORKSPACE_STATUSES = {
     "VOICE_READY",
     "RENDERING",
     "RENDERED",
-    "VIDEO_APPROVED",
-    "QUEUED_FOR_PUBLISHING",
-    "PUBLISHED",
+    "NEEDS_REVIEW",
+    "FAILED",
 }
 
 VIDEO_RUN_TYPES = {
@@ -73,10 +74,7 @@ WORKSPACE_METADATA_KEYS = {
 
 
 def _visible_in_video_workspace_filter():
-    return or_(
-        MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES),
-        exists().where(KafkaTask.reference_id == MediaWorkflow.id, KafkaTask.task_type.in_(VIDEO_RUN_TYPES)),
-    )
+    return MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES)
 
 
 class MediaWorkflowFromSourcesRequest(BaseModel):

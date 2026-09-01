@@ -12,16 +12,7 @@ import {
   Line,
 } from 'recharts'
 import { api } from '@/commons/apis/api'
-
-interface OpenAiCostData {
-  object: 'list'
-  data: Array<{
-    object: 'organization.costs.result'
-    amount: number
-    line_item: string
-    project_id: string | null
-  }>
-}
+import { PageLayout } from '@/commons/component/social-ui'
 
 interface OpenAiBucketData {
   object: 'page'
@@ -176,8 +167,8 @@ export default function OpenAiUsagePage() {
         let uncached = res.input_uncached_tokens || 0
         
         // If model doesn't support caching (like embeddings), all input tokens are technically uncached
-        if (cached === 0 && cachedWrite === 0 && uncached === 0 && res.input_tokens > 0) {
-          uncached = res.input_tokens
+        if (cached === 0 && cachedWrite === 0 && uncached === 0 && (res.input_tokens || 0) > 0) {
+          uncached = res.input_tokens || 0
         }
         
         totalInputCached += cached
@@ -204,7 +195,6 @@ export default function OpenAiUsagePage() {
   processBuckets(embeddingsData)
   processBuckets(audioData)
 
-  const completionStats = Object.values(modelStats).sort((a, b) => b.num_requests - a.num_requests)
   const timeSeriesData = Object.values(timeSeriesMap).sort((a: any, b: any) => a.timestamp - b.timestamp)
   const modelsList = Array.from(allModels)
   const COLORS = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#4f46e5', '#ec4899', '#06b6d4']
@@ -214,9 +204,10 @@ export default function OpenAiUsagePage() {
       : '0.0'
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-[#111827]">Sử dụng OpenAI API</h1>
+    <PageLayout
+      title="Sử dụng OpenAI API"
+      description="Theo dõi lưu lượng token, chi phí và tỷ lệ cache hit của OpenAI API."
+      actions={
         <select
           value={timeRange}
           onChange={(e) => setTimeRange(Number(e.target.value))}
@@ -226,7 +217,8 @@ export default function OpenAiUsagePage() {
           <option value={14}>14 ngày qua</option>
           <option value={30}>30 ngày qua</option>
         </select>
-      </div>
+      }
+    >
 
       <div className="grid gap-6 md:grid-cols-2">
         <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white flex flex-col">
@@ -243,7 +235,7 @@ export default function OpenAiUsagePage() {
                 <Tooltip
                   cursor={{ fill: '#333' }}
                   contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: '1px solid #333', color: '#fff' }}
-                  formatter={(value: number) => [`$${value.toFixed(4)}`, 'Chi phí']}
+                  formatter={(value: any) => [`$${Number(value || 0).toFixed(4)}`, 'Chi phí']}
                 />
                 <Bar dataKey="cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={60} />
               </BarChart>
@@ -391,7 +383,7 @@ export default function OpenAiUsagePage() {
                         <Tooltip
                           cursor={{ fill: '#f8faff' }}
                           contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                          formatter={(value: number) => [value.toLocaleString(), metric]}
+                          formatter={(value: any) => [Number(value || 0).toLocaleString(), metric]}
                         />
                         <Bar dataKey={model} fill={color} radius={[4, 4, 0, 0]} maxBarSize={40} />
                       </BarChart>
@@ -403,6 +395,6 @@ export default function OpenAiUsagePage() {
           </div>
         </div>
       )}
-    </div>
+    </PageLayout>
   )
 }

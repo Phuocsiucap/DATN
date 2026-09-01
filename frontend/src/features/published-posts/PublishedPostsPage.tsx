@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
   BarChart3,
-  CalendarDays,
   ExternalLink,
   Eye,
   Heart,
@@ -12,6 +11,8 @@ import {
   Send,
   Share2,
   TrendingUp,
+  UsersRound,
+  Video,
 } from 'lucide-react'
 import {
   fetchSocialPostsApi,
@@ -21,11 +22,13 @@ import {
   type SocialProfile,
 } from '@/commons/apis/api'
 import TikTokEmbedPlayer from '@/features/analytics/TikTokEmbedPlayer'
+import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import {
   AppButton,
+  DateInput,
   EmptyBlock,
   MetricCard,
-  PageHeader,
+  PageLayout,
   PlatformIcon,
   SearchField,
   SelectControl,
@@ -224,70 +227,19 @@ export default function PublishedPostsPage() {
   const busy = loadingProfiles || loadingPosts
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Bài đã đăng"
-        description="Theo dõi các bài đã xuất bản theo từng tài khoản social cùng chỉ số mới nhất."
-        actions={
-          <>
-            <SearchField
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Tìm bài đăng, caption, ID..."
-              className="w-full sm:w-[280px]"
-            />
-            <AppButton variant="secondary" icon={<RefreshCw size={15} className={busy ? 'animate-spin' : ''} />} onClick={() => void loadPosts()} disabled={busy || !selectedProfileId}>
-              Tải lại
-            </AppButton>
-            <AppButton icon={<RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />} onClick={() => void handleSync()} disabled={syncing || !selectedProfileId}>
-              Đồng bộ
-            </AppButton>
-          </>
-        }
+    <PageLayout
+      title="Bài đã đăng"
+      description="Theo dõi các bài đã xuất bản theo từng tài khoản social cùng chỉ số mới nhất."
+    >
+      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} loading={loadingProfiles} emptyLabel="Chưa có tài khoản social để theo dõi bài đã đăng." />
+
+      <SelectedProfilePanel
+        profile={selectedProfile}
+        totalPosts={posts.length}
+        loading={loadingProfiles}
+        syncing={syncing}
+        onSync={() => void handleSync()}
       />
-
-      <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="app-card p-4">
-          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="app-section-title">Tài khoản đang theo dõi</h2>
-              <p className="mt-1 text-xs font-medium text-[var(--on-surface-variant)]">
-                {selectedProfile ? `${selectedProfile.profile_name} - ${platformLabel(selectedProfile.platform)}` : 'Chưa có tài khoản social'}
-              </p>
-            </div>
-            <SelectControl value={selectedProfileId} onChange={setSelectedProfileId} className="w-full md:w-[280px]">
-              {profiles.length === 0 && <option value="">Chưa có tài khoản</option>}
-              {profiles.map((profile) => (
-                <option key={profile.id} value={String(profile.id)}>
-                  {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''}
-                </option>
-              ))}
-            </SelectControl>
-          </div>
-
-          {loadingProfiles ? (
-            <div className="loading-state">
-              <Loader2 size={16} className="animate-spin" />
-              Đang tải tài khoản...
-            </div>
-          ) : profiles.length === 0 ? (
-            <EmptyBlock label="Chưa có tài khoản social để theo dõi bài đã đăng." />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {profiles.map((profile) => (
-                <ProfileCard
-                  key={profile.id}
-                  profile={profile}
-                  active={String(profile.id) === selectedProfileId}
-                  onClick={() => setSelectedProfileId(String(profile.id))}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <SelectedProfilePanel profile={selectedProfile} totalPosts={posts.length} loading={loadingProfiles} />
-      </section>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={<Send size={18} />} label="Bài trong bộ lọc" value={plainNumberFormatter.format(filteredPosts.length)} tint="#2556ea" />
@@ -297,22 +249,35 @@ export default function PublishedPostsPage() {
       </section>
 
       <section className="app-card p-4">
-        <div className="mb-4 grid gap-3 md:grid-cols-[minmax(180px,220px)_minmax(180px,220px)_minmax(140px,1fr)_minmax(140px,1fr)]">
-          <SelectControl value={selectedStatus} onChange={(value) => setSelectedStatus(value as PostStatusFilter)}>
-            {POST_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </SelectControl>
-          <label className="relative">
-            <CalendarDays size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#718096]" />
-            <input className="app-input w-full pl-9" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-          </label>
-          <label className="relative">
-            <CalendarDays size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#718096]" />
-            <input className="app-input w-full pl-9" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-          </label>
-          <div className="flex items-center justify-end text-xs font-semibold text-[var(--on-surface-variant)]">
-            {filteredPosts.length}/{posts.length} bài
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <SearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Tìm bài đăng, caption, ID..."
+              className="w-full sm:w-[260px]"
+            />
+            <SelectControl value={selectedStatus} onChange={(value) => setSelectedStatus(value as PostStatusFilter)} className="w-full sm:w-[170px]">
+              {POST_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </SelectControl>
+            <DateInput label="Từ" value={startDate} onChange={setStartDate} className="w-full sm:w-[165px]" />
+            <DateInput label="Đến" value={endDate} onChange={setEndDate} className="w-full sm:w-[165px]" />
+          </div>
+
+          <div className="flex items-center gap-3 self-end lg:self-center">
+            <AppButton
+              variant="secondary"
+              icon={<RefreshCw size={15} className={busy ? 'animate-spin' : ''} />}
+              onClick={() => void loadPosts(selectedProfileId)}
+              disabled={busy || !selectedProfileId}
+            >
+              Tải lại
+            </AppButton>
+            <div className="text-xs font-semibold text-[var(--on-surface-variant)] shrink-0">
+              {filteredPosts.length}/{posts.length} bài
+            </div>
           </div>
         </div>
 
@@ -354,40 +319,32 @@ export default function PublishedPostsPage() {
           </div>
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
 
-function ProfileCard({ profile, active, onClick }: { profile: SocialProfile; active: boolean; onClick: () => void }) {
-  const postCount = Number(profile.video_count ?? 0)
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex min-h-[86px] items-center gap-3 rounded-[8px] border bg-white p-3 text-left shadow-sm transition hover:border-[#b9c3d5] hover:shadow-md',
-        active && 'border-[#818cf8] bg-[#f8f7ff]',
-      )}
-    >
-      <SocialProfileAvatar avatarUrl={profile.avatar_url} name={profile.profile_name} platform={profile.platform} size="lg" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-extrabold text-[#111827]" title={profile.profile_name}>{profile.profile_name}</div>
-        <div className="truncate text-xs font-medium text-[#64748b]">{profile.username ? `@${profile.username}` : platformLabel(profile.platform)}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <StatusPill value={profile.status || 'active'} />
-          {postCount > 0 && <span className="text-[10px] font-bold text-[#64748b]">{formatMetric(postCount)} bài</span>}
-        </div>
-      </div>
-    </button>
-  )
-}
-
-function SelectedProfilePanel({ profile, totalPosts, loading }: { profile: SocialProfile | null; totalPosts: number; loading: boolean }) {
+function SelectedProfilePanel({
+  profile,
+  totalPosts,
+  loading,
+  syncing,
+  onSync,
+}: {
+  profile: SocialProfile | null
+  totalPosts: number
+  loading: boolean
+  syncing: boolean
+  onSync: () => void
+}) {
   if (loading) {
     return (
-      <div className="app-card p-4">
-        <div className="loading-state">
-          <Loader2 size={16} className="animate-spin" />
-          Đang tải...
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-6 shadow-xs">
+        <div className="flex animate-pulse items-center gap-4">
+          <div className="h-16 w-16 rounded-full bg-slate-200" />
+          <div className="space-y-2">
+            <div className="h-4 w-32 rounded bg-slate-200" />
+            <div className="h-3 w-24 rounded bg-slate-200" />
+          </div>
         </div>
       </div>
     )
@@ -395,44 +352,78 @@ function SelectedProfilePanel({ profile, totalPosts, loading }: { profile: Socia
 
   if (!profile) {
     return (
-      <div className="app-card p-4">
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-xs">
         <EmptyBlock label="Chọn một tài khoản để xem bài đã đăng." />
       </div>
     )
   }
 
   return (
-    <div className="app-card flex flex-col gap-4 p-4">
-      <div className="flex items-start gap-3">
-        <SocialProfileAvatar avatarUrl={profile.avatar_url} name={profile.profile_name} platform={profile.platform} size="xl" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-extrabold text-[#111827]" title={profile.profile_name}>{profile.profile_name}</div>
-          <div className="truncate text-xs font-semibold text-[#64748b]">{profile.username ? `@${profile.username}` : platformLabel(profile.platform)}</div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill value={profile.status || 'active'} />
-            <span className="inline-flex items-center gap-1 rounded-[6px] bg-slate-100 px-2 py-1 text-[10px] font-bold text-[#526179]">
-              <PlatformIcon platform={profile.platform} size="sm" />
-              {platformLabel(profile.platform)}
-            </span>
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-1 shadow-xs transition-shadow hover:shadow-md">
+      {/* Background decoration */}
+      <div className="absolute top-0 right-0 h-32 w-64 -translate-y-8 translate-x-16 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 h-24 w-48 translate-y-8 -translate-x-8 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+
+      <div className="relative flex flex-col gap-6 p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="shrink-0 relative">
+            <SocialProfileAvatar avatarUrl={profile.avatar_url} name={profile.profile_name} platform={profile.platform} size="xl" className="ring-4 ring-white shadow-sm" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-xl font-black text-slate-900" title={profile.profile_name}>
+                {profile.profile_name}
+              </h2>
+              <StatusPill value={profile.status || 'active'} />
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-slate-500">
+              <span className="truncate text-blue-600">{profile.username ? `@${profile.username.replace(/^@/, '')}` : platformLabel(profile.platform)}</span>
+              <span className="text-slate-300">•</span>
+              <span className="text-slate-500">Tài khoản liên kết</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <ProfileStat label="Follower" value={profile.follower_count} />
-        <ProfileStat label="Đã lưu" value={totalPosts} />
-        <ProfileStat label="Likes kênh" value={profile.likes_count} />
-        <ProfileStat label="Video kênh" value={profile.video_count} />
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6 lg:gap-8">
+            <ProfileStatBox icon={<UsersRound size={16} />} label="Follower" value={profile.follower_count} tint="text-indigo-600" bgTint="bg-indigo-50" />
+            <ProfileStatBox icon={<Send size={16} />} label="Đã lưu" value={totalPosts} tint="text-blue-600" bgTint="bg-blue-50" />
+            <ProfileStatBox icon={<Heart size={16} />} label="Likes kênh" value={profile.likes_count} tint="text-pink-600" bgTint="bg-pink-50" />
+            <ProfileStatBox icon={<Video size={16} />} label="Video kênh" value={profile.video_count} tint="text-emerald-600" bgTint="bg-emerald-50" />
+          </div>
+
+          <div className="hidden h-12 w-px bg-slate-200 sm:block" />
+
+          <button
+            onClick={onSync}
+            disabled={syncing}
+            className={cn(
+              "group relative flex h-10 w-full shrink-0 sm:w-auto items-center justify-center gap-2 overflow-hidden rounded-xl px-5 font-bold text-white shadow-sm transition-all focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none disabled:opacity-60",
+              syncing ? "bg-slate-400" : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-md"
+            )}
+          >
+            <div className="absolute inset-0 bg-white/20 opacity-0 transition-opacity group-hover:opacity-100" />
+            <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
+            <span className="relative">Đồng bộ</span>
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-function ProfileStat({ label, value }: { label: string; value?: number | null }) {
+function ProfileStatBox({ label, value, icon, tint, bgTint }: { label: string; value?: number | null; icon: ReactNode; tint: string; bgTint: string }) {
   return (
-    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-3">
-      <div className="text-[10px] font-bold uppercase text-[#64748b]">{label}</div>
-      <div className="mt-1 text-lg font-extrabold text-[#111827]">{value === null || value === undefined ? '-' : formatMetric(value)}</div>
+    <div className="flex flex-col justify-center">
+      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        <span className={cn("flex h-6 w-6 items-center justify-center rounded-md", bgTint, tint)}>
+          {icon}
+        </span>
+        {label}
+      </div>
+      <div className="mt-1.5 text-xl font-black text-slate-800">
+        {value === null || value === undefined ? '-' : formatMetric(value)}
+      </div>
     </div>
   )
 }

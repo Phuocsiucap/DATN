@@ -7,7 +7,6 @@ import {
   Clapperboard,
   Clock,
   Copy,
-  Filter,
   FolderKanban,
   Hash,
   Layers,
@@ -25,6 +24,7 @@ import {
   createGenerateVideoStoryFromProjectApi,
   deleteVideoWorkspaceApi,
   fetchVideoWorkspacesApi,
+  renderGenerateVideoProjectApi,
   updateVideoWorkspaceApi,
   type VideoWorkspaceSummary,
 } from '@/commons/apis/generateVideo'
@@ -38,9 +38,14 @@ import {
 } from '@/commons/apis/planning'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { hasActiveVideoTask as hasActiveTask, videoWorkspaceSeriesKey } from '@/commons/apis/videoWorkspaceList'
-import { SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
+import { AppButton, PageLayout, SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
+import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { SeriesModal, TransferSeriesModal } from './components/SeriesModal'
-import { buildVideoKanbanColumns, isFailedVideoWorkspace } from './videoKanban'
+import VideoRenderingIndicator from '@/commons/component/VideoRenderingIndicator'
+import DraftGenerationIndicator from '@/commons/component/DraftGenerationIndicator'
+import VoiceGenerationIndicator from '@/commons/component/VoiceGenerationIndicator'
+import { RetryWorkflowModal } from './components/RetryWorkflowModal'
+import { buildVideoKanbanColumns, classifyVideoWorkspace, getVideoWorkspaceActivity, isFailedVideoWorkspace } from './videoKanban'
 
 type GenerateVideoProjectsPageProps = {
   onOpenProject: (workflowId: string) => void
@@ -54,7 +59,6 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   const [items, setItems] = useState<VideoWorkspaceSummary[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const [seriesFilter, setSeriesFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -63,6 +67,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   const [editingSeries, setEditingSeries] = useState<ContentSeries | null>(null)
   const [assigningWorkflow, setAssigningWorkflow] = useState<VideoWorkspaceSummary | null>(null)
   const [assignSeriesId, setAssignSeriesId] = useState('')
+  const [retryTargetWorkflow, setRetryTargetWorkflow] = useState<VideoWorkspaceSummary | null>(null)
 
   const profileSeries = useMemo(
     () => series.filter((item) => !selectedProfileId || !(item.profile_id || item.profileId) || item.profile_id === selectedProfileId || item.profileId === selectedProfileId),
@@ -73,6 +78,8 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     () => items.filter(hasActiveTask).length,
     [items],
   )
+  const attentionItems = items.filter((item) => ['failed', 'unknown'].includes(classifyVideoWorkspace(item)))
+  const approvalsUrl = `/approvals${selectedProfileId ? `?profile_id=${encodeURIComponent(selectedProfileId)}` : ''}`
 
   // Compute KPI metrics
   const stats = useMemo(() => {
@@ -104,7 +111,6 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         fetchVideoWorkspacesApi({
           profile_id: selectedProfileId,
           series_id: seriesFilter || undefined,
-          status: statusFilter || undefined,
           search: search.trim() || undefined,
           limit: 100,
         }),
@@ -113,8 +119,6 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       setItems(workspaceData.items)
       setTotal(workspaceData.total)
       const nextSnapshot = `${selectedProfileId}:${videoWorkspaceSeriesKey(workspaceData.items)}`
-      // Quiet polling needs full series data only if an automatic job has
-      // changed the page's series references, not on every progress update.
       const nextSeries = seriesData ?? (seriesSnapshot.current !== nextSnapshot ? await fetchContentSeriesApi(selectedProfileId) : null)
       if (nextSeries) setSeries(nextSeries)
       seriesSnapshot.current = nextSnapshot
@@ -123,7 +127,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [search, selectedProfileId, seriesFilter, statusFilter])
+  }, [search, selectedProfileId, seriesFilter])
 
   useEffect(() => {
     let disposed = false
@@ -160,14 +164,29 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const regenerateDraft = async (workflow: VideoWorkspaceSummary) => {
-    setBusy(`regen-${workflow.id}`)
+  const handleRegenerateDraft = async (workflowId: string) => {
+    setBusy(`regen-${workflowId}`)
     try {
-      await createGenerateVideoStoryFromProjectApi(workflow.id)
-      toast.success(`Đã đưa "${workflow.title}" vào hàng đợi tạo lại draft`)
+      await createGenerateVideoStoryFromProjectApi(workflowId)
+      toast.success('Đã đưa bài viết vào hàng đợi tạo lại draft kịch bản')
+      setRetryTargetWorkflow(null)
       await loadWorkspaces(true)
     } catch (error) {
-      toast.error(readApiError(error, 'Không tạo lại được draft'))
+      toast.error(readApiError(error, 'Không tạo lại được draft kịch bản'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleReRenderVideo = async (workflowId: string) => {
+    setBusy(`render-${workflowId}`)
+    try {
+      await renderGenerateVideoProjectApi(workflowId)
+      toast.success('Đã đưa bài viết vào hàng đợi render MP4')
+      setRetryTargetWorkflow(null)
+      await loadWorkspaces(true)
+    } catch (error) {
+      toast.error(readApiError(error, 'Không khởi chạy render được'))
     } finally {
       setBusy(null)
     }
@@ -232,60 +251,43 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3.5 bg-slate-50/60 p-3 sm:p-4">
-      {/* Top Header */}
-      <header className="flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white shadow-md shadow-blue-500/20">
-            <Clapperboard size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-lg font-black tracking-tight text-slate-900">Xưởng sản xuất video</h1>
-              <span className="inline-flex items-center rounded-full border border-blue-200/80 bg-blue-50 px-2.5 py-0.5 text-xs font-bold text-blue-700">
-                {total} workflow
-              </span>
-              {activeTasksCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 workflow-status-pulse" />
-                  Đang tự động cập nhật
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Quản lý và theo dõi quy trình tạo kịch bản, tổng hợp voice AI và render MP4 theo thời gian thực.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <button
-            onClick={() => { setEditingSeries(null); setSeriesModalOpen(true) }}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-xs font-bold text-white shadow-sm transition-all hover:from-blue-700 hover:to-indigo-700 hover:shadow-md hover:shadow-blue-500/25 active:scale-[0.98]"
-          >
-            <Plus size={15} strokeWidth={2.5} />
+    <PageLayout
+      title="Xưởng sản xuất video"
+      description="Quản lý và theo dõi quy trình tạo kịch bản, tổng hợp voice AI và render MP4 theo thời gian thực."
+      actions={
+        <>
+          <span className="inline-flex items-center rounded-full border border-blue-200/80 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+            {total} workflow
+          </span>
+          {activeTasksCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 workflow-status-pulse" />
+              Đang tự động cập nhật
+            </span>
+          )}
+          <AppButton variant="secondary" icon={<ArrowUpRight size={15} />} onClick={() => { window.location.href = approvalsUrl }}>
+            Duyệt video
+          </AppButton>
+          <AppButton icon={<Plus size={15} />} onClick={() => { setEditingSeries(null); setSeriesModalOpen(true) }}>
             Tạo series
-          </button>
-          <button
-            title="Tải lại dữ liệu"
-            onClick={() => void loadWorkspaces()}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-xs transition-all hover:border-slate-300 hover:bg-slate-50 active:scale-95"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin text-blue-600' : ''} />
-          </button>
-        </div>
-      </header>
+          </AppButton>
+          <AppButton variant="secondary" icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />} onClick={() => void loadWorkspaces()}>
+            Tải lại
+          </AppButton>
+        </>
+      }
+    >
+      <SocialProfileFilter
+        profiles={profiles}
+        value={selectedProfileId}
+        onChange={setSelectedProfileId}
+        loading={loading}
+        emptyLabel="Chưa có kênh social để tạo video."
+      />
 
       {/* KPI Stats Overview Bar */}
       <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <button
-          onClick={() => setStatusFilter('')}
-          className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-            statusFilter === ''
-              ? 'border-blue-500/80 bg-blue-50/40 shadow-xs ring-2 ring-blue-500/20'
-              : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-xs'
-          }`}
-        >
+        <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Tổng Workflow</div>
             <div className="mt-1 text-xl font-black text-slate-900">{total}</div>
@@ -293,16 +295,9 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
             <Layers size={18} />
           </div>
-        </button>
+        </div>
 
-        <button
-          onClick={() => setStatusFilter('SCRIPTING,EDITING,REVIEWING,VOICE_READY,RENDERING')}
-          className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-            statusFilter === 'SCRIPTING,EDITING,REVIEWING,VOICE_READY,RENDERING'
-              ? 'border-cyan-500/80 bg-cyan-50/40 shadow-xs ring-2 ring-cyan-500/20'
-              : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-xs'
-          }`}
-        >
+        <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Đang sản xuất</div>
             <div className="mt-1 flex items-center gap-1.5 text-xl font-black text-cyan-700">
@@ -313,33 +308,19 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600">
             <Sparkles size={18} />
           </div>
-        </button>
+        </div>
 
-        <button
-          onClick={() => setStatusFilter('RENDERED')}
-          className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-            statusFilter === 'RENDERED'
-              ? 'border-amber-500/80 bg-amber-50/40 shadow-xs ring-2 ring-amber-500/20'
-              : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-xs'
-          }`}
-        >
+        <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Chờ duyệt video</div>
-            <div className="mt-1 text-xl font-black text-amber-700">{stats.pendingVideoReview}</div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Video hoàn tất</div>
+            <div className="mt-1 text-xl font-black text-amber-700">{stats.pendingVideoReview + stats.ready}</div>
           </div>
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
             <Clock size={18} />
           </div>
-        </button>
+        </div>
 
-        <button
-          onClick={() => setStatusFilter('FAILED')}
-          className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-            statusFilter === 'FAILED'
-              ? 'border-rose-500/80 bg-rose-50/40 shadow-xs ring-2 ring-rose-500/20'
-              : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-xs'
-          }`}
-        >
+        <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Thất bại</div>
             <div className={`mt-1 text-xl font-black ${stats.failed > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
@@ -349,29 +330,13 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${stats.failed > 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-400'}`}>
             <AlertCircle size={18} />
           </div>
-        </button>
+        </div>
       </section>
 
       {/* Filter Toolbar */}
       <section className="flex flex-col gap-2.5 rounded-2xl border border-slate-200/90 bg-white p-3 shadow-xs lg:flex-row lg:items-center">
-        {/* Profile Select */}
-        <div className="relative flex-1 min-w-[200px]">
-          <Share2 size={15} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
-          <select
-            value={selectedProfileId}
-            onChange={(event) => setSelectedProfileId(event.target.value)}
-            className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/50 pl-9 pr-3 text-xs font-bold text-slate-800 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/15"
-          >
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.profile_name} · {profile.platform.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Search Input */}
-        <div className="relative flex-2 min-w-[240px]">
+        <div className="relative flex-1 min-w-[240px]">
           <Search size={15} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
           <input
             value={search}
@@ -388,29 +353,22 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             </button>
           )}
         </div>
-
-        {/* Status Filter */}
-        <div className="relative flex-1 min-w-[160px]">
-          <Filter size={15} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/50 pl-9 pr-3 text-xs font-bold text-slate-700 outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/15"
-          >
-            <option value="">Mọi trạng thái</option>
-            <option value="SCRIPTING,EDITING,REVIEWING,VOICE_READY,RENDERING">Đang sản xuất</option>
-            <option value="RENDERED">Chờ duyệt video</option>
-            <option value="VIDEO_APPROVED">Đã duyệt video</option>
-            <option value="QUEUED_FOR_PUBLISHING">Chờ đăng</option>
-            <option value="PUBLISHED">Đã đăng</option>
-            <option value="FAILED">Thất bại</option>
-          </select>
-        </div>
-
-        {/* Series Filter removed from here, moved to Sidebar */}
       </section>
 
       {/* Main Content Area */}
+      {attentionItems.length > 0 && (
+        <details open={true} className="shrink-0 rounded-xl border border-rose-200 bg-rose-50 p-3">
+          <summary className="cursor-pointer text-xs font-bold text-rose-700">Cần xử lý ({attentionItems.length}) — video lỗi hoặc trạng thái chưa xác định</summary>
+          <div className="mt-2 grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
+            {attentionItems.map((item) => (
+              <button key={item.id} onClick={() => onOpenProject(item.id)} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-left text-xs">
+                <span className="min-w-0 truncate font-semibold">{item.title}</span>
+                <span className="shrink-0 font-bold text-blue-700">Mở để xử lý ↗</span>
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
       <div className="min-h-0 flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden">
         {/* Series Sidebar */}
         <aside className="w-full lg:w-64 shrink-0 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white shadow-xs">
@@ -515,7 +473,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           <div className="h-full overflow-x-auto overflow-y-hidden pb-1">
             <div className="flex h-full min-w-full gap-3">
             {buildVideoKanbanColumns(items).map((column, columnIndex) => (
-              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] w-[280px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs sm:w-[300px] lg:w-[305px] xl:w-[320px]">
+              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] w-[250px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs lg:w-auto lg:min-w-[220px] lg:flex-1">
                 <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3">
                   <div className="flex items-center gap-2">
                     <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
@@ -535,7 +493,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                       busy={busy === `regen-${item.id}`}
                       disabled={Boolean(busy) || hasActiveTask(item)}
                       onOpen={() => onOpenProject(item.id)}
-                      onRegenerate={() => void regenerateDraft(item)}
+                      onRegenerate={() => setRetryTargetWorkflow(item)}
                       onCopy={() => copyId(item.id)}
                       onAssign={() => {
                         setAssigningWorkflow(item)
@@ -550,9 +508,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                     </div>
                   )}
                 </div>
-                <button className="mx-3 my-3 shrink-0 h-9 rounded-[8px] border border-slate-200 bg-white text-[12px] font-bold text-[#6d5dfc] hover:bg-[#f8faff]">
-                  + Thêm video
-                </button>
+                {column.id === 'review' && <a href={approvalsUrl} className="mx-3 my-3 grid h-9 shrink-0 place-items-center rounded-[8px] border border-blue-200 text-[12px] font-bold text-blue-700 hover:bg-blue-50">Duyệt và lên lịch tại Approvals ↗</a>}
               </section>
             ))}
             </div>
@@ -562,6 +518,16 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       </div>
 
       {/* Modal Components */}
+      <RetryWorkflowModal
+        item={retryTargetWorkflow}
+        isOpen={Boolean(retryTargetWorkflow)}
+        isSubmitting={Boolean(busy)}
+        onClose={() => setRetryTargetWorkflow(null)}
+        onOpenEdit={(workflowId) => onOpenProject(workflowId)}
+        onRegenerateDraft={(workflowId) => handleRegenerateDraft(workflowId)}
+        onReRenderVideo={(workflowId) => handleReRenderVideo(workflowId)}
+      />
+
       {seriesModalOpen && (
         <SeriesModal
           key={editingSeries?.id || 'new-series'}
@@ -600,7 +566,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           }}
         />
       )}
-    </div>
+    </PageLayout>
   )
 }
 
@@ -625,15 +591,31 @@ export function VideoKanbanCard({
   onAssign: () => void
   onDelete: () => void
 }) {
+  const activity = getVideoWorkspaceActivity(item)
+  const ActivityIndicator = activity?.kind === 'draft'
+    ? DraftGenerationIndicator
+    : activity?.kind === 'voice'
+      ? VoiceGenerationIndicator
+      : activity?.kind === 'rendering' ? VideoRenderingIndicator : null
+
   return (
     <article className="group overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-xs transition hover:border-[#c8d0ff] hover:shadow-sm">
-      <button onClick={onOpen} className="block w-full text-left">
-        <Thumbnail
-          src={item.thumbnail_url}
-          title={item.title}
-          className="h-[138px] w-full rounded-none"
-        />
-      </button>
+      <div className="relative">
+        <button onClick={onOpen} aria-label={`Mở video: ${item.title}`} className="block w-full text-left">
+          <Thumbnail
+            src={item.thumbnail_url}
+            title={item.title}
+            className="h-[138px] w-full rounded-none"
+          />
+        </button>
+        {ActivityIndicator && (
+          <ActivityIndicator
+            progress={item.progress_percent}
+            queued={activity?.queued}
+            className="pointer-events-none absolute inset-0"
+          />
+        )}
+      </div>
       <div className="space-y-3 p-3">
         <div>
           <button onClick={onOpen} className="line-clamp-2 text-left text-[13px] font-extrabold leading-5 text-slate-900 transition group-hover:text-[#2556ea]">
@@ -655,13 +637,8 @@ export function VideoKanbanCard({
           {item.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{item.category}</span>}
         </div>
 
-        {item.status === 'RENDERING' && (
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-500">{Math.round(Number(item.progress_percent ?? 0))}%</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-[#f59e0b]" style={{ width: `${Math.max(0, Math.min(100, Number(item.progress_percent ?? 0)))}%` }} />
-            </div>
-          </div>
+        {['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status) && (
+          <a href={`${item.status === 'PUBLISHED' ? '/published-posts' : item.status === 'QUEUED_FOR_PUBLISHING' ? '/schedule' : '/approvals'}?profile_id=${encodeURIComponent(item.profile?.id || item.profile_id || '')}`} className="block rounded-md bg-emerald-50 px-2 py-1.5 text-center text-[11px] font-bold text-emerald-700 hover:bg-emerald-100">{item.status === 'PUBLISHED' ? 'Xem video đã đăng' : item.status === 'QUEUED_FOR_PUBLISHING' ? 'Xem lịch đăng' : 'Mở Approvals để duyệt và chọn lịch'} ↗</a>
         )}
 
         <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] font-semibold text-slate-500">
@@ -711,13 +688,9 @@ function workflowStatusLabel(value: string) {
     REVIEWING: 'Review kịch bản',
     VOICE_READY: 'Có voice',
     RENDERING: 'Render MP4',
-    RENDERED: 'Chờ duyệt video',
-    VIDEO_APPROVED: 'Video đã duyệt',
-    QUEUED_FOR_PUBLISHING: 'Đã vào lịch đăng',
-    PUBLISHED: 'Đã xuất bản',
     FAILED: 'Lỗi',
   }
-  return labels[value] || value.replaceAll('_', ' ')
+  return labels[value] || 'Hoàn tất'
 }
 
 function formatDateTime(value: string) {

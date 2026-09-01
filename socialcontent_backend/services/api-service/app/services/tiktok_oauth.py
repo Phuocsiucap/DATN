@@ -136,9 +136,11 @@ def _is_tiktok_scope_error(exc: HTTPException) -> bool:
 def _redacted_payload(payload: dict[str, Any]) -> dict[str, Any]:
     hidden = {"access_token", "refresh_token", "client_secret", "token", "code"}
 
-    def redact(value: Any) -> Any:
+    def redact(value: Any, key_name: str | None = None) -> Any:
+        if key_name == "videos" and isinstance(value, list):
+            return f"[{len(value)} items hidden]"
         if isinstance(value, dict):
-            return {key: ("***" if key in hidden else redact(inner)) for key, inner in value.items()}
+            return {key: ("***" if key in hidden else redact(inner, key)) for key, inner in value.items()}
         if isinstance(value, list):
             return [redact(item) for item in value]
         return value

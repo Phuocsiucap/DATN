@@ -46,7 +46,6 @@ import {
 import { ContentDetailDialog } from '@/features/content/ContentDetailDialog'
 import {
   approveGenerateVideoDraftApi,
-  approveGenerateVideoProjectApi,
   createGenerateVideoStoryFromProjectApi,
   deleteVideoWorkspaceApi,
   editGenerateVideoStoryWithAiApi,
@@ -57,7 +56,6 @@ import {
   generateVideoVoiceApi,
   generateVideoMediaUrl,
   generateVideoOutputUrl,
-  queueGenerateVideoProjectApi,
   reviewGenerateVideoStoryWithAiApi,
   saveGenerateVideoStoryApi,
   updateVideoWorkspaceApi,
@@ -74,7 +72,7 @@ import { fetchAllContentSeriesApi, fetchContentSeriesApi, type ContentSeries } f
 import { TransferSeriesModal } from './components/SeriesModal'
 import WorkflowProgress from './WorkflowProgress'
 
-type StepId = 'plan' | 'story' | 'video' | 'preview'
+type StepId = 'story' | 'plan' | 'video' | 'preview'
 type PlanDraft = {
   title: string
   content_angle: string
@@ -123,9 +121,7 @@ const proCutFigmaAssets = {
 }
 
 const steps: Array<{ id: StepId; label: string; icon: React.ReactNode }> = [
-  { id: 'plan', label: 'Story data', icon: <FileText size={16} /> },
-  { id: 'story', label: 'Video draft', icon: <ImageIcon size={16} /> },
-  { id: 'video', label: 'Generate video', icon: <Clapperboard size={16} /> },
+  { id: 'video', label: 'Studio Editor', icon: <Clapperboard size={16} /> },
   { id: 'preview', label: 'Export MP4', icon: <Clapperboard size={16} /> },
 ]
 
@@ -275,7 +271,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   const actionLocksRef = useRef<Record<string, boolean>>({})
   const refreshedTaskRef = useRef('')
   const activeStory = story || previewStory
-  const hasStoryInput = Boolean(activeStory || storyText.trim())
+  const _hasStoryInput = Boolean(activeStory || storyText.trim())
   const canRenderMp4 = Boolean(activeStory || storyText.trim())
   const workflowRunning = Boolean(activeProgressTask(workflowProgress))
   const actionsLocked = Boolean(busy) || workflowRunning
@@ -394,7 +390,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
         setStory(null)
         setPreviewStory(null)
         setStoryText('')
-        setActiveStep('plan')
+        setActiveStep('story')
         setStatus('')
       }
     } catch (error: any) {
@@ -406,7 +402,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     }
   }
 
-  const createStory = async () => {
+  const _createStory = async () => {
     if (createStoryBusyRef.current) return
     createStoryBusyRef.current = true
     setBusy('story')
@@ -437,7 +433,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     }
   }
 
-  const savePlan = async () => {
+  const _savePlan = async () => {
     if (!selectedId) return
     if (!beginAction('save-plan')) return
     setBusy('save-plan')
@@ -495,7 +491,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       }, 5 * 60 * 1000)
       if (completedJob.status === 'FAILED') throw new Error(completedJob.error_message || 'AI edit thất bại')
       await loadProjectById(selectedId, { openSavedStory: true, quiet: true })
-      setActiveStep('story')
+      setActiveStep('video')
       setShowEditDialog(false)
       setStatus('Đã chỉnh timeline bằng AI từ dữ liệu đã gen + tài liệu gốc')
     } catch (error: any) {
@@ -598,23 +594,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     }
   }
 
-  const approveVideo = async () => {
-    if (!selectedId) return
-    if (!beginAction('approve-video')) return
-    setBusy('approve-video')
-    try {
-      await approveGenerateVideoProjectApi(selectedId)
-      await loadProjectById(selectedId)
-      setActiveStep('preview')
-      setStatus('Đã duyệt video. Video có thể đưa vào queue đăng bài.')
-    } catch (error: any) {
-      setStatus(error?.response?.data?.detail || error?.message || 'Không duyệt được video')
-    } finally {
-      endAction('approve-video')
-      setBusy(null)
-    }
-  }
-
   const approveDraft = async () => {
     if (!selectedId || !beginAction('approve-draft')) return
     setBusy('approve-draft')
@@ -633,28 +612,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       setStatus(error?.response?.data?.detail || error?.message || 'Không duyệt được draft')
     } finally {
       endAction('approve-draft')
-      setBusy(null)
-    }
-  }
-
-  const queueVideo = async () => {
-    if (!selectedId) return
-    if (!beginAction('queue-video')) return
-    setBusy('queue-video')
-    try {
-      const result = await queueGenerateVideoProjectApi(selectedId)
-      await loadProjectById(selectedId)
-      setActiveStep('preview')
-      const queueStatus = String(result.queue_item?.status || '')
-      setStatus(
-        queueStatus === 'needs_approval'
-          ? 'Đã đưa video vào queue và cần duyệt trước khi scheduler đăng. Kiểm tra ở Duyệt Queue hoặc Lịch đăng.'
-          : 'Đã đưa video vào queue đăng bài. Kiểm tra ở Duyệt Queue hoặc Lịch đăng.',
-      )
-    } catch (error: any) {
-      setStatus(error?.response?.data?.detail || error?.message || 'Không đưa được video vào queue')
-    } finally {
-      endAction('queue-video')
       setBusy(null)
     }
   }
@@ -841,67 +798,6 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       </div>
       )}
 
-      {!isStudioDetail && (
-      <div className="grid gap-4">
-        {activeStep === 'plan' && (
-          <Panel title="1. Story data từ AI">
-            <PlanEditor
-              workflow={selectedProject}
-              draft={planDraft}
-              saving={busy === 'save-plan'}
-              onChange={setPlanDraft}
-              onSave={() => void savePlan()}
-              onCreateStory={() => {
-                setActiveStep('story')
-                void createStory()
-              }}
-            />
-          </Panel>
-        )}
-
-        {activeStep === 'story' && (
-          <Panel title="2. Kịch bản & nội dung bài">
-            <div className="flex flex-wrap gap-2">
-              <button disabled={!selectedId || actionsLocked} onClick={() => void createStory()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                Create story
-              </button>
-              <button disabled={!hasStoryInput || actionsLocked} onClick={() => setShowEditDialog(true)} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                <Wand2 size={14} /> Edit with AI
-              </button>
-              <button disabled={!hasStoryInput || actionsLocked} onClick={() => void reviewStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0f766e] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                <ShieldCheck size={14} /> AI review story
-              </button>
-              <button disabled={!hasStoryInput || actionsLocked} onClick={() => void saveStory()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 disabled:opacity-50">
-                <Save size={14} /> Lưu kịch bản
-              </button>
-              <button disabled={!hasStoryInput || actionsLocked || selectedProject?.capabilities.can_generate_voice === false} onClick={() => { setActiveStep('video'); void generateVoice() }} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                <Mic2 size={14} /> Tạo Voice AI
-              </button>
-              {contentId && (
-                <button
-                  onClick={() => setShowContentDetailId(contentId)}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
-                >
-                  <Newspaper size={14} /> Xem bài gốc
-                </button>
-              )}
-            </div>
-            <div className="mt-3">
-              <StoryDataEditor
-                story={story}
-                sceneIndex={storySceneIndex}
-                onSelectScene={setStorySceneIndex}
-                onChange={(nextStory, nextIndex) => {
-                  updateStory(nextStory)
-                  if (typeof nextIndex === 'number') setStorySceneIndex(nextIndex)
-                }}
-              />
-            </div>
-          </Panel>
-        )}
-      </div>
-      )}
-
       {showEditDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
           <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
@@ -951,8 +847,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           onGenerateVoice={() => void generateVoice()}
           onVoiceProviderChange={setVoiceProvider}
           onFitFrames={() => void generateVoice()}
-          onExit={() => setActiveStep('story')}
+          onExit={() => setActiveStep('video')}
           onReload={() => void loadInitial()}
+          onEditWithAi={() => setShowEditDialog(true)}
+          onReviewWithAi={() => void reviewStoryWithAi()}
           onChange={(nextStory) => {
             setPreviewStory(nextStory)
             updateStory(nextStory)
@@ -978,12 +876,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                     <a href={exportedVideoUrl} download className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800">
                       <Download size={14} /> Tải video
                     </a>
-                    <button disabled={actionsLocked || !selectedProject?.capabilities.can_approve} onClick={() => void approveVideo()} className="h-8 rounded-md bg-[var(--success)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                      Duyệt video
-                    </button>
-                    <button disabled={actionsLocked || !selectedProject?.capabilities.can_queue} onClick={() => void queueVideo()} className="h-8 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                      Đưa vào queue đăng
-                    </button>
+                    <a href={`/approvals?profile_id=${encodeURIComponent(selectedProject?.profile?.id || '')}`} className="inline-flex min-h-8 items-center justify-center rounded-md bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white">
+                      Mở Approvals để duyệt và lên lịch
+                    </a>
+                    <p className="text-xs leading-5 text-emerald-800">Sản xuất video đã hoàn tất. Duyệt video, chọn lịch hoặc đăng ngay tại trang Approvals.</p>
                   </div>
                 )}
               </div>
@@ -1053,173 +949,9 @@ async function waitForGenerateVideoJob(
 }
 
 
-function PlanEditor({
-  workflow,
-  draft,
-  saving,
-  onChange,
-  onSave,
-  onCreateStory,
-}: {
-  workflow: VideoWorkspaceDetail | null
-  draft: PlanDraft
-  saving: boolean
-  onChange: (draft: PlanDraft) => void
-  onSave: () => void
-  onCreateStory: () => void
-}) {
-  const draftStory = workflowStory(workflow)
-  const scenes = draftStory ? storyTimelineScenes(draftStory) : []
-  const update = (field: keyof PlanDraft, value: string) => onChange({ ...draft, [field]: value })
 
-  return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="grid gap-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-base font-black text-[#0f172a]">Draft video</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">
-                Đây là scene-level input để tạo video draft, voice và timeline.
-              </div>
-            </div>
-            <span className="rounded bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-800">
-              {workflow?.status || 'Đang tải'}
-            </span>
-          </div>
 
-                    <div className="grid gap-5 md:grid-cols-2">
-            {/* Left Column */}
-            <div className="flex flex-col gap-4">
-              <Field label="Tiêu đề kế hoạch">
-                <input value={draft.title} onChange={(event) => update('title', event.target.value)} className={inputClass} />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Đối tượng mục tiêu">
-                  <input value={draft.target_audience} onChange={(event) => update('target_audience', event.target.value)} className={inputClass} />
-                </Field>
-                <Field label="Giọng văn">
-                  <input value={draft.tone} onChange={(event) => update('tone', event.target.value)} className={inputClass} />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Format">
-                  <input value={draft.format} onChange={(event) => update('format', event.target.value)} className={inputClass} />
-                </Field>
-                <Field label="Risk level">
-                  <input value={draft.risk_level} onChange={(event) => update('risk_level', event.target.value)} className={inputClass} />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Thời lượng mục tiêu">
-                  <input type="number" min="1" value={draft.target_duration_seconds} onChange={(event) => update('target_duration_seconds', event.target.value)} className={inputClass} />
-                </Field>
-                <Field label="Số part đề xuất">
-                  <input type="number" min="1" value={draft.recommended_part_count} onChange={(event) => update('recommended_part_count', event.target.value)} className={inputClass} />
-                </Field>
-              </div>
-            </div>
-
-            {/* Right Column */}
-            <div className="flex flex-col gap-4">
-              <Field label="Góc khai thác">
-                <textarea value={draft.content_angle} onChange={(event) => update('content_angle', event.target.value)} className={`${textareaClass} h-[100px]`} />
-              </Field>
-              <Field label="AI reasoning">
-                <textarea
-                  value={draft.ai_reasoning}
-                  onChange={(event) => update('ai_reasoning', event.target.value)}
-                  className={`${textareaClass} h-[132px]`}
-                  placeholder="Mỗi dòng là một lý do/nhận xét của AI planner"
-                />
-              </Field>
-            </div>
-            
-            {/* Full Width Bottom */}
-            <div className="col-span-1 md:col-span-2 rounded-lg border border-slate-200 bg-white p-4">
-              <div className="mb-3 text-[11px] font-black uppercase text-slate-500">Production Requirements</div>
-              <div className="flex flex-wrap gap-4">
-                {(() => {
-                  try {
-                    const reqs = typeof draft.production_requirements === 'string' 
-                      ? JSON.parse(draft.production_requirements || '{}')
-                      : draft.production_requirements || {};
-                      
-                    return [
-                      { key: 'requires_voice', label: 'Cần Voice AI' },
-                      { key: 'requires_subtitles', label: 'Cần Subtitles' },
-                      { key: 'requires_background_media', label: 'Cần Background Media' },
-                      { key: 'requires_character_consistency', label: 'Nhất quán nhân vật' }
-                    ].map(item => (
-                      <label key={item.key} className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={!!reqs[item.key]} 
-                          onChange={(e) => {
-                            const updated = { ...reqs, [item.key]: e.target.checked }
-                            update('production_requirements', JSON.stringify(updated, null, 2))
-                          }}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        {item.label}
-                      </label>
-                    ))
-                  } catch (e: any) {
-                    return <span className="text-sm text-red-500">Lỗi JSON: {e?.message || 'Error'}</span>
-                  }
-                })()}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
-            <button disabled={saving || !workflow} onClick={onSave} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-              <Save size={14} /> {saving ? 'Đang lưu...' : 'Lưu kế hoạch'}
-            </button>
-            <button disabled={saving || !workflow} onClick={onCreateStory} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-              <Wand2 size={14} /> Tạo lại draft bằng AI
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid content-start gap-4">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-sm font-black text-[#0f172a]">Scenes</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">{scenes.length} scene trong workflow</div>
-          <div className="mt-3 grid gap-2">
-            {scenes.length === 0 ? (
-              <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-400">
-                Chưa có scene nào.
-              </div>
-            ) : scenes.map((scene: any, index: number) => {
-              const voiceText = scene.voice_text || scene.subtitle || ''
-              return (
-                <div key={`${scene.image || 'scene'}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="font-bold text-[#0f172a]">Scene {index + 1}</div>
-                    <span className="rounded bg-white px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">{scene.duration}s</span>
-                  </div>
-                  {scene.subtitle ? <div className="mt-2 text-xs leading-5 text-slate-700"><b>Sub:</b> {scene.subtitle}</div> : null}
-                  {voiceText ? <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700"><b>Voice:</b> {voiceText}</div> : null}
-                  {scene.image ? <div className="mt-2 truncate text-xs leading-5 text-emerald-700"><b>Image:</b> {scene.image}</div> : null}
-                  <div className="mt-2 text-xs leading-5 text-slate-500"><b>Effect:</b> {scene.effect || 'slow-zoom'} · {scene.fit || 'cover'}</div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-        <SourceContentPreview source={{
-          ...((workflow?.source_content || {}) as Record<string, any>),
-          title: (workflow?.source_content as any)?.title || workflow?.title,
-          full_text: (workflow?.source_content as any)?.full_text || '',
-        }} />
-      </div>
-    </div>
-  )
-}
-
-function SourceContentPreview({ source }: { source: Record<string, any> }) {
+function _SourceContentPreview({ source }: { source: Record<string, any> }) {
   const [activeTab, setActiveTab] = useState<'content' | 'media'>('content')
 
   const mediaItems = useMemo(() => {
@@ -1421,7 +1153,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputClass = 'h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 outline-none focus:border-[#2563eb]'
-const textareaClass = 'w-full resize-y rounded-lg border border-slate-200 p-3 text-sm font-medium text-slate-700 outline-none focus:border-[#2563eb]'
+const _textareaClass = 'w-full resize-y rounded-lg border border-slate-200 p-3 text-sm font-medium text-slate-700 outline-none focus:border-[#2563eb]'
 const videoAspectPresets = [
   { label: '9:16', width: 1080, height: 1920 },
   { label: '3:4', width: 1080, height: 1440 },
@@ -1432,7 +1164,7 @@ const videoAspectPresets = [
 const fpsPresets = [15, 24, 25, 30, 50, 60]
 const backgroundPresets = ['#05070b', '#000000', '#ffffff', '#f8fafc', '#111827', '#ef4444', '#2563eb', '#16a34a', '#ff6200']
 
-function StoryDataEditor({
+function _StoryDataEditor({
   story,
   sceneIndex,
   onSelectScene,
@@ -1586,6 +1318,8 @@ function StoryVisualPreview({
   onFitFrames,
   onExit,
   onReload,
+  onEditWithAi,
+  onReviewWithAi,
   onChange,
 }: {
   draftReviewRequired: boolean
@@ -1604,6 +1338,8 @@ function StoryVisualPreview({
   onFitFrames: () => void
   onExit: () => void
   onReload: () => void
+  onEditWithAi?: () => void
+  onReviewWithAi?: () => void
   onChange: (story: GenerateVideoStory) => void
 }) {
   const scenes = useMemo(() => story ? storyTimelineScenes(story) : [], [story])
@@ -1907,6 +1643,8 @@ function StoryVisualPreview({
         onFitFrames={onFitFrames}
         onExit={onExit}
         onReload={onReload}
+        onEditWithAi={onEditWithAi}
+        onReviewWithAi={onReviewWithAi}
         onToggleFullscreen={() => setIsFullscreen((value) => !value)}
         onToggleTrackMute={toggleTrackMute}
         saving={saving}
@@ -1981,6 +1719,8 @@ function RemotionLikeEditor({
   onFitFrames,
   onExit,
   onReload,
+  onEditWithAi,
+  onReviewWithAi,
   onToggleFullscreen,
   onToggleTrackMute,
   saving,
@@ -2015,6 +1755,8 @@ function RemotionLikeEditor({
   onFitFrames: () => void
   onExit: () => void
   onReload: () => void
+  onEditWithAi?: () => void
+  onReviewWithAi?: () => void
   onToggleFullscreen: () => void
   onToggleTrackMute: (trackId: string) => void
   saving: boolean
@@ -2350,6 +2092,8 @@ function RemotionLikeEditor({
         onChange={onChange}
         onContextMenuTrack={openAudioMenu}
         onDuplicate={duplicateScene}
+        onEditWithAi={onEditWithAi}
+        onReviewWithAi={onReviewWithAi}
         onExit={onExit}
         onExport={onExport}
         onFitFrames={onFitFrames}
@@ -2411,6 +2155,8 @@ function StudioProductionShell({
   onChange,
   onContextMenuTrack,
   onDuplicate,
+  onEditWithAi,
+  onReviewWithAi,
   onExit,
   onExport,
   onFitFrames,
@@ -2467,6 +2213,8 @@ function StudioProductionShell({
   onChange: (story: GenerateVideoStory) => void
   onContextMenuTrack: (event: React.MouseEvent<HTMLElement>, item: { kind: 'legacy-music' | 'track'; trackId?: string }) => void
   onDuplicate: () => void
+  onEditWithAi?: () => void
+  onReviewWithAi?: () => void
   onExit: () => void
   onExport: () => void
   onFitFrames: () => void
@@ -2520,11 +2268,18 @@ function StudioProductionShell({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {onEditWithAi && (
+              <button onClick={onEditWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--primary)] px-3 text-[12px] font-bold text-white shadow-sm hover:opacity-90">
+                <Wand2 size={13} /> Edit with AI
+              </button>
+            )}
+            {onReviewWithAi && (
+              <button onClick={onReviewWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0f766e] px-3 text-[12px] font-bold text-white shadow-sm hover:opacity-90">
+                <ShieldCheck size={13} /> AI Review
+              </button>
+            )}
             <button onClick={onReload} className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[12px] font-bold text-[#27305b] shadow-sm hover:bg-[#f8faff]">
               <Rewind size={13} /> Reload
-            </button>
-            <button className="grid h-9 w-9 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#27305b] shadow-sm hover:bg-[#f8faff]">
-              <span className="text-lg leading-none">...</span>
             </button>
             <button disabled={exporting} onClick={onExport} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#6247ff] px-4 text-[12px] font-black text-white shadow-lg shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
               <Download size={14} /> {exporting ? 'Đang render...' : 'Xuất MP4'}
@@ -2573,7 +2328,16 @@ function StudioProductionShell({
             </div>
           </div>
         </section>
-        <StudioSceneEditorPanel currentScene={currentScene} sceneIndex={sceneIndex} scenes={scenes} story={story} videoDuration={videoDuration} onChange={onChange} />
+        <StudioSceneEditorPanel
+          currentScene={currentScene}
+          sceneIndex={sceneIndex}
+          scenes={scenes}
+          story={story}
+          videoDuration={videoDuration}
+          onChange={onChange}
+          onEditWithAi={onEditWithAi}
+          onReviewWithAi={onReviewWithAi}
+        />
         <StudioInspector
           audio1Muted={audio1Muted}
           audio2Muted={audio2Muted}
@@ -2731,8 +2495,10 @@ function StudioSceneEditorPanel({
   sceneIndex,
   scenes,
   story,
-  videoDuration,
+  videoDuration: _videoDuration,
   onChange,
+  onEditWithAi,
+  onReviewWithAi,
 }: {
   currentScene: GenerateVideoScene | undefined
   sceneIndex: number
@@ -2740,8 +2506,69 @@ function StudioSceneEditorPanel({
   story: GenerateVideoStory
   videoDuration: number
   onChange: (story: GenerateVideoStory) => void
+  onEditWithAi?: () => void
+  onReviewWithAi?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<'frame' | 'video'>('frame')
+  const mediaInputRef = useRef<HTMLInputElement>(null)
+  const addFrameInputRef = useRef<HTMLInputElement>(null)
+
+  const handleMediaChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      let assetUrl = ''
+      try {
+        const res = await uploadGenerateVideoAudioApi(file)
+        assetUrl = res.asset_path
+      } catch {
+        assetUrl = URL.createObjectURL(file)
+      }
+      if (currentScene) {
+        updateSceneAt(story, scenes, sceneIndex, {
+          image: assetUrl,
+          media_type: file.type.startsWith('video/') ? 'video' : 'image',
+        }, onChange)
+      }
+    } catch (err) {
+      console.error('Lỗi upload file media:', err)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
+  const handleAddFrame = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      let assetUrl = ''
+      try {
+        const res = await uploadGenerateVideoAudioApi(file)
+        assetUrl = res.asset_path
+      } catch {
+        assetUrl = URL.createObjectURL(file)
+      }
+      const newScene: GenerateVideoScene = {
+        ...emptyScene(),
+        image: assetUrl,
+        duration: 4,
+        subtitle: file.name.replace(/\.[^/.]+$/, ''),
+        media_type: file.type.startsWith('video/') ? 'video' : 'image',
+      }
+      const insertAt = Math.min(sceneIndex + 1, scenes.length)
+      const nextScenes = [
+        ...scenes.slice(0, insertAt),
+        newScene,
+        ...scenes.slice(insertAt),
+      ]
+      onChange(updateRenderScenes(story, nextScenes))
+    } catch (err) {
+      console.error('Lỗi thêm frame mới:', err)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
   const subtitleStyle = (currentScene?.text_style || {}) as Record<string, unknown>
   const fontSize = readNumericStyleValue(subtitleStyle.fontSize, 48)
   const titleText = story.meta?.title || getStoryProjectName(story)
@@ -2754,13 +2581,26 @@ function StudioSceneEditorPanel({
     },
   })
   const applyFitAll = (fit: 'cover' | 'contain') => onChange(updateRenderScenes(story, scenes.map((scene) => ({ ...scene, fit }))))
-  const sceneStart = getSceneStart(scenes, sceneIndex)
-  const sceneEnd = getSceneEnd(scenes, sceneIndex)
+  const _sceneStart = getSceneStart(scenes, sceneIndex)
+  const _sceneEnd = getSceneEnd(scenes, sceneIndex)
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
+      <input ref={mediaInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleMediaChange} />
+      <input ref={addFrameInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleAddFrame} />
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#e8ecf7] px-3">
         <div className="text-[15px] font-black text-[#11183c]">Scene {sceneIndex + 1}/{scenes.length}</div>
-        <div className="text-[11px] font-black text-[#11183c]">{formatStudioClock(sceneStart)} - {formatStudioClock(sceneEnd || videoDuration)}</div>
+        <div className="flex items-center gap-1.5">
+          {onEditWithAi && (
+            <button onClick={onEditWithAi} title="Edit with AI" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[var(--primary)] px-2 text-[11px] font-bold text-white hover:opacity-90">
+              <Wand2 size={12} /> AI Edit
+            </button>
+          )}
+          {onReviewWithAi && (
+            <button onClick={onReviewWithAi} title="AI Review" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[#0f766e] px-2 text-[11px] font-bold text-white hover:opacity-90">
+              <ShieldCheck size={12} /> Review
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid h-10 shrink-0 grid-cols-2 border-b border-[#e8ecf7] text-[12px] font-black">
         <button onClick={() => setActiveTab('frame')} className={activeTab === 'frame' ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#667097] hover:bg-[#f8faff]'}>Frame</button>
@@ -2772,9 +2612,9 @@ function StudioSceneEditorPanel({
             {currentScene ? <SceneMediaThumb scene={currentScene} className="h-full w-full object-cover" /> : null}
           </div>
           <div className="grid grid-cols-3 gap-2 border-t border-[#dfe4f3] bg-white p-2">
-            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><ImageIcon size={12} /> Thay ảnh</button>
-            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><Wand2 size={12} /> Tạo ảnh AI</button>
-            <button className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b]"><Film size={12} /> Chọn media</button>
+            <button onClick={() => mediaInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b] hover:bg-[#f8faff]"><ImageIcon size={12} /> Thay media</button>
+            <button onClick={onEditWithAi} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b] hover:bg-[#f8faff]"><Wand2 size={12} /> AI Edit</button>
+            <button onClick={() => addFrameInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] text-[11px] font-bold text-[#6247ff] hover:bg-[#eeeaff]"><Plus size={12} /> Thêm frame</button>
           </div>
         </div>
 
@@ -5730,11 +5570,8 @@ function inferProjectStatus(workflow: VideoWorkspaceDetail | null, story: Genera
 
 function inferActiveStepFromProject(workflow: VideoWorkspaceDetail | null, story: GenerateVideoStory | null): StepId {
   const artifacts = getWorkflowArtifacts(workflow)
-  if (artifacts?.final && story) return 'video'
-  if (story) {
-    return 'video'
-  }
-  return 'story'
+  if (artifacts?.final && story) return 'preview'
+  return 'video'
 }
 
 function getWorkflowArtifacts(workflow: VideoWorkspaceDetail | null) {

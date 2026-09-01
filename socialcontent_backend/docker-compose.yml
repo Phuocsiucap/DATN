@@ -155,6 +155,7 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EMBEDDING_SERVICE_URL: http://embedding-service:8075
+      GENERATE_VIDEO_DISABLE_RENDER: "true"
       PYTHONUNBUFFERED: "1"
     volumes:
       - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public

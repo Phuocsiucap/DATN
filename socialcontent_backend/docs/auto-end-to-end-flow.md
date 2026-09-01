@@ -47,8 +47,7 @@ flowchart TD
 | `video_render_mode` | `manual` | `auto` mới tự nối draft → voice → render. |
 | `approval_mode` | `manual` | `auto` cho phép tự duyệt video sau render; không vượt draft safety gate. |
 | `auto_queue_enabled` | `true` | Tự tạo queue ngay sau duyệt video. Có nhánh đồng bộ khi mở trang queue, xem I7. |
-| `schedule_enabled` của profile | `true` | Scheduler đăng bài yêu cầu bật. |
-| `auto_publish_enabled` | `false` | Scheduler chỉ tự upload khi bật. |
+| `auto_publish_enabled` | `false` | Công tắc duy nhất cho phép scheduler tự đăng khi đến lịch; đã gộp `schedule_enabled` của profile. |
 | `min_similarity` / `avoid_similarity_threshold` | `0.62` / `0.72` | Ngưỡng match chủ đề / chủ đề cần tránh. |
 | `require_video` | `false` | Yêu cầu **nguồn** có tín hiệu video, không bắt buộc dùng video nguồn trong render. |
 | `risk_level` | `medium` | `low` = thận trọng hơn: luôn qua Fit Judge và không tự chấp nhận risk MEDIUM. |
@@ -362,7 +361,7 @@ flowchart TD
     I7["I7 · NHÁNH KHI MỞ TRANG QUEUE<br/>VÀO: list_user_queue → scan workflow RENDERED/VIDEO_APPROVED/QUEUED_FOR_PUBLISHING<br/>ĐK: policy đạt, có final video, chưa có queue hợp lệ<br/>RA: queue needs_approval, lịch hiện tại +2 giờ<br/>! Không kiểm auto_queue_enabled ở nhánh đồng bộ này"]
     I8["I8 · REVIEWER CHỌN LỊCH / ĐĂNG NGAY<br/>VÀO: queue item + lựa chọn người dùng<br/>Đăng ngay: approved, scheduled_at=now → gọi publish<br/>Chọn lịch AI: rule-based, không LLM; dùng schedule_timezone<br/>Slot phải sau now+5 phút; tìm 0–7 ngày; fallback +1 giờ<br/>Lịch tay phải ở tương lai; RA queue approved"]
     I9["I9 · PUBLISH SCHEDULER TICK<br/>VÀO: enable_scheduler + SystemSetting<br/>Chu kỳ MĐ 5 phút, cấu hình clamp 1–1440 phút<br/>Mỗi tick: poll tối đa 10 bài đang publishing trước<br/>Sau đó chọn tối đa 5 queue item đến giờ trên toàn hệ thống"]
-    I10{"I10 · ELIGIBLE ĐỂ TỰ ĐĂNG?<br/>VÀO: queue + profile + strategy<br/>ĐK: platform=tiktok; queued/approved; scheduled_at ≤ now<br/>Profile active và access_token khác NULL<br/>schedule_enabled và auto_publish_enabled=true<br/>Nếu status=queued thì approval_mode phải auto"}
+    I10{"I10 · ELIGIBLE ĐỂ TỰ ĐĂNG?<br/>VÀO: queue + profile + strategy<br/>ĐK: platform=tiktok; queued/approved; scheduled_at ≤ now<br/>Profile active và access_token khác NULL<br/>auto_publish_enabled=true<br/>Nếu status=queued thì approval_mode phải auto"}
     I11["I11 · KIỂM TRA LẠI TRƯỚC UPLOAD<br/>VÀO: queue + workflow liên kết qua queued_post_id<br/>AUTO: chưa REJECTED; draft policy đạt<br/>Có FINAL_VIDEO hiện hành không STALE; article_link trùng URI này<br/>RA: được upload hoặc HTTP 409; không đăng bản render cũ"]
     IW["CHỜ / KHÔNG CHỌN TRONG TICK<br/>VÀO: chưa đến giờ, thiếu token, tắt auto_publish hoặc sai trạng thái<br/>RA: queue vẫn còn; không tự bị xóa"]
     I1 -->|policy không đạt| G0["QUAY G · REVIEW DRAFT"]
@@ -509,6 +508,6 @@ Ngoài W1/W7 được cập nhật rõ ở trên, các mục còn lại vẫn l�
 
 ## 4. Ví dụ đường đi để đọc sơ đồ
 
-**Ví dụ minh họa, không phải dữ liệu thực:** nguồn mới READY, Q=90; profile T=0.62, S=0.73, không avoid, risk MEDIUM, ít nhất 3 facts, không từ nhạy cảm → D4 đi thẳng PRODUCE. Series tốt nhất score=0.81, thứ hai=0.68, có 4 vector khác content_id → fixed USE_EXISTING. Compact quality=92, không CRITICAL → lưu draft PASS và ký phiên bản. Nếu `video_render_mode=auto` → Edge TTS rồi thử alignment, render; `approval_mode=auto` → duyệt; `auto_queue_enabled=true` → queue. Đến lịch, còn cần `schedule_enabled=true`, `auto_publish_enabled=true`, token và `video.publish` mới gửi TikTok. Direct Post mặc định SELF_ONLY; chỉ khi TikTok trả PUBLISH_COMPLETE mới hoàn tất Direct Post.
+**Ví dụ minh họa, không phải dữ liệu thực:** nguồn mới READY, Q=90; profile T=0.62, S=0.73, không avoid, risk MEDIUM, ít nhất 3 facts, không từ nhạy cảm → D4 đi thẳng PRODUCE. Series tốt nhất score=0.81, thứ hai=0.68, có 4 vector khác content_id → fixed USE_EXISTING. Compact quality=92, không CRITICAL → lưu draft PASS và ký phiên bản. Nếu `video_render_mode=auto` → Edge TTS rồi thử alignment, render; `approval_mode=auto` → duyệt; `auto_queue_enabled=true` → queue. Đến lịch, còn cần `auto_publish_enabled=true`, token và `video.publish` mới gửi TikTok. Direct Post mặc định SELF_ONLY; chỉ khi TikTok trả PUBLISH_COMPLETE mới hoàn tất Direct Post.
 
 **Ví dụ nhánh review:** cùng bài nhưng S=0.65 → qua cosine 0.62 nhưng chưa đạt 0.70 để bypass Fit Judge. Fit risk HIGH → dừng trước series, không tạo workflow. Nếu Fit PRODUCE nhưng draft có số liệu không có trong facts → một repair; vẫn lỗi → tạo draft chờ duyệt, chưa gắn pending series, không TTS. Người dùng duyệt đúng chữ ký mới tiếp tục; sửa lời thoại sau đó sẽ hủy duyệt và vô hiệu hóa media cũ.

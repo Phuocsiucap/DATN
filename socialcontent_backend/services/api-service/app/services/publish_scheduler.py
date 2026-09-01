@@ -154,7 +154,7 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
         )
         for item in due_items:
             strategy = item.profile.strategy
-            if not strategy or not strategy.schedule_enabled or not strategy.auto_publish_enabled:
+            if not strategy or not strategy.auto_publish_enabled:
                 result["skipped"] += 1
                 continue
             if item.status == "queued" and strategy.approval_mode != "auto":

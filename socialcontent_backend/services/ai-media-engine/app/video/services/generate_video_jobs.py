@@ -15,10 +15,7 @@ from common.db.content_series import (
 from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
-from app.video.services.generate_video_assets import hydrate_source_video_assets
 from app.video.services.generate_video_voice import DEFAULT_VOICE_SPEED
-from app.video.services.generate_video_rendering import export_final_video
-from app.video.services.generate_video_scripting import create_story_from_raw
 from app.video.services.generate_video_timeline import normalize_story_for_project, public_story_payload
 
 
@@ -806,9 +803,6 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         db.close()
 
 
-def process_generate_video_render_run(task_id: uuid.UUID | str) -> None:
-    _project_render_worker(str(task_id))
-
 
 def _maybe_enqueue_auto_voice_or_render(db, project, story: dict[str, Any], *, trigger: str) -> None:
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
@@ -950,105 +944,6 @@ def _maybe_enqueue_auto_generate_video_render(db, project, story: dict[str, Any]
 
 
 
-def _project_render_worker(task_id: str) -> None:
-    from common.db.models import KafkaTask, MediaWorkflow
-    from common.db.session import SessionLocal
-
-    db = SessionLocal()
-    try:
-        task = db.get(KafkaTask, uuid.UUID(task_id))
-        if not task or task.task_type != "GENERATE_VIDEO_RENDER" or task.status not in {"PENDING", "FAILED"}:
-            return
-
-        project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id)))
-        if not project:
-            return
-        if _cancel_blocked_auto_production(db, task, project):
-            return
-
-        blocking_task = (
-            db.query(KafkaTask)
-            .filter(
-                KafkaTask.reference_id == project.id,
-                KafkaTask.task_type.in_(
-                    [
-                        "GENERATE_VIDEO_SCRIPT",
-                        "GENERATE_VIDEO_EDIT",
-                        "GENERATE_VIDEO_REVIEW",
-                        "GENERATE_VIDEO_VOICE",
-                    ]
-                ),
-                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
-            )
-            .order_by(KafkaTask.created_at.desc())
-            .first()
-        )
-        if blocking_task:
-            task.current_stage = "QUEUED_RENDER_AFTER_VOICE" if blocking_task.task_type == "GENERATE_VIDEO_VOICE" else "QUEUED_RENDER_AFTER_DRAFT"
-            task.progress_percent = 0
-            db.add(task)
-            db.commit()
-            return
-
-        task.status = "RUNNING"
-        task.started_at = datetime.now(timezone.utc)
-        task.completed_at = None
-        task.error_message = None
-        _update_task_progress(db, task, project, "PREPARING_RENDER", 10, project_status="RENDERING")
-
-        metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
-        story = project.draft_json
-        if not isinstance(story, dict):
-            raise RuntimeError("Missing story for project render run")
-        story = normalize_story_for_project(story)
-        story.setdefault("meta", {})
-        story["meta"]["workflow_id"] = str(project.id)
-
-        _update_task_progress(db, task, project, "RENDERING_VIDEO", 30, project_status="RENDERING")
-        result = export_final_video(story, render_job_id=str(task.id))
-        result_story = result.get("story") or story
-        _preserve_compact_scenes(story, result_story)
-        artifact_path = str(result.get("artifact_path") or "")
-        public_story = public_story_payload(result_story)
-        public_story.setdefault("meta", {})
-        public_story["meta"]["workflow_id"] = str(project.id)
-        public_story["project_status"] = "RENDERED"
-        if artifact_path:
-            public_story.setdefault("video_artifacts", {})["final"] = artifact_path
-
-        _update_task_progress(db, task, project, "SAVING_VIDEO", 95, project_status="RENDERING")
-        _upsert_project_rendered_draft(project, public_story)
-
-        # update artifacts
-        artifacts = project.artifacts_jsonb if isinstance(project.artifacts_jsonb, list) else []
-        artifacts.append({
-            "artifact_type": "FINAL_VIDEO",
-            "uri": artifact_path,
-            "status": "READY",
-            "metadata": {"task_id": str(task.id)},
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        project.artifacts_jsonb = artifacts
-
-        task.status = "COMPLETED"
-        task.progress_percent = 100
-        task.current_stage = "RENDERED"
-        task.result_jsonb = {"output_path": artifact_path, "workflow_id": str(project.id)}
-        task.completed_at = datetime.now(timezone.utc)
-        project.status = "RENDERED"
-        project.current_stage = "RENDERED"
-        project.progress_percent = 100
-        _apply_module4_policy_after_render(db, project, artifact_path, public_story)
-        db.add_all([task, project])
-        db.commit()
-    except Exception as error:
-        db.rollback()
-        task = db.get(KafkaTask, uuid.UUID(task_id))
-        if task:
-            project = db.get(MediaWorkflow, uuid.UUID(str(task.reference_id))) if task.reference_id else None
-            _mark_video_task_failed(db, task, project, error)
-    finally:
-        db.close()
 
 
 def _apply_module4_policy_after_render(db, project, rendered_video: str, story: dict[str, Any]) -> None:
@@ -1136,7 +1031,7 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             # A full calendar must not mark a successfully rendered video as
             # failed, nor cause it to publish at an invented fallback time.
             item.scheduled_at = None
-            item.status = "needs_approval"
+            item.status = "approved"
             queued_reason = f"{queued_reason}. Cần chọn lịch: {exc}"
     item.ai_reason = queued_reason
     db.add(item)
@@ -1151,8 +1046,8 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
         "reason": queued_reason,
     }
     project.metadata_json = metadata
-    project.status = "QUEUED_FOR_PUBLISHING"
-    project.current_stage = "QUEUED_FOR_PUBLISHING"
+    project.status = "QUEUED_FOR_PUBLISHING" if item.scheduled_at else "VIDEO_APPROVED"
+    project.current_stage = project.status
 
 
 def _default_module4_caption(project, story: dict[str, Any]) -> str:

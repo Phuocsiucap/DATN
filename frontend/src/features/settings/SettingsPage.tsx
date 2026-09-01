@@ -24,7 +24,7 @@ import {
   type SchedulerSettingsStatus,
   type SchedulerSettings,
 } from '@/commons/apis/api'
-import { AppButton, AppCard, FilterChip, MetricCard, PageHeader, SearchField, SocialProfileAvatar, StatusPill, TabStrip } from '@/commons/component/social-ui'
+import { AppButton, AppCard, FilterChip, MetricCard, PageLayout, SearchField, SocialProfileAvatar, StatusPill, TabStrip } from '@/commons/component/social-ui'
 import { SocialProfileStrategyDialog, type SocialProfile } from './SocialProfileStrategyDialog'
 
 type CurrentUser = {
@@ -142,7 +142,6 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     tone: 'Professional & Authoritative',
     target_audience: '',
     approval_mode: 'manual',
-    schedule_enabled: true,
     schedule_days: '0,1,2,3,4,5,6',
     schedule_times: '08:30,20:30',
     schedule_timezone: 'Asia/Bangkok',
@@ -508,22 +507,21 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const connectedPlatforms = new Set(profiles.map((profile) => String(profile.platform || '').toLowerCase()).filter(Boolean)).size
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Quản lý kênh social"
-        description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược AI tự động hóa."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <SearchField placeholder="Tìm kiếm (Ctrl + K)" className="hidden w-[300px] lg:flex" />
-            <AppButton variant="secondary" icon={<RefreshCw size={15} />} onClick={() => void loadProfiles()} disabled={loading}>
-              Tải lại
-            </AppButton>
-            <AppButton icon={<Plus size={16} />} onClick={() => setAddProfileOpen(true)}>
-              Thêm kênh social
-            </AppButton>
-          </div>
-        }
-      />
+    <PageLayout
+      title="Quản lý kênh social"
+      description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược AI tự động hóa."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchField placeholder="Tìm kiếm (Ctrl + K)" className="hidden w-[300px] lg:flex" />
+          <AppButton variant="secondary" icon={<RefreshCw size={15} />} onClick={() => void loadProfiles()} disabled={loading}>
+            Tải lại
+          </AppButton>
+          <AppButton icon={<Plus size={16} />} onClick={() => setAddProfileOpen(true)}>
+            Thêm kênh social
+          </AppButton>
+        </div>
+      }
+    >
 
       <TabStrip
         tabs={[
@@ -759,7 +757,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         onChange={handleUpdateStrategyField}
         onSave={() => void handleSaveStrategy()}
       />
-    </div>
+    </PageLayout>
   )
 }
 

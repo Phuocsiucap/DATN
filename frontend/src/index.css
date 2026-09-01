@@ -86,8 +86,29 @@
     background: var(--outline);
   }
 
-  input[type="date"]::-webkit-calendar-picker-indicator {
+  input[type="date"],
+  input[type="datetime-local"] {
+    color-scheme: light;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
+    opacity: 0.65;
+    padding: 0;
+    margin: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
+  input[type="date"]::-webkit-datetime-edit,
+  input[type="datetime-local"]::-webkit-datetime-edit {
+    padding: 0;
+    display: inline-flex;
   }
 }
 
@@ -164,6 +185,9 @@
   min-width: 0;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 .app-table-header {

@@ -610,16 +610,46 @@ function timelineFromLegacyScenes(scenes, fps, story) {
 }
 
 function publicStoryPayload(story, workflowId, artifactPath) {
+  const cleanStory = JSON.parse(JSON.stringify(story || {}));
+  denormalizeLocalPublicAssetUrls(cleanStory);
   const publicStory = {
-    meta: {...(story.meta || {}), workflow_id: String(workflowId)},
-    video: story.video,
-    audio: story.audio,
-    timeline: story.timeline || {},
-    video_artifacts: {...(story.video_artifacts || {}), final: artifactPath},
+    meta: {...(cleanStory.meta || {}), workflow_id: String(workflowId)},
+    video: cleanStory.video,
+    audio: cleanStory.audio,
+    timeline: cleanStory.timeline || {},
+    video_artifacts: {...(cleanStory.video_artifacts || {}), final: artifactPath},
     project_status: 'RENDERED',
   };
-  publicStory.global_tracks = story.global_tracks || [];
+  publicStory.global_tracks = cleanStory.global_tracks || [];
   return publicStory;
+}
+
+function denormalizeLocalPublicAssetUrls(story) {
+  if (!story || typeof story !== 'object') return;
+  if (story.audio && typeof story.audio === 'object') {
+    for (const key of ['voice', 'music']) {
+      if (typeof story.audio[key] === 'string') {
+        story.audio[key] = localPublicRelativePath(story.audio[key]) || story.audio[key];
+      }
+    }
+  }
+
+  const timeline = story.timeline && typeof story.timeline === 'object' ? story.timeline : {};
+  for (const trackName of ['video', 'audio', 'text']) {
+    const clips = Array.isArray(timeline[trackName]) ? timeline[trackName] : [];
+    for (const clip of clips) {
+      if (clip && typeof clip === 'object' && typeof clip.src === 'string') {
+        clip.src = localPublicRelativePath(clip.src) || clip.src;
+      }
+    }
+  }
+
+  const scenes = Array.isArray(story.story_data) ? story.story_data : [];
+  for (const scene of scenes) {
+    if (scene && typeof scene === 'object' && typeof scene.image === 'string') {
+      scene.image = localPublicRelativePath(scene.image) || scene.image;
+    }
+  }
 }
 
 function normalizeClips(value, fps) {
@@ -883,7 +913,6 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
              s.approval_mode,
              s.auto_queue_enabled,
              s.auto_publish_enabled,
-             s.schedule_enabled,
              s.schedule_days,
              s.schedule_times
       FROM social_profiles sp
@@ -1012,7 +1041,7 @@ function nextStrategyScheduledAt(strategy) {
       .map((item) => Number(item.trim()))
       .filter((item) => Number.isInteger(item)),
   );
-  if (strategy.schedule_enabled === false || times.length === 0) {
+  if (times.length === 0) {
     return new Date(now.getTime() + 60 * 60 * 1000);
   }
   for (let dayOffset = 0; dayOffset < 8; dayOffset += 1) {

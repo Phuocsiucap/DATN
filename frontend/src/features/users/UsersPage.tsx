@@ -8,6 +8,7 @@ import {
   fetchUsersAiUsageSummaryApi,
   updateAdminUserApi,
 } from '@/commons/apis/api'
+import { PageLayout } from '@/commons/component/social-ui'
 
 type AdminUser = {
   id: string | number
@@ -155,16 +156,10 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight" style={{ color: 'var(--on-surface)' }}>
-            User Management
-          </h2>
-          <p className="text-sm mt-1" style={{ color: 'var(--on-surface-variant)' }}>
-            Quản lý tài khoản đăng nhập dashboard, phân quyền system/user và khóa truy cập khi cần.
-          </p>
-        </div>
+    <PageLayout
+      title="User Management"
+      description="Quản lý tài khoản đăng nhập dashboard, phân quyền system/user và khóa truy cập khi cần."
+      actions={
         <button
           onClick={() => void loadUsers()}
           disabled={loading}
@@ -174,7 +169,8 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
           <RefreshCw size={16} />
           Refresh
         </button>
-      </div>
+      }
+    >
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="bento-card rounded-xl p-5">
@@ -341,6 +337,6 @@ export default function UsersPage({ currentUser }: UsersPageProps) {
           </table>
         </div>
       </div>
-    </div>
+    </PageLayout>
   )
 }

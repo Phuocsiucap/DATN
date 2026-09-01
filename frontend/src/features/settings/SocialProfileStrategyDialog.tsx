@@ -348,15 +348,15 @@ export function SocialProfileStrategyDialog({
                       <Clock size={16} className="text-[var(--accent)]" /> Luồng tự động hóa & Lịch đăng
                     </h3>
                     <p className="mt-1 text-xs text-[var(--on-surface-variant)] leading-5">
-                      Cấu hình chế độ duyệt video, tự động đưa bài vào hàng đợi và đặt lịch xuất bản.
+                      Duyệt nội dung, chọn lịch và tự đăng là ba bước riêng. Duyệt tại Approvals, quản lý lịch tại Lịch đăng.
                     </p>
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Review Mode">
+                    <Field label="Duyệt video thành phẩm">
                       <SelectControl value={strategyForm.approval_mode || 'manual'} onChange={(value) => onChange('approval_mode', value)}>
-                        <option value="manual">Manual: Reviewer duyệt tay trước khi đăng</option>
-                        <option value="auto">Auto: Tự động duyệt sau khi render thành công</option>
+                        <option value="manual">Thủ công: Đưa vào tab Chờ duyệt</option>
+                        <option value="auto">Tự động: Duyệt khi render xong và qua kiểm tra cơ bản</option>
                       </SelectControl>
                     </Field>
 
@@ -376,8 +376,8 @@ export function SocialProfileStrategyDialog({
                       onChange={(checked) => onChange('auto_project_queue_enabled', checked)}
                     />
                     <SwitchRow
-                      label="Auto Queue After Approval"
-                      description="Tự đưa vào hàng đợi đăng sau khi duyệt"
+                      label="Tự lên lịch sau khi tự duyệt"
+                      description="Bật: luồng tự động chọn giờ đăng sau khi duyệt. Tắt: video nằm ở tab Đã duyệt, chờ bạn bấm Lên lịch. Nút Duyệt thủ công luôn chỉ duyệt."
                       checked={strategyForm.auto_queue_enabled ?? true}
                       onChange={(checked) => onChange('auto_queue_enabled', checked)}
                     />
@@ -386,17 +386,11 @@ export function SocialProfileStrategyDialog({
                   <div className="border-t pt-5 space-y-4" style={{ borderColor: 'var(--outline-variant)' }}>
                     <h4 className="text-xs font-extrabold uppercase text-[var(--on-surface-variant)]">Cấu hình khung giờ đăng bài</h4>
 
-                    <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <SwitchRow
-                        label="Schedule Enabled"
-                        description="Bật lịch đăng tự động"
-                        checked={strategyForm.schedule_enabled ?? true}
-                        onChange={(checked) => onChange('schedule_enabled', checked)}
-                      />
-                      <SwitchRow
-                        label="Scheduler Auto Publish"
-                        description="Tự động gửi lên TikTok khi tới lịch"
-                        checked={strategyForm.auto_publish_enabled || false}
+                        label="Tự động đăng theo lịch"
+                        description="Tự động gửi bài đủ điều kiện lên TikTok khi tới lịch. Tắt để chỉ lưu lịch, không tự đăng."
+                        checked={strategyForm.auto_publish_enabled ?? false}
                         onChange={(checked) => onChange('auto_publish_enabled', checked)}
                       />
                       <Field label="Múi giờ">

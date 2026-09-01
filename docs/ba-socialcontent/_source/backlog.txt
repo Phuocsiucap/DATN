@@ -1,0 +1,450 @@
+# T: mã|tên|kết quả nghiệp vụ|chỉ số đề xuất. E: số|tên|mục tiêu|ưu tiên|release|phụ thuộc. S: tên|vai trò|lợi ích|AC1|AC2|bằng chứng tùy chọn.
+T|01|Khởi tạo và vòng đời khách hàng|Giúp khách hàng đạt giá trị đầu tiên và quản lý vòng đời tài khoản|Thời gian từ đăng ký đến video được duyệt đầu tiên
+E|01|Đăng ký và kích hoạt|Tạo tài khoản Creator hợp lệ, có thể khôi phục|P0|R0|-
+S|Đăng ký tài khoản Creator bằng email|CR|bắt đầu sử dụng sản phẩm|Email trùng không tạo tài khoản thứ hai; không tự cấp quyền Admin|Thông báo lỗi không tiết lộ tài khoản tồn tại|B02
+S|Xác minh email bằng liên kết một lần|CR|chứng minh quyền kiểm soát email|Liên kết có thời hạn và chỉ dùng một lần|Gửi lại bị giới hạn tần suất
+S|Khôi phục mật khẩu an toàn|CR|lấy lại quyền truy cập|Mã hết hạn hoặc đã dùng bị từ chối|Đổi mật khẩu thu hồi phiên theo chính sách
+E|02|Onboarding theo mục tiêu|Dẫn dắt người mới đến kết quả đầu tiên|P1|R1|E01.01
+S|Chọn mục tiêu và chủ đề sáng tạo|CR|nhận hướng dẫn phù hợp|Lưu lựa chọn cá nhân và ngôn ngữ|Cho phép sửa hoặc bỏ qua bước không bắt buộc
+S|Thực hiện checklist tạo video đầu tiên|CR|biết bước tiếp theo cần làm|Checklist phản ánh trạng thái nguồn, kênh và video thật|Tiếp tục đúng bước sau khi đăng nhập lại
+S|Dùng dữ liệu mẫu trong sandbox|CR|trải nghiệm mà chưa kết nối tài khoản thật|Dữ liệu mẫu có nhãn và quyền sử dụng|Sandbox không đăng bài hoặc thu tiền thật
+E|03|Tạm ngưng và rời sản phẩm|Cho phép khách hàng rời đi có kiểm soát|P1|R1|E01.01
+S|Tạm dừng hoạt động tài khoản|CR|ngăn phát sinh công việc mới|Dừng tạo job mới theo thời điểm hiệu lực|Hiển thị cách xử lý job và phí đang phát sinh
+S|Xuất dữ liệu trước khi đóng tài khoản|CR|giữ lại tài sản của mình|Xuất theo phạm vi sở hữu và định dạng đã công bố|Liên kết tải có thời hạn và kiểm tra quyền
+S|Yêu cầu đóng tài khoản|CR|chấm dứt sử dụng theo quy trình rõ ràng|Hiển thị dữ liệu, lịch đăng và nghĩa vụ còn lại|Có xác nhận mạnh và theo dõi tiến độ xử lý
+E|04|Trung tâm công việc hằng ngày|Giúp Creator biết hôm nay cần làm gì để duy trì kênh|P1|R1|E16.01,E17.01
+S|Xem dashboard kênh và việc cần làm hôm nay|CR|tập trung vào việc phát triển kênh|Tổng hợp draft, video lỗi, bài đến lịch và kết nối có vấn đề|Dữ liệu chỉ thuộc Creator đang đăng nhập|B01
+S|Đặt mục tiêu sản lượng và lịch sáng tạo cá nhân|CR|duy trì thói quen xuất bản|Mục tiêu theo kênh và khoảng thời gian|Tạo draft không được tính là đã đăng
+S|Nhận gợi ý việc tiếp theo có giải thích|CR|giảm thời gian tìm việc cần xử lý|Gợi ý dẫn tới nội dung hoặc số liệu căn cứ|Không tự mua dịch vụ hoặc đăng bài theo gợi ý
+T|02|Tài sản cá nhân và quyền sở hữu Creator|Mỗi Creator tự quản lý công việc và dữ liệu riêng của mình|Số lỗi truy cập chéo Creator; tỷ lệ tài sản xác định được chủ sở hữu
+E|01|Phạm vi dữ liệu cá nhân|Tách dữ liệu theo Creator trên toàn hệ thống|P0|R0|E03.01
+S|Xem các tài sản do mình sở hữu|CR|quản lý nội dung trong đúng tài khoản|Danh sách lọc theo Creator đã đăng nhập|Không nhận ID chủ sở hữu tùy ý từ client
+S|Cô lập tài sản giữa các Creator|AD|bảo vệ dữ liệu cá nhân của từng người|API, file, cache, search và worker đều kiểm tra owner|Đổi ID không đọc hoặc sửa được dữ liệu Creator khác
+S|Phân biệt quyền Creator và Admin trên tài sản|AD|quản trị đúng thẩm quyền|Creator chỉ quản lý dữ liệu mình; Admin theo nghiệp vụ quản trị|Mọi truy cập quản trị nhạy cảm có audit và mục đích
+E|02|Dự án sản xuất của cá nhân|Sắp xếp công việc của một Creator|P1|R1|E02.01
+S|Tạo dự án nội dung cá nhân|CR|gom nguồn, draft và video cùng mục tiêu|Dự án có một Creator sở hữu|Không có thành viên, lời mời hoặc đồng sở hữu
+S|Gắn kênh và chiến dịch của mình vào dự án|CR|theo dõi sản phẩm đúng mục tiêu|Chỉ chọn kênh và nội dung thuộc tài khoản mình|Bỏ liên kết không xóa bài đã đăng
+S|Lọc công việc theo dự án cá nhân|CR|tìm nhanh việc đang làm|Bộ lọc áp dụng cho planning, video và lịch khi phù hợp|Không trộn dữ liệu giữa các tài khoản đăng nhập
+E|03|Bảo toàn công việc cá nhân|Tránh mất dữ liệu do thao tác hoặc nhiều thiết bị|P1|R1|E02.02
+S|Sao chép dự án thành bản làm việc mới|CR|tái sử dụng cấu hình và nội dung của mình|Bản sao có ID mới và tham chiếu asset hợp lệ|Không sao chép phê duyệt, lịch đăng hoặc khóa bí mật
+S|Ghi chú riêng trên nội dung và video|CR|lưu ý tưởng cho lần chỉnh tiếp|Ghi chú thuộc Creator và đối tượng cụ thể|Ghi chú không xuất hiện trong caption hay video nếu chưa chọn
+S|Phát hiện xung đột sửa từ nhiều tab hoặc thiết bị|CR|không tự ghi đè công việc của mình|Lưu với phiên bản cũ trả xung đột rõ ràng|Cho xem khác biệt và chọn bản muốn giữ
+T|03|Danh tính, đăng nhập và kiểm soát phiên|Bảo vệ danh tính người dùng và quyền quản trị|Tỷ lệ đăng nhập hợp lệ thành công; sự cố chiếm phiên
+E|01|Đăng nhập và phân quyền nền tảng|Xác thực mỗi yêu cầu và bảo vệ quyền hiện có|P0|R0|-
+S|Đăng nhập bằng thông tin hợp lệ|CR|truy cập tài khoản của mình|Sai thông tin trả lỗi chung và bị giới hạn thử|Tài khoản bị khóa không nhận phiên hợp lệ|B02
+S|Đăng xuất và thu hồi phiên|CR|kết thúc quyền truy cập trên thiết bị|Refresh token của phiên bị vô hiệu hóa|Quy định rõ độ trễ vô hiệu access token|B02
+S|Kiểm soát quyền người dùng và quản trị|AD|bảo vệ chức năng đặc quyền|Người dùng thường không gọi được API quản trị|Không tự xóa quản trị viên cuối cùng|B02
+E|02|MFA và quản lý phiên|Giảm rủi ro chiếm tài khoản|P0|R1|E03.01
+S|Bật xác thực đa yếu tố|CR|bảo vệ tài khoản khi lộ mật khẩu|Mã khôi phục chỉ dùng một lần|Mất thiết bị có quy trình xác minh có audit
+S|Xem và thu hồi phiên thiết bị|CR|phát hiện truy cập lạ|Hiển thị lần hoạt động và thiết bị phù hợp dữ liệu có|Thu hồi một phiên không vô hiệu nhầm phiên khác
+S|Xác thực lại trước thao tác nhạy cảm|CR|giảm tác hại của phiên bị đánh cắp|Đổi chủ, khóa API và thanh toán yêu cầu step-up|Phiên step-up có thời hạn và phạm vi
+E|03|Bảo vệ truy cập theo mô hình hai vai trò|Ngăn tự nâng quyền và lạm dụng đăng nhập|P0|R1|E03.01,E03.02
+S|Bảo vệ quy trình tạo và cấp quyền Admin|AD|không để người đăng ký trở thành quản trị|Đăng ký công khai chỉ tạo Creator|Cấp quyền Admin đi qua luồng đặc quyền có audit
+S|Giới hạn đăng nhập bất thường và dò mật khẩu|AD|giảm chiếm tài khoản|Có ngưỡng thử sai theo tài khoản và nguồn phù hợp|Không khóa vĩnh viễn chỉ vì kẻ khác cố đăng nhập sai
+S|Nhận cảnh báo truy cập bất thường|CR|kiểm tra an toàn tài khoản của mình|Thông báo cho thiết bị hoặc thay đổi nhạy cảm theo chính sách|Có đường thu hồi phiên và khôi phục an toàn
+T|04|Tài khoản mạng xã hội và nền tảng tích hợp|Kết nối an toàn và biết chính xác khả năng từng kênh|Tỷ lệ kết nối khỏe; thời gian khắc phục mất quyền
+E|01|Kết nối và ủy quyền kênh|Quản lý tài khoản xã hội do khách hàng sở hữu|P0|R0|E03.01
+S|Kết nối TikTok bằng luồng OAuth QR|CR|đăng nội dung lên tài khoản được ủy quyền|Chỉ tạo hoặc kích hoạt profile sau xác thực thành công|QR hết hạn không liên kết nhầm tài khoản|B03
+S|Hiển thị danh tính và scope đã cấp|CR|biết kênh nào và quyền nào đang dùng|Hiển thị đúng tài khoản đích trước thao tác đăng|Thiếu scope giải thích thao tác không khả dụng|B03
+S|Ngắt kết nối tài khoản xã hội|CR|dừng quyền sử dụng kênh|Dừng yêu cầu đăng mới và xử lý thu hồi token|Lịch sử bài đã đăng vẫn được giữ theo chính sách
+E|02|Sức khỏe và bí mật kết nối|Giữ kết nối bền vững mà không lộ thông tin|P0|R1|E04.01
+S|Làm mới token và yêu cầu kết nối lại|CR|tránh lịch đăng thất bại âm thầm|Refresh đồng thời không ghi đè token mới|Token bị thu hồi chuyển kênh sang cần xử lý
+S|Lưu token trong kho bí mật được mã hóa|AD|hạn chế lộ khóa truy cập|API và log không trả giá trị token|Chỉ worker đúng nhiệm vụ giải mã được
+S|Theo dõi sức khỏe kết nối tập trung|AD|xử lý sớm lỗi kênh|Phân biệt hết token, thiếu scope và sự cố nhà cung cấp|Thông báo chỉ đến người có quyền trên kênh
+E|03|Danh mục khả năng connector|Không cam kết tính năng nền tảng chưa cho phép|P0|R2|E04.02
+S|Khai báo khả năng theo nền tảng và loại tài khoản|AD|bật đúng thao tác được hỗ trợ|Đọc, đăng, analytics và bình luận có cờ độc lập|Không hỗ trợ trả lỗi rõ ràng thay vì giả thành công
+S|Quản lý phiên bản và kiểm thử adapter|AD|nâng cấp API không phá luồng cũ|Có bộ contract test bằng fixture hợp lệ|Adapter lỗi được tắt mà không dừng kênh khác
+S|Theo dõi app review và quota nền tảng|AD|biết điều kiện mở tích hợp|Lưu scope, môi trường, trạng thái duyệt và ngày kiểm tra|Chưa được cấp quyền thì chặn tính năng phụ thuộc
+T|05|Thu thập dữ liệu đa nền tảng|Đưa nguồn được phép vào một luồng thu thập thống nhất|Số connector đạt nghiệm thu; tỷ lệ dữ liệu có nguồn gốc
+E|01|Nguồn web, tin tức và RSS|Thu thập bài viết với bộ lọc rõ ràng|P0|R0|E03.01
+S|Lấy bài viết VNExpress theo URL hoặc RSS|CR|tạo nguồn nội dung tin tức|Lưu URL, tiêu đề, thời gian và media tham chiếu|Bài không đọc được có lý do, không tạo bản rỗng|B04
+S|Thêm website hoặc RSS được phép|CR|mở rộng nguồn ngoài VNExpress|Kiểm tra mẫu dữ liệu trước khi bật nguồn|Domain không hỗ trợ không bị xử lý như VNExpress
+S|Lọc nguồn theo từ khóa và khoảng thời gian|CR|chỉ thu nội dung phù hợp|Có bộ lọc bao gồm và loại trừ rõ ràng|Báo số bản ghi bị loại theo từng lý do|B04
+E|02|Nguồn video và mạng xã hội|Thu thập metadata theo quyền thực tế|P1|R2|E04.03,E06.03
+S|Lấy metadata video và playlist Bilibili|CR|nghiên cứu nội dung theo tập|Giữ định danh nguồn và thứ tự episode|Metadata không được hiểu là quyền tải video|B05
+S|Nhập dữ liệu YouTube và kênh đã ủy quyền|CR|khai thác nội dung video hợp lệ|Phân trang có checkpoint và giới hạn quota|Thiếu quyền lấy transcript hiển thị không khả dụng
+S|Thu thập mạng xã hội qua adapter được cấp phép|CR|theo dõi nguồn TikTok, Meta, X hoặc cộng đồng|Mỗi adapter có phạm vi dữ liệu và scope riêng|Không đọc dữ liệu riêng tư ngoài ủy quyền
+E|03|Nguồn nội bộ, tài liệu và đối tác|Dùng được tài sản do khách hàng cung cấp|P1|R2|E06.03,E12.01
+S|Nhập văn bản, CSV, PDF và tài liệu nội bộ|CR|tạo nội dung từ tài liệu sẵn có|Kiểm tra loại file, kích thước và mã độc|Lỗi từng dòng không làm mất bản ghi hợp lệ
+S|Đồng bộ CMS, Drive hoặc kho đối tượng|CR|tái sử dụng thư viện cá nhân|Có ánh xạ trường và đồng bộ thay đổi|Thu hồi quyền nguồn chặn lần đọc tiếp theo
+S|Nhập podcast và feed đối tác được cấp quyền|CR|mở rộng nội dung âm thanh và chuyên ngành|Lưu giấy phép cùng feed và media|Không tải bản trả phí khi chưa có quyền
+T|06|Điều phối crawl, lịch chạy và vận hành nguồn|Thu thập có kiểm soát, có thể phục hồi và giới hạn tải|Tỷ lệ job hoàn tất; độ trễ dữ liệu; chi phí trên bản ghi hợp lệ
+E|01|Quản lý job và lịch crawl|Cho người dùng kiểm soát toàn bộ lần thu thập|P0|R0|E05.01
+S|Tạo job crawl từ nguồn đã cấu hình|CR|thu thập đúng phạm vi|Snapshot cấu hình được lưu cùng job|Yêu cầu trùng idempotency key không tạo job mới|B04
+S|Lên lịch crawl theo múi giờ|CR|cập nhật dữ liệu định kỳ|Hiển thị lần chạy tiếp theo và timezone|Job chồng lịch xử lý theo chính sách đã chọn|B04
+S|Theo dõi, hủy và chạy lại job|CR|kiểm soát tiến độ và lỗi|Phân biệt thành công, một phần, lỗi và hủy|Retry giữ liên kết lần trước, không mất lỗi cũ|B04
+E|02|Phân phối tải và phục hồi|Không mất dữ liệu khi nguồn hoặc worker lỗi|P0|R1|E06.01
+S|Tiếp tục crawl từ checkpoint|AD|không quét lại toàn bộ nguồn|Checkpoint gắn nguồn và phiên bản cấu hình|Worker khởi động lại không bỏ qua trang chưa lưu
+S|Retry có backoff và dead-letter queue|AD|xử lý lỗi tạm thời có giới hạn|Phân loại lỗi retry được và lỗi vĩnh viễn|Hết số lần thử chuyển DLQ kèm nguyên nhân|B04
+S|Giới hạn tải theo nguồn và Creator|AD|ngăn một khách hàng chiếm tài nguyên|Tôn trọng Retry-After và mức song song cấu hình|Hàng đợi có công bằng và ngưỡng backpressure
+E|03|Crawl có trách nhiệm và an toàn|Chỉ thu thập trong phạm vi được phép|P0|R0|-
+S|Kiểm tra chính sách nguồn trước crawl|AD|giảm rủi ro sử dụng dữ liệu trái phép|Lưu căn cứ quyền truy cập và quy tắc robots áp dụng|Nguồn chưa được duyệt không tự bật crawl
+S|Chặn URL nguy hiểm và truy cập nội bộ|AD|ngăn SSRF qua crawler|Chặn IP private, loopback và metadata cloud|Kiểm tra lại DNS và từng redirect trước kết nối
+S|Dừng nguồn bị chặn hoặc thay đổi chính sách|AD|không tiếp tục truy cập ngoài cho phép|401, 403 hoặc challenge kích hoạt đánh giá phù hợp|Không xoay danh tính để vượt kiểm soát truy cập
+T|07|Chuẩn hóa, chất lượng và nguồn gốc dữ liệu|Tạo kho dữ liệu tin cậy cho AI và sản xuất|Tỷ lệ đầy đủ trường; tỷ lệ trùng; tỷ lệ truy vết thành công
+E|01|Mô hình nội dung chuẩn|Chuẩn hóa khác biệt giữa các nguồn|P0|R0|E06.01
+S|Chuẩn hóa nội dung về schema chung|CR|dùng cùng luồng xử lý cho nhiều nguồn|Có kiểu bài, media, ngôn ngữ và nguồn|Schema sai được cách ly thay vì bỏ âm thầm|B06
+S|Chuẩn hóa thời gian và ký tự đa ngôn ngữ|CR|so sánh dữ liệu chính xác|Lưu thời gian gốc và UTC khi xác định được|Thiếu timezone được đánh dấu, không giả độ chính xác
+S|Theo dõi dòng dữ liệu từ nguồn đến sản phẩm|AD|truy ra căn cứ của từng nội dung|Liên kết source, canonical, draft, video và post|Nguồn bị cập nhật không ghi đè mất lịch sử
+E|02|Chống trùng và cấu trúc truyện tập|Không sản xuất lặp hoặc sai thứ tự|P0|R0|E07.01
+S|Phát hiện trùng theo ID, URL và hash|CR|giảm dữ liệu lặp|Crawl lại cập nhật đúng canonical hiện hữu|Không làm lộ nội dung riêng của Creator khác khi chống trùng|B06
+S|Gom nhóm Story và Episode có thứ tự|CR|xử lý nội dung nhiều tập|Giữ định danh và nguồn của từng tập|Tập thiếu hoặc số thứ tự xung đột được cảnh báo|B06
+S|Duyệt gộp và tách bản gần trùng|CR|sửa kết quả nhận diện sai|Hiển thị căn cứ tương đồng trước gộp|Tách lại khôi phục liên kết và lưu người thực hiện
+E|03|Kiểm soát chất lượng và tái xử lý|Không đẩy dữ liệu lỗi vào AI|P0|R1|E07.01
+S|Chấm chất lượng và cách ly dữ liệu lỗi|CR|chỉ dùng nguồn đủ chất lượng|Rule kiểm tra đầy đủ, media và văn bản khả dụng|Người dùng biết vì sao bị chặn|B06
+S|Phát hiện nguồn đổi cấu trúc parser|AD|sửa lỗi thu thập trước khi lan rộng|Cảnh báo khi tỷ lệ trường thiếu vượt ngưỡng cấu hình|Giữ mẫu lỗi đã loại thông tin nhạy cảm
+S|Tái xử lý theo phiên bản parser mới|AD|cải thiện dữ liệu đã thu|Có dry-run và báo tác động trước chạy thật|Không tạo lại video hoặc thu phí khách hàng ngoài ý muốn
+T|08|Kho nội dung, tìm kiếm và khám phá|Giúp người dùng tìm và tái sử dụng nội dung có giá trị|Thời gian tìm nguồn phù hợp; tỷ lệ tìm kiếm có kết quả
+E|01|Thư viện và tổ chức nội dung|Quản lý tài sản nội dung hằng ngày|P0|R0|E07.01
+S|Duyệt kho nội dung theo nguồn và trạng thái|CR|tìm nội dung cần sản xuất|Có phân trang và bộ lọc kết hợp|Mọi kết quả tuân thủ quyền sở hữu|B07
+S|Gắn nhãn, bộ sưu tập và nội dung yêu thích|CR|tổ chức tư liệu theo chiến dịch|Đổi nhãn không thay định danh nội dung|Thao tác hàng loạt báo thành công và lỗi từng mục
+S|Lưu trữ và khôi phục nội dung|CR|giảm nhiễu mà không mất liên kết|Hiển thị sản phẩm đang tham chiếu trước lưu trữ|Không xóa media còn được dùng bởi video đang chạy
+E|02|Tìm kiếm ngữ nghĩa và bộ lọc lưu sẵn|Tìm được cả nội dung không khớp từ khóa|P1|R1|E08.01
+S|Tìm kiếm toàn văn có highlight|CR|xác định nhanh đoạn liên quan|Kết quả giữ filter và thứ tự ổn định|Chuỗi tìm kiếm không thực thi mã hay truy vấn tùy ý
+S|Tìm kiếm ngữ nghĩa đa ngôn ngữ|CR|tìm nguồn cùng ý nghĩa|Hiển thị điểm và căn cứ liên quan phù hợp|Embedding không làm lộ dữ liệu riêng của Creator khác
+S|Lưu bộ lọc và thông báo nội dung mới|CR|theo dõi chủ đề thường xuyên|Bộ lọc lưu được truy vấn lại bằng cùng quyền|Thông báo chỉ gửi khi có kết quả mới
+E|03|Khám phá xu hướng và đánh giá nguồn|Hỗ trợ lựa chọn có bằng chứng|P1|R2|E08.02,E17.01
+S|Theo dõi chủ đề đang tăng trưởng|CR|phát hiện cơ hội nội dung|Hiển thị cửa sổ thời gian và tập nguồn đo|Dữ liệu ít không được gắn nhãn xu hướng chắc chắn
+S|So sánh độ tin cậy các nguồn|CR|ưu tiên nguồn có chất lượng|Điểm có tiêu chí và lịch sử điều chỉnh|Người dùng có thể ghi chú hoặc phản biện kết quả
+S|Phân tích khoảng trống nội dung|CR|tìm chủ đề chưa khai thác|So sánh với kho bài và lịch sử xuất bản được phép|Đề xuất dẫn về nguồn tham khảo cụ thể
+T|09|Chiến lược kênh, chiến dịch và series|Biến mục tiêu thương hiệu thành kế hoạch nội dung nhất quán|Tỷ lệ nội dung đúng chiến lược; mức hoàn thành lịch chiến dịch
+E|01|Chiến lược nội dung từng kênh|Định nghĩa đối tượng, chủ đề và phong cách|P0|R0|E04.01
+S|Cấu hình chủ đề, đối tượng và giọng thương hiệu|CR|định hướng nội dung được tạo|Lưu phiên bản chiến lược theo profile|Thay chiến lược không sửa ngầm draft đã duyệt|B08
+S|Khai báo chủ đề tránh và quy tắc thương hiệu|CR|giảm nội dung không phù hợp|Quy tắc chặn cứng tách khỏi điểm ưu tiên|Nội dung bị loại có lý do truy vết|B08
+S|Thiết lập tần suất và khung giờ đăng|CR|duy trì nhịp xuất bản|Có timezone, ngày hoạt động và giới hạn bài/ngày|Cấu hình mới không tự thay lịch đã xác nhận|B09
+E|02|Chiến dịch và lịch biên tập|Điều phối nội dung theo mục tiêu kinh doanh|P1|R2|E09.01,E02.02
+S|Tạo chiến dịch với mục tiêu và ngân sách|CR|đo hiệu quả theo hoạt động kinh doanh|Có thời gian, kênh, KPI và người phụ trách|Ngân sách chưa duyệt không cho tự chi vượt mức
+S|Lập lịch biên tập đa kênh|CR|sắp xếp chủ đề giữa các kênh của mình|Hiển thị draft và ngày dự kiến|Ngày biên tập không bị hiểu là lịch đăng đã xác nhận
+S|Lập brief và theo dõi việc cá nhân|CR|giảm bỏ sót đầu việc|Brief có yêu cầu đầu ra và hạn dự kiến|Lưu lịch sử thay đổi mục tiêu và tiến độ
+E|03|Series và ngữ cảnh nhiều tập|Duy trì mạch nội dung qua nhiều video|P1|R1|E09.01,E07.02
+S|Tạo series và sắp xếp các tập|CR|phát triển chuỗi nội dung|Mỗi tập có vị trí và liên kết nội dung nguồn|Cảnh báo trùng số tập hoặc thiếu tập|B10
+S|Lưu nhân vật, sự kiện và phần đã kể|CR|tránh mâu thuẫn giữa các tập|Ngữ cảnh gắn phiên bản và dẫn chứng|AI không tự coi thông tin suy đoán là sự thật
+S|Điều chỉnh series mà không mất bài đã xuất bản|CR|thay kế hoạch khi nhu cầu đổi|Tập đã đăng giữ URL và lịch sử phiên bản|Tập mới dùng ngữ cảnh sau điều chỉnh đã duyệt
+T|10|Lập kế hoạch AI và tự động hóa có kiểm soát|Chuyển nguồn phù hợp thành kế hoạch sản xuất có thể giải thích|Tỷ lệ đề xuất được duyệt; số can thiệp thủ công mỗi workflow
+E|01|Lựa chọn ứng viên nội dung|Chọn nguồn phù hợp với từng profile|P0|R0|E09.01,E07.01
+S|Chạy planning từ nguồn hoặc job crawl|CR|tạo danh sách ứng viên sản xuất|Lưu tập đầu vào, strategy và phiên bản bộ chọn|Job rỗng không báo tạo kế hoạch thành công|B08
+S|Xem điểm phù hợp và lý do chọn bài|CR|đánh giá quyết định của AI|Hiển thị điểm, điều kiện loại và nguồn căn cứ|Không hợp nhất điểm phù hợp với kiểm tra an toàn|B08
+S|Chọn sản xuất, bỏ qua hoặc yêu cầu xem xét|CR|giữ quyền quyết định nội dung|Hành động gắn đúng phiên bản candidate|Chọn lại không sinh hai workflow cùng yêu cầu|B08
+E|02|Điều phối workflow tự động|Tự động hóa từng bước mà vẫn kiểm soát rủi ro|P0|R1|E10.01,E15.01
+S|Cấu hình mức tự động hóa từng công đoạn|CR|quyết định bước nào cần người duyệt|Tạo draft, duyệt, lên lịch và đăng có quyền riêng|Mặc định không tự đăng khi chưa bật rõ ràng|B09
+S|Tạm dừng và tiếp tục workflow|CR|xử lý ngoại lệ đúng điểm|Tiếp tục từ bước hợp lệ với snapshot đã lưu|Không lặp tác dụng bên ngoài của bước hoàn tất
+S|Xem toàn bộ dòng tiến trình sản xuất|CR|biết nội dung đang mắc ở đâu|Liên kết crawl, planning, draft, render và queue|Lỗi bước sau không làm mất kết quả bước trước|B10
+E|03|Quy tắc tự động hóa và mô phỏng|Cho phép mở rộng luồng mà hạn chế hành động sai|P1|R2|E10.02,E21.02
+S|Tạo quy tắc trigger, điều kiện và hành động|CR|tự động hóa theo nghiệp vụ|Mỗi hành động kiểm tra quyền, quota và chính sách|Phát hiện vòng lặp trigger và giới hạn độ sâu
+S|Mô phỏng quy tắc trước khi bật|CR|đánh giá phạm vi và chi phí|Dry-run hiển thị đối tượng và chi phí dự kiến|Không gọi thanh toán hoặc đăng bài thật
+S|Quản lý phiên bản và rollback quy tắc|CR|khôi phục cấu hình khi có lỗi|Có lịch sử ai thay đổi và thời điểm hiệu lực|Job đang chạy giữ snapshot hoặc được di trú rõ ràng
+T|11|Biên soạn bằng AI và quản trị mô hình|Tạo nội dung có chất lượng, truy vết và kiểm soát nhà cung cấp|Tỷ lệ draft đạt ngay; tỷ lệ lỗi sự thật; chi phí mỗi draft đạt
+E|01|Kịch bản, cảnh và biến thể nội dung|Sản xuất bản nháp có thể biên tập|P0|R0|E10.01
+S|Tạo kịch bản và cảnh từ nguồn đã chọn|CR|rút ngắn thời gian viết video|Draft có văn bản, cảnh và media tham chiếu|Đầu ra sai schema không chuyển sang render|B10
+S|Chỉnh sửa kịch bản hoặc sinh lại một cảnh|CR|cải thiện phần chưa đạt|Chỉ thay phần được chọn và tạo phiên bản mới|Thay nội dung đã duyệt làm mất hiệu lực duyệt tương ứng|B10
+S|Tạo caption, tiêu đề và biến thể theo kênh|CR|phù hợp đặc thù từng nền tảng|Biến thể giữ liên kết bản gốc và ngôn ngữ|Không tự đăng bất kỳ biến thể chưa được phép
+E|02|Căn cứ, kiến thức và an toàn AI|Ngăn AI bịa dữ kiện hoặc làm theo nguồn độc hại|P0|R1|E11.01,E25.01
+S|Kiểm tra phát biểu dựa trên nguồn|CR|giảm thông tin không có căn cứ|Phát biểu có dẫn nguồn hoặc nhãn chưa xác minh|Nội dung nhạy cảm thiếu căn cứ chuyển người duyệt
+S|Dùng kho tri thức riêng của mình|CR|giữ đúng thông tin và phong cách cá nhân|Truy xuất chỉ từ tài liệu của Creator đang sử dụng|Tài liệu hết hạn hoặc bị xóa không được truy xuất mới
+S|Cách ly chỉ dẫn độc hại trong nội dung nguồn|AD|ngăn prompt injection|Văn bản crawl chỉ được coi là dữ liệu|Đầu ra AI không tự có quyền gọi công cụ hoặc lộ bí mật
+E|03|Prompt, mô hình và đánh giá chất lượng|Thay đổi AI mà không gây suy giảm không kiểm soát|P1|R1|E11.01,E22.01
+S|Quản lý phiên bản prompt và cấu hình mô hình|AD|truy vết kết quả sinh|Mỗi lượt chạy lưu phiên bản, provider và tham số phù hợp|Không lưu bí mật hoặc dữ liệu nhạy cảm thừa|B11
+S|Đánh giá prompt trên bộ mẫu chuẩn|CR|so sánh chất lượng trước phát hành|Đo sự thật, phong cách, an toàn và chi phí|Bản mới chưa đạt ngưỡng không tự đưa vào production
+S|Chuyển nhà cung cấp AI theo chính sách|CR|giảm phụ thuộc một dịch vụ|Chỉ fallback đến provider được Creator cho phép|Không gửi dữ liệu sang vùng hoặc provider bị cấm
+E|04|Hook, CTA và tối ưu khả năng được tìm thấy|Giúp nội dung hấp dẫn và hướng người xem đến hành động|P1|R2|E11.01,E09.01
+S|Tạo nhiều hook mở đầu từ cùng nội dung|CR|thử cách giữ chân người xem|Mỗi hook giữ đúng thông tin nguồn|Không bịa dữ kiện hoặc giật tít gây hiểu sai
+S|Tạo CTA theo mục tiêu tương tác hoặc mua hàng|CR|hướng người xem đến hành động phù hợp|CTA chọn follow, bình luận, xem link hoặc mua sản phẩm|Không chèn link hay lời hứa thu nhập không được xác minh
+S|Đề xuất từ khóa, hashtag, mô tả và thumbnail|CR|tăng khả năng khám phá nội dung|Gợi ý theo kênh, ngôn ngữ và chủ đề|Không đảm bảo lượt xem hoặc xếp hạng chỉ từ điểm AI
+T|12|Tài sản media, bản quyền và thư viện thương hiệu|Quản lý media sử dụng được và truy vết quyền tái sử dụng|Tỷ lệ asset có quyền sử dụng; tỷ lệ liên kết media khả dụng
+E|01|Nhập và quản lý asset|Lưu trữ ảnh, video, âm thanh an toàn|P0|R1|E03.01
+S|Tải lên asset và tiếp tục upload gián đoạn|CR|đưa tư liệu lớn vào hệ thống|Kiểm tra checksum, dung lượng và loại file thật|Upload chưa hoàn tất không được dùng để xuất bản
+S|Quản lý metadata và phiên bản asset|CR|tìm và thay tư liệu chính xác|Lưu tác giả, nguồn, kích thước và phiên bản|Thay file không ghi đè âm thầm asset đang được duyệt
+S|Phát hiện media thiếu hoặc liên kết hết hạn|CR|sửa đầu vào trước sản xuất|Preflight kiểm tra asset cần thiết trước render|Không tự dùng asset khác thiếu quyền thay thế|B10
+E|02|Quyền sử dụng và giấy phép|Không nhầm dữ liệu thu được với quyền tái xuất bản|P0|R0|-
+S|Ghi nhận giấy phép và phạm vi sử dụng asset|CR|xác định asset được dùng vào đâu|Lưu nguồn, bằng chứng, thời hạn và phạm vi thương mại|Chưa xác minh quyền thì không cho tự động xuất bản
+S|Chặn asset hết hạn hoặc bị thu hồi quyền|AD|tránh tái sử dụng không hợp lệ|Kiểm tra quyền lại trước render và đăng|Liệt kê video, draft và post bị ảnh hưởng
+S|Gắn ghi công và điều kiện giấy phép vào đầu ra|CR|tuân thủ yêu cầu của chủ sở hữu|Template đầu ra chứa ghi công bắt buộc|Thiếu trường ghi công thì preflight báo lỗi
+E|03|Brand kit và kho media liên kết|Tái sử dụng phong cách và asset nhất quán|P1|R2|E12.01,E12.02
+S|Quản lý logo, font, màu và template thương hiệu|CR|đồng nhất nhận diện cá nhân|Brand kit có phiên bản và Creator sở hữu|Font không được cấp phép bị loại khỏi render
+S|Tìm media trong nhà cung cấp đã kết nối|CR|giảm thời gian tìm tư liệu|Hiển thị loại giấy phép và chi phí trước nhập|Không tự mua asset khi chưa được ủy quyền chi tiêu
+S|Tạo biến thể ảnh hoặc media bằng AI|CR|bổ sung tư liệu còn thiếu|Lưu model, prompt, chi phí và nhãn AI phù hợp|Đầu ra phải qua kiểm tra an toàn và quyền hình ảnh
+T|13|Âm thanh, phụ đề và bản địa hóa|Tạo nội dung dễ hiểu cho nhiều ngôn ngữ và nhu cầu tiếp cận|Tỷ lệ phụ đề đạt; lỗi phát âm; thời gian bản địa hóa
+E|01|Giọng đọc và quản lý voice|Tạo âm thanh đúng nội dung và quyền sử dụng|P0|R0|E11.01
+S|Tạo giọng đọc từ kịch bản đã chọn|CR|sản xuất thuyết minh|Lưu voice, ngôn ngữ và phiên bản văn bản|Lỗi TTS không đánh dấu âm thanh hoàn tất|B10
+S|Điều chỉnh phát âm, tốc độ và từ điển tên riêng|CR|nâng chất lượng giọng đọc|Có preview trước tạo lại toàn bộ|Thay phát âm chỉ vô hiệu hóa đoạn phụ thuộc
+S|Quản lý đồng ý sử dụng giọng tùy chỉnh|AD|bảo vệ người có giọng được mô phỏng|Chỉ tạo voice clone khi có bằng chứng đồng ý hợp lệ|Thu hồi đồng ý chặn tạo mới và mở xử lý tài sản liên quan
+E|02|Nhận dạng lời nói và phụ đề|Đồng bộ văn bản với âm thanh|P0|R0|E13.01
+S|Tạo phụ đề và căn thời gian với giọng đọc|CR|video dễ theo dõi|Mốc thời gian tăng dần và nằm trong độ dài audio|Cảnh báo alignment thấp hoặc thiếu đoạn|B10
+S|Sửa phụ đề và xuất SRT hoặc VTT|CR|hoàn thiện khả năng đọc|Giữ ký tự Unicode và timezone không liên quan timestamp media|Kiểm tra đoạn chồng lấn và thời lượng âm
+S|Nhận dạng lời nói từ media được phép|CR|tái sử dụng nội dung âm thanh|Lưu ngôn ngữ, độ tin cậy và timestamp|Đoạn không rõ có nhãn thay vì bịa transcript
+E|03|Dịch và phiên bản đa ngôn ngữ|Mở rộng nội dung mà giữ ý nghĩa gốc|P1|R2|E13.02,E11.02
+S|Dịch kịch bản theo glossary thương hiệu|CR|giữ đúng thuật ngữ|Bảo toàn tên riêng và dữ kiện cần giữ|Thuật ngữ mâu thuẫn được đưa ra người duyệt
+S|Tạo bản lồng tiếng theo ngôn ngữ|CR|phục vụ khán giả quốc tế|Voice phù hợp ngôn ngữ và quyền sử dụng|Bản lồng tiếng có timeline và duyệt độc lập
+S|Kiểm tra độ dài và ngữ cảnh bản địa|CR|tránh lỗi trình bày hoặc ý nghĩa|Phát hiện phụ đề tràn khung và quá nhanh|Bản dịch chưa đạt không kế thừa duyệt bản gốc
+T|14|Biên tập, render và xuất video|Chuyển kịch bản thành sản phẩm media có chất lượng|Tỷ lệ render thành công; thời gian render; số lần sửa mỗi video
+E|01|Không gian sản xuất và timeline|Cho phép biên tập có kiểm soát|P0|R0|E11.01,E13.01
+S|Theo dõi video theo các giai đoạn sản xuất|CR|biết việc nào cần xử lý|Draft, voice, render và hoàn tất có trạng thái rõ|Lỗi không biến mất khỏi danh sách công việc|B10
+S|Chỉnh cảnh, media và thời lượng timeline|CR|kiểm soát kết quả video|Cảnh tham chiếu đúng asset và phiên bản audio|Mốc âm, scene rỗng hoặc media hỏng bị chặn|B10
+S|Xem trước video theo tỷ lệ khung hình|CR|kiểm tra trước render tốn phí|Hiển thị safe area và phụ đề|Preview khác bản xuất phải được thông báo rõ
+E|02|Render và phục hồi sản xuất|Tạo đầu ra nhất quán khi worker lỗi|P0|R0|E14.01
+S|Render video MP4 từ timeline hợp lệ|CR|nhận video hoàn chỉnh|Đầu ra đạt preset codec, kích thước và thời lượng|Chỉ hoàn tất khi file được lưu và kiểm tra|B10
+S|Retry render từ bước bị lỗi|CR|không làm lại toàn bộ sản phẩm|Giữ asset và công đoạn đã hoàn tất hợp lệ|Cùng yêu cầu không tạo nhiều output chính|B10
+S|Hủy render và dọn tài nguyên tạm|CR|dừng công việc không còn cần|Worker nhận hủy tại điểm an toàn|Giải phóng reservation quota theo phần thực tế dùng
+E|03|Nhiều định dạng và tái sử dụng đầu ra|Sản xuất một nội dung cho nhiều điểm đến|P1|R2|E14.02,E04.03
+S|Xuất preset video theo từng nền tảng|CR|đáp ứng yêu cầu kênh đích|Preset gắn phiên bản yêu cầu kỹ thuật|Không tự cắt mất nội dung hoặc ghi công bắt buộc
+S|Tạo short clip từ video dài được phép|CR|tái sử dụng tư liệu hiệu quả|Clip lưu mốc cắt và tham chiếu nguồn|Không tạo đoạn gây sai nghĩa mà không cảnh báo duyệt
+S|Xuất gói media và metadata|CR|đăng thủ công hoặc lưu bản sao cá nhân|Gói có video, caption, phụ đề và thông tin quyền|Link tải giới hạn thời gian và quyền tải của Creator
+E|04|Nội dung ảnh, carousel và bài viết|Mở rộng sản xuất ngoài video theo kênh hỗ trợ|P1|R2|E12.03,E11.01
+S|Tạo bộ ảnh carousel từ nội dung đã chọn|CR|trình bày ý tưởng dưới dạng nhiều trang|Giữ thứ tự, nhận diện và dẫn nguồn cần thiết|Nội dung tràn khung được phát hiện trước xuất
+S|Chuyển video hoặc kịch bản thành bài viết ngắn|CR|tái sử dụng ý tưởng trên nhiều kênh|Bản chuyển đổi có phiên bản và kiểm tra dữ kiện|Không tự đăng hàng loạt bản sao giống nhau
+S|Tạo ảnh bìa và thẻ giới thiệu sản phẩm|CR|tăng khả năng nhấp xem hoặc tìm hiểu sản phẩm|Ảnh dùng asset đúng quyền và thông tin Creator đã cung cấp|Không tự điền giá hoặc lời khẳng định chưa có căn cứ
+T|15|Duyệt biên tập, chất lượng và phê duyệt|Chỉ đưa nội dung đúng phiên bản, đúng quyền ra xuất bản|Tỷ lệ lỗi lọt qua duyệt; thời gian chờ duyệt
+E|01|Duyệt draft và video thành phẩm|Giữ quyết định biên tập tách khỏi lịch đăng|P0|R0|E14.02
+S|Duyệt, từ chối hoặc yêu cầu sửa draft|CR|kiểm soát nội dung trước sản xuất|Quyết định gắn phiên bản draft và lý do|Draft thay đổi không giữ phê duyệt cũ|B10
+S|Xem trước và duyệt video hoàn chỉnh|CR|kiểm tra bản sẽ được đăng|Duyệt gắn checksum video và metadata liên quan|Thay asset hoặc caption quan trọng yêu cầu duyệt lại|B09
+S|Duyệt bài mà chưa lên lịch đăng|CR|tách quyết định nội dung và thời điểm|Duyệt riêng giữ scheduled_at trống|Không gọi AI lịch hoặc upload chỉ vì nhấn duyệt|B09
+E|02|Tự kiểm tra và quản lý phiên bản duyệt|Hỗ trợ Creator tự duyệt nội dung của mình|P1|R1|E15.01
+S|Dùng checklist cá nhân trước khi duyệt|CR|không bỏ sót lỗi nội dung và trình bày|Checklist gắn phiên bản draft hoặc video|Không tự đánh dấu kiểm tra hoàn tất khi chưa có kết quả
+S|So sánh phiên bản trước và sau khi sửa|CR|quyết định bản nào sẽ xuất bản|Hiển thị khác biệt kịch bản, caption và media|Khôi phục bản cũ không tự khôi phục lịch đăng đã hủy
+S|Nhận nhắc việc cần tự duyệt trước giờ dự kiến|CR|không bỏ lỡ kế hoạch cá nhân|Thông báo đúng bài và thời điểm đã cấu hình|Quá hạn không tự coi là được duyệt
+E|03|Preflight chất lượng, thương hiệu và an toàn|Kiểm tra trước khi chuyển sang hàng đợi đăng|P0|R0|E12.02,E15.01
+S|Kiểm tra chất lượng kỹ thuật video|CR|tránh xuất bản file lỗi|Kiểm tra hình đen, audio thiếu, subtitle và media phù hợp|Kết quả có lỗi chặn và cảnh báo riêng
+S|Kiểm tra nội dung theo chính sách đã chọn|CR|phát hiện rủi ro trước đăng|Có phiên bản policy, rule vi phạm và mức tin cậy|Kết quả không chắc chắn chuyển người duyệt
+S|Chặn xuất bản khi có vi phạm chưa giải quyết|CR|không đưa nội dung bị cấm lên kênh|Chặn cả API thủ công và scheduler|Duyệt biên tập không ghi đè quyết định Trust & Safety
+T|16|Xuất bản đa kênh và quản lý bài đăng|Đăng đúng tài khoản, thời điểm và trạng thái thực tế|Tỷ lệ đăng đúng lịch; bài trùng; thời gian xác nhận trạng thái
+E|01|Lịch đăng và điều khiển xuất bản|Không đăng ngoài quyết định của người dùng|P0|R0|E15.01,E04.01
+S|Chọn giờ thủ công hoặc chủ động yêu cầu AI đề xuất|CR|quyết định thời điểm xuất bản|Lịch thủ công giữ đúng thời điểm và timezone đã chọn|AI chỉ chọn slot hợp lệ và có fallback minh bạch|B09
+S|Bật hoặc tắt tự động đăng theo từng kênh|CR|kiểm soát hành động của scheduler|Tắt ngăn gửi bài mới nhưng vẫn theo dõi bài đã gửi|Không tự bật lại khi sửa lịch hoặc nâng cấp dữ liệu|B09
+S|Đăng ngay bài đã đủ điều kiện|CR|xuất bản khi cần|Kiểm tra lại quyền, duyệt, an toàn, quota và kênh|Nhấn lặp không tạo hai lần đăng|B12
+E|02|Adapter đăng bài đa nền tảng|Xuất bản theo khả năng thật của từng API|P1|R2|E04.03,E16.01
+S|Đăng TikTok và xác nhận kết quả upload|CR|biết video thực sự được xuất bản|Lưu publish ID rồi theo dõi trạng thái provider|Upload thành công chưa được gọi là published|B12
+S|Đăng biến thể lên YouTube, Meta và kênh được hỗ trợ|CR|phân phối nội dung đa kênh|Mỗi kênh có payload, quyền và kết quả độc lập|Kênh chưa hỗ trợ cung cấp gói đăng thủ công
+S|Xử lý xuất bản thành công một phần|CR|khôi phục đúng kênh bị lỗi|Hiển thị kết quả từng đích và lý do thất bại|Retry chỉ kênh lỗi, không đăng lại kênh thành công
+E|03|Quản lý bài đã đăng và đồng bộ trạng thái|Giữ lịch sử và kiểm soát vòng đời bài đăng|P0|R1|E16.01
+S|Xem và tìm bài đã đăng của mình|CR|quản lý nội dung sau xuất bản|Lưu permalink, tài khoản, phiên bản và thời điểm|Bài chưa xác nhận không lẫn vào danh sách đã đăng|B12
+S|Sửa, ẩn hoặc xóa bài khi nền tảng cho phép|CR|sửa sai sau xuất bản|Hiển thị chính xác thao tác API hỗ trợ|Không hỗ trợ thì tạo hướng dẫn và tác vụ xử lý thủ công
+S|Đồng bộ bài bị gỡ, hạn chế hoặc thay đổi bên ngoài|CR|biết trạng thái thật của bài|Lưu nguồn sự kiện và lần xác minh gần nhất|Không tự đăng lại bài bị nền tảng xử lý
+E|04|Tái sử dụng nội dung dài hạn có kiểm soát|Duy trì kênh mà không phát tán nội dung lỗi thời hoặc spam|P1|R2|E16.03,E12.02
+S|Tạo danh sách nội dung evergreen của mình|CR|tận dụng bài còn giá trị|Có ngày hết hiệu lực và kênh được phép dùng|Bài vi phạm hoặc quyền media hết hạn bị loại
+S|Đặt lịch tái sử dụng có khoảng cách và giới hạn|CR|duy trì nhịp nội dung|Có số lần tối đa, cooldown và kiểm tra chính sách kênh|Không lặp liên tục hoặc tạo tương tác giả
+S|Cập nhật nội dung cũ trước khi đăng lại|CR|giữ thông tin và ưu đãi chính xác|Kiểm tra dữ kiện, link và nhãn quảng cáo|Bản đã thay đổi phải qua duyệt tương ứng
+T|17|Phân tích hiệu quả và tối ưu nội dung|Đo kết quả thật và cải thiện quyết định sản xuất|Độ tươi dữ liệu; tỷ lệ nội dung đạt KPI; chi phí mỗi kết quả
+E|01|Dữ liệu hiệu suất kênh và bài|Cung cấp chỉ số có định nghĩa và nguồn rõ ràng|P0|R1|E16.01
+S|Xem hiệu suất tài khoản và từng bài|CR|đánh giá tăng trưởng|Chỉ số có thời điểm lấy và nguồn provider|Không có dữ liệu được hiển thị thiếu thay vì bằng không|B13
+S|Đồng bộ analytics theo lịch và backfill|AD|giữ dữ liệu liên tục|Đồng bộ có checkpoint và giới hạn quota|Bản chụp trùng không cộng lặp vào tổng
+S|Chuẩn hóa định nghĩa chỉ số đa nền tảng|CR|so sánh đúng ý nghĩa|Views, reach, engagement lưu định nghĩa theo nguồn|Không cộng chỉ số không tương thích mà thiếu chú thích
+E|02|Báo cáo chiến dịch và hiệu quả nội dung|Đánh giá kết quả phát triển các kênh của Creator|P1|R2|E17.01,E09.02
+S|Tạo dashboard theo kênh, chiến dịch và thời gian|CR|theo dõi mục tiêu|Bộ lọc áp dụng nhất quán cho toàn báo cáo|Mẫu số bằng không không tạo phần trăm sai
+S|So sánh hiệu suất trước và sau khi đổi chiến lược|CR|đánh giá cách xây kênh của mình|Hiển thị hai kỳ, số bài và chiến lược áp dụng|Không khẳng định thay đổi chiến lược là nguyên nhân duy nhất
+S|Xuất và nhận báo cáo định kỳ|CR|theo dõi kết quả của mình|File thể hiện kỳ, timezone, nguồn và độ trễ|Chỉ gửi đến địa chỉ nhận đã xác minh của Creator
+E|03|Thử nghiệm và tối ưu có kiểm chứng|Không đánh đồng tương quan với hiệu quả chắc chắn|P1|R2|E17.02
+S|So sánh biến thể nội dung trong thử nghiệm|CR|tìm phương án tốt hơn|Có giả thuyết, KPI và điều kiện kết thúc|Không kết luận chắc chắn từ mẫu quá nhỏ
+S|Đề xuất lịch và chủ đề từ hiệu suất|CR|cải thiện kế hoạch tiếp theo|Hiển thị dữ liệu và lý do của đề xuất|Đề xuất không tự thay lịch đã được xác nhận
+S|Đưa phản hồi biên tập về hệ thống gợi ý|CR|giảm đề xuất không phù hợp|Phân biệt lý do bỏ qua, chất lượng và an toàn|Phản hồi một Creator không lộ nội dung sang Creator khác
+E|04|Tăng trưởng và giữ chân khán giả|Đánh giá nội dung có giúp xây kênh bền vững hay không|P1|R2|E17.01
+S|Theo dõi giữ chân và tỷ lệ xem hết khi có dữ liệu|CR|biết đoạn nào làm mất người xem|Hiển thị nguồn, kỳ và độ khả dụng của chỉ số|API không cấp dữ liệu thì ghi chưa có, không tự ước thành dữ liệu thật
+S|So sánh hiệu quả chủ đề, hook và định dạng|CR|tìm cách xây kênh phù hợp|So sánh trên cửa sổ và tập bài có giải thích|Không kết luận nhân quả chỉ từ tương quan
+S|Theo dõi tăng trưởng người theo dõi theo kỳ|CR|biết tiến độ xây dựng kênh|Có mốc đầu cuối, chênh lệch và nguồn dữ liệu|Không tạo hoặc mua người theo dõi để đạt mục tiêu
+T|18|Lắng nghe xã hội và tương tác cộng đồng|Theo dõi thảo luận và xử lý tương tác được cấp quyền|Thời gian phản hồi; tỷ lệ cảnh báo hữu ích
+E|01|Theo dõi đề cập và chủ đề|Nhận biết thảo luận liên quan kênh cá nhân|P1|R2|E04.03,E25.01
+S|Theo dõi từ khóa thương hiệu trên nguồn được phép|CR|phát hiện thảo luận liên quan|Hiển thị độ bao phủ nguồn và thời gian cập nhật|Không quảng bá là thu thập toàn bộ mạng xã hội
+S|Phân loại cảm xúc và chủ đề thảo luận|CR|ưu tiên tình huống cần chú ý|Hiển thị độ tin cậy và ngôn ngữ hỗ trợ|Người dùng sửa được phân loại sai
+S|Cảnh báo tăng đột biến đề cập tiêu cực|CR|phản ứng sớm với khủng hoảng|Ngưỡng, khoảng thời gian và nguồn đo cấu hình được|Có chống lặp và thời gian im lặng
+E|02|Hộp thư và bình luận tập trung|Hỗ trợ Creator trả lời trên kênh của mình khi API cho phép|P1|R2|E18.01,E02.01
+S|Xem bình luận và tin nhắn được ủy quyền|CR|không bỏ sót tương tác|Chỉ đọc loại dữ liệu API và người dùng cho phép|Hội thoại riêng có quyền truy cập riêng
+S|Trả lời và đánh dấu tương tác đã xử lý|CR|chăm sóc người xem trên kênh của mình|Mỗi trả lời có Creator gửi và tài khoản đích|Kiểm tra chống gửi lặp và scope trước gửi
+S|Ẩn hoặc báo cáo bình luận vi phạm|CR|bảo vệ cộng đồng kênh|Chỉ cung cấp thao tác nền tảng hỗ trợ|Lưu lý do, bằng chứng tối thiểu và khả năng khôi phục
+E|03|Trợ lý tương tác và bảo vệ kênh|Hỗ trợ phản hồi có kiểm soát|P1|R2|E18.02,E32.01
+S|Tạo nháp trả lời bằng AI|CR|rút ngắn thời gian hỗ trợ|Nháp dùng kiến thức thương hiệu được phép|Không tự gửi nội dung nhạy cảm chưa được duyệt
+S|Báo thảo luận rủi ro cho Admin|CR|nhận hỗ trợ đúng thẩm quyền|Ticket giữ liên kết hội thoại và mức nghiêm trọng|Không gửi bằng chứng nhạy cảm vào kênh công khai
+S|Tạm dừng chiến dịch khi có khủng hoảng|CR|tránh đăng không phù hợp thời điểm|Có phạm vi kênh và thời điểm hiệu lực|Tiếp tục phải xác nhận lại bài quá hạn
+T|19|Gói dịch vụ, thuê bao và quyền lợi|Thương mại hóa sản phẩm với điều kiện sử dụng minh bạch|Tỷ lệ kích hoạt gói; churn; số tranh chấp quyền lợi
+E|01|Danh mục gói và entitlement|Định nghĩa Creator được dùng những gì|P0|R1|E02.01
+S|Công bố gói dịch vụ và quyền lợi|CR|chọn gói phù hợp|Hiển thị tính năng, hạn mức, kỳ và phụ phí|Không công bố giá hoặc quyền lợi chưa được chốt
+S|Quản lý phiên bản gói và hợp đồng|AD|giữ đúng cam kết đã bán|Mỗi thuê bao tham chiếu phiên bản giá và entitlement|Sửa danh mục gói không tự đổi điều kiện thuê bao đang hiệu lực
+S|Kiểm tra quyền lợi tại API và worker|CR|được dùng đúng tính năng đã mua|Không chỉ kiểm tra entitlement ở giao diện|Quyền lợi được kiểm tra lại trước tác vụ tính phí
+E|02|Vòng đời thuê bao|Thay đổi gói không gây mất dữ liệu hoặc thu sai|P0|R1|E19.01,E20.01
+S|Bắt đầu, gia hạn và hủy gia hạn thuê bao|CR|quản lý thời gian sử dụng|Phân biệt hủy ngay và hủy cuối kỳ theo chính sách|Không cấp quyền chỉ từ trang quay về checkout
+S|Nâng hoặc hạ gói có xem trước tác động|CR|đổi quy mô sử dụng|Hiển thị ngày hiệu lực, chênh lệch và giới hạn mới|Hạ gói không tự xóa dữ liệu vượt hạn mức
+S|Xử lý nợ phí và thời gian gia hạn thanh toán|AD|duy trì vận hành theo chính sách|Phân biệt past_due, grace, suspended và canceled|Hạn chế công việc mới không ngăn xem hóa đơn hỗ trợ
+E|03|Dùng thử, ưu đãi và gói bổ sung|Phục vụ nhu cầu cá nhân ở nhiều mức sử dụng|P1|R2|E19.02
+S|Tạo trial có giới hạn và ngày kết thúc|CR|đánh giá sản phẩm trước mua|Quyền trial và hạn mức được thể hiện rõ|Hết trial không tự thu tiền nếu chưa ủy quyền
+S|Áp dụng mã ưu đãi và điều kiện sử dụng|CR|nhận giá đúng chương trình|Kiểm tra thời hạn, lượt dùng và tính cộng dồn|Retry checkout không tiêu hao mã hai lần
+S|Quản lý gói bổ sung và ưu đãi cá nhân|AD|đáp ứng mức dùng khác nhau của Creator|Add-on có phạm vi, số lượng và ngày hiệu lực|Ngoại lệ giá hoặc quota phải có người duyệt
+T|20|Thanh toán, hóa đơn và đối soát|Thu tiền đúng và kiểm tra được mọi giao dịch|Tỷ lệ thanh toán thành công; sai lệch đối soát; giao dịch trùng
+E|01|Checkout và tích hợp cổng thanh toán|Thu tiền qua nhà cung cấp đủ điều kiện|P0|R1|E19.01
+S|Thanh toán qua cổng được cấu hình|CR|mua dịch vụ bằng phương thức phù hợp|Hiển thị số tiền, tiền tệ và mục đích trước xác nhận|Không lưu thông tin thẻ thô trong hệ thống
+S|Xác thực webhook và ghi nhận giao dịch|AD|cấp quyền theo thanh toán thật|Kiểm tra chữ ký, replay và ID giao dịch|Webhook trùng hoặc đảo thứ tự không cấp quyền hai lần
+S|Theo dõi giao dịch chờ và thanh toán thất bại|CR|biết có cần thanh toán lại|Trạng thái đối chiếu với provider trước retry|Không tạo charge mới khi kết quả trước chưa rõ
+E|02|Hóa đơn và đối soát kế toán|Truy vết số tiền thu, phí và điều chỉnh|P0|R1|E20.01
+S|Nhận hóa đơn và lịch sử thanh toán|CR|kiểm tra khoản đã trả|Hóa đơn có dòng dịch vụ, kỳ và tiền tệ|Thông tin thuế áp dụng theo cấu hình đã xác nhận
+S|Đối soát giao dịch với báo cáo cổng|AD|phát hiện thu thiếu hoặc ghi nhận sai|Tách gross, phí cổng, hoàn tiền và net|Sai lệch được đưa vào danh sách xử lý
+S|Ghi điều chỉnh và chứng từ liên quan|AD|sửa sai có dấu vết|Không sửa trực tiếp giao dịch đã chốt|Điều chỉnh tham chiếu chứng từ gốc và người duyệt
+E|03|Hoàn tiền, tranh chấp và chống gian lận|Giải quyết ngoại lệ thanh toán an toàn|P0|R1|E20.02
+S|Yêu cầu hoàn tiền|CR|giải quyết dịch vụ chưa đạt thỏa thuận|Hiển thị điều kiện và phần đủ điều kiện hoàn|Creator chỉ gửi yêu cầu và theo dõi trạng thái của mình
+S|Duyệt và thực hiện hoàn tiền|AD|giải quyết yêu cầu đúng chính sách|Ghi lý do, số tiền và giao dịch tham chiếu|Không hoàn vượt số tiền còn có thể hoàn hoặc thực hiện trùng
+S|Xử lý chargeback và tranh chấp|AD|bảo vệ khách hàng và doanh nghiệp|Lưu thời hạn, chứng từ và trạng thái provider|Chế tài thuê bao có lý do và không xóa chứng cứ
+S|Phát hiện giao dịch rủi ro và lạm dụng ưu đãi|AD|giảm tổn thất gian lận|Rule có ngưỡng và quyền xét lại thủ công|Không tự khóa vĩnh viễn chỉ từ tín hiệu yếu
+T|21|Đo mức dùng, hạn mức và credit|Không vượt quyền lợi và không tính trùng lượng sử dụng|Sai lệch metering; số lần vượt hard limit; khiếu nại credit
+E|01|Sổ sử dụng và đơn vị tính|Đo đúng tài nguyên theo khách hàng và tác vụ|P0|R1|E02.01
+S|Ghi usage theo Creator, job và loại tài nguyên|AD|tính phí và giải thích lượng dùng|Sự kiện có ID duy nhất, đơn vị và thời điểm|Sự kiện trùng không tăng usage lần hai
+S|Xem mức sử dụng so với hạn mức|CR|chủ động quản lý tài nguyên|Hiển thị used, reserved, remaining và thời điểm cập nhật|Giải thích rõ giới hạn kỳ, đồng thời và tốc độ
+S|Chốt kỳ dùng và xử lý sự kiện đến muộn|AD|tránh sai lệch hóa đơn|Có timezone kỳ và chính sách khóa sổ|Sự kiện muộn tạo điều chỉnh truy vết được
+E|02|Quota, giới hạn và công bằng sử dụng|Chặn vượt hạn mức ngay cả khi tác vụ đồng thời|P0|R1|E21.01,E19.01
+S|Giữ chỗ quota trước tác vụ tốn phí|CR|không bị vượt ngân sách bởi job đồng thời|Kiểm tra và reserve là thao tác nguyên tử|Không đủ hạn mức thì không gọi provider
+S|Quyết toán hoặc hoàn reservation sau tác vụ|AD|chỉ giữ lượng sử dụng hợp lệ|Có settle, release và TTL cho job thất lạc|Retry hệ thống không tự tính hai lần phí khách hàng
+S|Áp dụng hard limit, soft limit và rate limit|CR|kiểm soát mức dùng theo nhu cầu|Cảnh báo trước ngưỡng và chặn tại hard limit|Không gộp quota nền tảng với credit khách hàng
+E|03|Credit và ngoại lệ hạn mức|Cấp và điều chỉnh quyền sử dụng có kiểm soát|P1|R2|E21.02,E20.01
+S|Mua thêm credit và xem lịch sử biến động|CR|tiếp tục dùng khi hết phần được cấp|Credit chỉ cộng sau giao dịch đã xác minh|Sổ cộng trừ có nguồn và số dư có thể đối chiếu
+S|Quản lý credit khuyến mại, hết hạn và thứ tự dùng|AD|thực hiện đúng chính sách đã công bố|Phân biệt credit mua và credit tặng|Hiển thị ngày hết hạn trước khi người dùng mua
+S|Duyệt tăng quota hoặc bù credit|AD|giải quyết nhu cầu và sự cố|Cần lý do, người duyệt và thời hạn ngoại lệ|Không cho quản trị tự sửa số dư không lưu bút toán
+T|22|Chi phí vận hành và FinOps|Biết chi phí thật, dự báo và bảo vệ biên lợi nhuận|Chi phí mỗi video đạt; sai lệch dự toán; biên đóng góp
+E|01|Thu thập và phân bổ chi phí|Tách chi phí nhà cung cấp khỏi giá bán khách hàng|P0|R1|E21.01
+S|Theo dõi token và chi phí lượt gọi AI|AD|biết chi phí phát sinh theo công việc|Có model, loại token, provider và thời điểm giá|Phân biệt giá ước tính với hóa đơn đối soát|B11
+S|Phân bổ chi phí crawl, render, lưu trữ và mạng|AD|biết giá thành đầy đủ|Có cost center theo Creator, workflow và dịch vụ|Chi phí chung có quy tắc phân bổ công bố
+S|Đối chiếu usage nội bộ với hóa đơn nhà cung cấp|AD|phát hiện thất thoát|Giữ chi phí retry và lỗi dù không thu khách hàng|Sai lệch không bị che bằng sửa usage gốc
+E|02|Ngân sách và bảo vệ chi tiêu|Ngăn tác vụ tự động tạo hóa đơn ngoài kiểm soát|P0|R1|E22.01,E21.02
+S|Ước tính chi phí trước workflow|CR|quyết định có thực hiện|Hiển thị khoảng dự kiến và phần chưa xác định|Thay phạm vi hoặc model cần tính lại dự toán
+S|Đặt ngân sách và cảnh báo theo cấp|CR|kiểm soát tiền cho kênh và chiến dịch|Hỗ trợ tài khoản Creator, kênh, chiến dịch và job|Ngưỡng cảnh báo không được hiểu là hard cap
+S|Ngắt chi tiêu khi vượt ngưỡng hoặc bất thường|AD|hạn chế thiệt hại sự cố|Dừng tạo chi phí mới trong phạm vi xác định|Giải thích khoản đang chạy không thể thu hồi
+E|03|Tối ưu giá thành và năng lực phục vụ|Giảm chi phí mà vẫn giữ chuẩn chất lượng|P1|R2|E22.02,E17.01
+S|So sánh chi phí trên video được duyệt và đã đăng|AD|nhìn đúng hiệu quả sản xuất|Mẫu số và phạm vi thời gian được công bố|Bao gồm chi phí sản phẩm lỗi theo quy tắc phân bổ
+S|Đề xuất cache, batch và model phù hợp|AD|giảm chi phí tác vụ lặp|Cache khóa theo Creator và phiên bản dữ liệu|Không giảm kiểm tra an toàn hoặc chất lượng để tiết kiệm
+S|Dự báo chi phí và biên lợi nhuận|AD|đánh giá gói dịch vụ có bền vững|Giả định sản lượng và đơn giá được chỉnh sửa|Không trình bày dự báo như kết quả đã ghi nhận
+T|23|API mở, webhook và hệ sinh thái tích hợp|Cho phép đối tác tích hợp an toàn vào quy trình sản xuất|Tỷ lệ API thành công; thời gian tích hợp; lỗi webhook
+E|01|API và tài khoản dịch vụ|Cấp truy cập lập trình có giới hạn|P1|R2|E02.02,E24.01
+S|Tạo API key cá nhân theo scope|CR|tự động hóa từ hệ thống bên ngoài|Khóa có Creator, scope, ngày hết hạn và người sở hữu|Chỉ hiển thị secret lúc tạo và hỗ trợ thu hồi
+S|Sử dụng API có phiên bản và idempotency|CR|tích hợp ổn định|OpenAPI mô tả schema, lỗi, pagination và quota|Cùng key khác payload trả xung đột
+S|Thử tích hợp trong sandbox|CR|kiểm tra mà không phát sinh tác động thật|Dữ liệu và khóa tách production|Không gửi bài hoặc charge thật từ môi trường thử
+E|02|Webhook vào và ra|Chuyển sự kiện tin cậy giữa các hệ thống|P1|R2|E23.01
+S|Đăng ký webhook cá nhân theo loại sự kiện|CR|nhận thay đổi đúng nghiệp vụ|Endpoint phải qua xác minh và kiểm tra SSRF|Payload chỉ chứa trường thuộc phạm vi được cấp
+S|Xác thực và chống xử lý trùng webhook|AD|tránh giả mạo hoặc lặp hành động|Kiểm tra chữ ký trên raw body và cửa sổ replay|Lưu event ID trước thực hiện tác dụng nghiệp vụ
+S|Theo dõi retry và phát lại webhook thất bại của mình|CR|khôi phục tích hợp bị gián đoạn|Có backoff, DLQ và trạng thái từng lần gửi|Replay không bỏ qua kiểm tra quyền và idempotency
+E|03|Tích hợp công cụ làm việc cá nhân|Kết nối công cụ Creator đang sử dụng|P2|R2|E23.02,E25.01
+S|Kết nối công cụ workflow và quản lý công việc|CR|đưa sự kiện vào quy trình hiện có|Connector công bố trigger và hành động hỗ trợ|Không tạo vòng lặp giữa hai hệ thống
+S|Kết nối kho tri thức, DAM và CMS|CR|đồng bộ đầu vào và đầu ra|Xác định hệ thống chủ cho mỗi loại trường|Xung đột sửa ở hai nơi có quy tắc giải quyết
+S|Kết nối công cụ phân tích dữ liệu cá nhân|CR|phân tích ngoài sản phẩm|Dataset có hợp đồng schema và phạm vi truy cập|Xóa hoặc thu hồi quyền được lan truyền phù hợp
+T|24|Bảo mật ứng dụng và chuỗi cung ứng|Bảo vệ dữ liệu, tài nguyên và dịch vụ trước tấn công|Số lỗ hổng nghiêm trọng chưa xử lý; thời gian khắc phục
+E|01|Bảo mật API, file và luồng dữ liệu|Ngăn truy cập trái phép và dữ liệu độc hại|P0|R0|E03.01
+S|Kiểm tra quyền trên từng đối tượng và thuộc tính|AD|ngăn đọc hoặc sửa tài sản của người khác|Có test truy cập chéo cho API và đường tải file|Trường đặc quyền không nhận qua mass assignment
+S|Kiểm tra đầu vào và làm sạch nội dung hiển thị|AD|ngăn injection và XSS|HTML nguồn được sanitize trước hiển thị|Không nối dữ liệu người dùng thành lệnh hệ thống
+S|Bảo vệ upload và tải media|AD|ngăn file độc hoặc vượt tài nguyên|Kiểm tra MIME thực, kích thước và giải nén giới hạn|File chưa qua kiểm tra không phục vụ công khai
+E|02|Bí mật, mã hóa và mạng|Giảm thiệt hại khi một thành phần bị xâm nhập|P0|R1|E24.01
+S|Quản lý secret và luân chuyển khóa|AD|không lưu khóa trong mã nguồn|Khóa có owner, tuổi và quy trình rotation|Không ghi secret vào log, trace hoặc báo cáo
+S|Mã hóa dữ liệu truyền và dữ liệu lưu|AD|bảo vệ dữ liệu ngoài ứng dụng|Có cấu hình TLS và mã hóa storage được xác minh|Quyền dùng khóa tách khỏi quyền đọc dữ liệu thô
+S|Giới hạn mạng, egress và truy cập dịch vụ|AD|thu hẹp phạm vi tấn công|DB và broker không mở công khai ngoài yêu cầu|Worker chỉ gọi đích cần thiết theo chính sách
+E|03|Quản lý lỗ hổng và phản ứng sự cố|Phát hiện, khắc phục và chứng minh bảo mật|P0|R1|E24.02,E27.01
+S|Quét dependency, image và secret trước phát hành|AD|không đưa lỗ hổng biết trước lên production|Có SBOM và ngưỡng chặn theo mức rủi ro|Ngoại lệ có người phê duyệt và ngày hết hạn
+S|Kiểm thử xâm nhập và mô hình đe dọa|AD|kiểm tra các luồng có rủi ro cao|Bao phủ auth, Creator, crawler, AI, file và thanh toán|Phát hiện có owner và bằng chứng kiểm tra lại
+S|Xử lý sự cố lộ khóa hoặc truy cập dữ liệu|AD|cô lập nhanh và khôi phục an toàn|Có runbook thu hồi khóa, khoanh vùng và thông báo|Giữ bằng chứng có kiểm soát và ghi thời gian hành động
+T|25|Quyền riêng tư, bản quyền và quản trị dữ liệu|Sử dụng dữ liệu đúng mục đích, thời hạn và quyền được cấp|Tỷ lệ yêu cầu dữ liệu xử lý đúng hạn; tài sản thiếu căn cứ quyền
+E|01|Phân loại dữ liệu và đồng ý sử dụng|Biết dữ liệu nào được xử lý cho mục đích nào|P0|R1|E03.01
+S|Phân loại dữ liệu cá nhân, nội bộ và công khai|AD|áp dụng bảo vệ phù hợp|Schema và kho lưu có nhãn mức nhạy cảm|Dữ liệu công khai không mặc nhiên được phép tái sử dụng
+S|Ghi nhận điều khoản và lựa chọn đồng ý|CR|kiểm soát mục đích sử dụng dữ liệu|Lưu phiên bản, thời điểm và phạm vi lựa chọn|Rút đồng ý chặn xử lý mới thuộc mục đích đó
+S|Quản lý nhà xử lý phụ và vùng dữ liệu|CR|biết dữ liệu được gửi đến đâu|Danh mục ghi provider, mục đích và vùng xử lý|Không fallback AI sang provider ngoài danh mục cho phép
+E|02|Lưu giữ, xuất và xóa dữ liệu|Thực thi vòng đời dữ liệu có bằng chứng|P0|R1|E25.01
+S|Cấu hình thời hạn lưu theo loại dữ liệu|AD|không giữ dữ liệu vô thời hạn|Tách nguồn crawl, prompt, media, log và hóa đơn|Ngoại lệ lưu giữ có căn cứ và ngày rà soát
+S|Thực hiện yêu cầu truy cập, sửa hoặc xóa dữ liệu|CR|thực hiện quyền đối với dữ liệu của mình|Xác minh người yêu cầu và phạm vi dữ liệu|Theo dõi xử lý ở DB, search, vector, file và bên nhận
+S|Quản lý xóa trong backup và legal hold|AD|không xóa hoặc khôi phục sai dữ liệu|Hold có phạm vi và người có thẩm quyền|Khôi phục backup phải tái áp dụng danh sách xóa
+E|03|Bản quyền, quyền hình ảnh và AI có trách nhiệm|Giải quyết khiếu nại và nội dung tổng hợp minh bạch|P0|R1|E12.02
+S|Tiếp nhận khiếu nại quyền tác giả hoặc hình ảnh|AD|xử lý nội dung có tranh chấp|Hồ sơ có đối tượng, căn cứ và kênh liên hệ|Không coi mọi báo cáo là bằng chứng vi phạm đã xác nhận
+S|Gắn nhãn nội dung AI hoặc quảng cáo khi cần|CR|minh bạch với người xem|Quy tắc theo loại nội dung và kênh đích|Metadata bắt buộc được kiểm tra trước đăng
+S|Kiểm soát nội dung nhạy cảm và đối tượng dễ bị tổn thương|AD|giảm rủi ro từ AI và dữ liệu cá nhân|Có tiêu chí chuyển Admin đánh giá thủ công|Không dùng nhận diện nhạy cảm thiếu mục đích và quyền hợp lệ
+T|26|Cloud, mở rộng và khôi phục thảm họa|Vận hành được khi tải tăng hoặc thành phần gặp sự cố|Availability; RPO/RTO đo được; chi phí mỗi đơn vị tải
+E|01|Môi trường triển khai có thể lặp lại|Đưa hệ thống lên cloud bằng cấu hình kiểm soát|P0|R0|-
+S|Triển khai các dịch vụ và hạ tầng cần thiết|AD|chạy luồng nghiệp vụ trên môi trường đích|Có kiểm tra health của API, DB, broker và worker|Cấu hình và secret tách khỏi image|B14
+S|Tách dev, staging và production|AD|thử nghiệm không ảnh hưởng khách hàng|Khóa, dữ liệu và đích đăng tách theo môi trường|Không dùng dữ liệu thật chưa được làm sạch ở môi trường thử
+S|Quản lý cấu hình hạ tầng bằng mã và phiên bản|AD|tái tạo môi trường nhất quán|Thay đổi có review và so sánh trước áp dụng|Phát hiện drift so với cấu hình được quản lý
+E|02|Mở rộng xử lý và lưu trữ|Tăng công suất theo tải và ngân sách|P0|R1|E26.01,E21.02
+S|Tự mở rộng worker theo hàng đợi|AD|giảm thời gian chờ|Có giới hạn replica và ngân sách tối đa|Scale down không cắt job mà mất trạng thái
+S|Phân tầng object storage và phân phối media|AD|giảm tải API và chi phí lưu trữ|File riêng tư dùng truy cập có thời hạn|Chính sách lifecycle không xóa asset còn cần dùng
+S|Mở rộng DB, broker và phân vùng workload|AD|tránh nghẽn tại thành phần dùng chung|Có ngưỡng dung lượng, partition và kết nối|Một Creator tải lớn không làm đói các Creator khác
+E|03|Sao lưu, tính sẵn sàng và thảm họa|Khôi phục dữ liệu và công việc có thể kiểm chứng|P0|R1|E26.01
+S|Sao lưu và thử khôi phục định kỳ|AD|chứng minh backup dùng được|Kiểm tra khôi phục DB, object và cấu hình liên quan|Báo thời điểm dữ liệu phục hồi và sai lệch
+S|Chuyển vùng hoặc thành phần khi sự cố|AD|duy trì dịch vụ trong phạm vi cam kết|Runbook có điều kiện kích hoạt và kiểm tra dữ liệu|Không để hai publisher cùng đăng một job
+S|Diễn tập mất broker, DB hoặc nhà cung cấp|AD|đo mức đáp ứng RPO và RTO|Ghi thời gian phát hiện, phục hồi và backlog còn lại|Đối soát job, charge và bài đăng sau phục hồi
+T|27|Quan sát hệ thống và vận hành tin cậy|Phát hiện vấn đề sớm và xử lý được đến nguyên nhân|Thời gian phát hiện/khắc phục; tuổi hàng đợi; lỗi không được phát hiện
+E|01|Log, metric và trace xuyên luồng|Theo dõi một công việc qua nhiều dịch vụ|P0|R0|E26.01
+S|Tra cứu log bằng job và correlation ID|AD|tìm nguyên nhân lỗi|Crawl, planning, render và publish có liên kết truy vết|Log được che bí mật và dữ liệu nhạy cảm|B04
+S|Xem dashboard dịch vụ và hàng đợi|AD|phát hiện nghẽn vận hành|Có error rate, latency, queue age và tài nguyên|Không gọi dịch vụ khỏe chỉ vì process còn chạy
+S|Cảnh báo theo tác động người dùng|AD|ưu tiên đúng sự cố|Ngưỡng gắn SLO và mức nghiêm trọng|Có chống lặp, lịch trực và hướng dẫn xử lý
+E|02|Xử lý tác vụ tin cậy|Không mất hoặc lặp tác dụng nghiệp vụ|P0|R1|E27.01
+S|Đảm bảo nhất quán giữa trạng thái DB và sự kiện|AD|không mất việc khi publish event lỗi|Có outbox hoặc cơ chế tương đương được kiểm thử|Consumer xử lý ít nhất một lần mà không tạo trùng tác dụng
+S|Phục hồi worker chết và job bị treo|AD|không để công việc chờ vô hạn|Job có heartbeat, lease và timeout phù hợp|Thu hồi lease không cho hai worker quyết toán cùng job
+S|Phát lại DLQ bằng thao tác được kiểm soát|AD|khôi phục sau khi sửa nguyên nhân|Có preview phạm vi và checkpoint phát lại|Không phát lại charge hoặc publish đã xác nhận thành công
+E|03|Sự cố và thay đổi vận hành|Giảm thời gian gián đoạn và tái diễn|P1|R1|E27.01
+S|Quản lý incident và cập nhật trạng thái dịch vụ|AD|thống nhất xử lý sự cố|Incident có owner, mức độ và mốc thời gian|Thông báo không lộ dữ liệu nội bộ khách hàng
+S|Quản lý lịch bảo trì và kế hoạch rollback|AD|thay đổi hệ thống có kiểm soát|Có tác động, người duyệt và tiêu chí hủy triển khai|Bảo trì không tự xóa hoặc đăng bù hàng loạt
+S|Lập phân tích nguyên nhân sau sự cố|AD|ngăn sự cố tái diễn|Gắn hành động khắc phục với owner và hạn xử lý|Đo lại hiệu quả sau khi hành động hoàn tất
+T|28|Quản trị SaaS, hỗ trợ và kiểm toán|Quản trị hệ thống đủ quyền nhưng có trách nhiệm giải trình|Thời gian xử lý hỗ trợ; thay đổi đặc quyền có audit
+E|01|Quản lý Creator và tài khoản Admin|Điều hành nền tảng tập trung|P0|R0|E03.01
+S|Tra cứu, tạo và cập nhật tài khoản người dùng|AD|hỗ trợ vận hành hệ thống|Có lọc trạng thái và đúng hai vai trò Admin/Creator|Không trả mật khẩu hoặc token trong danh sách|B02
+S|Khóa, mở khóa và hạn chế tài khoản|AD|xử lý rủi ro hoặc yêu cầu hỗ trợ|Bắt buộc lý do, phạm vi và thời điểm hiệu lực|Không xóa dữ liệu hoặc lịch sử vi phạm khi khóa
+S|Xem tổng quan Creator và tài nguyên sử dụng|AD|biết tình trạng tài khoản Creator|Tổng hợp gói, usage, công việc lỗi và kết nối|Nội dung chi tiết chỉ mở khi có quyền nghiệp vụ
+E|02|Cấu hình, feature flag và audit|Quản lý thay đổi có phạm vi và có thể truy vết|P0|R1|E28.01
+S|Quản lý cấu hình hệ thống theo môi trường|AD|điều chỉnh vận hành an toàn|Giá trị được validate và có lịch sử thay đổi|Secret chỉ tham chiếu kho khóa, không hiển thị trực tiếp|B02
+S|Bật tính năng hoặc kill switch theo phạm vi|AD|triển khai dần và cô lập rủi ro|Có phạm vi Creator, connector hoặc công đoạn|Tắt tính năng ngăn tác vụ mới ở cả API và worker
+S|Tra cứu nhật ký hành động đặc quyền|AD|kiểm toán quyết định quản trị|Audit lưu ai, khi nào, lý do, trước và sau|Người thực hiện không thể tự sửa hoặc xóa audit
+E|03|Hỗ trợ khách hàng và quyền truy cập hỗ trợ|Giải quyết vấn đề mà không truy cập quá mức|P1|R1|E28.02
+S|Tạo ticket hỗ trợ gắn công việc bị lỗi|CR|nhận hỗ trợ đúng ngữ cảnh|Ticket có mức độ, trạng thái và lịch sử phản hồi|Đính kèm được quét và giới hạn người xem
+S|Cấp phiên hỗ trợ có thời hạn và scope|CR|cho hỗ trợ kiểm tra có kiểm soát|Có đồng ý hoặc căn cứ hỗ trợ được quy định|Mọi truy cập được audit, không thấy token hay mật khẩu
+S|Xuất gói chẩn đoán đã che dữ liệu nhạy cảm|AD|phân tích lỗi mà ít lộ dữ liệu|Chỉ chứa trường trong danh sách cho phép|Người dùng xem được phạm vi trước chia sẻ
+T|29|Trải nghiệm đa thiết bị và khả năng tiếp cận|Giúp người dùng hoàn thành công việc trên thiết bị phù hợp|Tỷ lệ hoàn thành tác vụ; lỗi tiếp cận; thời gian thao tác
+E|01|Trải nghiệm nhất quán và trạng thái rõ ràng|Không làm người dùng hiểu nhầm kết quả hệ thống|P0|R0|-
+S|Điều hướng thống nhất giữa các công đoạn|CR|theo dõi nội dung không bị mất ngữ cảnh|Giữ profile, dự án cá nhân và bộ lọc khi phù hợp|Liên kết sâu kiểm tra quyền đối tượng|B01
+S|Hiển thị trạng thái tải, rỗng, lỗi và tiến độ|CR|biết hệ thống đang xử lý gì|Không báo thành công trước khi backend xác nhận|Mất kết nối có hướng dẫn và không nhân đôi thao tác
+S|Xác nhận thao tác có tác động lớn|CR|tránh xóa hoặc đăng nhầm|Dialog thể hiện đối tượng, phạm vi và hậu quả|Thao tác hàng loạt cho xem trước danh sách ảnh hưởng
+E|02|Web đáp ứng và trải nghiệm di động|Cho phép quản lý khi không ngồi máy tính|P1|R2|E29.01
+S|Duyệt và quản lý lịch trên điện thoại|CR|xử lý việc cần thiết từ xa|Layout phù hợp màn hình nhỏ và thao tác chạm|Không giấu thông tin tài khoản đích hoặc cảnh báo
+S|Nhận thông báo trong ứng dụng và theo lựa chọn|CR|biết khi có việc cần xử lý|Cấu hình loại thông báo, giờ yên lặng và kênh nhận|Thông báo nhạy cảm không lộ nội dung trên màn hình khóa
+S|Lưu nháp khi mạng gián đoạn|CR|giảm mất công việc|Nháp cục bộ được bảo vệ và có thời hạn|Kết nối lại kiểm tra phiên bản và quyền trước đồng bộ
+E|03|Ngôn ngữ và khả năng tiếp cận|Phục vụ Creator với ngôn ngữ và nhu cầu tiếp cận khác nhau|P1|R1|E29.01
+S|Dùng giao diện tiếng Việt và ngôn ngữ bổ sung|CR|hiểu quy trình bằng ngôn ngữ quen thuộc|Thông báo lỗi và nhãn trạng thái được dịch thống nhất|Đổi locale không đổi giá trị UTC hoặc tiền tệ gốc
+S|Thao tác bằng bàn phím và trình đọc màn hình|CR|sử dụng sản phẩm với công cụ hỗ trợ|Có focus rõ, nhãn điều khiển và thứ tự hợp lý|Trạng thái lỗi không chỉ phân biệt bằng màu
+S|Xem phụ đề, độ tương phản và tùy chọn chuyển động|CR|tiếp cận nội dung và giao diện dễ hơn|Có phụ đề cho hướng dẫn có lời nói|Tôn trọng lựa chọn giảm chuyển động của người dùng
+T|30|Di trú, chất lượng phát hành và quản trị backlog|Mở rộng sản phẩm mà bảo toàn dữ liệu và luồng đã có|Tỷ lệ regression; thời gian rollback; mức đầy đủ traceability
+E|01|Nâng cấp và bảo toàn dữ liệu hiện tại|Nâng phiên bản hệ thống không mất quyền sở hữu Creator|P0|R1|E02.01
+S|Nâng schema dữ liệu và bảo toàn user_id|AD|giữ liên tục sử dụng|Có mapping chủ sở hữu Creator và báo dữ liệu mồ côi|Không gán dữ liệu của nhiều Creator về một tài khoản mặc định
+S|Di trú lịch, token và workflow đang chạy|AD|không gián đoạn xuất bản|Giữ UTC, trạng thái duyệt và cờ auto_publish|Không tự bật đăng hay lặp upload sau migration|B09
+S|Chạy dry-run và đối soát trước chuyển đổi|AD|phát hiện mất hoặc lệch dữ liệu|So sánh số lượng, checksum và liên kết quan trọng|Có rollback đã thử và điều kiện dừng rõ ràng
+E|02|Kiểm thử và cổng phát hành|Xác nhận chất lượng bằng bằng chứng|P0|R0|E26.01
+S|Kiểm thử luồng crawl đến xuất bản|AD|xác nhận sản phẩm hoạt động xuyên suốt|Bao phủ happy path, hủy, retry và lỗi dịch vụ ngoài|Sandbox và mock không được gọi là E2E production
+S|Kiểm thử bảo mật, tải và tính đúng hạn mức|AD|chặn lỗi gây thiệt hại|Có case truy cập chéo, quota race và webhook trùng|Kết quả gắn phiên bản build và dữ liệu thử
+S|Triển khai từng phần và theo dõi hồi quy|AD|phát hành có thể thu hồi|Có canary hoặc phạm vi thử và chỉ số so sánh|Vượt ngưỡng lỗi kích hoạt rollback theo quy trình
+E|03|Truy vết yêu cầu và cải tiến sản phẩm|Giữ backlog sống và tránh phạm vi không kiểm soát|P1|R1|-
+S|Liên kết Theme, Epic, Story với kiểm thử và release|AD|chứng minh từng yêu cầu được đáp ứng|Mỗi story có ID, AC, trạng thái và nguồn quyết định|Thay đổi phạm vi giữ lịch sử và người chấp thuận
+S|Đo mức sử dụng tính năng với dữ liệu tối thiểu|AD|ưu tiên cải tiến có căn cứ|Event có định nghĩa và lựa chọn privacy phù hợp|Không đưa nội dung riêng tư vào analytics sản phẩm
+S|Quản lý phản hồi và deprecate tính năng|AD|phát triển mà không bỏ rơi người dùng|Có thời gian thông báo và phương án thay thế|Không ngừng API đang dùng mà thiếu kế hoạch chuyển đổi
+T|31|Gắn link sản phẩm và affiliate|Hỗ trợ Creator dẫn người xem đến liên kết kiếm tiền bên ngoài|Tỷ lệ link hợp lệ; số lỗi gắn link; tỷ lệ bài đáp ứng nhãn quảng cáo
+E|01|Thư viện link cá nhân|Lưu liên kết Creator tự cung cấp để dùng lại|P1|R1|E02.01
+S|Thêm và chỉnh sửa link sản phẩm hoặc affiliate|CR|dùng lại liên kết kiếm tiền của mình|Lưu URL, tên gợi nhớ, loại link và Creator sở hữu|Không tự tạo mã affiliate hoặc đăng ký chương trình bên ngoài
+S|Sắp xếp link theo kênh hoặc chủ đề cá nhân|CR|chọn đúng liên kết khi tạo nội dung|Chỉ hiển thị link thuộc Creator đang đăng nhập|Lưu trữ link không tự sửa bài đã đăng
+S|Kiểm tra link lỗi hoặc hết hiệu lực|CR|phát hiện liên kết không sử dụng được|Hiển thị thời điểm kiểm tra và lỗi xác định được|Link chặn bot được ghi chưa xác minh, không kết luận sai là hỏng
+E|02|Chèn link vào nội dung theo kênh|Gắn đúng link và vị trí nền tảng cho phép|P1|R1|E31.01,E16.01
+S|Chọn link để chèn vào caption hoặc mô tả|CR|dẫn người xem đến điểm mua hoặc trang affiliate|Có preview URL và nội dung cuối trước xác nhận|Không tự chèn link ngoài lựa chọn của Creator
+S|Kiểm tra vị trí đặt link theo khả năng kênh|CR|không tạo bài có liên kết không hoạt động như mong đợi|Thông báo kênh hỗ trợ link nhấp được ở vị trí nào|Không hỗ trợ thì gợi ý bio của kênh hoặc thao tác thủ công
+S|Giữ nguyên mã affiliate và tham số liên kết|CR|không mất thông tin giới thiệu của mình|Preview và payload giữ tham số hợp lệ đã nhập|Không tự rút gọn, thêm redirect hoặc thay mã người giới thiệu
+E|03|Minh bạch và an toàn khi gắn link|Giảm link độc hại và nội dung thương mại thiếu minh bạch|P0|R1|E31.02,E32.01
+S|Thêm nhãn affiliate hoặc quảng cáo khi cần|CR|minh bạch quan hệ thương mại của nội dung|Có mẫu nhãn theo kênh và loại nội dung|Không gỡ nhãn bắt buộc chỉ để tăng lượt nhấp
+S|Chặn link độc hại hoặc đích đến vi phạm|AD|bảo vệ người xem và uy tín hệ thống|Ghi căn cứ, phạm vi chặn và đường khiếu nại|Quét link phải chống SSRF và không sửa mã affiliate
+S|Thay link trong bản nháp hoặc bài được phép sửa|CR|khắc phục liên kết sai của mình|Bản đã duyệt phải kiểm tra lại sau sửa link|Bài ngoài nền tảng không sửa được thì tạo hướng dẫn thủ công
+T|32|Quản trị bài đăng người dùng và Trust & Safety|Phát hiện, ngăn chặn và xử lý vi phạm cộng đồng có quyền khiếu nại|Thời gian xử lý vi phạm; tỷ lệ quyết định bị đảo; tỷ lệ tái phạm
+E|01|Chính sách cộng đồng và phân loại vi phạm|Có quy tắc rõ ràng để xét và xử lý nội dung|P0|R1|E03.01
+S|Công bố và quản lý phiên bản tiêu chuẩn cộng đồng|AD|xét bài theo quy tắc minh bạch|Mỗi rule có phạm vi, ví dụ và ngày hiệu lực|Lưu phiên bản đã áp dụng cho từng quyết định
+S|Phân loại vi phạm và mức độ nghiêm trọng|AD|ưu tiên xử lý phù hợp|Bao phủ spam, lừa đảo, quấy rối, thù ghét, bạo lực và nội dung cấm|Admin xem xét ngoại lệ theo ngữ cảnh, không chỉ khớp từ khóa
+S|Ánh xạ chính sách nội bộ với chính sách từng nền tảng|AD|không nhầm quyền quản lý nội bộ và bên ngoài|Kết quả ghi rõ vi phạm rule nội bộ hay rule nền tảng|Xung đột hoặc thiếu chắc chắn chuyển kiểm duyệt thủ công
+E|02|Kho bài đăng toàn hệ thống và giám sát|Quản trị được bài của người dùng theo thẩm quyền|P0|R1|E32.01,E16.01
+S|Tra cứu bài đăng của người dùng để kiểm duyệt|AD|tìm nội dung cần xử lý|Lọc theo Creator, kênh, trạng thái, thời gian và mức rủi ro|Chỉ Admin được xem bài của Creator khác cho nghiệp vụ kiểm duyệt
+S|Xem hồ sơ bài và lịch sử phiên bản vi phạm|AD|đưa ra quyết định dựa trên bằng chứng|Hiển thị tác giả, nguồn, nội dung, lần sửa và trạng thái bên ngoài|Mọi lượt xem bằng chứng nhạy cảm được audit
+S|Kiểm tra bài chờ đăng và quét lại bài đã đăng|AD|phát hiện cả vi phạm trước và sau xuất bản|Kiểm tra text, hình, audio và video trong khả năng công bố|Bài sửa hoặc policy đổi được đưa vào tái kiểm tra theo phạm vi
+E|03|Báo cáo vi phạm và hàng đợi xét duyệt|Tiếp nhận tín hiệu mà không kết tội tự động|P0|R1|E32.02
+S|Báo cáo bài đăng có dấu hiệu vi phạm|CR|giúp phát hiện nội dung gây hại|Có danh mục lý do, đối tượng và mã theo dõi|Bảo vệ danh tính người báo cáo và giới hạn spam báo cáo
+S|Ưu tiên hàng đợi vi phạm theo mức rủi ro|AD|xử lý trường hợp nghiêm trọng trước|Gộp báo cáo trùng nhưng giữ nguồn và thời điểm|Số lượng báo cáo không tự chứng minh nội dung vi phạm
+S|Xác nhận hoặc bác bỏ nghi vấn vi phạm|AD|ra quyết định có căn cứ|Cần rule, bằng chứng, mức độ và lý do kết luận|AI độ tin cậy thấp không tự khóa vĩnh viễn người dùng
+E|04|Ngăn đăng và xử lý bài vi phạm|Thực thi quyết định trên đúng phạm vi kiểm soát|P0|R1|E32.03
+S|Chặn hoặc hủy lịch đăng bài vi phạm|AD|ngăn nội dung bị cấm tiếp tục xuất bản|Áp dụng cho thủ công, tự động và API đối tác|Worker kiểm tra quyết định mới nhất trước gửi bài
+S|Ẩn nội dung nội bộ và yêu cầu gỡ bài bên ngoài|AD|hạn chế tiếp cận nội dung vi phạm|Ẩn nội bộ và trạng thái gỡ bên ngoài là hai trường riêng|API không hỗ trợ thì giao việc thủ công, không báo đã gỡ
+S|Ngăn tái đăng nội dung vi phạm đã xác nhận|AD|giảm tái phạm qua bản sao|So khớp hash hoặc dấu vết phù hợp phạm vi quyền|Nội dung tương tự chưa đủ chắc chắn phải được xét ngữ cảnh
+E|05|Cảnh báo và chế tài người dùng|Xử lý tái phạm công bằng, có thời hạn và phạm vi|P0|R1|E32.04
+S|Nhận thông báo vi phạm và yêu cầu khắc phục|CR|hiểu lý do và cách xử lý|Thông báo có bài, rule, hành động, thời hạn và cách khiếu nại|Không tiết lộ người báo cáo hoặc bằng chứng nhạy cảm không cần thiết
+S|Áp dụng hạn chế đăng hoặc đình chỉ tài khoản|AD|ngăn hành vi vi phạm tiếp diễn|Chế tài có mức độ, phạm vi, thời hạn và người duyệt|Không tự xóa tài sản, hóa đơn hoặc hồ sơ khiếu nại
+S|Theo dõi lịch sử vi phạm và điều kiện tái phạm|AD|áp dụng chính sách nhất quán|Chỉ tính quyết định có hiệu lực trong cửa sổ chính sách|Quyết định bị đảo phải loại khỏi điểm hoặc số lần tái phạm
+E|06|Khiếu nại, khôi phục và kiểm toán kiểm duyệt|Cho phép sửa quyết định sai và giám sát quyền lực quản trị|P0|R1|E32.05
+S|Gửi khiếu nại và bằng chứng bổ sung|CR|yêu cầu xem xét quyết định|Có hạn xử lý, trạng thái và mã hồ sơ|Tài khoản bị hạn chế vẫn truy cập được kênh khiếu nại phù hợp
+S|Xét khiếu nại và khôi phục quyền hợp lệ|AD|sửa quyết định sai|Lưu căn cứ xét lại; ưu tiên Admin khác nếu có nhiều Admin|Khôi phục không tự đăng lại bài hoặc lịch đã quá hạn
+S|Kiểm toán quyết định và bảo vệ bằng chứng|AD|phát hiện lạm quyền và cải thiện chất lượng|Audit chống sửa có người xử lý, rule và hành động thực thi|Bằng chứng có quyền truy cập, retention và quy trình xóa riêng

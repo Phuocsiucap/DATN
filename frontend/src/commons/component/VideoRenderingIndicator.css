@@ -1,0 +1,63 @@
+.video-rendering-indicator {
+  --drawing-duration: 4.6s;
+}
+
+.video-rendering-indicator__frame,
+.video-rendering-indicator__play {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+}
+
+.video-rendering-indicator__pen {
+  transform: translate(72px, 85px);
+}
+
+.video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__frame {
+  animation: video-render-frame var(--drawing-duration) linear infinite;
+}
+
+.video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__play {
+  animation: video-render-play var(--drawing-duration) linear infinite;
+}
+
+.video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__pen {
+  animation: video-render-pen var(--drawing-duration) linear infinite;
+}
+
+/* Pen keyframes follow the same segment lengths as the two drawing paths. */
+@keyframes video-render-pen {
+  0%, 5% { transform: translate(72px, 85px); }
+  15.174% { transform: translate(72px, 31px); }
+  31% { transform: translate(156px, 31px); }
+  41.174% { transform: translate(156px, 85px); }
+  57% { transform: translate(72px, 85px); }
+  61% { transform: translate(88px, 59px); }
+  65% { transform: translate(108px, 46px); }
+  71.8% { transform: translate(108px, 70px); }
+  78.9% { transform: translate(130px, 58px); }
+  86% { transform: translate(108px, 46px); }
+  91% { transform: translate(86px, 53px); }
+  96%, 100% { transform: translate(72px, 85px); }
+}
+
+@keyframes video-render-frame {
+  0%, 5% { stroke-dashoffset: 100; opacity: 1; }
+  57%, 90% { stroke-dashoffset: 0; opacity: 1; }
+  98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes video-render-play {
+  0%, 65% { stroke-dashoffset: 100; opacity: 1; }
+  86%, 90% { stroke-dashoffset: 0; opacity: 1; }
+  98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__frame,
+  .video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__play,
+  .video-rendering-indicator[data-state='rendering'] .video-rendering-indicator__pen {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+}

@@ -267,6 +267,19 @@ class AutoDraftApiTests(unittest.TestCase):
         resolve.assert_not_called()
         self.db.commit.assert_not_called()
 
+    def test_approvals_intake_preserves_video_approval_without_assigning_a_schedule(self):
+        service = SocialProfileService()
+        self.project.status = "VIDEO_APPROVED"
+        self.project.title = "Video đã duyệt"
+        self.project.metadata_json.update(video_approved=True, draft_review_approved=True, approved_script_signature=draft_script_signature(self.story))
+        self.project.artifacts_jsonb = [{"artifact_type": "FINAL_VIDEO", "uri": "new.mp4", "status": "READY"}]
+        self.db.query.return_value.filter.return_value.filter.return_value.all.return_value = [self.project]
+        self.db.get.side_effect = [SimpleNamespace(platform="tiktok"), SimpleNamespace(canonical_title="Article")]
+        service.sync_rendered_workflows_to_queue(self.db, self.user)
+        item = self.db.add.call_args_list[0].args[0]
+        self.assertEqual(item.status, "approved")
+        self.assertIsNone(item.scheduled_at)
+
     def test_legacy_queue_sync_uses_current_render_not_source_article_url(self):
         service = SocialProfileService()
         self.project.status = "RENDERED"
@@ -279,6 +292,25 @@ class AutoDraftApiTests(unittest.TestCase):
         item = self.db.add.call_args_list[0].args[0]
         self.assertEqual(item.article_link, "new.mp4")
         self.assertEqual(item.status, "needs_approval")
+
+    def test_old_intake_recovers_approval_only_for_untouched_unscheduled_records(self):
+        service = SocialProfileService()
+        self.project.status = "VIDEO_APPROVED"
+        self.project.metadata_json.update(video_approved=True, draft_review_approved=True, approved_script_signature=draft_script_signature(self.story), queued_post_id=str(uuid.uuid4()))
+        self.db.query.return_value.filter.return_value.filter.return_value.all.return_value = [self.project]
+        old_reason = "Được chuyển tự động từ Video đã hoàn thành render"
+        for item_status, scheduled_at, reason, expected in [
+            ("needs_approval", None, old_reason, "approved"),
+            ("needs_approval", "2099-01-01", old_reason, "needs_approval"),
+            ("needs_approval", None, "Reviewer cần xem lại", "needs_approval"),
+            ("changes_requested", None, old_reason, "changes_requested"),
+        ]:
+            with self.subTest(status=item_status, scheduled_at=scheduled_at, reason=reason):
+                item = SimpleNamespace(user_id=self.project.user_id, profile_id=self.project.profile_id, status=item_status, scheduled_at=scheduled_at, ai_reason=reason)
+                self.db.get.return_value = item
+                service.sync_rendered_workflows_to_queue(self.db, self.user)
+                self.assertEqual(item.status, expected)
+                self.assertEqual(item.scheduled_at, scheduled_at)
 
     def test_legacy_queue_sync_skips_auto_drafts_waiting_review(self):
         service = SocialProfileService()

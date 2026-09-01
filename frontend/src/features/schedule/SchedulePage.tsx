@@ -13,12 +13,12 @@ import {
   Plus,
   RefreshCw,
   Rocket,
-  Search,
   Send,
-  UsersRound,
 } from 'lucide-react'
 import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar } from '@/commons/component/social-ui'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
+import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
 
@@ -30,7 +30,6 @@ type SocialProfile = {
   avatar_url?: string | null
   status: string
   strategy?: {
-    schedule_enabled?: boolean
     approval_mode?: string
     auto_publish_enabled?: boolean
   } | null
@@ -384,46 +383,28 @@ export default function SchedulePage() {
     })
   }, [todayItems, weekItems])
 
-  const activeProfiles = profiles.filter((profile) => String(profile.status || '').toLowerCase() === 'active').length
   const weekRangeLabel = `${weekDays[0]?.subLabel || ''} - ${weekDays[6]?.subLabel || ''}`
   const totalScheduled = summary.total_scheduled ?? items.filter((item) => scheduledValue(item)).length
   const todayCount = summary.today ?? todayItems.length
   const thisWeekCount = summary.date_range ?? weekItems.length
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--on-surface)' }}>Lịch đăng bài</h2>
-          <p className="mt-1 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
-            Quản lý lịch xuất bản theo kênh social, nền tảng và video đã render.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="flex h-10 min-w-[280px] items-center gap-2 rounded-md border bg-white px-3" style={{ borderColor: 'var(--outline-variant)' }}>
-            <Search size={16} style={{ color: 'var(--on-surface-variant)' }} />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Tìm kiếm bài viết, nội dung, kênh social..."
-              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-            />
-          </div>
-          <button
-            onClick={() => void loadData()}
-            disabled={loading}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border bg-white px-3 text-sm font-semibold disabled:opacity-50"
-            style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
-          >
-            <RefreshCw size={16} />
-            Tải lại
-          </button>
-          <select
+    <PageLayout
+      title="Lịch đăng bài"
+      description="Quản lý lịch xuất bản theo kênh social, nền tảng và video đã render."
+      contentClassName="flex-none"
+      actions={
+        <>
+          <SearchField
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Tìm kiếm bài viết, kênh..."
+            className="w-full sm:w-[260px]"
+          />
+          <SelectControl
             value={selectedStatus}
-            onChange={(event) => setSelectedStatus(event.target.value)}
-            className="h-10 rounded-md border bg-white px-3 text-sm font-semibold outline-none"
-            style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+            onChange={setSelectedStatus}
+            className="w-full sm:w-[180px]"
           >
             <option value="all">Tất cả trạng thái</option>
             <option value="upcoming">Sắp đăng</option>
@@ -433,48 +414,25 @@ export default function SchedulePage() {
             <option value="publishing">Đang gửi</option>
             <option value="published">Đã đăng</option>
             <option value="failed">Lỗi</option>
-          </select>
-        </div>
-      </div>
-
-      <section className="space-y-3">
-        <h3 className="text-sm font-bold" style={{ color: 'var(--on-surface)' }}>Kênh social đã kết nối</h3>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <AccountCard
-            active={selectedProfileId === 'all'}
-            title="Tất cả kênh social"
-            subtitle={`${profiles.length} profile`}
-            platform="all"
-            statusText={`${activeProfiles}/${profiles.length || 0} đang hoạt động`}
-            onClick={() => setSelectedProfileId('all')}
-          />
-          {profiles.map((profile) => (
-            <AccountCard
-              key={profile.id}
-              active={selectedProfileId === String(profile.id)}
-              title={profile.profile_name}
-              subtitle={profile.username ? `@${profile.username}` : getPlatformMeta(profile.platform).label}
-              platform={profile.platform}
-              avatarUrl={profile.avatar_url}
-              statusText={String(profile.status || '').toLowerCase() === 'active' ? 'Đã kết nối' : profile.status}
-              onClick={() => setSelectedProfileId(String(profile.id))}
-            />
-          ))}
-          <button
-            className="flex min-h-[86px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-white text-sm font-semibold"
-            style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+          </SelectControl>
+          <AppButton
+            variant="secondary"
+            icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />}
+            onClick={() => void loadData()}
+            disabled={loading}
           >
-            <Plus size={22} />
-            Kết nối thêm
-          </button>
-        </div>
-      </section>
+            Tải lại
+          </AppButton>
+        </>
+      }
+    >
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} allOption loading={loading} />
+
+      <section className="grid gap-3 md:grid-cols-3">
         <StatCard icon={<CalendarDays size={18} />} tint="#7c3aed" label="Tổng bài đã lên lịch" value={String(totalScheduled)} helper="Toàn bộ hàng đợi" />
         <StatCard icon={<Clock3 size={18} />} tint="#2563eb" label="Hôm nay" value={String(todayCount)} helper="Theo bộ lọc hiện tại" />
         <StatCard icon={<Activity size={18} />} tint="#16a34a" label="Tuần này" value={String(thisWeekCount)} helper="Trong 7 ngày đang xem" />
-        <StatCard icon={<UsersRound size={18} />} tint="#ea580c" label="Kênh social hoạt động" value={`${activeProfiles}/${profiles.length || 0}`} helper="Profile đang active" />
       </section>
 
       <div className="flex flex-col gap-3 xl:flex-row">
@@ -646,55 +604,7 @@ export default function SchedulePage() {
         onApprove={(queueItemId) => void handleApprove(queueItemId)}
         onPublish={handlePublishItem}
       />
-    </div>
-  )
-}
-
-function AccountCard({
-  active,
-  title,
-  subtitle,
-  platform,
-  statusText,
-  avatarUrl,
-  onClick,
-}: {
-  active: boolean
-  title: string
-  subtitle: string
-  platform: string
-  statusText: string
-  avatarUrl?: string | null
-  onClick: () => void
-}) {
-  const meta = getPlatformMeta(platform)
-  return (
-    <button
-      onClick={onClick}
-      className="flex min-h-[86px] items-center gap-3 rounded-lg border bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-      style={{ borderColor: active ? meta.border : 'var(--outline-variant)' }}
-    >
-      <div className="relative shrink-0">
-        <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border bg-slate-50" style={{ borderColor: 'var(--outline-variant)' }}>
-          {avatarUrl ? (
-            <img src={avatarUrl} alt={title} className="h-full w-full object-cover" />
-          ) : (
-            <span className="text-sm font-bold" style={{ color: meta.color }}>{title.slice(0, 2).toUpperCase()}</span>
-          )}
-        </div>
-        <span className="absolute -left-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-black text-white" style={{ backgroundColor: meta.color }}>
-          {meta.short}
-        </span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-bold" style={{ color: 'var(--on-surface)' }}>{title}</div>
-        <div className="truncate text-xs" style={{ color: 'var(--on-surface-variant)' }}>{subtitle}</div>
-        <div className="mt-1 flex items-center gap-1 text-xs font-medium text-emerald-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          {statusText}
-        </div>
-      </div>
-    </button>
+    </PageLayout>
   )
 }
 
@@ -762,7 +672,7 @@ function ScheduleEventCard({
       className="rounded-md border p-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
       style={{ borderColor: active ? platform.color : platform.border, backgroundColor: platform.bg }}
     >
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs font-black" style={{ color: platform.color }}>
           <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
           {formatTime(scheduledValue(item))}
@@ -778,9 +688,17 @@ function ScheduleEventCard({
           <Eye size={12} />
         </button>
       </div>
+      <div className="mb-2 h-24 w-full overflow-hidden rounded-md bg-slate-100 relative">
+        {item.article_link ? (
+          <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: generateVideoOutputUrl(item.article_link) }} compact />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-xl font-black text-white opacity-40" style={{ backgroundColor: platform.color }}>{platform.short}</div>
+        )}
+      </div>
       <div className="line-clamp-2 text-xs font-bold leading-snug" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
-      <div className="mt-1 truncate text-[10px]" style={{ color: 'var(--on-surface-variant)' }}>
-        {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
+      <div className="mt-2 flex items-center gap-1.5 truncate text-[10px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
+        <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
+        <span className="truncate">{profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}</span>
       </div>
       <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold" style={{ color: status.color }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
@@ -832,15 +750,15 @@ function TodayItem({ item, profile, active, onClick }: { item: QueueItem; profil
     >
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-slate-100">
         {videoUrl ? (
-          <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: videoUrl, thumbnail_url: profile?.avatar_url || undefined }} compact />
+          <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: videoUrl }} compact />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs font-black text-white" style={{ backgroundColor: platform.color }}>{platform.short}</div>
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1 text-[10px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-[8px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
-          {profile?.profile_name || item.profile_name || platform.label}
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
+          <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
+          <span className="truncate">{profile?.profile_name || item.profile_name || platform.label}</span>
         </div>
         <div className="line-clamp-2 text-sm font-semibold" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
         <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold" style={{ color: status.color }}>
@@ -871,14 +789,14 @@ function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem |
         <h3 className="text-base font-bold" style={{ color: 'var(--on-surface)' }}>Chi tiết bài đăng</h3>
         <button onClick={onClose} className="icon-button" style={{ color: 'var(--on-surface-variant)' }}>×</button>
       </div>
-      <div className="mb-3 flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--on-surface)' }}>
-        <span className="flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
-        {item.article_title}
+      <div className="mb-3 flex items-center gap-2.5 text-sm font-semibold leading-snug" style={{ color: 'var(--on-surface)' }}>
+        <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="md" />
+        <span className="line-clamp-2">{item.article_title}</span>
       </div>
       <div className="mb-3 overflow-hidden rounded-lg border bg-slate-950" style={{ borderColor: 'var(--outline-variant)' }}>
         {videoUrl ? (
           <MediaAssetPreview
-            item={{ media_type: 'VIDEO', source_url: videoUrl, thumbnail_url: profile?.avatar_url || undefined }}
+            item={{ media_type: 'VIDEO', source_url: videoUrl }}
             controls
             className="aspect-[9/16] max-h-[360px] w-full"
           />

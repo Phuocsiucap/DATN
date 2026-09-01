@@ -1,0 +1,65 @@
+.draft-generation-indicator {
+  --draft-drawing-duration: 4.4s;
+}
+
+.draft-generation-indicator__line {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+}
+
+.draft-generation-indicator__pen {
+  transform: translate(90px, 40px);
+}
+
+.draft-generation-indicator[data-state='draft'] .draft-generation-indicator__pen {
+  animation: draft-write-pen var(--draft-drawing-duration) linear infinite;
+}
+
+.draft-generation-indicator[data-state='draft'] .draft-generation-indicator__line--first {
+  animation: draft-write-first var(--draft-drawing-duration) linear infinite;
+}
+
+.draft-generation-indicator[data-state='draft'] .draft-generation-indicator__line--second {
+  animation: draft-write-second var(--draft-drawing-duration) linear infinite;
+}
+
+.draft-generation-indicator[data-state='draft'] .draft-generation-indicator__line--third {
+  animation: draft-write-third var(--draft-drawing-duration) linear infinite;
+}
+
+@keyframes draft-write-pen {
+  0%, 5% { transform: translate(90px, 40px); }
+  29% { transform: translate(140px, 40px); }
+  38% { transform: translate(90px, 57px); }
+  62% { transform: translate(140px, 57px); }
+  71% { transform: translate(90px, 74px); }
+  87% { transform: translate(124px, 74px); }
+  93% { transform: translate(146px, 38px); }
+  100% { transform: translate(90px, 40px); }
+}
+
+@keyframes draft-write-first {
+  0%, 5% { stroke-dashoffset: 100; opacity: 1; }
+  29%, 90% { stroke-dashoffset: 0; opacity: 1; }
+  98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes draft-write-second {
+  0%, 38% { stroke-dashoffset: 100; opacity: 1; }
+  62%, 90% { stroke-dashoffset: 0; opacity: 1; }
+  98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes draft-write-third {
+  0%, 71% { stroke-dashoffset: 100; opacity: 1; }
+  87%, 90% { stroke-dashoffset: 0; opacity: 1; }
+  98%, 100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draft-generation-indicator[data-state='draft'] .draft-generation-indicator__pen,
+  .draft-generation-indicator[data-state='draft'] .draft-generation-indicator__line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

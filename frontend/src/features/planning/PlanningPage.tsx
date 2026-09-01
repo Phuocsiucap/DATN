@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import {
@@ -40,6 +40,7 @@ import { updateVideoWorkspaceApi } from '@/commons/apis/generateVideo'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { MediaAssetPreview, mediaPlaybackUrl, mediaPreviewUrl, isImageMedia, isVideoMedia } from '@/commons/media'
 import { SocialProfileAvatar, platformLabel } from '@/commons/component/social-ui'
+import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { Sheet, SheetContent } from '@/commons/component/ui/sheet'
 import { SeriesModal, TransferSeriesModal, type SeriesFormData } from '@/features/generate-video/components/SeriesModal'
 import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
@@ -112,7 +113,18 @@ export default function PlanningPage({
   const runDetailRequest = useRef(0)
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('')
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(initialStep === 'jobs' ? 'all' : '')
+  const [loadingProfiles, setLoadingProfiles] = useState(true)
+  const runsRequest = useRef(0)
+  const currentRunFilter = useRef(selectedProfileId)
+  useEffect(() => { currentRunFilter.current = selectedProfileId }, [selectedProfileId])
+
+  const loadRuns = useCallback(async () => {
+    const profileId = currentRunFilter.current
+    const request = ++runsRequest.current
+    const response = await fetchPlanningRunsApi({ profile_id: profileId === 'all' ? undefined : profileId || undefined })
+    if (request === runsRequest.current && profileId === currentRunFilter.current) setJobs(response.items)
+  }, [])
 
   const [selectedReviewArticle, setSelectedReviewArticle] = useState<{
     article: ProfileSeriesReview['articles'][number]
@@ -225,10 +237,9 @@ export default function PlanningPage({
         ? { ...current, candidates: current.candidates.map(applyReview) }
         : { ...current, candidates: current.candidates.map(applyReview) }
     })
-    const [detail, nextRuns] = await Promise.all([fetchPlanningRunDetailApi(selectedRun.id), fetchPlanningRunsApi()])
+    const [detail] = await Promise.all([fetchPlanningRunDetailApi(selectedRun.id), loadRuns()])
     if (request === runDetailRequest.current) {
       setRunDetail(detail)
-      setJobs(nextRuns.items)
     }
   }
 
@@ -243,16 +254,15 @@ export default function PlanningPage({
       if (fetching) return
       fetching = true
       try {
-        const [detail, nextRuns] = await Promise.all([fetchPlanningRunDetailApi(runId), fetchPlanningRunsApi()])
+        const [detail] = await Promise.all([fetchPlanningRunDetailApi(runId), loadRuns()])
         if (!cancelled && request === runDetailRequest.current) {
           setRunDetail(detail)
-          setJobs(nextRuns.items)
         }
       } catch { /* Keep the current result; the next poll can recover. */ }
       finally { fetching = false }
     }, 3000)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [selectedRun, hasPendingCandidate])
+  }, [selectedRun, hasPendingCandidate, loadRuns])
 
   const [loading, setLoading] = useState(true)
   const [plansLoading, setPlansLoading] = useState(false)
@@ -275,31 +285,38 @@ export default function PlanningPage({
     }
   }
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadProfiles = async () => {
+    setLoadingProfiles(true)
     try {
-      if (activeStep === 'jobs') {
-        const nextRuns = await fetchPlanningRunsApi()
-        setJobs(nextRuns.items)
-        return
-      }
-
-      if (activeStep === 'plans') {
-        const profileResponse = await fetchSocialProfilesApi()
-        const nextProfiles = profileResponse.items || profileResponse || []
-        setProfiles(nextProfiles)
-        setSelectedProfileId((current) => current || nextProfiles[0]?.id || '')
-      }
+      const profileResponse = await fetchSocialProfilesApi()
+      const nextProfiles = profileResponse.items || []
+      setProfiles(nextProfiles)
+      setSelectedProfileId(current => {
+        if (activeStep === 'jobs' && current === 'all') return current
+        if (nextProfiles.some(profile => profile.id === current)) return current
+        return activeStep === 'jobs' ? 'all' : nextProfiles[0]?.id || ''
+      })
     } catch (error: any) {
-      toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning')
+      toast.error(error?.response?.data?.detail || 'Không thể tải kênh social')
     } finally {
-      setLoading(false)
+      setLoadingProfiles(false)
     }
   }
 
   useEffect(() => {
-    void loadData()
+    void loadProfiles()
   }, [])
+
+  useEffect(() => {
+    if (activeStep !== 'jobs') { setLoading(false); return }
+    let cancelled = false
+    setJobs([])
+    setLoading(true)
+    loadRuns().catch((error) => {
+      if (!cancelled) toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning')
+    }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true; runsRequest.current += 1 }
+  }, [activeStep, selectedProfileId, loadRuns])
 
   useEffect(() => {
     if (activeStep !== 'plans') return
@@ -315,11 +332,11 @@ export default function PlanningPage({
     const interval = setInterval(() => {
       const hasRunningJobs = jobs.some((job) => !['COMPLETED', 'FAILED', 'SUCCEEDED'].includes(job.status))
       if (hasRunningJobs) {
-        fetchPlanningRunsApi().then((response) => setJobs(response.items)).catch(() => {})
+        loadRuns().catch(() => {})
       }
     }, 3000)
     return () => clearInterval(interval)
-  }, [activeStep, jobs])
+  }, [activeStep, jobs, loadRuns])
 
   useEffect(() => {
     if (!selectedReviewArticle) return
@@ -344,7 +361,7 @@ export default function PlanningPage({
       void loadProfilePlanning(selectedProfileId)
       return
     }
-    void loadData()
+    void Promise.all([loadProfiles(), loadRuns()]).catch((error) => toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning'))
   }
 
   const openRegenerateArticle = (plan: ContentPlan) => {
@@ -387,6 +404,8 @@ export default function PlanningPage({
         </div>
       </div>
 
+      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} allOption={activeStep === 'jobs'} loading={loadingProfiles} className="mb-5" />
+
       {loading ? (
         <div className="flex items-center justify-center p-12 text-[#64748b]">
           <Loader2 className="animate-spin mr-2" size={24} /> Đang xử lý...
@@ -395,7 +414,7 @@ export default function PlanningPage({
         <div className="min-h-[600px]">
           {activeStep === 'jobs' && (
             <div className="space-y-4">
-              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào" /></div> : jobs.map((job) => (
+              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào cho kênh đã chọn" /></div> : jobs.map((job) => (
                 <div
                   key={job.id}
                   onClick={() => handleOpenRunDetail(job)}
@@ -504,18 +523,6 @@ export default function PlanningPage({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <select
-                      value={selectedProfileId}
-                      onChange={(event) => setSelectedProfileId(event.target.value)}
-                      className="h-10 rounded-lg border border-[#d9e0ea] bg-white px-3 text-sm font-semibold text-[#0f172a] outline-none focus:border-[#3525cd]"
-                    >
-                      {profiles.length === 0 && <option value="">Chưa có social profile</option>}
-                      {profiles.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''} - {profile.platform}
-                        </option>
-                      ))}
-                    </select>
                     <button
                       onClick={() => { setEditingSeries(null); setSeriesModalOpen(true) }}
                       className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 text-xs font-bold text-white shadow-xs transition-colors hover:bg-blue-700"

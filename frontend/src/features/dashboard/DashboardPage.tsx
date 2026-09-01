@@ -4,6 +4,7 @@ import { Newspaper, TrendingUp, AlertCircle, Download, Sparkles, Play, Pause, Ch
 import { useAppDispatch, useAppSelector } from '@/commons/hooks/useAppDispatch'
 import { fetchStats } from '@/commons/store/slices/statsSlice'
 import { triggerCrawlApi, fetchSchedulerStatusApi, startSchedulerApi, stopSchedulerApi } from '@/commons/apis/api'
+import { PageLayout } from '@/commons/component/social-ui'
 import StatCard from '@/features/dashboard/components/StatCard'
 import EventFeed from '@/features/dashboard/components/EventFeed'
 
@@ -67,19 +68,15 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
   const isRunning = schedulerStatus === 'running'
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold" style={{ color: 'var(--on-surface)' }}>
-            {isSystemUser ? 'System Dashboard' : 'My Dashboard'}
-          </h2>
-          <p className="text-xs mt-1 max-w-2xl" style={{ color: 'var(--on-surface-variant)' }}>
-            {isSystemUser
-              ? 'Theo dõi toàn bộ hoạt động crawl, queue, account và publish của hệ thống.'
-              : 'Theo dõi bài phù hợp, queue sắp đăng và hiệu quả các social account của bạn.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <PageLayout
+      title={isSystemUser ? 'System Dashboard' : 'My Dashboard'}
+      description={
+        isSystemUser
+          ? 'Theo dõi toàn bộ hoạt động crawl, queue, account và publish của hệ thống.'
+          : 'Theo dõi bài phù hợp, queue sắp đăng và hiệu quả các social account của bạn.'
+      }
+      actions={
+        <>
           <button
             className="inline-flex h-8 items-center gap-1.5 px-3 rounded-md text-xs font-semibold border transition-colors hover:bg-[var(--surface-container-low)]"
             style={{
@@ -103,8 +100,9 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
             <Sparkles size={14} className={crawling ? 'animate-spin' : ''} />
             {crawling ? 'Scanning...' : 'AI Content Scan'}
           </button>
-        </div>
-      </div>
+        </>
+      }
+    >
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {loading ? (
@@ -276,6 +274,6 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
           </div>
         </div>
       </div>
-    </div>
+    </PageLayout>
   )
 }

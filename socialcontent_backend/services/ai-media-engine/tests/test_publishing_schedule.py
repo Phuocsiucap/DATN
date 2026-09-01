@@ -29,14 +29,23 @@ class RenderQueueScheduleTests(unittest.TestCase):
         self.assertEqual(self.project.metadata_json["module4_queue"]["scheduled_at"], self.future.isoformat())
         self.assertIs(self.choose.call_args.args[2], item)
 
-    def test_full_calendar_waits_for_review_without_failing_render(self):
+    def test_auto_review_without_auto_schedule_stays_approved_without_a_publish_job(self):
+        self.profile.strategy.auto_queue_enabled = False
+        jobs._apply_module4_policy_after_render(self.db, self.project, "video.mp4", {})
+        self.assertTrue(self.project.metadata_json["video_approved"])
+        self.assertEqual(self.project.status, "VIDEO_APPROVED")
+        self.choose.assert_not_called()
+        self.db.add.assert_not_called()
+
+    def test_full_calendar_keeps_approval_and_waits_for_schedule_without_failing_render(self):
         self.choose.side_effect = ValueError("Không còn khung giờ trống")
         jobs._apply_module4_policy_after_render(self.db, self.project, "video.mp4", {})
         item = self.db.add.call_args.args[0]
         self.assertIsNone(item.scheduled_at)
-        self.assertEqual(item.status, "needs_approval")
+        self.assertEqual(item.status, "approved")
         self.assertIn("Cần chọn lịch", item.ai_reason)
-        self.assertNotEqual(self.project.status, "FAILED")
+        self.assertEqual(self.project.status, "VIDEO_APPROVED")
+        self.assertTrue(self.project.metadata_json["video_approved"])
 
     def test_manual_review_does_not_schedule_or_call_ai(self):
         self.profile.strategy.approval_mode = "manual"

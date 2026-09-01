@@ -5,7 +5,6 @@ import { store } from '@/commons/store'
 import { useWebSocket } from '@/commons/hooks/useWebSocket'
 import Sidebar from '@/commons/component/Sidebar'
 import { TAB_PATHS, type Tab } from '@/commons/component/navigation'
-import TopNavBar from '@/commons/component/TopNavBar'
 
 // Features
 import DashboardPage from '@/features/dashboard/DashboardPage'
@@ -53,8 +52,9 @@ const getNormalizedPath = () => {
 
 const getTabFromPath = (): Tab => {
   const normalizedPath = getNormalizedPath()
+  if (normalizedPath === '/') return 'analyticsAccounts'
   if (normalizedPath.startsWith('/generate-video')) return 'generateVideo'
-  return PATH_TABS[normalizedPath] ?? 'dashboard'
+  return PATH_TABS[normalizedPath] ?? 'analyticsAccounts'
 }
 
 const getGenerateVideoProjectIdFromPath = () => {
@@ -130,13 +130,13 @@ function AppContent() {
   useEffect(() => {
     const handleAuthExpired = () => {
       setCurrentUser(null)
-      handleTabChange('dashboard', true)
+      handleTabChange(isSystemUser ? 'dashboard' : 'analyticsAccounts', true)
       setAuthLoading(false)
     }
 
     window.addEventListener('auth:expired', handleAuthExpired)
     return () => window.removeEventListener('auth:expired', handleAuthExpired)
-  }, [handleTabChange])
+  }, [handleTabChange, isSystemUser])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -160,7 +160,7 @@ function AppContent() {
   const handleLogout = async () => {
     await logoutApi()
     setCurrentUser(null)
-    handleTabChange('dashboard', true)
+    handleTabChange(isSystemUser ? 'dashboard' : 'analyticsAccounts', true)
   }
 
   if (authLoading) {
@@ -178,24 +178,18 @@ function AppContent() {
   }
 
   return (
-    <div className="compact-ui app-shell flex min-h-screen">
+    <div className="compact-ui app-shell flex h-screen w-screen overflow-hidden bg-[var(--surface)]">
       <Sidebar
         activeTab={tab}
         onTabChange={handleTabChange}
         isSystemUser={isSystemUser}
         currentUser={currentUser}
+        onLogout={() => void handleLogout()}
       />
 
-      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
-        <TopNavBar
-          currentUser={currentUser}
-          onLogout={() => void handleLogout()}
-        />
-        <div className={tab === 'generateVideo'
-          ? 'flex-1 min-h-0 w-full overflow-y-auto p-4 pb-20 md:p-5 md:pb-5'
-          : 'w-full max-w-[1600px] mx-auto px-4 py-5 pb-20 md:px-6 md:pb-6'
-        }>
-          {tab === 'dashboard' && <DashboardPage currentUser={currentUser} />}
+      <main className="flex-1 min-w-0 h-full flex flex-col overflow-y-auto">
+        <div className="flex-1 min-h-0 w-full max-w-[1600px] mx-auto p-4 md:p-5 flex flex-col">
+          {tab === 'dashboard' && (isSystemUser ? <DashboardPage currentUser={currentUser} /> : <AccountAnalyticsPage />)}
           {tab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenModule2} />}
           {tab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenGenerateVideo} />}
           {tab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}

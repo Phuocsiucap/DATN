@@ -336,7 +336,6 @@ class SocialProfileStrategy(Base):
     target_audience = Column(String(255), default="", nullable=False)
     post_frequency_per_day = Column(Integer, default=2, nullable=False)
     active_hours = Column(String(120), default="08:00-11:00,19:00-22:00", nullable=False)
-    schedule_enabled = Column(Boolean, default=True, nullable=False)
     schedule_days = Column(String(40), default="0,1,2,3,4,5,6", nullable=False)
     schedule_times = Column(String(120), default="08:30,20:30", nullable=False)
     schedule_timezone = Column(String(80), default="Asia/Bangkok", nullable=False)

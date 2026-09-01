@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SocialProfileCreateRequest(BaseModel):
@@ -27,7 +27,6 @@ class SocialProfileStrategyRequest(BaseModel):
     target_audience: str | None = None
     post_frequency_per_day: int | None = None
     active_hours: str | None = None
-    schedule_enabled: bool | None = None
     schedule_days: str | None = None
     schedule_times: str | None = None
     schedule_timezone: str | None = None
@@ -41,7 +40,15 @@ class SocialProfileStrategyRequest(BaseModel):
     video_render_mode: str | None = None
     max_system_recommendations: int | None = None
     auto_queue_enabled: bool | None = None
-    auto_publish_enabled: bool | None = None
+    auto_publish_enabled: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_schedule_toggle(cls, data: Any) -> Any:
+        # Do not silently ignore an old client's attempt to disable publishing.
+        if isinstance(data, dict) and "schedule_enabled" in data:
+            raise ValueError("schedule_enabled không còn được hỗ trợ; hãy tải lại trang và dùng auto_publish_enabled")
+        return data
 
 
 class StrategyTopicDetailResponse(BaseModel):
@@ -70,7 +77,6 @@ class SocialProfileStrategyResponse(BaseModel):
     target_audience: str
     post_frequency_per_day: int
     active_hours: str
-    schedule_enabled: bool
     schedule_days: str
     schedule_times: str
     schedule_timezone: str
@@ -100,7 +106,7 @@ class QueueStatusRequest(BaseModel):
 
 
 class QueueApproveScheduleRequest(BaseModel):
-    schedule_mode: str = "ai"
+    schedule_mode: Literal["manual", "ai"] = "manual"
     scheduled_at: datetime | None = None
     timezone: str | None = None
 

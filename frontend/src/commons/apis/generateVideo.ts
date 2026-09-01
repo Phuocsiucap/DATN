@@ -334,6 +334,11 @@ export const generateFinalVideoApi = async (workflowId: string) => {
   return data as { job: GenerateVideoJob }
 }
 
+export const renderGenerateVideoProjectApi = async (workflowId: string) => {
+  const { data } = await api.post(`${basePath}/projects/${workflowId}/render`)
+  return data as { job: GenerateVideoJob }
+}
+
 export const approveGenerateVideoProjectApi = async (workflowId: string) => {
   const { data } = await api.post(`${basePath}/projects/${workflowId}/approve-video`, undefined, { timeout: 60000 })
   return data as { workflow_id: string; status: string; rendered_video: string }
@@ -409,9 +414,13 @@ export const fetchElevenLabsSharedVoicesApi = async (params: { search?: string; 
 }
 
 export const generateVideoMediaUrl = (assetPath: string) => {
-  if (/^(https?:|blob:)/i.test(assetPath)) return assetPath
+  if (!assetPath) return ''
+  let cleaned = assetPath.trim()
+  cleaned = cleaned.replace(/^https?:\/\/(127\.0\.0\.1|localhost|host\.docker\.internal)(:\d+)?\/?/, '')
+  cleaned = cleaned.replace(/^\/?(api\/v1\/generate-video\/media\/)+/, '')
+  if (/^(https?:|blob:)/i.test(cleaned)) return cleaned
   const base = api.defaults.baseURL || ''
-  return `${base}${basePath}/media/${assetPath.replace(/^\/+/, '')}`
+  return `${base}${basePath}/media/${cleaned.replace(/^\/+/, '')}`
 }
 
 export const generateVideoOutputUrl = (outputUrlOrPath: string) => {

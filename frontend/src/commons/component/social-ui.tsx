@@ -2,6 +2,7 @@ import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import {
   BarChart3,
   Bell,
+  CalendarDays,
   ChevronDown,
   Clapperboard,
   ExternalLink,
@@ -193,6 +194,39 @@ export function PageHeader({
   )
 }
 
+export function PageLayout({
+  title,
+  description,
+  actions,
+  header,
+  children,
+  className,
+  contentClassName,
+}: {
+  title?: string
+  description?: string
+  actions?: ReactNode
+  header?: ReactNode
+  children: ReactNode
+  className?: string
+  contentClassName?: string
+}) {
+  return (
+    <div className={cn('app-page flex-1 min-h-0 h-full flex flex-col gap-4', className)}>
+      {header ? (
+        header
+      ) : title ? (
+        <PageHeader title={title} description={description} actions={actions} />
+      ) : null}
+      <div className={cn('flex-1 min-h-0 w-full flex flex-col gap-4', contentClassName)}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+export const Layout = PageLayout
+
 export function SearchField({
   value,
   onChange,
@@ -241,6 +275,49 @@ export function SelectControl({
         {children}
       </select>
       <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#718096]" />
+    </label>
+  )
+}
+
+export function DateInput({
+  value,
+  onChange,
+  label,
+  placeholder,
+  className,
+  min,
+  max,
+  disabled,
+}: {
+  value?: string
+  onChange?: (value: string) => void
+  label?: string
+  placeholder?: string
+  className?: string
+  min?: string
+  max?: string
+  disabled?: boolean
+}) {
+  return (
+    <label
+      className={cn(
+        'relative flex h-10 min-w-[160px] items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 transition focus-within:border-[#6d5dfc] focus-within:ring-2 focus-within:ring-[#6d5dfc]/15 hover:border-[#b8c2d4]',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
+      )}
+    >
+      <CalendarDays size={15} className="pointer-events-none shrink-0 text-[#718096]" />
+      {label && <span className="shrink-0 text-xs font-bold text-[#64748b]">{label}</span>}
+      <input
+        type="date"
+        value={value || ''}
+        min={min}
+        max={max}
+        disabled={disabled}
+        onChange={(event) => onChange?.(event.target.value)}
+        placeholder={placeholder}
+        className="h-full min-w-0 flex-1 cursor-pointer bg-transparent p-0 text-[13px] font-semibold text-[#172033] outline-none"
+      />
     </label>
   )
 }

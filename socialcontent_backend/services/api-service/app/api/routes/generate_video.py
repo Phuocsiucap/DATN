@@ -1008,6 +1008,15 @@ def generate_video(
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+@router.post("/projects/{workflow_id}/render")
+def render_project_video(
+    workflow_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return generate_video(payload=GenerateVideoRequest(workflow_id=workflow_id), user=user, db=db)
+
+
 @router.get("/render-jobs/{job_id}")
 def get_render_job(
     job_id: uuid.UUID,

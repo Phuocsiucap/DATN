@@ -154,7 +154,7 @@ export default function PostAnalyticsPage() {
   const hasTraffic = Boolean(charts?.data_availability?.traffic_sources && charts.traffic_sources.length)
 
   return (
-    <div className="space-y-5">
+    <div className="app-page">
       <PageHeader
         title="Phân tích theo bài đăng"
         description="Theo dõi hiệu suất từng video đã xuất bản, tăng trưởng tương tác và nguồn dữ liệu TikTok."
