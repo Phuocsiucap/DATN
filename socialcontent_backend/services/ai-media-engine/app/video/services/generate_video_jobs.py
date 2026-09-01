@@ -401,22 +401,6 @@ def _clean_series_title(value: Any) -> str | None:
     return " ".join(title.split())[:180]
 
 
-def _find_active_series_by_title(db: Any, profile_id: uuid.UUID, title: str):
-    from common.db.models import ContentSeries
-
-    normalized = title.casefold()
-    rows = (
-        db.query(ContentSeries)
-        .filter(
-            ContentSeries.profile_id == profile_id,
-            ContentSeries.status == "ACTIVE",
-        )
-        .limit(100)
-        .all()
-    )
-    return next((series for series in rows if str(series.title or "").strip().casefold() == normalized), None)
-
-
 def _find_active_series_by_category_id(db: Any, profile_id: uuid.UUID, category_id: str):
     from common.db.models import ContentSeries
 

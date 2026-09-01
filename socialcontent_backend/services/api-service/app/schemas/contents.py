@@ -23,6 +23,7 @@ class ContentResponse(BaseModel):
     normalized_title: str | None
     summary: str | None
     language: str
+    content_scope: str
     status: str
     canonical_url: str | None
     quality_score: float

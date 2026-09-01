@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
 from common.db.idempotency import claim_event
-from common.db.models import ContentItem
+from common.db.models import ContentItem, CrawlJobContent
 from common.db.session import SessionLocal
 from common.events.kafka import consumer
 from common.events.topics import CONTENT_EMBEDDING_REQUESTED
@@ -47,7 +47,8 @@ def _handle_content_embedding_requested(db: Session, message: dict[str, Any]) ->
     if job_id:
         items = (
             db.query(ContentItem)
-            .filter(ContentItem.crawl_job_id == uuid.UUID(str(job_id)))
+            .join(CrawlJobContent, CrawlJobContent.content_id == ContentItem.id)
+            .filter(CrawlJobContent.job_id == uuid.UUID(str(job_id)))
             .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
             .all()
         )

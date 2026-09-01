@@ -25,7 +25,7 @@ def vnexpress_rss_feeds(_: User = Depends(get_current_user)):
     return {"items": vnexpress_rss_catalog()}
 
 
-@router.post("/crawl-sources")
+@router.post("/crawl-sources", status_code=201)
 def create_source(payload: schemas.CrawlSourceCreateRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     job = db.get(CrawlJob, payload.job_id) if payload.job_id else CrawlJob(name=payload.name or f"{payload.source_type} source config", crawl_mode="SOURCE_CONFIG", requested_by=user.id)
     if payload.job_id and not job:

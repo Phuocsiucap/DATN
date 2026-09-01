@@ -148,7 +148,7 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
               label={isSystemUser ? 'Upcoming Queue' : 'Sắp đăng'}
               value={stats?.queue_status?.upcoming ?? '—'}
               icon={<Clock size={18} />}
-              badge={<span className="text-[11px]" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
+              badge={<span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{stats?.queue_status?.needs_approval ?? 0} cần duyệt</span>}
               iconBg="#dbeafe"
               iconColor="#2563eb"
             />
@@ -160,7 +160,7 @@ export default function DashboardPage({ currentUser }: { currentUser: CurrentUse
               iconBg="rgba(0,164,114,0.1)"
               iconColor="#00a472"
               badge={
-                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-[10px] font-bold">
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-bold">
                   {isSystemUser ? (isRunning ? 'LIVE' : 'OFF') : `${stats?.published_failed ?? 0} failed`}
                 </span>
               }

@@ -13,4 +13,4 @@ COPY socialcontent_backend/alembic /app/alembic
 COPY socialcontent_backend/services/ai-media-engine/app /app/services/ai-media-engine/app
 
 WORKDIR /app/services/ai-media-engine
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8060"]
+CMD ["uvicorn", "app.planning.main:app", "--host", "0.0.0.0", "--port", "8050"]

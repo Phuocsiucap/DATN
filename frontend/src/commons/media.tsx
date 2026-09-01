@@ -73,7 +73,7 @@ export function MediaAssetPreview({
   const shellClass = `${className || (compact ? 'h-12 w-[72px]' : 'aspect-video w-full')} overflow-hidden rounded-md bg-black`
 
   if (!item || (!playbackUrl && !previewUrl)) {
-    return <div className={`${shellClass} flex items-center justify-center border border-dashed border-slate-300 bg-slate-50 text-[11px] font-semibold text-slate-400`}>No media</div>
+    return <div className={`${shellClass} flex items-center justify-center border border-dashed border-slate-300 bg-slate-50 text-xs font-semibold text-slate-400`}>No media</div>
   }
 
   if (isVideo) {

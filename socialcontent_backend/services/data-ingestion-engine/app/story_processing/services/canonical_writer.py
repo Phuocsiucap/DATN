@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log, finalize_job_if_ready
 from common.db.idempotency import claim_event
-from common.db.models import ContentItem, CrawlJob, Story, KafkaTask, ProfileContentLink, SocialProfile, SocialProfileStrategy
+from common.db.models import ContentItem, CrawlJob, CrawlJobContent, Story, KafkaTask
 from app.story_processing.deduplication.rules import find_duplicate_content
 from app.story_processing.grouping.rules import extract_episode_number, grouping_key, normalize_story_text
 from app.story_processing.ordering.episodes import update_story_completion
@@ -182,29 +182,17 @@ class CanonicalWriter:
         )
         db.add(content)
         db.flush()
-
-        if content.content_scope == "GLOBAL":
-            profiles = (
-                db.query(SocialProfile)
-                .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
-                .filter(SocialProfileStrategy.receive_system_content == True)
-                .all()
-            )
-            for profile in profiles:
-                link = ProfileContentLink(
-                    user_id=profile.user_id,
-                    profile_id=profile.id,
-                    content_id=content.id,
-                    relation_type="CONTENT_RECOMMENDATION",
-                    relation_reason="AUTO_GLOBAL",
-                    source_scope=content.content_scope,
-                    recommendation_status="RECOMMENDED",
-                    score=0,
-                    status="ACTIVE",
-                    metadata_json={"reason": "Auto-recommended from GLOBAL scope"},
-                )
-                db.add(link)
-            db.flush()
+        self._link_content_to_job(
+            db,
+            job=job,
+            content=content,
+            is_duplicate=False,
+            match_type="NEW_CANONICAL",
+            source_type=source_type,
+            source_external_id=str(source_external_id),
+            processed_document_id=processed_document_id,
+            metadata={"quality_score": quality.get("score", 0)},
+        )
 
         story = None
         if self._should_group_as_story(source_type, normalized):
@@ -311,6 +299,17 @@ class CanonicalWriter:
 
         job = db.get(CrawlJob, job_id) if job_id else None
         if job:
+            self._link_content_to_job(
+                db,
+                job=job,
+                content=existing_content,
+                is_duplicate=True,
+                match_type=match_type,
+                source_type=source_type,
+                source_external_id=source_external_id,
+                processed_document_id=processed_document_id,
+                metadata={"reason": reason, "quality_score": quality.get("score", 0)},
+            )
             job.current_stage = "GROUPING" if story else "CANONICAL"
             job.total_duplicates += 1
             job.progress_percent = max(float(job.progress_percent), 85)
@@ -345,6 +344,50 @@ class CanonicalWriter:
         db.flush()
         finalized = finalize_job_if_ready(db, job)
         return existing_content, story, True, finalized, job.status if job else None
+
+    @staticmethod
+    def _link_content_to_job(
+        db: Session,
+        *,
+        job: CrawlJob | None,
+        content: ContentItem,
+        is_duplicate: bool,
+        match_type: str | None,
+        source_type: str | None,
+        source_external_id: str | None,
+        processed_document_id: str | None,
+        metadata: dict | None = None,
+    ) -> CrawlJobContent | None:
+        if not job:
+            return None
+
+        link = db.get(CrawlJobContent, (job.id, content.id))
+        if not link:
+            link = CrawlJobContent(
+                job_id=job.id,
+                content_id=content.id,
+                is_duplicate=is_duplicate,
+                match_type=match_type,
+                source_type=source_type,
+                source_external_id=source_external_id,
+                processed_document_id=processed_document_id,
+                occurrence_count=1,
+                metadata_json=metadata or {},
+            )
+        else:
+            link.is_duplicate = bool(link.is_duplicate or is_duplicate)
+            link.match_type = match_type or link.match_type
+            link.source_type = source_type or link.source_type
+            link.source_external_id = source_external_id or link.source_external_id
+            link.processed_document_id = processed_document_id or link.processed_document_id
+            link.occurrence_count = int(link.occurrence_count or 0) + 1
+            link.metadata_json = {
+                **(link.metadata_json if isinstance(link.metadata_json, dict) else {}),
+                **(metadata or {}),
+            }
+        db.add(link)
+        db.flush()
+        return link
 
     def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:
         key_bytes = hashlib.sha256(f"{source_type}:{source_external_id}".encode("utf-8")).digest()[:8]

@@ -124,7 +124,7 @@ def list_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     return [to_user_response(user) for user in db.query(User).order_by(User.created_at.desc()).all()]
 
 
-@router.post("", response_model=schemas.UserResponse)
+@router.post("", response_model=schemas.UserResponse, status_code=201)
 def create_user(payload: schemas.AdminUserCreateRequest, _: User = Depends(require_system_admin), db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     if not email:
@@ -132,7 +132,7 @@ def create_user(payload: schemas.AdminUserCreateRequest, _: User = Depends(requi
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 6 ký tự")
     if db.query(User).filter(User.email == email).first():
-        raise HTTPException(status_code=400, detail="Email đã tồn tại")
+        raise HTTPException(status_code=409, detail="Email đã tồn tại")
     normalized_payload = payload.model_copy(update={"email": email})
     user = UserService().create_user_by_admin(db, normalized_payload)
     return to_user_response(user)
@@ -149,7 +149,7 @@ def update_user(user_id: uuid.UUID, payload: schemas.UserUpdateRequest, current_
             raise HTTPException(status_code=400, detail="Email không được để trống")
         duplicate = db.query(User).filter(User.email == email, User.id != user.id).first()
         if duplicate:
-            raise HTTPException(status_code=400, detail="Email đã tồn tại")
+            raise HTTPException(status_code=409, detail="Email đã tồn tại")
     if payload.password and len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 6 ký tự")
     if payload.roles is not None and user.id == current_user.id:

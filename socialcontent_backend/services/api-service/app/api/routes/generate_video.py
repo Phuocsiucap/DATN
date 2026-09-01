@@ -1066,7 +1066,7 @@ def generate_project_voice(
     return {"job": _serialize_workflow_run(db, job)}
 
 
-@router.post("/direct-script")
+@router.post("/direct-script", status_code=201)
 def create_direct_script(
     payload: DirectScriptRequest,
     user: User = Depends(get_current_user),

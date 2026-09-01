@@ -222,7 +222,7 @@ export default function OpenAiUsagePage() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white flex flex-col">
-          <h2 className="mb-2 text-[13px] text-gray-400">Total Spend</h2>
+          <h2 className="mb-2 text-sm text-gray-400">Total Spend</h2>
           <div className="mb-6 text-3xl font-extrabold text-white">
             ${totalCost.toFixed(4)}
           </div>
@@ -244,7 +244,7 @@ export default function OpenAiUsagePage() {
         </div>
 
         <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white flex flex-col">
-          <h2 className="mb-2 text-[13px] text-gray-400">Total tokens</h2>
+          <h2 className="mb-2 text-sm text-gray-400">Total tokens</h2>
           <div className="mb-6 text-3xl font-extrabold text-white">
             {totalTokens.toLocaleString()}
           </div>
@@ -272,13 +272,13 @@ export default function OpenAiUsagePage() {
           <h2 className="mb-6 text-sm font-bold text-gray-200">Cache performance</h2>
           <div className="grid grid-cols-2">
             <div>
-              <div className="text-[13px] text-gray-400">Hit rate (cache-read ratio)</div>
+              <div className="text-sm text-gray-400">Hit rate (cache-read ratio)</div>
               <div className="mt-2 text-2xl font-semibold">
                 {cacheHitRate}%
               </div>
             </div>
             <div>
-              <div className="text-[13px] text-gray-400">Cache reads per write</div>
+              <div className="text-sm text-gray-400">Cache reads per write</div>
               <div className="mt-2 text-2xl font-semibold">
                 {totalInputCacheWrite > 0 ? (totalInputCached / totalInputCacheWrite).toFixed(1) : '—'}
               </div>
@@ -289,19 +289,19 @@ export default function OpenAiUsagePage() {
           <h2 className="mb-6 text-sm font-bold text-gray-200">Token volume</h2>
           <div className="grid grid-cols-3">
             <div>
-              <div className="text-[13px] text-gray-400">Cache-read tokens</div>
+              <div className="text-sm text-gray-400">Cache-read tokens</div>
               <div className="mt-2 text-2xl font-semibold">
                 {totalInputCached >= 1000 ? (totalInputCached/1000).toFixed(0) + 'K' : totalInputCached}
               </div>
             </div>
             <div>
-              <div className="text-[13px] text-gray-400">Cache-write tokens</div>
+              <div className="text-sm text-gray-400">Cache-write tokens</div>
               <div className="mt-2 text-2xl font-semibold">
                 {totalInputCacheWrite >= 1000 ? (totalInputCacheWrite/1000).toFixed(0) + 'K' : totalInputCacheWrite}
               </div>
             </div>
             <div>
-              <div className="text-[13px] text-gray-400">Uncached tokens</div>
+              <div className="text-sm text-gray-400">Uncached tokens</div>
               <div className="mt-2 text-2xl font-semibold">
                 {totalInputUncached >= 1000 ? (totalInputUncached/1000).toFixed(0) + 'K' : totalInputUncached}
               </div>
@@ -344,10 +344,10 @@ export default function OpenAiUsagePage() {
                 <div key={model} className="rounded-[12px] border border-[var(--outline-variant)] bg-white p-6 shadow-sm flex flex-col">
                   <h3 className="mb-4 flex items-center text-base font-bold text-[#111827]">
                     <div className="mr-2 h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
-                    {model} <span className="ml-2 text-[13px] font-normal text-[#64748b]">({metric})</span>
+                    {model} <span className="ml-2 text-sm font-normal text-[#64748b]">({metric})</span>
                   </h3>
                   
-                  <div className="mb-6 flex gap-6 text-[13px]">
+                  <div className="mb-6 flex gap-6 text-sm">
                     <div>
                       <div className="text-[#64748b]">Requests</div>
                       <div className="font-semibold text-[#111827]">{stat?.num_requests?.toLocaleString() || 0}</div>

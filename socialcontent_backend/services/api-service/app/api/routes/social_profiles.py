@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,11 +10,56 @@ from sqlalchemy.orm import Session
 
 from common.db.models import ContentItem, MediaWorkflow, SocialProfileSnapshot, User
 from common.db.session import get_db
+from common.events.envelope import build_event
+from common.events.kafka import publish
+from common.events.topics import PROFILE_STRATEGY_UPDATED
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
 from app.services.social_profiles import SocialProfileService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+PLANNING_STRATEGY_FIELDS = {
+    "content_topics",
+    "content_topic_descriptions",
+    "avoid_topics",
+    "avoid_topic_descriptions",
+    "tone",
+    "target_audience",
+    "risk_level",
+    "min_similarity",
+    "avoid_similarity_threshold",
+    "require_video",
+    "receive_system_content",
+    "auto_project_queue_enabled",
+    "max_system_recommendations",
+}
+
+
+def _publish_strategy_updated(profile, changed_fields: set[str]) -> None:
+    relevant_fields = sorted(PLANNING_STRATEGY_FIELDS.intersection(changed_fields))
+    if not relevant_fields:
+        return
+    try:
+        publish(
+            PROFILE_STRATEGY_UPDATED,
+            build_event(
+                event_type=PROFILE_STRATEGY_UPDATED,
+                source="api-service",
+                correlation_id=profile.id,
+                payload={
+                    "profile_id": str(profile.id),
+                    "user_id": str(profile.user_id),
+                    "changed_fields": relevant_fields,
+                },
+            ),
+        )
+    except Exception:
+        # Strategy persistence must not fail only because the async planner is
+        # temporarily unavailable. Kafka delivery is retried by later edits or
+        # the next GLOBAL crawl completion event.
+        logger.exception("Failed to publish strategy update for profile %s", profile.id)
 
 
 @router.get("", response_model=schemas.SocialProfileListResponse)
@@ -23,7 +69,7 @@ def list_social_profiles(platform: str | None = None, db: Session = Depends(get_
     return {"items": [service.serialize_profile(profile) for profile in profiles]}
 
 
-@router.post("", response_model=schemas.SocialProfileResponse)
+@router.post("", response_model=schemas.SocialProfileResponse, status_code=201)
 def create_social_profile(payload: schemas.SocialProfileCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     profile = service.create_profile(db, current_user, payload)
@@ -240,7 +286,7 @@ def refresh_queue_item_publish_status(
     }
 
 
-@router.post("/post-items/{post_id}/metrics")
+@router.post("/post-items/{post_id}/metrics", status_code=201)
 def create_social_post_metric(
     post_id: uuid.UUID,
     payload: schemas.SocialPostMetricCreateRequest,
@@ -336,6 +382,7 @@ def update_social_profile_strategy(
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
     strategy = service.update_strategy(db, profile, payload)
+    _publish_strategy_updated(profile, set(payload.model_fields_set))
     return service.serialize_strategy(strategy)
 
 
@@ -363,6 +410,7 @@ def add_social_profile_strategy_topic(
     profile = service.get_owned_profile(db, profile_id, current_user)
     strategy = service.get_or_create_strategy(db, profile)
     strategy = service.add_strategy_topic(db, strategy, payload)
+    _publish_strategy_updated(profile, {"content_topics" if payload.kind.strip().lower() == "content" else "avoid_topics"})
     return service.serialize_strategy(strategy)
 
 
@@ -378,6 +426,7 @@ def update_social_profile_strategy_topic(
     profile = service.get_owned_profile(db, profile_id, current_user)
     strategy = service.get_or_create_strategy(db, profile)
     strategy = service.update_strategy_topic(db, strategy, topic_key, payload)
+    _publish_strategy_updated(profile, {"content_topics" if payload.kind.strip().lower() == "content" else "avoid_topics"})
     return service.serialize_strategy(strategy)
 
 
@@ -393,6 +442,7 @@ def delete_social_profile_strategy_topic(
     profile = service.get_owned_profile(db, profile_id, current_user)
     strategy = service.get_or_create_strategy(db, profile)
     strategy = service.delete_strategy_topic(db, strategy, kind, topic_key)
+    _publish_strategy_updated(profile, {"content_topics" if kind.strip().lower() == "content" else "avoid_topics"})
     return service.serialize_strategy(strategy)
 
 
@@ -618,7 +668,7 @@ def list_social_posts(profile_id: uuid.UUID, db: Session = Depends(get_db), curr
     return {"items": [service.serialize_post(post) for post in service.list_posts(db, profile)]}
 
 
-@router.post("/{profile_id}/posts")
+@router.post("/{profile_id}/posts", status_code=201)
 def create_social_post(
     profile_id: uuid.UUID,
     payload: schemas.SocialPostCreateRequest,

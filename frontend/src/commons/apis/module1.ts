@@ -16,9 +16,26 @@ export type CrawlJob = {
   total_failed: number
   total_duplicates: number
   progress_percent: number
+  schedule?: CrawlJobSchedule | null
   created_at: string
   updated_at: string
 }
+
+export type CrawlJobSchedule = {
+  enabled: boolean
+  runs_per_day: number
+  window_start: string
+  window_end: string
+  weekdays: number[]
+  timezone: string
+  next_run_at?: string | null
+  last_run_at?: string | null
+}
+
+export type CrawlJobScheduleInput = Pick<
+  CrawlJobSchedule,
+  'enabled' | 'runs_per_day' | 'window_start' | 'window_end' | 'weekdays' | 'timezone'
+>
 
 export type ContentItem = {
   id: string
@@ -27,6 +44,7 @@ export type ContentItem = {
   normalized_title?: string | null
   summary?: string | null
   language: string
+  content_scope?: 'GLOBAL' | 'PRIVATE' | string
   status: string
   canonical_url?: string | null
   quality_score: number
@@ -274,6 +292,11 @@ export const cancelCrawlJobApi = async (jobId: string) => {
 
 export const retryCrawlJobApi = async (jobId: string) => {
   const { data } = await api.post(`/crawl-jobs/${jobId}/retry`)
+  return data as CrawlJob
+}
+
+export const updateCrawlJobScheduleApi = async (jobId: string, payload: CrawlJobScheduleInput) => {
+  const { data } = await api.put(`/crawl-jobs/${jobId}/schedule`, payload)
   return data as CrawlJob
 }
 

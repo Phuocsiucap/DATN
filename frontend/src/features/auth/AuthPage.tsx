@@ -244,7 +244,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                     placeholder="user"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                   />
-                  <span className="mt-1 block text-[11px] text-slate-400">
+                  <span className="mt-1 block text-xs text-slate-400">
                     Phân tách bằng dấu phẩy nếu có nhiều role (vd: user, admin)
                   </span>
                 </div>

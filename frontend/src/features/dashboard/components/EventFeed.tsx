@@ -63,11 +63,11 @@ export default function EventFeed() {
                   </p>
                   <div className="flex items-center gap-2 mt-1.5">
                     {badge && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={badge.style}>
+                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={badge.style}>
                         {badge.label}
                       </span>
                     )}
-                    <span className="text-[11px]" style={{ color: 'var(--on-surface-variant)' }}>
+                    <span className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
                       {new Date(ev.timestamp).toLocaleTimeString('vi-VN')}
                     </span>
                   </div>

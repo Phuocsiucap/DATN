@@ -82,8 +82,8 @@ export function PlatformIcon({
 }) {
   const key = platformKey(platform)
   const sizes = {
-    sm: 'h-4 w-4 text-[9px]',
-    md: 'h-6 w-6 text-[11px]',
+    sm: 'h-4 w-4 text-xs',
+    md: 'h-6 w-6 text-xs',
     lg: 'h-8 w-8 text-xs',
   }
   const base = cn('inline-flex shrink-0 items-center justify-center rounded-full font-black text-white shadow-sm', sizes[size], className)
@@ -113,7 +113,7 @@ export function SocialProfileAvatar({
 }) {
   const [imgError, setImgError] = useState(false)
   const sizes = {
-    sm: { box: 'h-7 w-7 text-[10px]', badgeSize: 'sm' as const, badgePos: '-bottom-0.5 -right-0.5' },
+    sm: { box: 'h-7 w-7 text-xs', badgeSize: 'sm' as const, badgePos: '-bottom-0.5 -right-0.5' },
     md: { box: 'h-9 w-9 text-xs', badgeSize: 'sm' as const, badgePos: '-bottom-0.5 -right-0.5' },
     lg: { box: 'h-11 w-11 text-sm', badgeSize: 'md' as const, badgePos: '-bottom-0.5 -right-0.5' },
     xl: { box: 'h-14 w-14 text-base', badgeSize: 'md' as const, badgePos: '-bottom-0.5 -right-0.5' },
@@ -163,7 +163,7 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
       <div className="grid h-8 w-8 place-items-center rounded-[8px] bg-[linear-gradient(135deg,#6d5dfc,#2556ea)] text-white shadow-[0_8px_22px_rgba(79,70,229,0.24)]">
         <ShieldCheck size={18} fill="currentColor" strokeWidth={1.8} />
       </div>
-      {!compact && <div className="text-[18px] font-extrabold leading-none text-[#111827]">Social<span className="text-[#2556ea]">Hub</span></div>}
+      {!compact && <div className="text-lg font-extrabold leading-none text-[#111827]">Social<span className="text-[#2556ea]">Hub</span></div>}
     </div>
   )
 }
@@ -187,7 +187,7 @@ export function PageHeader({
     <div className={cn('flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between', className)}>
       <div className="min-w-0">
         <h1 className="app-title">{title}</h1>
-        {description && <p className="mt-1 text-[13px] font-medium text-[var(--on-surface-variant)]">{description}</p>}
+        {description && <p className="mt-1 text-sm font-medium text-[var(--on-surface-variant)]">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -245,7 +245,7 @@ export function SearchField({
         value={value}
         onChange={(event) => onChange?.(event.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-[8px] border border-[var(--outline-variant)] bg-white pl-9 pr-3 text-[13px] font-medium text-[#172033] outline-none transition focus:border-[#6d5dfc] focus:ring-2 focus:ring-[#6d5dfc]/15"
+        className="h-10 w-full rounded-[8px] border border-[var(--outline-variant)] bg-white pl-9 pr-3 text-sm font-medium text-[#172033] outline-none transition focus:border-[#6d5dfc] focus:ring-2 focus:ring-[#6d5dfc]/15"
       />
     </label>
   )
@@ -270,7 +270,7 @@ export function SelectControl({
       <select
         value={value}
         onChange={(event) => onChange?.(event.target.value)}
-        className={cn('h-10 w-full appearance-none rounded-[8px] border border-[var(--outline-variant)] bg-white pr-8 text-[13px] font-semibold text-[#172033] outline-none transition focus:border-[#6d5dfc] focus:ring-2 focus:ring-[#6d5dfc]/15', icon ? 'pl-9' : 'pl-3')}
+        className={cn('h-10 w-full appearance-none rounded-[8px] border border-[var(--outline-variant)] bg-white pr-8 text-sm font-semibold text-[#172033] outline-none transition focus:border-[#6d5dfc] focus:ring-2 focus:ring-[#6d5dfc]/15', icon ? 'pl-9' : 'pl-3')}
       >
         {children}
       </select>
@@ -316,7 +316,7 @@ export function DateInput({
         disabled={disabled}
         onChange={(event) => onChange?.(event.target.value)}
         placeholder={placeholder}
-        className="h-full min-w-0 flex-1 cursor-pointer bg-transparent p-0 text-[13px] font-semibold text-[#172033] outline-none"
+        className="h-full min-w-0 flex-1 cursor-pointer bg-transparent p-0 text-sm font-semibold text-[#172033] outline-none"
       />
     </label>
   )
@@ -345,7 +345,7 @@ export function AppButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'inline-flex h-10 items-center justify-center gap-2 rounded-[8px] px-4 text-[13px] font-bold transition disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex h-10 items-center justify-center gap-2 rounded-[8px] px-4 text-sm font-bold transition disabled:pointer-events-none disabled:opacity-50',
         variant === 'primary' && 'bg-[linear-gradient(135deg,#6d5dfc,#2556ea)] text-white shadow-[0_8px_18px_rgba(37,86,234,0.18)] hover:brightness-105',
         variant === 'secondary' && 'border border-[var(--outline-variant)] bg-white text-[#172033] hover:border-[#b9c3d5] hover:bg-[#f8faff]',
         variant === 'danger' && 'border border-[#ffb9bd] bg-white text-[#ef233c] hover:bg-[#fff4f5]',
@@ -381,7 +381,7 @@ export function IconButton({
       className={cn('relative grid h-9 w-9 place-items-center rounded-[8px] border border-transparent text-[#34415a] transition hover:border-[var(--outline-variant)] hover:bg-white', active && 'border-[#c8d0ff] bg-[#f1f0ff] text-[#4f46e5]', className)}
     >
       {children}
-      {badge !== undefined && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#ef233c] px-1 text-[10px] font-extrabold text-white">{badge}</span>}
+      {badge !== undefined && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#ef233c] px-1 text-xs font-extrabold text-white">{badge}</span>}
     </button>
   )
 }
@@ -405,10 +405,10 @@ export function TabStrip<T extends string>({
           <button
             key={tab.value}
             onClick={() => onChange(tab.value)}
-            className={cn('relative h-12 whitespace-nowrap text-[13px] font-bold text-[#718096] transition hover:text-[#2556ea]', active && 'text-[#2556ea]')}
+            className={cn('relative h-12 whitespace-nowrap text-sm font-bold text-[#718096] transition hover:text-[#2556ea]', active && 'text-[#2556ea]')}
           >
             {tab.label}
-            {tab.count !== undefined && <span className={cn('ml-1.5 rounded-full bg-[#eef1f7] px-2 py-0.5 text-[11px] text-[#718096]', active && 'bg-[#2556ea] text-white')}>{tab.count}</span>}
+            {tab.count !== undefined && <span className={cn('ml-1.5 rounded-full bg-[#eef1f7] px-2 py-0.5 text-xs text-[#718096]', active && 'bg-[#2556ea] text-white')}>{tab.count}</span>}
             {active && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-[#2556ea]" />}
           </button>
         )
@@ -433,11 +433,11 @@ export function FilterChip({
   return (
     <button
       onClick={onClick}
-      className={cn('inline-flex h-10 shrink-0 items-center gap-2 rounded-[8px] border px-4 text-[13px] font-bold transition', active ? 'border-[#7c6cff] bg-[#f2f0ff] text-[#4f46e5] shadow-[0_0_0_2px_rgba(109,93,252,0.08)]' : 'border-[var(--outline-variant)] bg-white text-[#526179] hover:border-[#b9c3d5]')}
+      className={cn('inline-flex h-10 shrink-0 items-center gap-2 rounded-[8px] border px-4 text-sm font-bold transition', active ? 'border-[#7c6cff] bg-[#f2f0ff] text-[#4f46e5] shadow-[0_0_0_2px_rgba(109,93,252,0.08)]' : 'border-[var(--outline-variant)] bg-white text-[#526179] hover:border-[#b9c3d5]')}
     >
       {icon}
       {label}
-      {count !== undefined && <span className={cn('rounded-full px-1.5 py-0.5 text-[11px]', active ? 'bg-white text-[#4f46e5]' : 'bg-[#eef1f7] text-[#718096]')}>{count}</span>}
+      {count !== undefined && <span className={cn('rounded-full px-1.5 py-0.5 text-xs', active ? 'bg-white text-[#4f46e5]' : 'bg-[#eef1f7] text-[#718096]')}>{count}</span>}
     </button>
   )
 }
@@ -461,9 +461,9 @@ export function MetricCard({
         {icon || <BarChart3 size={20} />}
       </div>
       <div className="min-w-0">
-        <div className="truncate text-[12px] font-semibold text-[#64748b]">{label}</div>
-        <div className="mt-0.5 text-[24px] font-extrabold leading-none text-[#111827]">{value}</div>
-        {trend && <div className="mt-1 text-[11px] font-bold text-[#16a34a]">{trend}</div>}
+        <div className="truncate text-xs font-semibold text-[#64748b]">{label}</div>
+        <div className="mt-0.5 text-2xl font-extrabold leading-none text-[#111827]">{value}</div>
+        {trend && <div className="mt-1 text-xs font-bold text-[#16a34a]">{trend}</div>}
       </div>
     </AppCard>
   )
@@ -485,7 +485,7 @@ export function StatusPill({ value, tone }: { value: string; tone?: 'green' | 'b
     purple: 'bg-[#f2f0ff] text-[#6d5dfc]',
     gray: 'bg-[#eef1f7] text-[#526179]',
   }
-  return <span className={cn('inline-flex h-6 items-center rounded-[6px] px-2 text-[11px] font-extrabold uppercase', classes[picked], normalized === 'ready' && 'tracking-normal')}>{value}</span>
+  return <span className={cn('inline-flex h-6 items-center rounded-[6px] px-2 text-xs font-extrabold uppercase', classes[picked], normalized === 'ready' && 'tracking-normal')}>{value}</span>
 }
 
 export function Thumbnail({
@@ -520,13 +520,13 @@ export function Thumbnail({
             <Clapperboard size={18} />
           </div>
           {title && (
-            <span className="mt-2 line-clamp-1 text-[10px] font-extrabold text-slate-300 px-2">
+            <span className="mt-2 line-clamp-1 text-xs font-extrabold text-slate-300 px-2">
               {title}
             </span>
           )}
         </div>
       )}
-      {duration && <span className="absolute bottom-1.5 right-1.5 rounded-[5px] bg-black/80 px-1.5 py-0.5 text-[10px] font-bold text-white">{duration}</span>}
+      {duration && <span className="absolute bottom-1.5 right-1.5 rounded-[5px] bg-black/80 px-1.5 py-0.5 text-xs font-bold text-white">{duration}</span>}
     </div>
   )
 }
@@ -571,7 +571,7 @@ export function TopBarIconGroup() {
 
 export function LoadingBlock({ label = 'Đang tải dữ liệu...' }: { label?: string }) {
   return (
-    <div className="flex min-h-[220px] items-center justify-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white text-[13px] font-semibold text-[#64748b]">
+    <div className="flex min-h-[220px] items-center justify-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white text-sm font-semibold text-[#64748b]">
       <Loader2 size={18} className="animate-spin text-[#6d5dfc]" />
       {label}
     </div>
@@ -580,7 +580,7 @@ export function LoadingBlock({ label = 'Đang tải dữ liệu...' }: { label?:
 
 export function EmptyBlock({ label }: { label: string }) {
   return (
-    <div className="grid min-h-[180px] place-items-center rounded-[8px] border border-dashed border-[var(--outline-variant)] bg-white px-6 text-center text-[13px] font-semibold text-[#718096]">
+    <div className="grid min-h-[180px] place-items-center rounded-[8px] border border-dashed border-[var(--outline-variant)] bg-white px-6 text-center text-sm font-semibold text-[#718096]">
       {label}
     </div>
   )

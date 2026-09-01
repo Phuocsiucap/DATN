@@ -53,7 +53,7 @@ export function RetryWorkflowModal({
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-900">Xác nhận thực hiện lại tác vụ</h3>
-              <p className="text-[11px] font-semibold text-slate-500 truncate max-w-[240px]">
+              <p className="text-xs font-semibold text-slate-500 truncate max-w-[240px]">
                 {item.title}
               </p>
             </div>
@@ -97,7 +97,7 @@ export function RetryWorkflowModal({
                   />
                   <div>
                     <div className="text-xs font-black text-slate-900">1. Render lại video (Mặc định)</div>
-                    <p className="mt-0.5 text-[11px] text-slate-500 leading-normal">
+                    <p className="mt-0.5 text-xs text-slate-500 leading-normal">
                       Giữ nguyên kịch bản & giọng đọc hiện tại, gửi lại yêu cầu ghép khung hình MP4 mới.
                     </p>
                   </div>
@@ -121,7 +121,7 @@ export function RetryWorkflowModal({
                   />
                   <div>
                     <div className="text-xs font-black text-slate-900">2. Tạo lại kịch bản mới</div>
-                    <p className="mt-0.5 text-[11px] text-slate-500 leading-normal">
+                    <p className="mt-0.5 text-xs text-slate-500 leading-normal">
                       Xóa bỏ bản thảo cũ và chạy AI viết lại kịch bản hoàn toàn mới từ nguồn bài viết.
                     </p>
                   </div>

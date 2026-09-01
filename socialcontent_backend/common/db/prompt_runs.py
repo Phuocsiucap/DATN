@@ -7,13 +7,9 @@ from sqlalchemy.orm import Session
 
 from common.db.models import PromptRun
 from common.db.session import SessionLocal
-from common.utils.token_calculator import PRICING_TABLE, calculate_token_cost
+from common.utils.token_calculator import calculate_token_cost
 
 logger = logging.getLogger(__name__)
-
-# Backwards-compatible export for older imports. Values are USD per one million tokens.
-MODEL_PRICING = PRICING_TABLE
-
 
 def log_prompt_run(
     *,

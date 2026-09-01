@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.db.bootstrap import ensure_roles, ensure_schema_compatibility
 from common.db.models import Base
 from common.db.session import SessionLocal, engine
+from common.http.responses import configure_api_responses
 from app.api.routes import (
     admin,
     analytics,
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SocialContent API Service", lifespan=lifespan)
+configure_api_responses(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],

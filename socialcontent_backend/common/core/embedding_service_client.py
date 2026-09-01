@@ -26,11 +26,6 @@ def embedding_model_storage_name() -> str:
     return f"{settings.embedding_model_name}:{settings.embedding_dimensions}"
 
 
-def create_embedding(text: str, *, run_type: str = "PLANNING", step_name: str = "create_embedding") -> list[float]:
-    result = create_embeddings([text], run_type=run_type, step_name=step_name)
-    return result.embeddings[0] if result.embeddings else []
-
-
 def create_embeddings(
     texts: list[str],
     *,
@@ -71,7 +66,11 @@ def _post_json(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=settings.embedding_request_timeout_seconds) as response:
             data = json.loads(response.read().decode("utf-8"))
-            return data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                return {}
+            if data.get("success") is True and isinstance(data.get("data"), dict):
+                return data["data"]
+            return data
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
         raise EmbeddingServiceError(f"Embedding service returned {error.code}: {body}") from error

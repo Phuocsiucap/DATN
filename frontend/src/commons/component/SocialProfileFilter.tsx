@@ -78,8 +78,8 @@ function ChannelCard({ active, disabled, onClick, title, subtitle, avatar, statu
       {avatar}
       <span className="min-w-0 flex-1">
         <span className={cn('block truncate text-xs font-bold text-[var(--on-surface)]', active && 'pr-3')} title={title}>{title}</span>
-        <span className="block truncate text-[11px] text-[var(--on-surface-variant)]" title={subtitle}>{subtitle}</span>
-        <span className={cn('mt-0.5 flex items-center gap-1.5 text-[11px] font-medium', status.tone)}>
+        <span className="block truncate text-xs text-[var(--on-surface-variant)]" title={subtitle}>{subtitle}</span>
+        <span className={cn('mt-0.5 flex items-center gap-1.5 text-xs font-medium', status.tone)}>
           <span aria-hidden="true" className={cn('h-1.5 w-1.5 shrink-0 rounded-full', status.dot)} />
           <span className="truncate">{status.label}</span>
         </span>

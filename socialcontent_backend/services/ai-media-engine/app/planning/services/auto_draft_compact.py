@@ -700,10 +700,6 @@ def _meaningful_tokens(value: str) -> set[str]:
     }
 
 
-def _contains_unsupported_number(voice_text: str, fact_text: str) -> bool:
-    return bool(_unsupported_numbers(voice_text, fact_text))
-
-
 def _unsupported_numbers(voice_text: str, fact_text: str) -> set[str]:
     fact_numbers = {_normalize_number(item) for item in re.findall(r"(?<!\w)\d+(?:[.,]\d+)?%?", fact_text)}
     voice_numbers = {_normalize_number(item) for item in re.findall(r"(?<!\w)\d+(?:[.,]\d+)?%?", voice_text)}

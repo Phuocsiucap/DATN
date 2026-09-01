@@ -6,10 +6,6 @@ from common.db.mongo import processed_documents
 
 
 class NormalizationDocumentRepository:
-    def insert_processed(self, document: dict[str, Any]) -> str:
-        result = processed_documents().insert_one(document)
-        return str(result.inserted_id)
-
     def insert_processed_many(self, documents: list[dict[str, Any]]) -> list[str]:
         if not documents:
             return []

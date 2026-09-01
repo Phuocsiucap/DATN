@@ -26,7 +26,7 @@ def list_content_series(user: User = Depends(get_current_user), db: Session = De
     return [_serialize_series(row) for row in rows]
 
 
-@router.post("", response_model=schemas.ContentSeriesResponse)
+@router.post("", response_model=schemas.ContentSeriesResponse, status_code=201)
 def create_content_series(
     payload: schemas.ContentSeriesCreateRequest,
     user: User = Depends(get_current_user),

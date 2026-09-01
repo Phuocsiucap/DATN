@@ -270,7 +270,7 @@ export function SocialProfileStrategyDialog({
                           )}
                         >
                           <span className="block text-xs font-bold leading-4">{tone.value}</span>
-                          <span className="mt-1 block text-[11px] font-medium leading-4 text-[var(--on-surface-variant)]">
+                          <span className="mt-1 block text-xs font-medium leading-4 text-[var(--on-surface-variant)]">
                             {tone.helper}
                           </span>
                         </button>
@@ -303,17 +303,19 @@ export function SocialProfileStrategyDialog({
 
                   <div className="grid gap-5 sm:grid-cols-2">
                     <SwitchRow
-                      label="Receive System Content"
-                      description="Cho phép nhận gợi ý tự động từ nguồn bài crawlers toàn hệ thống"
+                      label="Nhận bài từ kho Global"
+                      description="Nhận bài Global, tự tạo plan và chấm độ phù hợp theo topic/avoid topic của kênh"
                       checked={strategyForm.receive_system_content ?? true}
                       onChange={(checked) => onChange('receive_system_content', checked)}
                     />
 
-                    <Field label="Max Recommendations / Day" description="Số lượng bài AI đề xuất tối đa mỗi ngày cho kênh này">
+                    <Field label="Số bài Global nhận mỗi ngày" description="Số bài phù hợp tối đa được đưa vào inbox của kênh trong một ngày, theo múi giờ lịch đăng (1-500)">
                       <input
                         className="app-input"
                         type="number"
-                        value={strategyForm.max_system_recommendations ?? 10}
+                        min={1}
+                        max={500}
+                        value={strategyForm.max_system_recommendations ?? 20}
                         onChange={(event) => onChange('max_system_recommendations', parseInt(event.target.value, 10))}
                       />
                     </Field>
@@ -370,8 +372,8 @@ export function SocialProfileStrategyDialog({
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <SwitchRow
-                      label="Auto Create Workflow"
-                      description="Tự tạo kịch bản từ nội dung đạt điểm cao"
+                      label="Tự tạo workflow từ plan đạt"
+                      description="Sau khi chấm đạt ngưỡng strategy, tự tạo workflow và draft; tắt để chỉ nhận plan đề xuất"
                       checked={strategyForm.auto_project_queue_enabled || false}
                       onChange={(checked) => onChange('auto_project_queue_enabled', checked)}
                     />
@@ -453,7 +455,7 @@ function Field({ label, description, children }: { label: string; description?: 
   return (
     <label className="block space-y-1.5">
       <span className="text-xs font-semibold text-[var(--on-surface)]">{label}</span>
-      {description && <span className="block text-[11px] leading-4 text-[var(--on-surface-variant)]">{description}</span>}
+      {description && <span className="block text-xs leading-4 text-[var(--on-surface-variant)]">{description}</span>}
       {children}
     </label>
   )
@@ -480,7 +482,7 @@ function TagInput({ value, onChange, placeholder, danger = false }: { value: str
             <span
               key={tag}
               className={cn(
-                'inline-flex max-w-full items-center rounded-md px-2 py-1 text-[11px] font-semibold leading-none',
+                'inline-flex max-w-full items-center rounded-md px-2 py-1 text-xs font-semibold leading-none',
                 danger ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-[var(--accent)]'
               )}
             >
@@ -488,7 +490,7 @@ function TagInput({ value, onChange, placeholder, danger = false }: { value: str
             </span>
           ))
         ) : (
-          <span className="text-[11px] leading-7 text-slate-400">Chưa có tag nào</span>
+          <span className="text-xs leading-7 text-slate-400">Chưa có tag nào</span>
         )}
       </div>
       <textarea
@@ -518,16 +520,16 @@ function TopicDescriptionList({
   if (!items.length) return null
   return (
     <div className={cn('rounded-lg border p-3.5', danger ? 'border-rose-100 bg-rose-50/50' : 'border-indigo-100 bg-indigo-50/50')}>
-      <div className={cn('text-[11px] font-extrabold uppercase', danger ? 'text-rose-700' : 'text-[var(--accent)]')}>{title}</div>
+      <div className={cn('text-xs font-extrabold uppercase', danger ? 'text-rose-700' : 'text-[var(--accent)]')}>{title}</div>
       <div className="mt-2 space-y-2">
         {items.map((item) => (
           <div key={`${title}-${item.topic_key}`} className="rounded-md bg-white p-3 border border-slate-100 shadow-2xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-xs font-extrabold text-[var(--on-surface)]">{item.topic}</span>
-                <span className="rounded-[5px] bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-500">{item.topic_key}</span>
+                <span className="rounded-[5px] bg-slate-100 px-2 py-0.5 font-mono text-xs font-bold text-slate-500">{item.topic_key}</span>
                 {item.custom_description && (
-                  <span className={cn('rounded-[5px] px-2 py-0.5 text-[10px] font-bold', danger ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-[var(--accent)]')}>
+                  <span className={cn('rounded-[5px] px-2 py-0.5 text-xs font-bold', danger ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-[var(--accent)]')}>
                     custom
                   </span>
                 )}
@@ -547,7 +549,7 @@ function TopicDescriptionList({
               placeholder="Nhập description riêng cho topic này..."
               rows={2}
               className={cn(
-                'mt-2 min-h-[60px] w-full resize-y rounded-md border bg-white px-2.5 py-2 text-[12px] leading-5 text-[var(--on-surface)] outline-none placeholder:text-slate-400 focus:ring-2',
+                'mt-2 min-h-[60px] w-full resize-y rounded-md border bg-white px-2.5 py-2 text-xs leading-5 text-[var(--on-surface)] outline-none placeholder:text-slate-400 focus:ring-2',
                 danger
                   ? 'border-rose-100 focus:border-rose-400 focus:ring-rose-100'
                   : 'border-[var(--outline-variant)] focus:border-[var(--accent)] focus:ring-indigo-100'
@@ -613,7 +615,7 @@ function SwitchRow({
     <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3">
       <div className="min-w-0">
         <div className="text-xs font-bold text-[var(--on-surface)]">{label}</div>
-        <div className="truncate text-[11px] text-[var(--on-surface-variant)]">{description}</div>
+        <div className="truncate text-xs text-[var(--on-surface-variant)]">{description}</div>
       </div>
       <label className="relative inline-flex shrink-0 cursor-pointer items-center">
         <input type="checkbox" className="peer sr-only" checked={checked} onChange={(event) => onChange(event.target.checked)} />

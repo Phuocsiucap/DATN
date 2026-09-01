@@ -42,8 +42,8 @@ flowchart TD
 |---|---:|---|
 | `enable_scheduler` | `true` | Cho phép vòng lịch nguồn và lịch đăng chạy; không tự bật hết các công tắc profile. |
 | `source.configuration.schedule_enabled` | Không có thì coi là tắt | Cho nguồn `SOURCE_CONFIG` tạo crawl theo lịch. |
-| `receive_system_content` | `true` | Một điều kiện để profile được xét ở bước AUTO. |
-| `auto_project_queue_enabled` | `false` | Bật tự xét bài → tạo **MediaWorkflow**, không phải queue đăng bài. |
+| `receive_system_content` | `true` | Nhận bài GLOBAL, tạo PlanningRun/PlanningCandidate và chấm theo strategy. Tắt sẽ ẩn các link GLOBAL cũ khỏi inbox. |
+| `auto_project_queue_enabled` | `false` | Bật để candidate đạt trong plan tiếp tục tạo **MediaWorkflow**; tắt thì chỉ lưu điểm/đề xuất. |
 | `video_render_mode` | `manual` | `auto` mới tự nối draft → voice → render. |
 | `approval_mode` | `manual` | `auto` cho phép tự duyệt video sau render; không vượt draft safety gate. |
 | `auto_queue_enabled` | `true` | Tự tạo queue ngay sau duyệt video. Có nhánh đồng bộ khi mở trang queue, xem I7. |
@@ -53,7 +53,7 @@ flowchart TD
 | `risk_level` | `medium` | `low` = thận trọng hơn: luôn qua Fit Judge và không tự chấp nhận risk MEDIUM. |
 | `schedule_days` / `schedule_times` | `0,1,2,3,4,5,6` / `08:30,20:30` | `0` = thứ Hai; lưu ý timezone tại I4. |
 | `schedule_timezone` | `Asia/Bangkok` | Nhánh chọn lịch trên trang queue dùng; nhánh auto sau render hiện chưa dùng. |
-| `max_system_recommendations` / `post_frequency_per_day` | `20` / `2` | **Không được áp làm quota** trong consumer AUTO và scheduler đang trace. |
+| `max_system_recommendations` / `post_frequency_per_day` | `20` / `2` | Giá trị đầu là quota bài GLOBAL mới được đưa vào inbox mỗi ngày theo `schedule_timezone`; giá trị sau giới hạn lịch đăng/ngày. |
 
 ## A. Tạo crawl, lên lịch và chia task
 
@@ -63,7 +63,7 @@ flowchart TD
     A2["A2 · LƯU JOB VÀ NGUỒN<br/>VÀO: request + user<br/>LÀM: chuẩn hóa feed VNExpress, lưu DB<br/>ĐK: user thường bị ép PRIVATE / USER<br/>RA: CrawlJob PENDING + CrawlJobSource + AuditLog"]
     A3["A3 · LỊCH NGUỒN<br/>VÀO: job SOURCE_CONFIG + source ACTIVE<br/>ĐK: enable_scheduler và schedule_enabled<br/>Chu kỳ kiểm tra MĐ 60 giây, tối thiểu 5 giây<br/>RA: nguồn đến hạn hoặc tiếp tục chờ"]
     A4{"A4 · ĐÃ ĐẾN HẠN?<br/>VÀO: last_triggered_at + interval_minutes<br/>ĐK: chưa từng chạy / timestamp lỗi / đã qua interval<br/>Interval MĐ 60 phút; tối thiểu 1 phút"}
-    A5["A5 · SINH LƯỢT CRAWL THEO LỊCH<br/>VÀO: source đến hạn<br/>LÀM: copy source và config sang SCHEDULED_RUN<br/>RA: job PENDING + cập nhật last_triggered_at<br/>! Không copy scope/created_by_type; xem cảnh báo W6"]
+    A5["A5 · SINH LƯỢT CRAWL THEO LỊCH<br/>VÀO: source đến hạn<br/>LÀM: copy source/config và giữ scope/created_by_type/requested_by sang SCHEDULED_RUN<br/>RA: job PENDING + cập nhật last_run_at/next_run_at"]
     A6["A6 · EVENT crawl.job.created<br/>VÀO: job_id + source_count hoặc nguồn lịch<br/>LÀM: truyền yêu cầu qua Kafka<br/>RA: envelope có event_id, correlation_id, job_id"]
     A7{"A7 · ORCHESTRATOR GUARD<br/>VÀO: event + job<br/>ĐK: event chưa claim; job tồn tại, chưa CANCELLED<br/>ĐK: chưa có CRAWL_URL task của job"}
     A8["A8 · CHIA TASK THEO NGUỒN<br/>VÀO: N CrawlJobSource<br/>LÀM: mỗi nguồn tạo 1 task CRAWL_URL<br/>MĐ max_attempts = 4; tối thiểu 1<br/>RA: N task QUEUED + N crawl.task.requested<br/>Job QUEUED; progress = 10%"]
@@ -90,9 +90,9 @@ flowchart TD
     B3["B3 · BILIBILI<br/>VÀO: URL hoặc queries/keywords<br/>LÀM: metadata/API search, mở rộng series nguồn<br/>MĐ 10 item; clamp 1–50<br/>Search duration MĐ tối đa 7200 giây; timeout 20 giây<br/>RA: raw metadata/media/episode; chưa tự transcribe nguồn"]
     B4["B4 · NORMALIZE + SOURCE QUALITY<br/>VÀO: raw document; VNExpress đã normalize thì giữ<br/>LÀM: clean text, metadata/media, hash; chấm 0–100<br/>ĐK: ≥80 READY; 60–79 USABLE_WITH_WARNING; dưới 60 NEEDS_REVIEW<br/>RA: Mongo processed_documents; phát content.normalized<br/>Task SUCCEEDED; job progress tối thiểu 60%"]
     B5{"B5 · CHỐNG TRÙNG CANONICAL<br/>VÀO: processed_document_id → normalized + quality<br/>LÀM: khóa identity nguồn; tìm cùng URL → content_hash → transcript_hash<br/>ĐK: GLOBAL chỉ so GLOBAL; PRIVATE so GLOBAL hoặc cùng owner"}
-    B6["B6 · BÀI MỚI<br/>VÀO: normalized chưa trùng<br/>LÀM: tạo ContentItem với crawl_job_id/scope/owner<br/>RA: id, title, summary, score/status, mongo_id, sources, media<br/>GLOBAL: tạo link RECOMMENDED score 0 cho profile nhận nguồn<br/>Bilibili: có thể gắn Story/episode nguồn; khác ContentSeries đầu ra"]
-    B7["B7 · BÀI TRÙNG<br/>VÀO: ContentItem đã có<br/>LÀM: thêm source/media, duplicate_count + 1<br/>RA: dùng lại content_id; tăng total_duplicates<br/>! Giữ crawl_job_id cũ, không tạo ContentItem mới cho job này"]
-    B8["B8 · GHI KẾT QUẢ CANONICAL<br/>VÀO: content_id mới hoặc được dùng lại<br/>LÀM: KafkaTask NORMALIZE COMPLETED<br/>RA: output_reference = content_id; progress ≥85%<br/>Phát content.canonical.saved và story.grouped nếu có"]
+    B6["B6 · BÀI MỚI<br/>VÀO: normalized chưa trùng<br/>LÀM: tạo ContentItem canonical với scope/owner và CrawlJobContent cho job hiện tại<br/>RA: id, title, summary, score/status, mongo_id, sources, media<br/>Không fan-out thẳng vào inbox; planner strategy quyết định bài Global được nhận<br/>Bilibili: có thể gắn Story/episode nguồn; khác ContentSeries đầu ra"]
+    B7["B7 · BÀI TRÙNG<br/>VÀO: ContentItem đã có và được phép thấy theo scope<br/>LÀM: dùng lại canonical, thêm source/media, duplicate_count + 1<br/>Tạo/cập nhật CrawlJobContent cho job hiện tại<br/>RA: job mới vẫn có kết quả dù content_id/crawl_job_id gốc thuộc job trước"]
+    B8["B8 · GHI KẾT QUẢ CANONICAL<br/>VÀO: content_id mới hoặc được dùng lại + occurrence của job<br/>LÀM: KafkaTask NORMALIZE COMPLETED<br/>RA: output_reference = content_id; progress ≥85%<br/>Phát content.canonical.saved và story.grouped nếu có"]
     B9{"B9 · JOB ĐÃ XỬ LÝ HẾT?<br/>VÀO: CRAWL_URL tasks + counters<br/>ĐK: không task PENDING/QUEUED/RUNNING/RETRYING<br/>ĐK: canonical_saved_count + total_failed ≥ total_crawled<br/>LÀM: chỉ đóng job khi các điều kiện đạt"}
     B10["B10 · ĐÓNG JOB<br/>Mọi crawl task thất bại và 0 bài: FAILED<br/>Có lỗi khác: PARTIAL_SUCCESS; còn lại SUCCEEDED<br/>RA: progress 100%, completed_at<br/>Canonical path phát content.embedding.requested rồi crawl.job.completed"]
     B11{"B11 · LỖI TOÀN TASK / RETRY<br/>VÀO: exception + attempt_count<br/>ĐK: attempt_count dưới max_attempts?"}
@@ -135,12 +135,12 @@ flowchart TD
     C1["C1 · HAI ĐƯỜNG KÍCH HOẠT EMBEDDING<br/>VÀO: content.embedding.requested hoặc matcher ensure qua HTTP<br/>LÀM: kiểm tra embedding thiếu/cũ, không đợi event hoàn tất mới planning<br/>RA: ContentEmbedding dùng chung; không phải LLM quyết định sản xuất"]
     C2["C2 · SOẠN TEXT ĐỂ EMBED<br/>VÀO: ContentItem + full text ở Mongo<br/>LÀM: title + summary + category + tags + 4 câu mở đầu<br/>Giới hạn opening 1800 ký tự; tổng 4000 ký tự<br/>RA: embedding_text"]
     C3["C3 · CACHE / BATCH EMBEDDING<br/>VÀO: embedding_text + model<br/>ĐK: vector đúng model và text chưa đổi → dùng lại<br/>MĐ text-embedding-3-small; 512 chiều<br/>Batch MĐ ≤64 item và ≤240000 ký tự<br/>RA: upsert ContentEmbedding theo content_id + model"]
-    C4{"C4 · AUTO CONSUMER ĐƯỢC CHẠY?<br/>VÀO: crawl.job.completed + job_id/status<br/>ĐK: Kafka bật; status SUCCEEDED hoặc PARTIAL_SUCCESS<br/>ĐK profile: active + receive_system_content + auto_project_queue_enabled"}
-    C5["C5 · LẤY BÀI CỦA JOB<br/>VÀO: crawl_job_id<br/>ĐK: ContentItem cùng job; READY hoặc USABLE_WITH_WARNING<br/>Sắp updated_at giảm dần rồi quality; giới hạn 500 bài<br/>RA: items dùng để xét cho từng profile<br/>! Đoạn query này chưa lọc scope/owner theo profile"]
+    C4{"C4 · CONSUMER ĐƯỢC CHẠY?<br/>VÀO: crawl.job.completed hoặc profile.strategy.updated<br/>ĐK crawl: job GLOBAL và status SUCCEEDED/PARTIAL_SUCCESS<br/>ĐK profile: active + receive_system_content<br/>auto_project_queue_enabled chỉ điều khiển bước tạo workflow"}
+    C5["C5 · LẤY BÀI GLOBAL<br/>VÀO: crawl_job_id hoặc strategy vừa cập nhật<br/>ĐK: ContentItem GLOBAL; READY hoặc USABLE_WITH_WARNING<br/>Job mới: tối đa 500 bài cùng job<br/>Strategy đổi: lấy tối đa 500 bài Global gần nhất<br/>RA: items dùng để xét cho profile"]
     C6["C6 · VECTOR CHỦ ĐỀ VÀ TOPIC SCORE<br/>VÀO: content vector + content_topics/avoid_topics<br/>LÀM: Topic + Description → TopicEmbedding, có cache<br/>Từng topic tính cosine; score = clamp(max cosine ×100)<br/>RA: topic_matches, avoid_matches, similarity S"]
     C7{"C7 · ĐỦ ĐIỀU KIỆN CANDIDATE?<br/>VÀO: S + status + strategy + metadata nguồn<br/>ĐK: ít nhất 1 content topic cosine ≥ T; MĐ T=0.62<br/>Không khớp avoid bằng keyword hoặc cosine ≥ A; MĐ A=0.72<br/>Nếu require_video: content_type VIDEO hoặc duration hoặc video media"}
     C8["C8 · KHÔNG ĐỦ ĐIỀU KIỆN<br/>VÀO: thiếu vector/topics, dưới T, avoid match hoặc thiếu video<br/>RA: eligible=false, lý do; LOW_MATCH hoặc AVOID_TOPIC_MATCH<br/>Keyword khớp topic không thay thế được cosine gate<br/>Không gọi creative LLM cho candidate này"]
-    C9["C9 · LƯU XẾP HẠNG<br/>VÀO: mọi điểm candidate của profile<br/>Sort: eligible → similarity → score → quality → thời gian<br/>RA: ProfileContentLink + PlanningRun + PlanningCandidate<br/>Xét tất cả eligible, không cắt ở max_system_recommendations=20"]
+    C9["C9 · LƯU XẾP HẠNG VÀ ÁP QUOTA<br/>VÀO: mọi điểm candidate của profile<br/>Sort: eligible → similarity → score → quality → thời gian<br/>RA: PlanningRun + PlanningCandidate cho lượt chấm; chỉ top bài đạt trong quota ngày tạo ProfileContentLink/inbox<br/>Tắt auto_project_queue_enabled: dừng sau plan; bật: bài vừa nhận tiếp tục production gate"]
     C10{"C10 · WORKFLOW AUTO ĐÃ CÓ?<br/>VÀO: profile_id + content_id + crawl_job_id<br/>Tìm trong 20 workflow gần nhất của profile/content<br/>ĐK: selection_mode AUTO và cùng crawl_job_id"}
     C11["C11 · DÙNG LẠI WORKFLOW<br/>VÀO: workflow đã tồn tại<br/>RA: candidate.selected=true, workflow_id, cập nhật link<br/>Không sinh lại draft và không enqueue lại ở nhánh này"]
     C1 --> C2 --> C3
@@ -154,7 +154,7 @@ flowchart TD
     C10 -->|chưa| D0["SANG D · QUYẾT ĐỊNH SẢN XUẤT"]
 ```
 
-Embedding service lỗi không có fallback “keyword đủ thì sản xuất”: nếu vector không có, cosine gate không qua. Bài trùng dùng content cũ ở B7 thường không nằm trong query `crawl_job_id` mới ở C5. Một bài có thể được xét cho nhiều profile; đây không phải chọn duy nhất một profile cho bài.
+Embedding service lỗi không có fallback “keyword đủ thì sản xuất”: nếu vector không có, cosine gate không qua. Embedding và planner lấy bài của job qua `CrawlJobContent`, nên bài trùng ở B7 vẫn thuộc lượt crawl mới. Một bài có thể được xét cho nhiều profile; đây không phải chọn duy nhất một profile cho bài.
 
 Nguồn: [AUTO consumer](/D:/DATN/socialcontent_backend/services/ai-media-engine/app/planning/consumers/crawl_job_completed.py), [matcher](/D:/DATN/socialcontent_backend/common/planning/embedding_matcher.py), [embedding service](/D:/DATN/socialcontent_backend/services/embedding-service/app/service.py).
 
@@ -379,7 +379,7 @@ flowchart TD
     I11 -->|draft/video cũ| G0
 ```
 
-`5 item/tick` không phải 5 bài/profile và cũng không phải quota ngày. Query lấy 5 item trước rồi mới xét một số công tắc strategy: item bị bỏ qua không được tự bù bằng item thứ 6 trong cùng lượt. `max_system_recommendations=20` và `post_frequency_per_day=2` không hạn chế số workflow/video ở đường AUTO này. Nhiều video có thể nhận cùng slot `08:30` hoặc `20:30`.
+`5 item/tick` không phải 5 bài/profile và cũng không phải quota nhận bài. Query scheduler đăng lấy 5 item trước rồi mới xét một số công tắc strategy: item bị bỏ qua không được tự bù bằng item thứ 6 trong cùng lượt. `max_system_recommendations=20` giới hạn bài GLOBAL mới vào inbox/ngày; `post_frequency_per_day=2` giới hạn lịch đăng/ngày. Nhiều video vẫn có thể nhận cùng slot `08:30` hoặc `20:30` ở nhánh scheduler đăng.
 
 Nhánh auto schedule hiện dùng `datetime.utcnow()` để ghép `schedule_times`; nhánh “AI chọn lịch” trên queue dùng `ZoneInfo(schedule_timezone)`. Do đó chưa thể hiểu cùng chuỗi `08:30` là cùng giờ địa phương ở cả hai nhánh. Scheduler có thể đợi lâu hơn chu kỳ danh nghĩa vì mỗi lượt xử lý upload tuần tự rồi mới sleep.
 
@@ -453,13 +453,14 @@ Nguồn: [Kafka adapter](/D:/DATN/socialcontent_backend/common/events/kafka.py),
 | Dữ liệu | Nội dung chính | Bên ghi → bên đọc tiếp |
 |---|---|---|
 | `CrawlJob` + `CrawlJobSource` | Nguồn, scope/owner, mode, lịch, status và counter | API/scheduler → orchestrator/crawler/canonical |
+| `CrawlJobContent` | Quan hệ job ↔ canonical content, cờ duplicate và provenance của lần phát hiện | Canonical → chi tiết job, kho creator, embedding/planner |
 | `KafkaTask` CRAWL_URL | reference job, payload nguồn, attempt/status/error | Orchestrator → crawler |
 | Mongo `processed_documents` | normalized text/transcript, media, quality, source metadata | Crawler/normalizer → canonical; full text → embedding/planner |
-| `ContentItem` | Canonical id/title/summary/quality/status/hash, sources/media, mongo id, crawl_job_id | Canonical → matcher/planner |
+| `ContentItem` | Canonical id/title/summary/quality/status/hash, sources/media, mongo id; `crawl_job_id` chỉ là job tạo bản gốc | Canonical → matcher/planner |
 | `Story` + content episode order | Nhóm/episode của nguồn Bilibili | Canonical grouping → giao diện/luồng nguồn; không phải output series |
 | `ContentEmbedding` | content_id, model, vector, embedding_text, dimension | Embedding service → matcher và centroid series |
 | `TopicEmbedding` | Vector topic+description, model/cache hash | Matcher → so topic/avoid cho nhiều bài |
-| `ProfileContentLink` | Candidate score/status/reasons/AI decision theo profile/content | Canonical khởi tạo; AUTO matcher cập nhật → giao diện Content |
+| `ProfileContentLink` | Candidate score/status/reasons/AI decision theo profile/content | AUTO matcher áp quota và cập nhật → giao diện Content |
 | `PlanningRun` / `PlanningCandidate` | Một lần xét theo profile/job; rank, eligible, selected, decisions, workflow_id | AUTO consumer → lịch sử quyết định |
 | `ContentSeries` | Title/theme, ACTIVE, total_parts, current_part | Khi PASS/duyệt + chọn series → workflow kế tiếp dùng làm context |
 | `MediaWorkflow.draft_json` | `meta`, `source`, `timeline`, `story_data`, `compact_scenes`, `audio`, `video_artifacts` | Planner/API/worker → editor, TTS, renderer |
@@ -496,10 +497,10 @@ File media nằm dưới `socialcontent_backend/data_demo/video_gen_demo/public/
 
 1. **W1 — Alignment đã sửa lỗi thiếu helper trong code ngày 31/08.** Test mock đã qua; chưa khẳng định Whisper thật hay render end-to-end đã thành công.
 2. **W2 — Lịch auto sau render chưa dùng timezone profile.** Nhánh queue “AI chọn lịch” lại dùng timezone; hai nhánh chưa thống nhất. Không coi `08:30` là 08:30 giờ Việt Nam ở mọi đường đi.
-3. **W3 — Chưa có quota sản xuất/ngày ở consumer AUTO.** Tối đa 500 nguồn/job được xét, mọi eligible có thể tạo workflow cho từng profile; mặc định 20 recommendations và 2 post/ngày không được dùng để chặn ở đây.
+3. **W3 — Quota nhận bài và quota đăng là hai giới hạn khác nhau.** Consumer có thể chấm tối đa 500 nguồn/lượt nhưng chỉ top bài eligible trong phần `max_system_recommendations` còn lại của ngày mới vào inbox và tiếp tục tạo workflow; `post_frequency_per_day` chỉ giới hạn lịch đăng.
 4. **W4 — AUTO không tự bảo đảm public.** Scheduler chỉ Direct Post TikTok, privacy mặc định SELF_ONLY. Upload inbox và Direct Post có ý nghĩa khác nhau dù queue có thể cùng ghi published.
 5. **W5 — Tắt Kafka làm mất đường kích hoạt AUTO planning.** Crawl/video có fallback riêng nhưng AUTO consumer idle; Kafka publish lỗi hiện chỉ warning, không có bảo đảm outbox/replay xuyên suốt.
-6. **W6 — Phạm vi dữ liệu cần rà lại trước production.** Scheduler nguồn không copy `content_scope/created_by_type` sang SCHEDULED_RUN, nên rơi về default GLOBAL/SYSTEM của model. Query AUTO lại chỉ lọc crawl_job_id/status, không lọc PRIVATE owner theo profile. Đây là thiếu kiểm tra trong code đang trace, không phải hành vi phân quyền nên mặc định chấp nhận.
+6. **W6 — Canonical và kết quả crawl là hai lớp.** Scheduler giữ `content_scope/created_by_type/requested_by`; dedup PRIVATE chỉ so với GLOBAL hoặc cùng owner. `CrawlJobContent` giúp job sau vẫn thấy bài canonical đã có mà không làm lộ PRIVATE của creator khác.
 7. **W7 — V2 dùng được ảnh/video nguồn, không tự tìm/generate visual.** Image thiếu nguồn vẫn dùng ảnh demo. `require_video` chỉ là gate nguồn, không ép mọi clip phải là video.
 8. **W8 — Tắt auto_queue không ngăn mọi cách tạo queue.** Mở trang queue có nhánh đồng bộ workflow rendered/approved sang needs_approval; xem I7.
 9. **W9 — Đừng suy ra đã đăng từ MediaWorkflow hoặc counter scheduler.** Xem trạng thái queue + SocialPost + response TikTok; có publish_id chưa chắc có post_id hay public URL.

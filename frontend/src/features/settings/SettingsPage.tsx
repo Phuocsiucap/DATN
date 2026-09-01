@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'sonner'
 
-import { AlertTriangle, Check, CircleUserRound, ExternalLink, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, X, Zap } from 'lucide-react'
+import { AlertTriangle, Check, CircleUserRound, ExternalLink, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, Zap } from 'lucide-react'
 import {
   fetchSocialProfilesApi,
   createSocialProfileApi,
@@ -26,6 +26,14 @@ import {
 } from '@/commons/apis/api'
 import { AppButton, AppCard, FilterChip, MetricCard, PageLayout, SearchField, SocialProfileAvatar, StatusPill, TabStrip } from '@/commons/component/social-ui'
 import { SocialProfileStrategyDialog, type SocialProfile } from './SocialProfileStrategyDialog'
+import { AddTikTokProfileDialog } from './components/AddTikTokProfileDialog'
+import {
+  getTikTokQrHelpText,
+  getTikTokQrStatusLabel,
+  isTikTokQrProcessingStatus,
+  resolveTikTokQrStatus,
+  TIKTOK_QR_SIZE,
+} from './tiktokQr'
 
 type CurrentUser = {
   id: string | number
@@ -42,42 +50,7 @@ const DEFAULT_SETTINGS: SchedulerSettings = {
   bilibili_interval_minutes: 30,
   publish_queue_interval_minutes: 5,
 }
-const TIKTOK_QR_SIZE = 232
 const TIKTOK_QR_WARMUP_MS = 5000
-
-const resolveTikTokQrStatus = (data: any) => {
-  if (data?.authenticated) return 'authenticated'
-  if (typeof data?.status === 'string' && data.status) return data.status
-  return data?.session_active ? 'waiting_for_scan' : 'stopped'
-}
-
-const isTikTokQrProcessingStatus = (status: string) => ['scanned', 'confirmed'].includes(status)
-
-const getTikTokQrHelpText = (status: string, createsProfile: boolean) => {
-  if (status === 'scanned') {
-    return createsProfile
-      ? 'Đã quét mã thành công. Hãy bấm Cho phép trên TikTok, hệ thống sẽ tự tạo profile.'
-      : 'Đã quét mã thành công. Hãy bấm Cho phép trên TikTok để hoàn tất kết nối.'
-  }
-  if (status === 'confirmed') {
-    return createsProfile ? 'TikTok đã xác nhận. Đang tạo và lưu profile...' : 'TikTok đã xác nhận. Đang lưu kết nối...'
-  }
-  return createsProfile ? 'Sau khi TikTok xác thực, profile sẽ được tạo tự động.' : 'Sử dụng ứng dụng TikTok trên điện thoại để quét mã này.'
-}
-
-const getTikTokQrStatusLabel = (status: string) => {
-  const labels: Record<string, string> = {
-    authenticated: 'Hoàn tất',
-    confirmed: 'Đang lưu kết nối',
-    scanned: 'Đã quét mã',
-    waiting_for_scan: 'Đang chờ quét',
-    new: 'Đang chờ quét',
-    expired: 'QR đã hết hạn',
-    stopped: 'Đã dừng',
-    preparing_qr: 'Đang chuẩn bị QR',
-  }
-  return labels[status] || status
-}
 
 function resolveProfileMetric(profile: SocialProfile, key: 'follower_count' | 'following_count' | 'likes_count' | 'video_count') {
   const directValue = profile[key]
@@ -147,7 +120,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     schedule_timezone: 'Asia/Bangkok',
     min_similarity: 0.62,
     avoid_similarity_threshold: 0.72,
-    max_system_recommendations: 15,
+    max_system_recommendations: 20,
     auto_project_queue_enabled: false,
     video_render_mode: 'manual',
     auto_queue_enabled: true,
@@ -661,91 +634,22 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         </div>
       )}
 
-      {/* Add profile Modal */}
-      {addProfileOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl border border-[#d9e0ea] bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between border-b border-[#eef2f7] px-6 py-4 bg-slate-50">
-              <div>
-                <h3 className="text-lg font-bold text-[#0f172a]">Thêm TikTok Profile</h3>
-                <p className="mt-0.5 text-xs text-[#64748b]">Tạo profile social content mới và kết nối TikTok bằng mã QR.</p>
-              </div>
-              <button onClick={() => void closeAddProfile()} className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-4 p-6">
-              <label className="block space-y-1.5 text-sm">
-                <span className="font-bold text-slate-700">Tên profile</span>
-                <input
-                  value={newProfileName}
-                  onChange={(e) => setNewProfileName(e.target.value)}
-                  placeholder="VD: TikTok Storytelling Channel"
-                  className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]"
-                />
-              </label>
-
-              <label className="block space-y-1.5 text-sm">
-                <span className="font-bold text-slate-700">Username TikTok</span>
-                <input
-                  value={newProfileUsername}
-                  onChange={(e) => setNewProfileUsername(e.target.value)}
-                  placeholder="@username hoặc để trống"
-                  className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]"
-                />
-              </label>
-
-              {pendingSessionId && (
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
-                  <h4 className="font-bold text-blue-900">Quét QR để hoàn tất</h4>
-                  <p className="mb-4 mt-1 text-xs text-blue-800">
-                    {pendingQrReady ? getTikTokQrHelpText(sessionStatus, true) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
-                  </p>
-                  {!pendingQrReady ? (
-                    <div className="mx-auto flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
-                  ) : pendingQrImage ? (
-                    <img src={pendingQrImage} alt="QR Code" className="mx-auto h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
-                  ) : pendingQrUrl ? (
-                    <div className="mx-auto inline-flex rounded-xl border-2 border-white bg-white p-2 shadow-sm">
-                      <QRCodeSVG value={pendingQrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
-                    </div>
-                  ) : (
-                    <div className="mx-auto flex h-64 w-64 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>
-                  )}
-                  {pendingQrReady && pendingQrUrl && (
-                    <a href={pendingQrUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
-                      <ExternalLink size={14} /> Mở link QR
-                    </a>
-                  )}
-                  <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
-                    {pendingQrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
-                    Trạng thái: {getTikTokQrStatusLabel(pendingQrReady ? sessionStatus : 'preparing_qr')}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-wrap justify-end gap-3 border-t border-[#eef2f7] bg-slate-50 px-6 py-4">
-              {pendingSessionId ? (
-                <button onClick={() => void closeAddProfile()} className="rounded-lg border border-[#d9e0ea] px-4 py-2 text-sm font-bold text-[#475569] hover:bg-white">
-                  Dừng QR
-                </button>
-              ) : (
-                <>
-                  <button onClick={() => void handleCreateProfile()} disabled={addingProfile} className="h-8 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-white disabled:opacity-60">
-                    Tạo trước, đăng nhập sau
-                  </button>
-                  <button onClick={() => void handleStartPendingQr()} disabled={addingProfile} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60">
-                    <QrCode size={14} /> Thêm bằng QR
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
+      <AddTikTokProfileDialog
+        open={addProfileOpen}
+        name={newProfileName}
+        username={newProfileUsername}
+        adding={addingProfile}
+        sessionId={pendingSessionId}
+        qrImage={pendingQrImage}
+        qrUrl={pendingQrUrl}
+        qrReady={pendingQrReady}
+        sessionStatus={sessionStatus}
+        onNameChange={setNewProfileName}
+        onUsernameChange={setNewProfileUsername}
+        onClose={() => void closeAddProfile()}
+        onCreate={() => void handleCreateProfile()}
+        onStartQr={() => void handleStartPendingQr()}
+      />
       {/* Social Profile Strategy Modal */}
       <SocialProfileStrategyDialog
         open={strategyDialogOpen}
@@ -825,7 +729,7 @@ function SocialProfileCard({
             {stats.map((stat) => (
               <div key={stat.label}>
                 <div className="font-extrabold text-slate-800">{formatProfileMetric(stat.value)}</div>
-                <div className="text-[11px] text-slate-500">{stat.label}</div>
+                <div className="text-xs text-slate-500">{stat.label}</div>
               </div>
             ))}
           </div>

@@ -121,7 +121,7 @@ export function PublishingQueueDetailDialog({
       <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border bg-white shadow-2xl" style={{ borderColor: 'var(--outline-variant)' }}>
         <div className="flex items-start justify-between gap-4 border-b px-5 py-4" style={{ borderColor: 'var(--outline-variant)', backgroundColor: 'var(--surface-container-low)' }}>
           <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
               <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-0.5">
                 <UserRound size={11} />
                 {item.profile_name || `Profile #${item.profile_id}`}
@@ -282,7 +282,7 @@ export function PublishingQueueDetailDialog({
             {!sourceLoading && contentDetail && (
               <>
                 <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
                     {article.sourceType && <span className="rounded-md bg-slate-100 px-2 py-0.5">{article.sourceType}</span>}
                     <span className="rounded-md bg-slate-100 px-2 py-0.5">{formatDateTime(article.publishedAt)}</span>
                     <span className="rounded-md bg-slate-100 px-2 py-0.5">Quality {Number(contentDetail.quality_score || 0).toFixed(1)}</span>
@@ -322,7 +322,7 @@ export function PublishingQueueDetailDialog({
 function InfoTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-lg border p-3" style={{ borderColor: 'var(--outline-variant)' }}>
-      <div className="flex items-center gap-1 text-[10px] font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
+      <div className="flex items-center gap-1 text-xs font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
         {icon}
         {label}
       </div>

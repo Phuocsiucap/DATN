@@ -289,7 +289,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Tổng Workflow</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng Workflow</div>
             <div className="mt-1 text-xl font-black text-slate-900">{total}</div>
           </div>
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
@@ -299,7 +299,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
 
         <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Đang sản xuất</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Đang sản xuất</div>
             <div className="mt-1 flex items-center gap-1.5 text-xl font-black text-cyan-700">
               {stats.inProd}
               {stats.inProd > 0 && <span className="h-2 w-2 rounded-full bg-cyan-500 workflow-status-pulse" />}
@@ -312,7 +312,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
 
         <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Video hoàn tất</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Video hoàn tất</div>
             <div className="mt-1 text-xl font-black text-amber-700">{stats.pendingVideoReview + stats.ready}</div>
           </div>
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
@@ -322,7 +322,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
 
         <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Thất bại</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Thất bại</div>
             <div className={`mt-1 text-xl font-black ${stats.failed > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
               {stats.failed}
             </div>
@@ -373,7 +373,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         {/* Series Sidebar */}
         <aside className="w-full lg:w-64 shrink-0 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white shadow-xs">
           <div className="sticky top-0 z-10 bg-white/95 p-4 backdrop-blur-sm border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-[13px] font-black text-slate-900 flex items-center gap-2">
+            <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
               <FolderKanban size={16} className="text-blue-600" />
               Danh sách Series
             </h3>
@@ -385,7 +385,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
               >
                 <Plus size={14} />
               </button>
-              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600">
+              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-600">
                 {profileSeries.length}
               </span>
             </div>
@@ -413,7 +413,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                   <span className={`line-clamp-2 text-xs font-bold leading-5 ${seriesFilter === item.id ? 'text-blue-700' : 'text-slate-700 group-hover:text-blue-600'}`}>
                     {item.title}
                   </span>
-                  <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-400">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
                     <span className={`inline-block w-1.5 h-1.5 rounded-full ${item.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                     {item.total_parts > 0 ? `${item.current_part || 0}/${item.total_parts} part` : 'Không giới hạn'}
                   </div>
@@ -476,9 +476,9 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
               <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] w-[250px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs lg:w-auto lg:min-w-[220px] lg:flex-1">
                 <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3">
                   <div className="flex items-center gap-2">
-                    <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
-                    <h2 className="text-[13px] font-extrabold text-slate-900">{column.title}</h2>
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-[10px] font-black text-slate-600">
+                    <span className={`grid h-5 w-5 place-items-center rounded-full text-xs font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
+                    <h2 className="text-sm font-extrabold text-slate-900">{column.title}</h2>
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1.5 text-xs font-black text-slate-600">
                       {column.items.length}
                     </span>
                   </div>
@@ -503,12 +503,12 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
                     />
                   ))}
                   {column.items.length === 0 && (
-                    <div className="grid h-32 place-items-center rounded-[8px] border border-dashed border-slate-200 text-center text-[12px] font-semibold text-slate-400">
+                    <div className="grid h-32 place-items-center rounded-[8px] border border-dashed border-slate-200 text-center text-xs font-semibold text-slate-400">
                       Chưa có video
                     </div>
                   )}
                 </div>
-                {column.id === 'review' && <a href={approvalsUrl} className="mx-3 my-3 grid h-9 shrink-0 place-items-center rounded-[8px] border border-blue-200 text-[12px] font-bold text-blue-700 hover:bg-blue-50">Duyệt và lên lịch tại Approvals ↗</a>}
+                {column.id === 'review' && <a href={approvalsUrl} className="mx-3 my-3 grid h-9 shrink-0 place-items-center rounded-[8px] border border-blue-200 text-xs font-bold text-blue-700 hover:bg-blue-50">Duyệt và lên lịch tại Approvals ↗</a>}
               </section>
             ))}
             </div>
@@ -618,10 +618,10 @@ export function VideoKanbanCard({
       </div>
       <div className="space-y-3 p-3">
         <div>
-          <button onClick={onOpen} className="line-clamp-2 text-left text-[13px] font-extrabold leading-5 text-slate-900 transition group-hover:text-[#2556ea]">
+          <button onClick={onOpen} className="line-clamp-2 text-left text-sm font-extrabold leading-5 text-slate-900 transition group-hover:text-[#2556ea]">
             {item.title}
           </button>
-          <div className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+          <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-600">
             <SocialProfileAvatar
               avatarUrl={item.profile?.avatar}
               name={item.profile?.name}
@@ -634,18 +634,18 @@ export function VideoKanbanCard({
 
         <div className="flex flex-wrap gap-1.5">
           <StatusPill value={item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'Cần duyệt draft' : workflowStatusLabel(item.status)} tone={isFailedVideoWorkspace(item) ? 'red' : item.status === 'RENDERING' || item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'amber' : 'purple'} />
-          {item.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-[10px] font-bold text-[#6d5dfc]">{item.category}</span>}
+          {item.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-xs font-bold text-[#6d5dfc]">{item.category}</span>}
         </div>
 
         {['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status) && (
-          <a href={`${item.status === 'PUBLISHED' ? '/published-posts' : item.status === 'QUEUED_FOR_PUBLISHING' ? '/schedule' : '/approvals'}?profile_id=${encodeURIComponent(item.profile?.id || item.profile_id || '')}`} className="block rounded-md bg-emerald-50 px-2 py-1.5 text-center text-[11px] font-bold text-emerald-700 hover:bg-emerald-100">{item.status === 'PUBLISHED' ? 'Xem video đã đăng' : item.status === 'QUEUED_FOR_PUBLISHING' ? 'Xem lịch đăng' : 'Mở Approvals để duyệt và chọn lịch'} ↗</a>
+          <a href={`${item.status === 'PUBLISHED' ? '/published-posts' : item.status === 'QUEUED_FOR_PUBLISHING' ? '/schedule' : '/approvals'}?profile_id=${encodeURIComponent(item.profile?.id || item.profile_id || '')}`} className="block rounded-md bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-100">{item.status === 'PUBLISHED' ? 'Xem video đã đăng' : item.status === 'QUEUED_FOR_PUBLISHING' ? 'Xem lịch đăng' : 'Mở Approvals để duyệt và chọn lịch'} ↗</a>
         )}
 
-        <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] font-semibold text-slate-500">
+        <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-xs font-semibold text-slate-500">
           <button
             onClick={onAssign}
             title="Bấm để chuyển series cho bài viết này"
-            className={`inline-flex min-w-0 max-w-[170px] items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold transition-all ${
+            className={`inline-flex min-w-0 max-w-[170px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold transition-all ${
               item.series
                 ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 ring-1 ring-indigo-500/15'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
@@ -655,11 +655,11 @@ export function VideoKanbanCard({
             <span className="truncate">{item.series?.title || 'Chưa thuộc series'}</span>
             <Pencil size={10} className="ml-0.5 opacity-60 shrink-0" />
           </button>
-          <span className="inline-flex items-center gap-1 text-[10px] text-slate-400"><Clock size={11} />{formatDateTime(item.updated_at)}</span>
+          <span className="inline-flex items-center gap-1 text-xs text-slate-400"><Clock size={11} />{formatDateTime(item.updated_at)}</span>
         </div>
 
         <div className="flex items-center justify-between">
-          <button onClick={onCopy} className="inline-flex items-center gap-1 rounded-[6px] bg-slate-50 px-2 py-1 font-mono text-[10px] font-bold text-slate-500 hover:bg-slate-100">
+          <button onClick={onCopy} className="inline-flex items-center gap-1 rounded-[6px] bg-slate-50 px-2 py-1 font-mono text-xs font-bold text-slate-500 hover:bg-slate-100">
             <Hash size={10} />
             {item.id.slice(0, 8)}
             {copied ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
@@ -671,7 +671,7 @@ export function VideoKanbanCard({
             <button disabled={disabled} onClick={onRegenerate} title="Tạo lại draft" className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
               <RefreshCw size={13} className={busy ? 'animate-spin text-[#2556ea]' : ''} />
             </button>
-            <button onClick={onOpen} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-[#2556ea] px-2.5 text-[11px] font-extrabold text-white">
+            <button onClick={onOpen} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-[#2556ea] px-2.5 text-xs font-extrabold text-white">
               Mở <ArrowUpRight size={13} />
             </button>
           </div>

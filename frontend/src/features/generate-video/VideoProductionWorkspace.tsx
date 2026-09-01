@@ -70,6 +70,7 @@ import {
 } from '@/commons/apis/generateVideo'
 import { fetchAllContentSeriesApi, fetchContentSeriesApi, type ContentSeries } from '@/commons/apis/planning'
 import { TransferSeriesModal } from './components/SeriesModal'
+import { EditStoryWithAiDialog } from './components/EditStoryWithAiDialog'
 import WorkflowProgress from './WorkflowProgress'
 
 type StepId = 'story' | 'plan' | 'video' | 'preview'
@@ -691,7 +692,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                 {selectedProject?.title || 'Video Script Editor'}
               </h1>
               {selectedProject && (
-                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-800">
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-black uppercase text-emerald-800">
                   {inferProjectStatus(selectedProject, story)}
                 </span>
               )}
@@ -710,7 +711,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
             </div>
             
             {selectedProject && (
-              <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-slate-600 md:pl-12">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-600 md:pl-12">
                 <button
                   type="button"
                   onClick={() => void openTransferModal()}
@@ -741,7 +742,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                      Confidence: {String(selectedProject.metadata?.confidence_score)}%
                    </div>
                 )}
-                <div className="ml-1 text-[11px] text-slate-400">
+                <div className="ml-1 text-xs text-slate-400">
                   ID: {selectedProject.id.slice(0, 8)}
                 </div>
               </div>
@@ -782,7 +783,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
             })}
           </div>
           {status ? (
-            <div className="flex items-center rounded-md border border-slate-200 bg-white px-4 py-2 text-[12px] font-bold text-slate-700 shadow-sm">
+            <div className="flex items-center rounded-md border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm">
               {status}
             </div>
           ) : null}
@@ -798,39 +799,14 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
       </div>
       )}
 
-      {showEditDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-              <div>
-                <div className="text-base font-black text-[#0f172a]">Edit story with AI</div>
-                <div className="mt-1 text-xs font-semibold text-slate-500">Nhập yêu cầu chỉnh sửa cho story data hiện tại.</div>
-              </div>
-              <button onClick={() => setShowEditDialog(false)} className="icon-button border border-slate-200 bg-white text-slate-600">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex flex-col gap-3 p-4">
-              <textarea
-                autoFocus
-                value={editPrompt}
-                onChange={(event) => setEditPrompt(event.target.value)}
-                placeholder="Ví dụ: Viết lại subtitle tự nhiên hơn, tăng kịch tính ở 2 scene đầu, vẫn giữ đúng dữ kiện bài gốc."
-                className="h-40 w-full resize-y rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100"
-              />
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowEditDialog(false)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700">
-                  Cancel
-                </button>
-                <button disabled={!editPrompt.trim() || actionsLocked} onClick={() => void editStoryWithAi()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-50">
-                  <Wand2 size={14} /> Submit
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <EditStoryWithAiDialog
+        open={showEditDialog}
+        prompt={editPrompt}
+        submitting={actionsLocked}
+        onPromptChange={setEditPrompt}
+        onClose={() => setShowEditDialog(false)}
+        onSubmit={() => void editStoryWithAi()}
+      />
       {activeStep === 'video' && (
         <StoryVisualPreview
           draftReviewRequired={draftReviewRequired}
@@ -1000,9 +976,9 @@ function _SourceContentPreview({ source }: { source: Record<string, any> }) {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Nguồn bài viết</span>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-400">Nguồn bài viết</span>
               {sourceDomain && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200/80 bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">
                   <Globe size={10} />
                   {sourceDomain}
                 </span>
@@ -1121,13 +1097,13 @@ function SourceMediaItem({ item, index }: { item: Record<string, any>; index: nu
           </div>
         )}
 
-        <span className="absolute left-2 top-2 rounded-md bg-slate-950/70 backdrop-blur-xs px-2 py-0.5 text-[9px] font-black uppercase text-white tracking-wider">
+        <span className="absolute left-2 top-2 rounded-md bg-slate-950/70 backdrop-blur-xs px-2 py-0.5 text-xs font-black uppercase text-white tracking-wider">
           {isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'MEDIA'}
         </span>
       </div>
 
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] font-bold text-slate-600 bg-slate-50/80">
-        <span className="truncate text-slate-500 font-mono text-[10px]">#{index + 1}</span>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-bold text-slate-600 bg-slate-50/80">
+        <span className="truncate text-slate-500 font-mono text-xs">#{index + 1}</span>
         {mediaUrlValue && (
           <a
             href={mediaUrlValue}
@@ -1213,13 +1189,13 @@ function _StoryDataEditor({
             <div className="flex flex-wrap items-center gap-2">
               <ShieldCheck size={14} />
               <span>{meta.ai_story_review.action === 'REVISED' ? 'AI reviewer đã sửa draft' : 'AI reviewer đã duyệt draft'}</span>
-              {meta.ai_story_review.reviewed_at && <span className="text-[11px] opacity-75">{new Date(meta.ai_story_review.reviewed_at).toLocaleString()}</span>}
+              {meta.ai_story_review.reviewed_at && <span className="text-xs opacity-75">{new Date(meta.ai_story_review.reviewed_at).toLocaleString()}</span>}
             </div>
             {meta.ai_story_review.notes?.length ? (
               <div className="mt-1 line-clamp-2 opacity-90">{meta.ai_story_review.notes.join(' · ')}</div>
             ) : null}
             {meta.voice_invalidated_by_story_review ? (
-              <div className="mt-1 text-[11px] font-black text-amber-700">Voice cũ đã bị bỏ vì timeline/subtitle thay đổi.</div>
+              <div className="mt-1 text-xs font-black text-amber-700">Voice cũ đã bị bỏ vì timeline/subtitle thay đổi.</div>
             ) : null}
           </div>
         )}
@@ -2239,7 +2215,7 @@ function StudioProductionShell({
       <div className="shrink-0 px-3 pb-3 pt-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[#637097]">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#637097]">
               <button title="Quay lại" onClick={onExit} className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#dfe4f3] bg-white text-[#2d3463] shadow-sm hover:bg-[#f5f7ff]">
                 <ArrowLeft size={15} />
               </button>
@@ -2251,12 +2227,12 @@ function StudioProductionShell({
               <div className="grid h-8 w-8 place-items-center rounded-[8px] bg-[#ede9fe] text-[#6247ff]">
                 <Clapperboard size={16} />
               </div>
-              <h1 className="truncate text-[22px] font-black leading-tight text-[#11183c]">{getStoryProjectName(story)}</h1>
-              <span className={`rounded-[8px] px-3 py-1 text-[11px] font-black uppercase ${draftReviewRequired ? 'bg-amber-100 text-amber-800' : 'bg-[#d5f7e8] text-[#069467]'}`}>
+              <h1 className="truncate text-2xl font-black leading-tight text-[#11183c]">{getStoryProjectName(story)}</h1>
+              <span className={`rounded-[8px] px-3 py-1 text-xs font-black uppercase ${draftReviewRequired ? 'bg-amber-100 text-amber-800' : 'bg-[#d5f7e8] text-[#069467]'}`}>
                 {draftReviewRequired ? 'Cần duyệt draft' : 'Đã có draft'}
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 pl-11 text-[11px] font-bold text-[#4f5b7f]">
+            <div className="mt-2 flex flex-wrap items-center gap-2 pl-11 text-xs font-bold text-[#4f5b7f]">
               <span className="rounded bg-white px-2 py-1 shadow-sm">TikTok</span>
               <span className="rounded bg-white px-2 py-1 shadow-sm">SocialContentHub</span>
               <span className="rounded bg-white px-2 py-1 shadow-sm">{String(story.meta?.source || 'Ẩm thực')}</span>
@@ -2269,19 +2245,19 @@ function StudioProductionShell({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {onEditWithAi && (
-              <button onClick={onEditWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--primary)] px-3 text-[12px] font-bold text-white shadow-sm hover:opacity-90">
+              <button onClick={onEditWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--primary)] px-3 text-xs font-bold text-white shadow-sm hover:opacity-90">
                 <Wand2 size={13} /> Edit with AI
               </button>
             )}
             {onReviewWithAi && (
-              <button onClick={onReviewWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0f766e] px-3 text-[12px] font-bold text-white shadow-sm hover:opacity-90">
+              <button onClick={onReviewWithAi} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[#0f766e] px-3 text-xs font-bold text-white shadow-sm hover:opacity-90">
                 <ShieldCheck size={13} /> AI Review
               </button>
             )}
-            <button onClick={onReload} className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-[12px] font-bold text-[#27305b] shadow-sm hover:bg-[#f8faff]">
+            <button onClick={onReload} className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[#dfe4f3] bg-white px-3 text-xs font-bold text-[#27305b] shadow-sm hover:bg-[#f8faff]">
               <Rewind size={13} /> Reload
             </button>
-            <button disabled={exporting} onClick={onExport} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#6247ff] px-4 text-[12px] font-black text-white shadow-lg shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
+            <button disabled={exporting} onClick={onExport} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[#6247ff] px-4 text-xs font-black text-white shadow-lg shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
               <Download size={14} /> {exporting ? 'Đang render...' : 'Xuất MP4'}
             </button>
           </div>
@@ -2292,7 +2268,7 @@ function StudioProductionShell({
       <div className="grid min-h-0 flex-1 grid-cols-[250px_minmax(320px,1fr)_380px_280px] gap-3 overflow-hidden px-3 pb-3">
         <StudioSceneRail scenes={scenes} sceneIndex={sceneIndex} videoDuration={videoDuration} onDuplicate={onDuplicate} onSeek={onSeek} onSelect={onSelect} />
         <section className="relative flex min-w-0 flex-col overflow-hidden rounded-[8px] bg-[#d9deea] shadow-sm">
-          <div className="absolute left-4 top-20 z-10 grid gap-2 text-[12px] font-black text-[#27305b]">
+          <div className="absolute left-4 top-20 z-10 grid gap-2 text-xs font-black text-[#27305b]">
               {videoAspectPresets.map((preset) => (
                 <button
                   key={preset.label}
@@ -2313,7 +2289,7 @@ function StudioProductionShell({
             </div>
           </div>
           <div className="mx-3 mb-3 rounded-[14px] bg-white/40 px-3 py-2 backdrop-blur">
-            <div className="flex items-center justify-between text-[12px] font-black text-[#11183c]">
+            <div className="flex items-center justify-between text-xs font-black text-[#11183c]">
               <span>{formatStudioClock(currentTime)} / {formatStudioClock(videoDuration)}</span>
               <div className="flex items-center gap-3">
                 <button title="Về đầu" onClick={() => onSeek(0)} className="grid h-8 w-8 place-items-center rounded-full bg-white/80 text-[#27305b] shadow-sm"><SkipBack size={14} /></button>
@@ -2405,7 +2381,7 @@ function StudioStageProgress({ exporting, progress, voiceReady }: { exporting: b
   ]
   return (
     <div className="mt-5">
-      <div className="mb-1 flex justify-end text-[12px] font-black text-[#11183c]">{Math.round(progress)}%</div>
+      <div className="mb-1 flex justify-end text-xs font-black text-[#11183c]">{Math.round(progress)}%</div>
       <div className="relative h-12">
         <div className="absolute left-0 right-0 top-2 h-1 rounded-full bg-[#d8ddef]">
           <div className="h-full rounded-full bg-[#6247ff]" style={{ width: `${Math.max(28, Math.min(100, progress || 28))}%` }} />
@@ -2419,7 +2395,7 @@ function StudioStageProgress({ exporting, progress, voiceReady }: { exporting: b
                 <span className={`grid h-5 w-5 place-items-center rounded-full border-2 ${done ? 'border-[#16b78f] bg-[#16b78f] text-white' : active ? 'border-[#6247ff] bg-[#6247ff] text-white' : 'border-[#b9c1d8] bg-white text-[#8a94b4]'}`}>
                   {done ? <CheckCircle2 size={13} /> : <Circle size={9} fill="currentColor" />}
                 </span>
-                <span className={`text-[11px] font-black ${active ? 'text-[#6247ff]' : done ? 'text-[#16b78f]' : 'text-[#667097]'}`}>{stage.label}</span>
+                <span className={`text-xs font-black ${active ? 'text-[#6247ff]' : done ? 'text-[#16b78f]' : 'text-[#667097]'}`}>{stage.label}</span>
               </div>
             )
           })}
@@ -2447,11 +2423,11 @@ function StudioSceneRail({
   return (
     <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#e8ecf7] px-3">
-        <div className="flex items-center gap-2 text-[13px] font-black text-[#11183c]">
+        <div className="flex items-center gap-2 text-sm font-black text-[#11183c]">
           <FileText size={15} className="text-[#6247ff]" />
           Kịch bản ({scenes.length})
         </div>
-        <button title="AI gợi ý" className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#c9c2ff] px-2 text-[11px] font-bold text-[#6247ff]">
+        <button title="AI gợi ý" className="inline-flex h-7 items-center gap-1 rounded-[8px] border border-[#c9c2ff] px-2 text-xs font-bold text-[#6247ff]">
           <Wand2 size={12} /> AI gợi ý
         </button>
       </div>
@@ -2469,22 +2445,22 @@ function StudioSceneRail({
               }}
               className={`grid w-full grid-cols-[24px_84px_minmax(0,1fr)] gap-2 rounded-[8px] border p-2 text-left transition ${active ? 'border-[#6247ff] bg-[#f4f2ff] shadow-sm ring-2 ring-[#6247ff]/10' : 'border-transparent hover:border-[#dfe4f3] hover:bg-[#f8faff]'}`}
             >
-              <span className={`grid h-7 w-6 place-items-center rounded-[6px] text-[12px] font-black ${active ? 'bg-white text-[#6247ff]' : 'bg-[#f3f6fd] text-[#667097]'}`}>{index + 1}</span>
+              <span className={`grid h-7 w-6 place-items-center rounded-[6px] text-xs font-black ${active ? 'bg-white text-[#6247ff]' : 'bg-[#f3f6fd] text-[#667097]'}`}>{index + 1}</span>
               <SceneMediaThumb scene={scene} className="h-14 w-[84px] rounded-[6px] object-cover" />
               <span className="min-w-0">
-                <span className="block truncate text-[12px] font-black text-[#11183c]">Scene {index + 1}</span>
-                <span className="mt-0.5 block truncate text-[11px] font-semibold text-[#56617f]">{scene.subtitle || fileNameFromPath(scene.image || '')}</span>
-                <span className="mt-1 block text-[10px] font-bold text-[#7782a4]">{formatStudioClock(start)} - {formatStudioClock(end)}</span>
+                <span className="block truncate text-xs font-black text-[#11183c]">Scene {index + 1}</span>
+                <span className="mt-0.5 block truncate text-xs font-semibold text-[#56617f]">{scene.subtitle || fileNameFromPath(scene.image || '')}</span>
+                <span className="mt-1 block text-xs font-bold text-[#7782a4]">{formatStudioClock(start)} - {formatStudioClock(end)}</span>
               </span>
             </button>
           )
         })}
       </div>
       <div className="border-t border-[#e8ecf7] p-2">
-        <button onClick={onDuplicate} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white text-[12px] font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
+        <button onClick={onDuplicate} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border border-[#dfe4f3] bg-white text-xs font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
           <Plus size={14} /> Thêm scene
         </button>
-        <div className="mt-1 text-center text-[10px] font-bold text-[#98a2c3]">{formatStudioClock(videoDuration)} tổng thời lượng</div>
+        <div className="mt-1 text-center text-xs font-bold text-[#98a2c3]">{formatStudioClock(videoDuration)} tổng thời lượng</div>
       </div>
     </aside>
   )
@@ -2588,21 +2564,21 @@ function StudioSceneEditorPanel({
       <input ref={mediaInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleMediaChange} />
       <input ref={addFrameInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleAddFrame} />
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-[#e8ecf7] px-3">
-        <div className="text-[15px] font-black text-[#11183c]">Scene {sceneIndex + 1}/{scenes.length}</div>
+        <div className="text-base font-black text-[#11183c]">Scene {sceneIndex + 1}/{scenes.length}</div>
         <div className="flex items-center gap-1.5">
           {onEditWithAi && (
-            <button onClick={onEditWithAi} title="Edit with AI" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[var(--primary)] px-2 text-[11px] font-bold text-white hover:opacity-90">
+            <button onClick={onEditWithAi} title="Edit with AI" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[var(--primary)] px-2 text-xs font-bold text-white hover:opacity-90">
               <Wand2 size={12} /> AI Edit
             </button>
           )}
           {onReviewWithAi && (
-            <button onClick={onReviewWithAi} title="AI Review" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[#0f766e] px-2 text-[11px] font-bold text-white hover:opacity-90">
+            <button onClick={onReviewWithAi} title="AI Review" className="inline-flex h-7 items-center gap-1 rounded-[7px] bg-[#0f766e] px-2 text-xs font-bold text-white hover:opacity-90">
               <ShieldCheck size={12} /> Review
             </button>
           )}
         </div>
       </div>
-      <div className="grid h-10 shrink-0 grid-cols-2 border-b border-[#e8ecf7] text-[12px] font-black">
+      <div className="grid h-10 shrink-0 grid-cols-2 border-b border-[#e8ecf7] text-xs font-black">
         <button onClick={() => setActiveTab('frame')} className={activeTab === 'frame' ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#667097] hover:bg-[#f8faff]'}>Frame</button>
         <button onClick={() => setActiveTab('video')} className={activeTab === 'video' ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#667097] hover:bg-[#f8faff]'}>Video</button>
       </div>
@@ -2612,9 +2588,9 @@ function StudioSceneEditorPanel({
             {currentScene ? <SceneMediaThumb scene={currentScene} className="h-full w-full object-cover" /> : null}
           </div>
           <div className="grid grid-cols-3 gap-2 border-t border-[#dfe4f3] bg-white p-2">
-            <button onClick={() => mediaInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b] hover:bg-[#f8faff]"><ImageIcon size={12} /> Thay media</button>
-            <button onClick={onEditWithAi} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-[11px] font-bold text-[#27305b] hover:bg-[#f8faff]"><Wand2 size={12} /> AI Edit</button>
-            <button onClick={() => addFrameInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] text-[11px] font-bold text-[#6247ff] hover:bg-[#eeeaff]"><Plus size={12} /> Thêm frame</button>
+            <button onClick={() => mediaInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-xs font-bold text-[#27305b] hover:bg-[#f8faff]"><ImageIcon size={12} /> Thay media</button>
+            <button onClick={onEditWithAi} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#dfe4f3] text-xs font-bold text-[#27305b] hover:bg-[#f8faff]"><Wand2 size={12} /> AI Edit</button>
+            <button onClick={() => addFrameInputRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] text-xs font-bold text-[#6247ff] hover:bg-[#eeeaff]"><Plus size={12} /> Thêm frame</button>
           </div>
         </div>
 
@@ -2630,7 +2606,7 @@ function StudioSceneEditorPanel({
               <button
                 key={effect.value}
                 onClick={() => updateScene({ effect: effect.value })}
-                className={`h-8 rounded-[7px] border px-1 text-[10px] font-bold ${currentScene?.effect === effect.value ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
+                className={`h-8 rounded-[7px] border px-1 text-xs font-bold ${currentScene?.effect === effect.value ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568] hover:bg-[#f8faff]'}`}
               >
                 {effect.label}
               </button>
@@ -2640,9 +2616,9 @@ function StudioSceneEditorPanel({
 
         <StudioSection title="Cách hiển thị">
           <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => applyFitAll('contain')} className="h-8 rounded-[7px] border border-[#6247ff] bg-[#f4f2ff] text-[11px] font-bold text-[#6247ff]">All</button>
-            <button onClick={() => updateScene({ fit: 'cover' })} className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === 'cover' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Làm đầy</button>
-            <button onClick={() => updateScene({ fit: 'contain' })} className={`h-8 rounded-[7px] border text-[11px] font-bold ${getSceneMediaFit(currentScene) === 'contain' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Fit</button>
+            <button onClick={() => applyFitAll('contain')} className="h-8 rounded-[7px] border border-[#6247ff] bg-[#f4f2ff] text-xs font-bold text-[#6247ff]">All</button>
+            <button onClick={() => updateScene({ fit: 'cover' })} className={`h-8 rounded-[7px] border text-xs font-bold ${getSceneMediaFit(currentScene) === 'cover' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Làm đầy</button>
+            <button onClick={() => updateScene({ fit: 'contain' })} className={`h-8 rounded-[7px] border text-xs font-bold ${getSceneMediaFit(currentScene) === 'contain' ? 'border-[#6247ff] bg-[#f4f2ff] text-[#6247ff]' : 'border-[#dfe4f3] text-[#3b4568]'}`}>Fit</button>
           </div>
         </StudioSection>
 
@@ -2663,7 +2639,7 @@ function StudioSceneEditorPanel({
             onFontSizeChange={(value) => updateSubtitleStyle({ fontSize: value })}
             onTextChange={(value) => updateScene({ subtitle: value })}
           />
-          <button type="button" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#c9c2ff] text-[12px] font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
+          <button type="button" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#c9c2ff] text-xs font-bold text-[#6247ff] hover:bg-[#f7f5ff]">
             <Plus size={14} /> Thêm text / sticker
           </button>
         </StudioSection>
@@ -2777,7 +2753,7 @@ function StudioInspector({
     activeTab === tab ? 'border-b-2 border-[#6247ff] text-[#6247ff]' : 'text-[#56617f] hover:bg-[#f8faff] hover:text-[#27305b]'
   return (
     <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#dfe4f3] bg-white shadow-sm">
-      <div className="grid h-11 shrink-0 grid-cols-3 border-b border-[#e8ecf7] text-[12px] font-black text-[#56617f]">
+      <div className="grid h-11 shrink-0 grid-cols-3 border-b border-[#e8ecf7] text-xs font-black text-[#56617f]">
         <button onClick={() => setActiveTab('info')} className={tabClass('info')}>Thông tin</button>
         <button onClick={() => setActiveTab('ai')} className={tabClass('ai')}>AI gợi ý</button>
         <button onClick={() => setActiveTab('script')} className={tabClass('script')}>Script</button>
@@ -2857,15 +2833,15 @@ function StudioInspector({
           <>
             <StudioSection title="AI review">
               {review ? (
-                <div className={`rounded-[8px] border px-3 py-2 text-[12px] font-bold ${review.action === 'REVISED' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+                <div className={`rounded-[8px] border px-3 py-2 text-xs font-bold ${review.action === 'REVISED' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span>{review.action === 'REVISED' ? 'AI đã chỉnh draft' : 'AI đã duyệt draft'}</span>
-                    {review.reviewed_at && <span className="text-[10px] opacity-75">{new Date(review.reviewed_at).toLocaleString()}</span>}
+                    {review.reviewed_at && <span className="text-xs opacity-75">{new Date(review.reviewed_at).toLocaleString()}</span>}
                   </div>
-                  {reviewNotes.length ? <div className="mt-1 text-[11px] font-semibold opacity-90">{reviewNotes.join(' · ')}</div> : null}
+                  {reviewNotes.length ? <div className="mt-1 text-xs font-semibold opacity-90">{reviewNotes.join(' · ')}</div> : null}
                 </div>
               ) : (
-                <div className="rounded-[8px] border border-dashed border-[#cfd6ea] bg-[#f8faff] px-3 py-3 text-[12px] font-semibold text-[#667097]">
+                <div className="rounded-[8px] border border-dashed border-[#cfd6ea] bg-[#f8faff] px-3 py-3 text-xs font-semibold text-[#667097]">
                   Chưa có kết quả AI review cho draft này.
                 </div>
               )}
@@ -2873,19 +2849,19 @@ function StudioInspector({
 
             <StudioSection title={`Gợi ý nhanh cho scene ${sceneIndex + 1}`}>
               <div className="grid gap-2">
-                <button type="button" onClick={() => updateScene({ effect: 'slow-zoom', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                <button type="button" onClick={() => updateScene({ effect: 'slow-zoom', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-xs font-bold text-[#27305b] hover:bg-[#f8faff]">
                   Slow zoom + làm đầy khung
                 </button>
-                <button type="button" onClick={() => updateScene({ effect: 'pan-right', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                <button type="button" onClick={() => updateScene({ effect: 'pan-right', fit: 'cover' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-xs font-bold text-[#27305b] hover:bg-[#f8faff]">
                   Pan right cho ảnh có không gian ngang
                 </button>
-                <button type="button" onClick={() => updateScene({ fit: 'contain' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                <button type="button" onClick={() => updateScene({ fit: 'contain' })} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-xs font-bold text-[#27305b] hover:bg-[#f8faff]">
                   Giữ nguyên ảnh, dùng background làm nền
                 </button>
-                <button type="button" onClick={applyReadableSubtitleStyle} className="h-9 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] px-3 text-left text-[12px] font-bold text-[#6247ff] hover:bg-[#f0edff]">
+                <button type="button" onClick={applyReadableSubtitleStyle} className="h-9 rounded-[7px] border border-[#c9c2ff] bg-[#f7f5ff] px-3 text-left text-xs font-bold text-[#6247ff] hover:bg-[#f0edff]">
                   Tối ưu chữ phụ đề cho mobile
                 </button>
-                <button type="button" onClick={copySubtitleToVoice} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-[12px] font-bold text-[#27305b] hover:bg-[#f8faff]">
+                <button type="button" onClick={copySubtitleToVoice} className="h-9 rounded-[7px] border border-[#dfe4f3] px-3 text-left text-xs font-bold text-[#27305b] hover:bg-[#f8faff]">
                   Dùng subtitle hiện tại làm voice text
                 </button>
               </div>
@@ -2908,7 +2884,7 @@ function StudioInspector({
               <div className="space-y-2">
                 {scenes.map((scene, index) => (
                   <div key={`${scene.video_id || 'no-media'}:${scene.text_id || index}-script`} className={`rounded-[8px] border p-2 ${index === sceneIndex ? 'border-[#6247ff] bg-[#f7f5ff]' : 'border-[#e3e8f4] bg-white'}`}>
-                    <button type="button" onClick={() => onSelect(index)} className="mb-1 flex w-full items-center justify-between text-left text-[11px] font-black text-[#27305b]">
+                    <button type="button" onClick={() => onSelect(index)} className="mb-1 flex w-full items-center justify-between text-left text-xs font-black text-[#27305b]">
                       <span>Scene {index + 1}</span>
                       <span>{formatStudioClock(getSceneStart(scenes, index))}</span>
                     </button>
@@ -2921,10 +2897,10 @@ function StudioInspector({
         )}
       </div>
       <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-[#e8ecf7] p-3">
-        <button onClick={onSave} className="h-9 rounded-[8px] border border-[#c9c2ff] bg-white text-[12px] font-black text-[#6247ff] hover:bg-[#f7f5ff]">
+        <button onClick={onSave} className="h-9 rounded-[8px] border border-[#c9c2ff] bg-white text-xs font-black text-[#6247ff] hover:bg-[#f7f5ff]">
           Lưu chỉnh sửa
         </button>
-        <button onClick={onGenerateVoice} disabled={voiceGenerating} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] bg-[#6247ff] text-[12px] font-black text-white shadow-sm shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
+        <button onClick={onGenerateVoice} disabled={voiceGenerating} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] bg-[#6247ff] text-xs font-black text-white shadow-sm shadow-[#6247ff]/25 hover:bg-[#4f36ee] disabled:opacity-50">
           <Mic2 size={14} /> {voiceGenerating ? 'Đang tạo' : 'Tạo Voice AI'}
         </button>
         <select
@@ -2932,7 +2908,7 @@ function StudioInspector({
           value={voiceProvider}
           disabled={voiceGenerating}
           onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
-          className="col-span-2 h-8 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-[11px] font-bold text-[#2d3463] outline-none disabled:opacity-50"
+          className="col-span-2 h-8 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-xs font-bold text-[#2d3463] outline-none disabled:opacity-50"
         >
           {voiceProviderOptions.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -2943,12 +2919,12 @@ function StudioInspector({
   )
 }
 
-const studioInputClass = 'h-9 w-full min-w-0 rounded-[7px] border border-[#dfe4f3] bg-white px-2.5 text-[12px] font-semibold text-[#27305b] outline-none focus:border-[#6247ff] focus:ring-2 focus:ring-[#6247ff]/10'
+const studioInputClass = 'h-9 w-full min-w-0 rounded-[7px] border border-[#dfe4f3] bg-white px-2.5 text-xs font-semibold text-[#27305b] outline-none focus:border-[#6247ff] focus:ring-2 focus:ring-[#6247ff]/10'
 
 function StudioSection({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <section className="space-y-2.5 border-b border-[#eef1f8] pb-4 last:border-b-0">
-      <div className="text-[12px] font-black text-[#11183c]">{title}</div>
+      <div className="text-xs font-black text-[#11183c]">{title}</div>
       {children}
     </section>
   )
@@ -2957,7 +2933,7 @@ function StudioSection({ children, title }: { children: React.ReactNode; title: 
 function StudioField({ children, label }: { children: React.ReactNode; label: string }) {
   return (
     <label className="grid gap-1">
-      <span className="text-[10px] font-black text-[#667097]">{label}</span>
+      <span className="text-xs font-black text-[#667097]">{label}</span>
       {children}
     </label>
   )
@@ -2967,7 +2943,7 @@ function StudioVolume({ label, value, onChange }: { label: string; value: number
   const normalized = clampNumber(value, 0, 1)
   return (
     <label className="grid gap-1">
-      <span className="flex items-center justify-between text-[10px] font-black text-[#667097]">
+      <span className="flex items-center justify-between text-xs font-black text-[#667097]">
         <span>{label}</span>
         <span>{Math.round(normalized * 100)}%</span>
       </span>
@@ -3006,7 +2982,7 @@ function StudioAudioPath({
 
 function StudioCheckbox({ checked, label }: { checked: boolean; label: string }) {
   return (
-    <label className="flex items-center gap-2 text-[12px] font-bold text-[#27305b]">
+    <label className="flex items-center gap-2 text-xs font-bold text-[#27305b]">
       <input type="checkbox" checked={checked} readOnly className="h-4 w-4 rounded border-[#c9c2ff]" style={{ accentColor: '#6247ff' }} />
       <span>{label}</span>
     </label>
@@ -3089,11 +3065,11 @@ function StudioTimelinePanel({
     <section className="relative h-[232px] shrink-0 overflow-hidden border-t border-[#dfe4f3] bg-white px-3 pb-3 pt-2">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex gap-1.5">
-          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><ScissorsIcon /> Tách</button>
-          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><Trash2 size={12} /> Xóa</button>
-          <button onClick={onAddTrack} className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-[11px] font-bold text-[#27305b]"><Plus size={12} /> Thêm media</button>
+          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-xs font-bold text-[#27305b]"><ScissorsIcon /> Tách</button>
+          <button className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-xs font-bold text-[#27305b]"><Trash2 size={12} /> Xóa</button>
+          <button onClick={onAddTrack} className="inline-flex h-7 items-center gap-1 rounded-[7px] border border-[#dfe4f3] px-2 text-xs font-bold text-[#27305b]"><Plus size={12} /> Thêm media</button>
         </div>
-        <div className="text-[11px] font-black text-[#667097]">{formatStudioClock(videoDuration)} · {Math.round(videoDuration * fps)} frames</div>
+        <div className="text-xs font-black text-[#667097]">{formatStudioClock(videoDuration)} · {Math.round(videoDuration * fps)} frames</div>
       </div>
       <div className="relative h-[190px] overflow-x-auto overflow-y-hidden rounded-[8px] border border-[#dfe4f3] bg-[#f7f9ff]">
         <StudioFrameRuler duration={videoDuration} fps={fps} headerWidth={118} onSeek={onSeek} />
@@ -3115,7 +3091,7 @@ function StudioTimelinePanel({
           }}
         >
           <div className="h-full w-0.5 bg-[#14b8a6]" />
-          <div className="absolute top-0 rounded bg-[#6247ff] px-1 py-0.5 text-[9px] font-black text-white">{formatStudioClock((playheadLeft / 100) * videoDuration)}</div>
+          <div className="absolute top-0 rounded bg-[#6247ff] px-1 py-0.5 text-xs font-black text-white">{formatStudioClock((playheadLeft / 100) * videoDuration)}</div>
         </div>
         {audioMenu && (
           <div className="fixed z-[70] min-w-36 rounded-[8px] border border-[#dfe4f3] bg-white p-1 shadow-xl" style={{ left: audioMenu.x, top: audioMenu.y }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
@@ -3179,7 +3155,7 @@ function StudioTimelinePanel({
                       onUpdateSubtitleTiming(drag.index, drag.start + (event.clientX - drag.startX) * secondsPerPixel, drag.duration)
                     }}
                     onPointerUp={() => { subtitleDragRef.current = null }}
-                    className="h-full w-full cursor-grab truncate px-2 text-left text-[10px] font-black text-[#5f3900]"
+                    className="h-full w-full cursor-grab truncate px-2 text-left text-xs font-black text-[#5f3900]"
                   >
                     {scene.subtitle}
                   </button>
@@ -3231,7 +3207,7 @@ function StudioTimelinePanel({
 function StudioTimelineTrack({ children, icon, label, muted, onToggleMute }: { children: React.ReactNode; icon: React.ReactNode; label: string; muted?: boolean; onToggleMute?: () => void }) {
   return (
     <div className="grid grid-cols-[118px_minmax(900px,1fr)] border-t border-[#e8ecf7] first:border-t-0">
-      <div className="flex h-8 items-center justify-between border-r border-[#e8ecf7] bg-[#f2f5fc] px-2 text-[10px] font-black text-[#27305b]">
+      <div className="flex h-8 items-center justify-between border-r border-[#e8ecf7] bg-[#f2f5fc] px-2 text-xs font-black text-[#27305b]">
         <span className="flex min-w-0 items-center gap-1.5">
           {icon}
           <span className="truncate">{label}</span>
@@ -3250,7 +3226,7 @@ function StudioTimelineTrack({ children, icon, label, muted, onToggleMute }: { c
 function StudioFrameRuler({ duration, fps, headerWidth, onSeek }: { duration: number; fps: number; headerWidth: number; onSeek: (time: number) => void }) {
   const ticks = Array.from({ length: 13 })
   return (
-    <div className="flex h-7 cursor-pointer items-start justify-between border-b border-[#e8ecf7] bg-white pr-3 text-[10px] font-black text-[#667097]" style={{ marginLeft: headerWidth }} onClick={(event) => {
+    <div className="flex h-7 cursor-pointer items-start justify-between border-b border-[#e8ecf7] bg-white pr-3 text-xs font-black text-[#667097]" style={{ marginLeft: headerWidth }} onClick={(event) => {
       const rect = event.currentTarget.getBoundingClientRect()
       onSeek(((event.clientX - rect.left) / Math.max(1, rect.width)) * duration)
     }}>
@@ -3331,7 +3307,7 @@ function StudioExtraAudioClip({
 }
 
 function ScissorsIcon() {
-  return <span className="text-[12px] font-black">⌘</span>
+  return <span className="text-xs font-black">⌘</span>
 }
 
 function FigmaIcon({ className = '', name, size = 14 }: { className?: string; name: keyof typeof proCutFigmaAssets; size?: number }) {
@@ -3424,9 +3400,9 @@ function ProCutTopToolbar({
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex shrink-0 items-center gap-1">
           <span className="size-[18px] rounded bg-[#ff6200]" />
-          <span className="text-[14px] font-extrabold text-[#f1f1f6]">PRO CUT</span>
+          <span className="text-sm font-extrabold text-[#f1f1f6]">PRO CUT</span>
         </div>
-        <div className="hidden items-center gap-3 text-[12px] font-medium text-[#9e9eae] lg:flex">
+        <div className="hidden items-center gap-3 text-xs font-medium text-[#9e9eae] lg:flex">
           <button>File</button>
           <button>Edit</button>
           <button>Clip</button>
@@ -3438,9 +3414,9 @@ function ProCutTopToolbar({
       </div>
 
       <div className="mx-3 hidden min-w-0 items-center gap-2 text-center lg:flex">
-        <p className="max-w-[300px] truncate text-[12px] font-semibold text-[#f1f1f6]">{projectName}</p>
+        <p className="max-w-[300px] truncate text-xs font-semibold text-[#f1f1f6]">{projectName}</p>
         <span className="size-1 rounded-sm bg-[#626272]" />
-        <p className="text-[11px] text-[#626272]">{story.video?.width || 1080}x{story.video?.height || 1920} · {fps} fps · {Math.round(videoDuration * fps)} frames</p>
+        <p className="text-xs text-[#626272]">{story.video?.width || 1080}x{story.video?.height || 1920} · {fps} fps · {Math.round(videoDuration * fps)} frames</p>
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
@@ -3454,7 +3430,7 @@ function ProCutTopToolbar({
           value={voiceProvider}
           disabled={voiceGenerating || saving || exporting}
           onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
-          className="h-[26px] rounded border border-[#2d2d37] bg-[#1e1e24] px-2 text-[11px] font-semibold text-[#f1f1f6] outline-none hover:bg-[#26262e] disabled:opacity-50"
+          className="h-[26px] rounded border border-[#2d2d37] bg-[#1e1e24] px-2 text-xs font-semibold text-[#f1f1f6] outline-none hover:bg-[#26262e] disabled:opacity-50"
         >
           {voiceProviderOptions.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -3488,7 +3464,7 @@ function ToolbarActionButton({ active, disabled, icon, label, onClick }: { activ
     <button
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-[26px] items-center gap-[6px] rounded px-[10px] text-[11px] font-semibold disabled:opacity-50 ${active ? 'bg-[#ff6200] text-white hover:bg-[#ea580c]' : 'border border-[#2d2d37] bg-[#1e1e24] text-[#f1f1f6] hover:bg-[#26262e]'}`}
+      className={`inline-flex h-[26px] items-center gap-[6px] rounded px-[10px] text-xs font-semibold disabled:opacity-50 ${active ? 'bg-[#ff6200] text-white hover:bg-[#ea580c]' : 'border border-[#2d2d37] bg-[#1e1e24] text-[#f1f1f6] hover:bg-[#26262e]'}`}
     >
       {icon}
       {label}
@@ -3533,8 +3509,8 @@ function ProCutAddAudioPanel({
       <div className="grid w-full max-w-[520px] gap-4 rounded-lg border border-[#2d2d37] bg-[#111115] p-4 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[11px] font-bold uppercase text-[#9e9eae]">Add Track</div>
-            <div className="mt-1 text-[13px] font-bold text-[#f1f1f6]">Thêm audio vào timeline tại playhead</div>
+            <div className="text-xs font-bold uppercase text-[#9e9eae]">Add Track</div>
+            <div className="mt-1 text-sm font-bold text-[#f1f1f6]">Thêm audio vào timeline tại playhead</div>
           </div>
           <button aria-label="Close add track" onClick={onCancel} className="flex size-8 items-center justify-center rounded border border-[#2d2d37] bg-[#1e1e24] text-[#f1f1f6] hover:bg-[#26262e]">
             <X size={15} />
@@ -3549,7 +3525,7 @@ function ProCutAddAudioPanel({
               className={`grid min-h-16 gap-1 rounded-md border px-3 py-2 text-left ${type === option.type ? 'border-[#ff6200] bg-[#ff6200]/15 text-white' : 'border-[#2d2d37] bg-[#1e1e24] text-[#f1f1f6] hover:bg-[#26262e]'}`}
             >
               <span className="text-xs font-black uppercase">{option.label}</span>
-              <span className="text-[10px] font-semibold text-[#9e9eae]">{option.hint}</span>
+              <span className="text-xs font-semibold text-[#9e9eae]">{option.hint}</span>
             </button>
           ))}
         </div>
@@ -3577,7 +3553,7 @@ function ProCutAddAudioPanel({
               placeholder="https://... hoặc assets/audio/..."
               className="h-9 rounded border border-[#2d2d37] bg-[#1e1e24] px-2 text-xs font-semibold text-white outline-none"
             />
-            <button type="button" onClick={() => onLinkChange('assets/audio/demo-ambient.wav')} className="justify-self-start rounded border border-[#2d2d37] bg-[#1e1e24] px-2 py-1 text-[11px] font-semibold text-[#f1f1f6] hover:bg-[#26262e]">
+            <button type="button" onClick={() => onLinkChange('assets/audio/demo-ambient.wav')} className="justify-self-start rounded border border-[#2d2d37] bg-[#1e1e24] px-2 py-1 text-xs font-semibold text-[#f1f1f6] hover:bg-[#26262e]">
               Dùng demo audio
             </button>
           </label>
@@ -3644,7 +3620,7 @@ function ProCutMainSplit({
             <FigmaIcon name="ellipse" size={10} className="-ml-1 opacity-90 group-hover:opacity-100" />
           </button>
           <div className="flex items-center justify-between">
-            <p className="text-[14px] font-bold text-[#ff6200]">{formatTimelineClock(currentTime, fps)}</p>
+            <p className="text-sm font-bold text-[#ff6200]">{formatTimelineClock(currentTime, fps)}</p>
             <div className="flex items-center gap-4 text-[#9e9eae]">
               <button aria-label="Skip back" onClick={() => onSeek(0)}><FigmaIcon name="skipBack" size={16} /></button>
               <button aria-label="Rewind" onClick={() => onSeek(Math.max(0, currentTime - 1))}><FigmaIcon name="rewind" size={16} /></button>
@@ -3654,7 +3630,7 @@ function ProCutMainSplit({
               <button aria-label="Forward" onClick={() => onSeek(Math.min(videoDuration, currentTime + 1))}><FigmaIcon name="fastForward" size={16} /></button>
               <button aria-label="Skip forward" onClick={() => onSeek(videoDuration)}><FigmaIcon name="skipForward" size={16} /></button>
             </div>
-            <p className="text-[13px] font-medium text-[#9e9eae]">{formatTimelineClock(videoDuration, fps)}</p>
+            <p className="text-sm font-medium text-[#9e9eae]">{formatTimelineClock(videoDuration, fps)}</p>
           </div>
         </div>
       </section>
@@ -3674,7 +3650,7 @@ function ProCutMainSplit({
 function PaneHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="flex h-9 shrink-0 items-center justify-between border border-[#2d2d37] bg-[#1e1e24] px-4">
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase text-[#9e9eae]">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase text-[#9e9eae]">
         {icon}
         {title}
       </div>
@@ -3724,19 +3700,19 @@ function ProCutInspector({
       <PaneHeader icon={<FigmaIcon name="settingsPanel" size={14} />} title="Inspector / Properties" />
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         <div className="space-y-1">
-          <p className="text-[10px] font-semibold uppercase text-[#626272]">Selected Clip</p>
-          <p className="truncate text-[13px] font-bold text-[#f1f1f6]">{selectedName}</p>
+          <p className="text-xs font-semibold uppercase text-[#626272]">Selected Clip</p>
+          <p className="truncate text-sm font-bold text-[#f1f1f6]">{selectedName}</p>
         </div>
         <InspectorDivider />
 
         <InspectorSection title="Transform">
-          <label className="grid gap-1 text-[10px] text-[#626272]">
+          <label className="grid gap-1 text-xs text-[#626272]">
             Media Fit
             <div className="grid grid-cols-[1fr_58px] gap-2">
               <select
                 value={mediaFit}
                 onChange={(event) => updateSceneAt(story, scenes, sceneIndex, { fit: event.target.value }, onChange)}
-                className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] font-semibold text-[#f1f1f6] outline-none"
+                className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-xs font-semibold text-[#f1f1f6] outline-none"
               >
                 <option value="contain">Để nguyên</option>
                 <option value="cover">Làm đầy</option>
@@ -3744,7 +3720,7 @@ function ProCutInspector({
               <button
                 type="button"
                 onClick={() => onChange(updateRenderScenes(story, scenes.map((scene) => ({ ...scene, fit: mediaFit }))))}
-                className="h-8 rounded border border-[#2d2d37] bg-[#1e1e24] text-[11px] font-bold text-[#f1f1f6] hover:bg-[#26262e]"
+                className="h-8 rounded border border-[#2d2d37] bg-[#1e1e24] text-xs font-bold text-[#f1f1f6] hover:bg-[#26262e]"
               >
                 All
               </button>
@@ -3765,12 +3741,12 @@ function ProCutInspector({
 
         <InspectorDivider />
         <InspectorSection title="Subtitle">
-          <label className="grid gap-1 text-[10px] text-[#626272]">
+          <label className="grid gap-1 text-xs text-[#626272]">
             Font
             <select
               value={subtitleFontFamily}
               onChange={(event) => updateSubtitleStyle({ fontFamily: event.target.value })}
-              className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] font-semibold text-[#f1f1f6] outline-none"
+              className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-xs font-semibold text-[#f1f1f6] outline-none"
             >
               <option value="Inter, system-ui, sans-serif">Inter</option>
               <option value="Arial, Helvetica, sans-serif">Arial</option>
@@ -3789,12 +3765,12 @@ function ProCutInspector({
 
         <InspectorDivider />
         <InspectorSection title="Active Effects">
-          <label className="grid gap-1 text-[10px] text-[#626272]">
+          <label className="grid gap-1 text-xs text-[#626272]">
             Effect
             <select
               value={currentScene?.effect || 'slow-zoom'}
               onChange={(event) => updateSceneAt(story, scenes, sceneIndex, { effect: event.target.value }, onChange)}
-              className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] font-semibold text-[#f1f1f6] outline-none"
+              className="h-8 rounded border border-[#2d2d37] bg-[#111115] px-2 text-xs font-semibold text-[#f1f1f6] outline-none"
             >
               <option value="slow-zoom">slow-zoom</option>
               <option value="pan-right">pan-right</option>
@@ -3802,7 +3778,7 @@ function ProCutInspector({
               <option value="push-in">push-in</option>
             </select>
           </label>
-          <div className="flex h-[30px] items-center gap-2 rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] font-semibold text-[#f1f1f6]">
+          <div className="flex h-[30px] items-center gap-2 rounded border border-[#2d2d37] bg-[#111115] px-2 text-xs font-semibold text-[#f1f1f6]">
             <FigmaIcon name="eye" size={14} />
             <span>{currentScene?.effect || 'slow-zoom'}</span>
           </div>
@@ -3815,7 +3791,7 @@ function ProCutInspector({
 function InspectorSection({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <div className="space-y-3">
-      <p className="text-[11px] font-bold uppercase text-[#9e9eae]">{title}</p>
+      <p className="text-xs font-bold uppercase text-[#9e9eae]">{title}</p>
       {children}
     </div>
   )
@@ -3828,8 +3804,8 @@ function InspectorDivider() {
 function InspectorNumber({ label, max, min, step, suffix, value, onChange }: { label: string; max: number; min: number; step: number; suffix: string; value: number; onChange: (value: number) => void }) {
   return (
     <label className="space-y-1">
-      <p className="text-[10px] text-[#626272]">{label}</p>
-      <div className="flex h-8 items-center rounded border border-[#2d2d37] bg-[#111115] px-2 text-[11px] text-[#f1f1f6]">
+      <p className="text-xs text-[#626272]">{label}</p>
+      <div className="flex h-8 items-center rounded border border-[#2d2d37] bg-[#111115] px-2 text-xs text-[#f1f1f6]">
         <input
           type="number"
           min={min}
@@ -3847,10 +3823,10 @@ function InspectorNumber({ label, max, min, step, suffix, value, onChange }: { l
 
 function InspectorSlider({ label, max, min = 0, step = 0.01, value, onChange }: { label: string; max: number; min?: number; step?: number; value: number; onChange: (value: number) => void }) {
   return (
-    <label className="grid gap-1 text-[10px] text-[#626272]">
+    <label className="grid gap-1 text-xs text-[#626272]">
       <span className="flex items-center justify-between">
         <span>{label}</span>
-        <span className="text-[11px] text-[#f1f1f6]">{value.toFixed(2)}</span>
+        <span className="text-xs text-[#f1f1f6]">{value.toFixed(2)}</span>
       </span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} style={{ accentColor: '#ff6200' }} />
     </label>
@@ -4000,8 +3976,8 @@ function ProCutTimelinePanel({
                       className="h-full w-full overflow-hidden text-left"
                     >
                       <SceneMediaThumb scene={scene} className="absolute left-1 top-1 h-9 w-9 rounded object-cover opacity-80" />
-                      <span className="absolute left-12 top-1 max-w-[calc(100%-54px)] truncate text-[10px] font-semibold text-white">{fileNameFromPath(scene.image || `${mediaType}_clip`)}</span>
-                      <span className="absolute bottom-1 left-12 text-[9px] font-semibold text-white/80">{Number(scene.duration || 0).toFixed(2)}s · {mediaType}</span>
+                      <span className="absolute left-12 top-1 max-w-[calc(100%-54px)] truncate text-xs font-semibold text-white">{fileNameFromPath(scene.image || `${mediaType}_clip`)}</span>
+                      <span className="absolute bottom-1 left-12 text-xs font-semibold text-white/80">{Number(scene.duration || 0).toFixed(2)}s · {mediaType}</span>
                     </button>
                     {visualScenes.length === scenes.length && index < scenes.length - 1 && (
                       <button
@@ -4076,7 +4052,7 @@ function ProCutTimelinePanel({
                         onUpdateSubtitleTiming(drag.index, drag.start + (event.clientX - drag.startX) * secondsPerPixel, drag.duration)
                       }}
                       onPointerUp={() => { subtitleDragRef.current = null }}
-                      className="absolute left-2 top-1 z-20 flex h-8 w-6 cursor-grab items-center justify-center rounded bg-black/15 text-[10px] font-black text-[#111115] active:cursor-grabbing"
+                      className="absolute left-2 top-1 z-20 flex h-8 w-6 cursor-grab items-center justify-center rounded bg-black/15 text-xs font-black text-[#111115] active:cursor-grabbing"
                     >
                       T
                     </button>
@@ -4089,7 +4065,7 @@ function ProCutTimelinePanel({
                       }}
                       onChange={(event) => updateSceneAt(story, scenes, index, { subtitle: event.target.value }, onChange)}
                       title={scene.subtitle || `Scene ${index + 1}`}
-                      className="h-full w-full min-w-0 truncate border-0 bg-transparent px-3 pl-11 pr-5 text-left text-[11px] font-semibold normal-case text-[#111115] outline-none"
+                      className="h-full w-full min-w-0 truncate border-0 bg-transparent px-3 pl-11 pr-5 text-left text-xs font-semibold normal-case text-[#111115] outline-none"
                     />
                     <button
                       data-no-seek="true"
@@ -4179,7 +4155,7 @@ function ProCutTimelinePanel({
                     onPointerUp={() => { musicDragRef.current = null }}
                     className="h-full w-full cursor-grab overflow-hidden px-3 active:cursor-grabbing"
                   >
-                    <span className={`absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold ${audio1Muted ? 'text-[#9e9eae]' : 'text-[#00e5c9]'}`}>{fileNameFromPath(musicSrc)}</span>
+                    <span className={`absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold ${audio1Muted ? 'text-[#9e9eae]' : 'text-[#00e5c9]'}`}>{fileNameFromPath(musicSrc)}</span>
                     <WaveformCanvas src={musicSrc} color={audio1Muted ? '#626272' : '#00e5c9'} className="h-full w-full pt-4" />
                   </button>
                   <button
@@ -4244,7 +4220,7 @@ function ProCutTimelinePanel({
           ))}
 
           <div className="grid grid-cols-[200px_minmax(0,1fr)]">
-            <button onClick={onAddTrack} className="flex h-10 items-center gap-1 border border-[#2d2d37] bg-[#17171c] px-3 text-left text-[11px] font-bold text-[#ff6200]">
+            <button onClick={onAddTrack} className="flex h-10 items-center gap-1 border border-[#2d2d37] bg-[#17171c] px-3 text-left text-xs font-bold text-[#ff6200]">
               <FigmaIcon name="plus" size={12} />
               Add Track
             </button>
@@ -4344,7 +4320,7 @@ function ProCutTimelineAudioClip({
           className="h-full w-full cursor-grab overflow-hidden px-4 active:cursor-grabbing"
         >
           {src ? <WaveformCanvas src={src} color={color} className="h-full w-full pt-4" /> : null}
-          <span className="absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+          <span className="absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
             {track.type} · {start.toFixed(1)}s
           </span>
         </button>
@@ -4354,7 +4330,7 @@ function ProCutTimelineAudioClip({
           onChange={(event) => updateAudioTrack(story, onChange, track.id, { src: event.target.value })}
           onPointerDown={(event) => event.stopPropagation()}
           placeholder={track.type === 'voice' ? 'assets/audio/voice.mp3' : 'assets/audio/demo-ambient.wav'}
-          className="absolute bottom-1 left-4 right-4 z-20 h-4 rounded border border-white/15 bg-black/55 px-1.5 text-[9px] font-semibold text-white outline-none"
+          className="absolute bottom-1 left-4 right-4 z-20 h-4 rounded border border-white/15 bg-black/55 px-1.5 text-xs font-semibold text-white outline-none"
         />
         <button
           data-no-seek="true"
@@ -4395,7 +4371,7 @@ function ProCutTrack({
 }) {
   return (
     <div className="grid grid-cols-[200px_minmax(0,1fr)]">
-      <div className="flex h-full min-h-12 items-center justify-between border border-[#2d2d37] bg-[#17171c] px-3 text-[11px] font-bold text-[#f1f1f6]">
+      <div className="flex h-full min-h-12 items-center justify-between border border-[#2d2d37] bg-[#17171c] px-3 text-xs font-bold text-[#f1f1f6]">
         <span className="flex min-w-0 items-center gap-2">
           {icon}
           <span className="truncate">{label}</span>
@@ -4465,7 +4441,7 @@ function FrameRuler({ duration, fps, headerWidth = 78, onSeek }: { duration: num
   const ticks = Array.from({ length: 9 })
   return (
     <div
-      className="flex h-7 cursor-pointer items-start justify-between border-b border-[#2d2d37] pr-3 text-[10px] font-medium text-[#626272]"
+      className="flex h-7 cursor-pointer items-start justify-between border-b border-[#2d2d37] pr-3 text-xs font-medium text-[#626272]"
       style={{ marginLeft: headerWidth }}
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect()
@@ -4593,11 +4569,11 @@ export function AudioLane({
                 {src ? (
                   <WaveformCanvas src={src} color={color} className="h-full w-full" />
                 ) : (
-                  <div className="flex h-full items-center justify-center px-4 text-[10px] font-black uppercase tracking-wider text-white/70">
+                  <div className="flex h-full items-center justify-center px-4 text-xs font-black uppercase tracking-wider text-white/70">
                     nhập audio path
                   </div>
                 )}
-                <span className="absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-black text-white">
+                <span className="absolute left-4 top-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-black text-white">
                   {track.type} · {start.toFixed(1)}s - {(start + duration).toFixed(1)}s
                 </span>
               </button>
@@ -4607,7 +4583,7 @@ export function AudioLane({
                 onChange={(event) => updateAudioTrack(story, onChange, track.id, { src: event.target.value })}
                 onPointerDown={(event) => event.stopPropagation()}
                 placeholder={track.type === 'voice' ? 'assets/audio/voice-...mp3' : 'assets/audio/demo-ambient.wav'}
-                className="absolute bottom-1 left-4 right-4 z-20 h-5 rounded border border-white/20 bg-black/55 px-1.5 text-[10px] font-semibold text-white outline-none"
+                className="absolute bottom-1 left-4 right-4 z-20 h-5 rounded border border-white/20 bg-black/55 px-1.5 text-xs font-semibold text-white outline-none"
               />
               <button
                 data-no-seek="true"
@@ -5119,7 +5095,7 @@ function SceneEditor({
                 placeholder="Voice text dài hơn subtitle nếu cần giữ duration theo plan"
               />
               {scene.timing && (
-                <div className="text-[11px] font-semibold text-slate-500">
+                <div className="text-xs font-semibold text-slate-500">
                   Voice timestamp: {Number(scene.timing.start || 0).toFixed(2)}s - {Number(scene.timing.end || 0).toFixed(2)}s
                 </div>
               )}

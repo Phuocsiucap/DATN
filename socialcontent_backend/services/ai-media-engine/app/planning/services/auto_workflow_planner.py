@@ -962,17 +962,6 @@ class AutoWorkflowPlanner:
             "reusable_followup_angles": [str(item)[:240] for item in followup_angles[:3]],
         }
 
-    def strategy_payload(self, strategy: SocialProfileStrategy) -> dict[str, Any]:
-        return {
-            "content_topics": strategy.content_topics,
-            "avoid_topics": strategy.avoid_topics,
-            "tone": strategy.tone,
-            "target_audience": strategy.target_audience,
-            "risk_level": strategy.risk_level,
-            "min_similarity": getattr(strategy, "min_similarity", None),
-            "require_video": bool(strategy.require_video),
-        }
-
     def call_llm(
         self,
         settings: Any,

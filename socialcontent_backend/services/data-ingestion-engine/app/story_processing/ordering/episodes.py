@@ -19,10 +19,3 @@ def update_story_completion(story: Story) -> None:
     missing = [number for number in range(1, max(numbers) + 1) if number not in numbers]
     story.total_episodes = len(numbers)
     story.completion_status = "COMPLETE" if not missing else "MISSING_EPISODES"
-
-
-def missing_episode_numbers(items: list[ContentItem]) -> list[int]:
-    numbers = sorted({item.episode_order for item in items if item.episode_order})
-    if not numbers:
-        return []
-    return [number for number in range(1, max(numbers) + 1) if number not in numbers]

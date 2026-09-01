@@ -142,7 +142,7 @@ class StrategyEmbeddingMatcher:
 
         eligible = content.status in {"READY", "USABLE_WITH_WARNING"} and passed_similarity_gate and not avoided_topics and has_required_video
         selection_reasons = [
-            "Included because content item is linked to this crawl_job_id",
+            "Included because the content item is available for this profile's strategy matching",
             f"Topic cosine threshold gate={passed_similarity_gate}, top_cosine={similarity:.4f}, threshold={threshold:.4f}, avoid_threshold={avoid_threshold:.4f}",
         ]
         if matched_topics:
@@ -421,14 +421,6 @@ class StrategyEmbeddingMatcher:
         if not matches:
             return 0.0
         return max(0.0, min(1.0, max(float(item.get("similarity") or 0.0) for item in matches)))
-
-    def strategy_topics_embedding_text(self, strategy: SocialProfileStrategy) -> str:
-        topics = self.split_terms(strategy.content_topics)
-        descriptions = self.topic_descriptions_map(getattr(strategy, "content_topic_descriptions", None))
-        return "\n\n".join(
-            self.topic_embedding_text(topic, self.custom_topic_description(topic, descriptions))
-            for topic in topics
-        )[:4000]
 
     def strategy_similarity_threshold(self, strategy: SocialProfileStrategy) -> float:
         value = (

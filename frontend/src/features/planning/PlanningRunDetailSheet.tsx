@@ -45,12 +45,12 @@ function Badge({ value }: { value: string | null }) {
   if (['SUCCEEDED', 'PASS', 'AI_APPROVED', 'DRAFT_READY', 'PRODUCE'].includes(status)) color = 'bg-emerald-100 text-emerald-800'
   if (['FAILED', 'AI_ERROR', 'SKIP', 'PRODUCTION_REJECTED'].includes(status)) color = 'bg-red-100 text-red-800'
   if (status.includes('REVIEW') || status === 'SKIPPED_NO_API_KEY') color = 'bg-amber-100 text-amber-800'
-  return <span className={`inline-flex rounded-md px-2 py-1 text-[10px] font-bold ${color}`}>{labels[status] || status}</span>
+  return <span className={`inline-flex rounded-md px-2 py-1 text-xs font-bold ${color}`}>{labels[status] || status}</span>
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-    <div className="text-[10px] font-bold uppercase text-slate-500">{label}</div>
+    <div className="text-xs font-bold uppercase text-slate-500">{label}</div>
     <div className="mt-1 text-lg font-black tabular-nums text-slate-800">{value}</div>
   </div>
 }
@@ -61,7 +61,7 @@ function TopicScores({ scores, topics }: { scores: PlanningTopicScore[]; topics:
     const color = score.matched
       ? topic?.kind === 'AVOID' ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
       : 'border-slate-200 bg-white text-slate-600'
-    return <span key={`${score.topic_id}-${index}`} title={topic?.description || topic?.key || undefined} className={`rounded border px-2 py-0.5 text-[10px] ${color}`}>
+    return <span key={`${score.topic_id}-${index}`} title={topic?.description || topic?.key || undefined} className={`rounded border px-2 py-0.5 text-xs ${color}`}>
       {topic?.name || score.topic_id}: {displayNumber(score.similarity, 4)}
       {score.threshold != null && ` / ngưỡng ${displayNumber(score.threshold, 4)}`}
     </span>
@@ -74,7 +74,7 @@ function Issue({ issue }: { issue: PlanningDraftIssue }) {
     {issue.scene_indexes.length > 0 && <span> — cảnh {issue.scene_indexes.map(index => index + 1).join(', ')}</span>}
     {typeof issue.details.actual_words === 'number' && typeof issue.details.maximum_words === 'number' &&
       <span> ({issue.details.actual_words}/{issue.details.maximum_words} từ)</span>}
-    <span className="ml-1 text-[10px] text-amber-700">[{issue.code}]</span>
+    <span className="ml-1 text-xs text-amber-700">[{issue.code}]</span>
   </li>
 }
 
@@ -84,7 +84,7 @@ function WorkflowInfo({ workflow, onOpenWorkflow }: { workflow: PlanningWorkflow
     {workflow.series && <span>Series đang gắn: {workflow.series.name || shortId(workflow.series.id)}</span>}
     {workflow.pending_series && <span className="text-amber-700">Series đề xuất đang chờ duyệt draft.</span>}
     {workflow.series_error && <span className="text-amber-700">Không áp dụng được series: {workflow.series_error}</span>}
-    <span className="text-[10px] text-slate-400">Cập nhật {formatDate(workflow.updated_at)}</span>
+    <span className="text-xs text-slate-400">Cập nhật {formatDate(workflow.updated_at)}</span>
     <OpenDraftWorkspaceButton workflowId={workflow.id} onOpenWorkflow={onOpenWorkflow}
       reviewRequired={workflow.current_stage === 'DRAFT_REVIEW_REQUIRED'} rejected={workflow.status === 'REJECTED'} />
     {workflow.current_stage === 'DRAFT_REVIEW_REQUIRED' && workflow.status !== 'REJECTED' && <p className="w-full text-amber-800">
@@ -126,11 +126,11 @@ function CompactCandidateCard({ candidate, workflow, runId, onChanged, onOpenWor
   return <article className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2"><span className="text-xs text-slate-400">#{candidate.rank ?? '—'}</span><Badge value={candidate.status} /></div>
-      {candidate.similarity != null && <span className="text-[11px] text-slate-500">Độ khớp {displayNumber(candidate.similarity, 4)}</span>}
+      {candidate.similarity != null && <span className="text-xs text-slate-500">Độ khớp {displayNumber(candidate.similarity, 4)}</span>}
     </div>
     <h3 className="text-sm font-bold text-slate-900">{candidate.title || 'Nội dung nguồn không còn khả dụng'}</h3>
     <p className="text-xs leading-5 text-slate-700">{candidate.reason}</p>
-    {candidate.reason_code && <p className="text-[10px] text-slate-500">{candidate.reason_code}</p>}
+    {candidate.reason_code && <p className="text-xs text-slate-500">{candidate.reason_code}</p>}
     <CandidateReviewControls runId={runId} candidate={candidate} onChanged={onChanged} />
     {workflow && <WorkflowInfo workflow={workflow} onOpenWorkflow={onOpenWorkflow} />}
     {candidate.workflow_id && !workflow && <p className="text-xs text-slate-500">Workflow #{shortId(candidate.workflow_id)} không còn khả dụng.</p>}
@@ -164,7 +164,7 @@ function CandidateCard({ candidate, workflow, topics, runId, onChanged, onOpenWo
   return <article className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
     {!diagnosticOnly && <><div className="flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-400">#{candidate.rank ?? '—'}</span><Badge value={status} /></div>
-      <span className="text-[11px] text-slate-500">Điểm khớp {displayNumber(matching.score, 1)} · Chất lượng nguồn {displayNumber(matching.source_quality_score, 1)}</span>
+      <span className="text-xs text-slate-500">Điểm khớp {displayNumber(matching.score, 1)} · Chất lượng nguồn {displayNumber(matching.source_quality_score, 1)}</span>
     </div>
     <h3 className="text-sm font-bold leading-6 text-slate-900">{candidate.title || 'Nội dung nguồn không còn khả dụng'}</h3></>}
     {candidate.summary && <p className="text-xs leading-5 text-slate-600">{candidate.summary}</p>}
@@ -175,7 +175,7 @@ function CandidateCard({ candidate, workflow, topics, runId, onChanged, onOpenWo
         <span className="text-slate-500">{production.source === 'HUMAN' ? 'Người dùng quyết định' : `${production.source || 'Chưa ghi nguồn'} · Confidence ${displayNumber(production.confidence_score, 1)}`}</span>
       </div>
       {production.reason && <p>{production.reason}</p>}
-      {production.reason_code && <p className="text-[10px] text-slate-500">{production.reason_code}</p>}
+      {production.reason_code && <p className="text-xs text-slate-500">{production.reason_code}</p>}
     </section>}
     {decision?.legacy_reason && <p className="text-xs text-slate-600">{decision.legacy_reason}</p>}
     {decision && decision.notes.length > 0 && <ul className="ml-4 list-disc text-xs text-slate-600">{decision.notes.map(note => <li key={note}>{note}</li>)}</ul>}
@@ -222,7 +222,7 @@ function CandidateCard({ candidate, workflow, topics, runId, onChanged, onOpenWo
         {[...matching.selection_reasons, ...matching.rejection_reasons].map((reason, index) => <p key={index} className="text-slate-500">{reason}</p>)}
       </div>
     </details>
-    {decision && <p className="text-[10px] leading-5 text-slate-400">
+    {decision && <p className="text-xs leading-5 text-slate-400">
       {[decision.provider, decision.model].filter(Boolean).join(' · ')}
       {usage ? ` · Token đã ghi nhận: ${displayNumber(usage.input_tokens)} vào / ${displayNumber(usage.output_tokens)} ra · Creative ${displayNumber(usage.creative_call_count)} call · Fit Judge ${displayNumber(usage.fit_judge_call_count)} call` : ' · Chưa ghi nhận token cho quyết định này'}
     </p>}

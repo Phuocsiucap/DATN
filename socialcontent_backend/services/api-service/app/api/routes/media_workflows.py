@@ -295,7 +295,7 @@ def get_video_workflow_progress(
     }
 
 
-@router.post("/from-sources")
+@router.post("/from-sources", status_code=201)
 def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = db.get(SocialProfile, payload.profile_id)
     if not profile or profile.user_id != user.id:

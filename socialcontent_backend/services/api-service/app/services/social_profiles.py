@@ -13,7 +13,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, MediaWorkflow, PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, SocialProfileStrategy, User
+from common.db.models import ContentItem, MediaWorkflow, ProfileContentLink, PublishingQueueItem, SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, SocialProfileStrategy, User
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
 from common.planning.auto_draft_policy import auto_production_allowed, is_auto_workflow
 from common.planning.publishing_schedule import choose_publish_schedule, lock_schedule_profile, schedule_timezone
@@ -488,7 +488,8 @@ class SocialProfileService:
 
     def update_strategy(self, db: Session, profile: SocialProfile, payload: schemas.SocialProfileStrategyRequest) -> SocialProfileStrategy:
         strategy = self.get_or_create_strategy(db, profile)
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        changes = payload.model_dump(exclude_unset=True)
+        for field, value in changes.items():
             if field == "post_frequency_per_day" and value is not None:
                 value = max(int(value), 1)
             elif field == "min_similarity" and value is not None:
@@ -510,6 +511,17 @@ class SocialProfileService:
             elif field == "risk_level" and value not in {"low", "medium", "high"}:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="risk_level phải là low, medium hoặc high")
             setattr(strategy, field, value)
+
+        if changes.get("receive_system_content") is False:
+            (
+                db.query(ProfileContentLink)
+                .filter(
+                    ProfileContentLink.user_id == profile.user_id,
+                    ProfileContentLink.profile_id == profile.id,
+                    ProfileContentLink.source_scope == "GLOBAL",
+                )
+                .update({ProfileContentLink.status: "INACTIVE"}, synchronize_session=False)
+            )
 
         strategy.content_topic_descriptions = self.prune_topic_descriptions(strategy.content_topics, strategy.content_topic_descriptions)
         strategy.avoid_topic_descriptions = self.prune_topic_descriptions(strategy.avoid_topics, strategy.avoid_topic_descriptions)

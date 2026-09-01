@@ -13,6 +13,7 @@ from common.core.config import get_settings
 from common.db.bootstrap import ensure_schema_compatibility
 from common.db.models import Base, ContentItem
 from common.db.session import SessionLocal, engine, get_db
+from common.http.responses import configure_api_responses
 from common.workers import run_thread_worker_forever
 from app.consumer import run_content_embedding_requested_consumer
 from app.service import embed_texts, ensure_content_embeddings
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Embedding Service", lifespan=lifespan)
+configure_api_responses(app)
 
 
 @app.get("/health")

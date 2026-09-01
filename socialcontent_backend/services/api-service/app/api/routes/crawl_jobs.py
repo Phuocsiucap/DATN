@@ -14,7 +14,7 @@ from app.services.crawl_jobs import CrawlJobService
 router = APIRouter()
 
 
-@router.post("", response_model=schemas.CrawlJobResponse)
+@router.post("", response_model=schemas.CrawlJobResponse, status_code=201)
 def create_crawl_job(payload: schemas.CrawlJobCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return CrawlJobService().create(db, payload, user)
 
@@ -45,9 +45,26 @@ def cancel_crawl_job(job_id: uuid.UUID, user: User = Depends(get_current_user), 
     return CrawlJobService().cancel(db, job, user)
 
 
+@router.put("/{job_id}/schedule", response_model=schemas.CrawlJobResponse)
+def update_crawl_job_schedule(
+    job_id: uuid.UUID,
+    payload: schemas.CrawlJobScheduleRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = _get_owned_job(db, job_id, user)
+    if job.crawl_mode == "SCHEDULED_RUN":
+        raise HTTPException(status_code=409, detail="Không thể đặt lịch trên một lần chạy được sinh tự động")
+    if job.status in {"PENDING", "QUEUED", "RUNNING"}:
+        raise HTTPException(status_code=409, detail="Không thể đổi lịch khi job đang được xử lý")
+    return CrawlJobService().update_schedule(db, job, payload, user)
+
+
 @router.post("/{job_id}/retry", response_model=schemas.CrawlJobResponse)
 def retry_crawl_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     job = _get_owned_job(db, job_id, user)
+    if job.crawl_mode == "SOURCE_CONFIG":
+        raise HTTPException(status_code=409, detail="Hãy bật lịch để tiếp tục chạy job định kỳ")
     return CrawlJobService().retry(db, job, user)
 
 

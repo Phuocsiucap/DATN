@@ -1,4 +1,3 @@
-from copy import deepcopy
 from types import SimpleNamespace as Row
 import unittest
 from unittest.mock import MagicMock, patch
@@ -8,7 +7,7 @@ import json
 from app.planning.consumers import candidate_review as worker
 from app.planning.services.auto_workflow_planner import AutoWorkflowPlanner, AutoWorkflowDecision
 from common.core.llm import ChatCompletionResult
-from common.db.models import ContentItem, KafkaTask, MediaWorkflow, PlanningCandidate, PlanningRun, SocialProfile, ProfileContentLink
+from common.db.models import ContentItem, KafkaTask, MediaWorkflow, PlanningCandidate, PlanningRun, SocialProfile
 from common.planning.candidate_review import REVIEW_TASK_TYPE
 from test_auto_draft_links import draft, FACTS, CATALOG
 

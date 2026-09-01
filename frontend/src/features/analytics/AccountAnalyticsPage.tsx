@@ -152,7 +152,7 @@ export default function AccountAnalyticsPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={cn('relative h-11 whitespace-nowrap text-[13px] font-bold text-[#718096]', activeTab === tab && 'text-[#2556ea]')}
+            className={cn('relative h-11 whitespace-nowrap text-sm font-bold text-[#718096]', activeTab === tab && 'text-[#2556ea]')}
           >
             {tab}
             {activeTab === tab && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-[#2556ea]" />}
@@ -215,7 +215,7 @@ export default function AccountAnalyticsPage() {
                     <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-[#eef2ff] text-xs font-black text-[#4f46e5]">{index + 1}</span>
                     <span className="min-w-0">
                       <span className="block truncate text-xs font-extrabold text-[#111827]">#{topic.topic}</span>
-                      <span className="text-[10px] font-semibold text-[#64748b]">{topic.posts} bài</span>
+                      <span className="text-xs font-semibold text-[#64748b]">{topic.posts} bài</span>
                     </span>
                     <span className="text-right text-xs font-extrabold text-[#111827]">{formatMetric(topic.views)}</span>
                     <span className="text-right text-xs font-bold text-[#16a34a]">{topic.avg_engagement_pct}%</span>

@@ -105,7 +105,7 @@ export default function WorkflowProgress({ progress, compact = false }: Workflow
               <div key={phase.key} className="flex flex-col items-center gap-0.5 text-center">
                 <span
                   title={phase.label}
-                  className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] transition-all ${
+                  className={`flex h-4 w-4 items-center justify-center rounded-full text-xs transition-all ${
                     completed
                       ? 'bg-emerald-500 text-white shadow-xs'
                       : active
@@ -116,7 +116,7 @@ export default function WorkflowProgress({ progress, compact = false }: Workflow
                   {completed ? <Check size={10} strokeWidth={3} /> : <Icon size={9} />}
                 </span>
                 <span
-                  className={`max-w-full truncate text-[9px] font-semibold leading-tight ${
+                  className={`max-w-full truncate text-xs font-semibold leading-tight ${
                     active ? 'font-bold text-blue-700' : completed ? 'text-emerald-700' : 'text-slate-400'
                   }`}
                 >
@@ -205,7 +205,7 @@ export default function WorkflowProgress({ progress, compact = false }: Workflow
                 <Icon size={12} />
               </span>
               <span
-                className={`max-w-full truncate text-[10px] font-bold ${
+                className={`max-w-full truncate text-xs font-bold ${
                   active ? 'text-blue-700' : completed ? 'text-emerald-700' : 'text-slate-400'
                 }`}
               >
@@ -225,7 +225,7 @@ export default function WorkflowProgress({ progress, compact = false }: Workflow
 
       {progress.tasks.length > 0 && (
         <div className="mt-4 border-t border-slate-100 pt-3">
-          <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-slate-400">Hoạt động gần nhất</div>
+          <div className="mb-2 text-xs font-black uppercase tracking-wider text-slate-400">Hoạt động gần nhất</div>
           <div className="grid gap-1.5 sm:grid-cols-2">
             {progress.tasks.slice(0, 4).map((item) => (
               <div

@@ -45,7 +45,8 @@ def _generate_reviewed_draft(db, task, candidate):
     score = StrategyEmbeddingMatcher().score_candidate(db, content, profile.strategy)
     if not score.eligible:
         raise ValueError("Nguồn không còn vượt bộ lọc chủ đề/video hiện tại. Hãy kiểm tra lại cấu hình và nguồn.")
-    workflow = db.get(MediaWorkflow, candidate.workflow_id) if candidate.workflow_id else _existing_auto_workflow(db, profile.id, content.id, str(run.crawl_job_id))
+    source_job_id = str(run.crawl_job_id) if run.crawl_job_id else None
+    workflow = db.get(MediaWorkflow, candidate.workflow_id) if candidate.workflow_id else _existing_auto_workflow(db, profile.id, content.id, source_job_id)
     decision = None
     if not workflow:
         decision = AutoWorkflowPlanner().decide_and_build_draft(
@@ -56,9 +57,9 @@ def _generate_reviewed_draft(db, task, candidate):
             raise ValueError(decision.error_message or decision.reason or "Không sinh được draft.")
         # Serialize saving for the same profile, including series allocation.
         lock_profile_series_scope(db, profile.id)
-        workflow = _existing_auto_workflow(db, profile.id, content.id, str(run.crawl_job_id))
+        workflow = _existing_auto_workflow(db, profile.id, content.id, source_job_id)
         if not workflow:
-            workflow = _create_auto_workflow_from_decision(db, profile, profile.strategy, score, decision, str(run.crawl_job_id))
+            workflow = _create_auto_workflow_from_decision(db, profile, profile.strategy, score, decision, source_job_id)
             workflow.metadata_json = {**as_dict(workflow.metadata_json), "production_review": review,
                                       "planning_candidate_id": str(candidate.id)}
     if workflow.user_id != run.user_id or workflow.profile_id != run.profile_id or workflow.primary_content_id != content.id:

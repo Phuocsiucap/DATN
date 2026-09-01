@@ -25,7 +25,7 @@ export default function StatCard({
           {icon}
         </div>
         {trend && (
-          <span className="text-[11px] font-semibold flex items-center gap-0.5"
+          <span className="text-xs font-semibold flex items-center gap-0.5"
             style={{ color: trendUp ? 'var(--success)' : 'var(--error)' }}>
             {trendUp ? '↑' : '↓'}{trend}
           </span>
@@ -33,7 +33,7 @@ export default function StatCard({
         {badge && badge}
       </div>
       <div className="mt-5">
-        <p className="text-[11px] font-semibold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
+        <p className="text-xs font-semibold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
           {label}
         </p>
         <p className="text-xl font-bold mt-1 tabular-nums" style={{ color: 'var(--on-surface)' }}>

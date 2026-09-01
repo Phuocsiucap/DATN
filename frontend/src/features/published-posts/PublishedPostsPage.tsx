@@ -21,7 +21,6 @@ import {
   type SocialPost,
   type SocialProfile,
 } from '@/commons/apis/api'
-import TikTokEmbedPlayer from '@/features/analytics/TikTokEmbedPlayer'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import {
   AppButton,
@@ -29,7 +28,6 @@ import {
   EmptyBlock,
   MetricCard,
   PageLayout,
-  PlatformIcon,
   SearchField,
   SelectControl,
   SocialProfileAvatar,
@@ -37,6 +35,7 @@ import {
   platformLabel,
 } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
+import { PostDetailCard } from './components/PostDetailCard'
 
 type PostStatusFilter = 'all' | 'published' | 'draft' | 'failed' | 'deleted'
 
@@ -415,7 +414,7 @@ function SelectedProfilePanel({
 function ProfileStatBox({ label, value, icon, tint, bgTint }: { label: string; value?: number | null; icon: ReactNode; tint: string; bgTint: string }) {
   return (
     <div className="flex flex-col justify-center">
-      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+      <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
         <span className={cn("flex h-6 w-6 items-center justify-center rounded-md", bgTint, tint)}>
           {icon}
         </span>
@@ -477,79 +476,6 @@ function MetricCell({ icon, value }: { icon: ReactNode; value: number }) {
   )
 }
 
-function PostDetailCard({ post }: { post: SocialPost | null }) {
-  if (!post) {
-    return <EmptyBlock label="Chọn một bài để xem chi tiết nhanh." />
-  }
-
-  const latestCapturedAt = post.latest_metric?.captured_at
-  const growth24h = Number(post.growth?.views_24h || 0)
-
-  return (
-    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <StatusPill value={post.status || 'published'} />
-            {post.platform_post_id && <span className="rounded-[6px] bg-slate-100 px-2 py-1 text-[10px] font-bold text-[#64748b]">ID {post.platform_post_id}</span>}
-          </div>
-          <h3 className="line-clamp-2 text-base font-extrabold text-[#111827]">{post.title || 'Untitled post'}</h3>
-        </div>
-        {post.post_url && (
-          <a href={post.post_url} target="_blank" rel="noreferrer" className="icon-button shrink-0 border border-[var(--outline-variant)] bg-white text-[#2556ea]" title="Mở bài đăng">
-            <ExternalLink size={15} />
-          </a>
-        )}
-      </div>
-
-      <div className="mt-3 space-y-2 text-xs text-[#64748b]">
-        <InfoLine label="Ngày đăng" value={formatDateTime(post.published_at)} />
-        <InfoLine label="Cập nhật chỉ số" value={formatDateTime(latestCapturedAt)} />
-        <InfoLine label="Tăng view 24h" value={`${growth24h >= 0 ? '+' : ''}${formatMetric(growth24h)}`} />
-      </div>
-
-      <div className="mt-3">
-        <TikTokEmbedPlayer postId={post.platform_post_id} postUrl={post.post_url} title={post.title} />
-      </div>
-
-      {post.caption && (
-        <div className="mt-3 rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-3">
-          <div className="mb-1 text-[10px] font-bold uppercase text-[#64748b]">Caption</div>
-          <p className="line-clamp-6 whitespace-pre-line text-sm leading-relaxed text-[#111827]">{post.caption}</p>
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <MiniMetric label="Views" value={metricValue(post, 'views')} icon={<Eye size={14} />} />
-        <MiniMetric label="Likes" value={metricValue(post, 'likes')} icon={<Heart size={14} />} />
-        <MiniMetric label="Comments" value={metricValue(post, 'comments')} icon={<MessageCircle size={14} />} />
-        <MiniMetric label="Shares" value={metricValue(post, 'shares')} icon={<Share2 size={14} />} />
-      </div>
-    </div>
-  )
-}
-
-function InfoLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="font-semibold">{label}</span>
-      <span className="truncate font-bold text-[#111827]">{value}</span>
-    </div>
-  )
-}
-
-function MiniMetric({ label, value, icon }: { label: string; value: number; icon: ReactNode }) {
-  return (
-    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-2">
-      <div className="flex items-center gap-1 text-[10px] font-bold uppercase text-[#64748b]">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-1 text-base font-extrabold text-[#111827]">{formatMetric(value)}</div>
-    </div>
-  )
-}
-
 function TopPostsCard({ posts, selectedPostId, onSelect }: { posts: SocialPost[]; selectedPostId: string | null; onSelect: (postId: string) => void }) {
   return (
     <div className="rounded-[8px] border border-[var(--outline-variant)] bg-white p-4 shadow-sm">
@@ -568,7 +494,7 @@ function TopPostsCard({ posts, selectedPostId, onSelect }: { posts: SocialPost[]
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] bg-[#eef2ff] text-xs font-black text-[#4f46e5]">{index + 1}</span>
             <span className="min-w-0 flex-1">
               <span className="line-clamp-1 text-xs font-bold text-[#111827]">{post.title || 'Untitled post'}</span>
-              <span className="text-[10px] font-semibold text-[#64748b]">{formatMetric(metricValue(post, 'views'))} views</span>
+              <span className="text-xs font-semibold text-[#64748b]">{formatMetric(metricValue(post, 'views'))} views</span>
             </span>
           </button>
         ))}

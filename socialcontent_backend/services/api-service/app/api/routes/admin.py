@@ -18,7 +18,7 @@ from app.services.users import UserService, to_user_response
 router = APIRouter()
 
 
-@router.post("/system/bootstrap", response_model=schemas.UserResponse)
+@router.post("/system/bootstrap", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
 def bootstrap_system_admin(payload: schemas.BootstrapAdminRequest, db: Session = Depends(get_db)):
     settings = get_settings()
     if payload.bootstrap_token != settings.system_bootstrap_token:

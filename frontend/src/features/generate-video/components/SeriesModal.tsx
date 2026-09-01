@@ -41,7 +41,7 @@ export function SeriesModal({ seriesToEdit, profiles, onClose, onSubmit, isSubmi
               <h3 className="text-base font-black text-slate-900">
                 {isEditing ? 'Chỉnh sửa series' : 'Tạo series mới'}
               </h3>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-xs text-slate-500">
                 {isEditing ? 'Cập nhật thông tin chuỗi kịch bản' : 'Tạo chủ đề series để nhóm bài viết'}
               </p>
             </div>

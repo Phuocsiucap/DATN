@@ -180,7 +180,7 @@ export default function PostAnalyticsPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={cn('relative h-11 whitespace-nowrap text-[13px] font-bold text-[#718096]', activeTab === tab && 'text-[#2556ea]')}
+            className={cn('relative h-11 whitespace-nowrap text-sm font-bold text-[#718096]', activeTab === tab && 'text-[#2556ea]')}
           >
             {tab}
             {activeTab === tab && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-[#2556ea]" />}
@@ -205,8 +205,8 @@ export default function PostAnalyticsPage() {
                 <div className="min-w-0">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <StatusPill value={post.status || 'published'} />
-                    <span className="rounded-[6px] bg-slate-100 px-2 py-1 text-[10px] font-bold text-[#64748b]">{platformLabel(post.profile?.platform || selectedProfile?.platform)}</span>
-                    {post.platform_post_id && <span className="rounded-[6px] bg-slate-100 px-2 py-1 text-[10px] font-bold text-[#64748b]">ID {post.platform_post_id}</span>}
+                    <span className="rounded-[6px] bg-slate-100 px-2 py-1 text-xs font-bold text-[#64748b]">{platformLabel(post.profile?.platform || selectedProfile?.platform)}</span>
+                    {post.platform_post_id && <span className="rounded-[6px] bg-slate-100 px-2 py-1 text-xs font-bold text-[#64748b]">ID {post.platform_post_id}</span>}
                   </div>
                   <h2 className="text-xl font-extrabold leading-tight text-[#111827]">{post.title || 'Untitled post'}</h2>
                   {post.caption && <p className="mt-3 line-clamp-4 text-sm leading-relaxed text-[#64748b]">{post.caption}</p>}
@@ -300,7 +300,7 @@ export default function PostAnalyticsPage() {
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-[140px]">
-      <div className="text-[10px] font-bold uppercase text-[#64748b]">{label}</div>
+      <div className="text-xs font-bold uppercase text-[#64748b]">{label}</div>
       <div className="mt-1 truncate text-sm font-extrabold text-[#111827]">{value}</div>
     </div>
   )
@@ -309,7 +309,7 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
 function MetricTile({ icon, label, value, suffix = '', tint }: { icon: ReactNode; label: string; value?: number | null; suffix?: string; tint: string }) {
   return (
     <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-3">
-      <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-[#64748b]">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase text-[#64748b]">
         <span className="grid h-7 w-7 place-items-center rounded-[8px]" style={{ color: tint, backgroundColor: `${tint}16` }}>{icon}</span>
         {label}
       </div>

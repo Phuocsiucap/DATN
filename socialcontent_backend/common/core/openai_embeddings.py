@@ -26,24 +26,6 @@ def embedding_model_storage_name() -> str:
     return f"{settings.embedding_model_name}:{settings.embedding_dimensions}"
 
 
-def create_embedding(
-    text: str,
-    *,
-    user_id: str | None = None,
-    reference_id: str | None = None,
-    run_type: str = "CREATE_EMBEDDING",
-    step_name: str = "create_content_embedding",
-) -> list[float]:
-    result = create_embeddings(
-        [text],
-        user_id=user_id,
-        reference_id=reference_id,
-        run_type=run_type,
-        step_name=step_name,
-    )
-    return result.embeddings[0] if result.embeddings else []
-
-
 def create_embeddings(
     texts: list[str],
     *,

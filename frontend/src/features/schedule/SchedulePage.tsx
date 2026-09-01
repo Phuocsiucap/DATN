@@ -634,7 +634,7 @@ function FilterChip({ active, label, short, color, onClick }: { active: boolean;
         backgroundColor: active ? '#eef2ff' : '#fff',
       }}
     >
-      {short && <span className="flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-black text-white" style={{ backgroundColor: color }}>{short}</span>}
+      {short && <span className="flex h-5 min-w-5 items-center justify-center rounded-full text-xs font-black text-white" style={{ backgroundColor: color }}>{short}</span>}
       {label}
     </button>
   )
@@ -674,7 +674,7 @@ function ScheduleEventCard({
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs font-black" style={{ color: platform.color }}>
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-[9px] text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-xs text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
           {formatTime(scheduledValue(item))}
         </div>
         <button
@@ -696,11 +696,11 @@ function ScheduleEventCard({
         )}
       </div>
       <div className="line-clamp-2 text-xs font-bold leading-snug" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
-      <div className="mt-2 flex items-center gap-1.5 truncate text-[10px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
+      <div className="mt-2 flex items-center gap-1.5 truncate text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
         <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
         <span className="truncate">{profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}</span>
       </div>
-      <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold" style={{ color: status.color }}>
+      <div className="mt-1 flex items-center gap-1 text-xs font-semibold" style={{ color: status.color }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
         {status.label}
       </div>
@@ -712,7 +712,7 @@ function ScheduleEventCard({
               onApprove()
             }}
             disabled={loading}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[10px] font-bold text-white disabled:opacity-50"
+            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-bold text-white disabled:opacity-50"
             style={{ backgroundColor: '#4f46e5' }}
           >
             <CheckCircle2 size={11} />
@@ -726,7 +726,7 @@ function ScheduleEventCard({
               onPublish()
             }}
             disabled={loading}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[10px] font-bold text-white disabled:opacity-50"
+            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-bold text-white disabled:opacity-50"
             style={{ backgroundColor: '#0f766e' }}
           >
             {hasTikTokScope(item, 'video.publish') ? <Rocket size={11} /> : <Send size={11} />}
@@ -756,12 +756,12 @@ function TodayItem({ item, profile, active, onClick }: { item: QueueItem; profil
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
+        <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
           <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
           <span className="truncate">{profile?.profile_name || item.profile_name || platform.label}</span>
         </div>
         <div className="line-clamp-2 text-sm font-semibold" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
-        <div className="mt-1 flex items-center gap-1 text-[10px] font-semibold" style={{ color: status.color }}>
+        <div className="mt-1 flex items-center gap-1 text-xs font-semibold" style={{ color: status.color }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
           {status.label}
         </div>

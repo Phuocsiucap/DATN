@@ -38,7 +38,7 @@ class SocialProfileStrategyRequest(BaseModel):
     receive_system_content: bool | None = None
     auto_project_queue_enabled: bool | None = None
     video_render_mode: str | None = None
-    max_system_recommendations: int | None = None
+    max_system_recommendations: int | None = Field(default=None, ge=1, le=500)
     auto_queue_enabled: bool | None = None
     auto_publish_enabled: bool = False
 

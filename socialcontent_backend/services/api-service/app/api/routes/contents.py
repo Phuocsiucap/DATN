@@ -2,9 +2,10 @@ import html
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User
+from common.db.models import CrawlJob, CrawlJobContent, ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User
 from common.db.session import get_db
 from common.db.media_workflows import _load_content_full_text
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
@@ -12,6 +13,76 @@ from app.api.deps import get_current_user, require_admin
 from app.schemas import api as schemas
 
 router = APIRouter()
+
+
+def _visible_content_query(query, user: User, content_scope: str | None):
+    requested_scope = str(content_scope or "").strip().upper()
+    if user.is_system_admin:
+        return query.filter(ContentItem.content_scope == requested_scope) if requested_scope else query
+
+    own_private = and_(ContentItem.content_scope == "PRIVATE", ContentItem.owner_user_id == user.id)
+    if requested_scope == "PRIVATE":
+        return query.filter(own_private)
+    if requested_scope == "GLOBAL":
+        return query.filter(ContentItem.content_scope == "GLOBAL")
+    if requested_scope in {"INBOX", "CREATOR"}:
+        assigned_global_ids = select(ProfileContentLink.content_id).where(
+            ProfileContentLink.user_id == user.id,
+            ProfileContentLink.status == "ACTIVE",
+            ProfileContentLink.source_scope == "GLOBAL",
+        )
+        creator_crawled_ids = (
+            select(CrawlJobContent.content_id)
+            .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+            .where(
+                CrawlJob.requested_by == user.id,
+                CrawlJob.content_scope == "PRIVATE",
+            )
+        )
+        return query.filter(
+            or_(
+                own_private,
+                and_(ContentItem.content_scope == "GLOBAL", ContentItem.id.in_(assigned_global_ids)),
+                and_(ContentItem.content_scope == "GLOBAL", ContentItem.id.in_(creator_crawled_ids)),
+            )
+        )
+    return query.filter(or_(ContentItem.content_scope == "GLOBAL", own_private))
+
+
+def _crawl_job_content_query(query, crawl_job_id: uuid.UUID):
+    return query.join(CrawlJobContent, CrawlJobContent.content_id == ContentItem.id).filter(
+        CrawlJobContent.job_id == crawl_job_id
+    )
+
+
+def _content_order(content_scope: str | None, crawl_job_id: uuid.UUID | None, user: User | None = None):
+    if crawl_job_id:
+        return (CrawlJobContent.created_at.desc(), ContentItem.created_at.desc())
+    if user and str(content_scope or "").strip().upper() in {"INBOX", "CREATOR"}:
+        last_creator_crawl = (
+            select(func.max(CrawlJobContent.created_at))
+            .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+            .where(
+                CrawlJobContent.content_id == ContentItem.id,
+                CrawlJob.requested_by == user.id,
+                CrawlJob.content_scope == "PRIVATE",
+            )
+            .correlate(ContentItem)
+            .scalar_subquery()
+        )
+        last_recommendation = (
+            select(func.max(ProfileContentLink.recommended_at))
+            .where(
+                ProfileContentLink.content_id == ContentItem.id,
+                ProfileContentLink.user_id == user.id,
+                ProfileContentLink.status == "ACTIVE",
+            )
+            .correlate(ContentItem)
+            .scalar_subquery()
+        )
+        activity_at = func.greatest(ContentItem.updated_at, last_creator_crawl, last_recommendation)
+        return (activity_at.desc(), ContentItem.created_at.desc())
+    return (ContentItem.created_at.desc(),)
 
 
 @router.get("", response_model=list[schemas.ContentResponse])
@@ -27,19 +98,7 @@ def list_contents(
 ):
     query = db.query(ContentItem)
 
-    # Privacy filtering
-    if not user.is_system_admin:
-        if content_scope == "PRIVATE":
-            query = query.filter(ContentItem.content_scope == "PRIVATE", ContentItem.owner_user_id == user.id)
-        elif content_scope == "GLOBAL":
-            query = query.filter(ContentItem.content_scope == "GLOBAL")
-        else:
-            query = query.filter(
-                (ContentItem.content_scope == "GLOBAL")
-                | ((ContentItem.content_scope == "PRIVATE") & (ContentItem.owner_user_id == user.id))
-            )
-    elif content_scope:
-        query = query.filter(ContentItem.content_scope == content_scope.upper())
+    query = _visible_content_query(query, user, content_scope)
 
     if content_type:
         query = query.filter(ContentItem.content_type == content_type.upper())
@@ -48,9 +107,9 @@ def list_contents(
     if language:
         query = query.filter(ContentItem.language == language)
     if crawl_job_id:
-        query = query.filter(ContentItem.crawl_job_id == crawl_job_id)
+        query = _crawl_job_content_query(query, crawl_job_id)
 
-    contents = query.order_by(ContentItem.created_at.desc()).limit(100).all()
+    contents = query.order_by(*_content_order(content_scope, crawl_job_id, user)).limit(100).all()
     return [_content_response(item) for item in contents]
 
 
@@ -64,23 +123,11 @@ def final_content_view(
 ):
     query = db.query(ContentItem)
 
-    # Privacy filtering
-    if not user.is_system_admin:
-        if content_scope == "PRIVATE":
-            query = query.filter(ContentItem.content_scope == "PRIVATE", ContentItem.owner_user_id == user.id)
-        elif content_scope == "GLOBAL":
-            query = query.filter(ContentItem.content_scope == "GLOBAL")
-        else:
-            query = query.filter(
-                (ContentItem.content_scope == "GLOBAL")
-                | ((ContentItem.content_scope == "PRIVATE") & (ContentItem.owner_user_id == user.id))
-            )
-    elif content_scope:
-        query = query.filter(ContentItem.content_scope == content_scope.upper())
+    query = _visible_content_query(query, user, content_scope)
     if crawl_job_id:
-        query = query.filter(ContentItem.crawl_job_id == crawl_job_id)
+        query = _crawl_job_content_query(query, crawl_job_id)
 
-    contents = query.order_by(ContentItem.created_at.desc()).limit(200).all()
+    contents = query.order_by(*_content_order(content_scope, crawl_job_id, user)).limit(200).all()
     
     story_ids = {content.story_id for content in contents if content.story_id}
     stories = db.query(Story).filter(Story.id.in_(story_ids)).all() if story_ids else []
@@ -112,6 +159,7 @@ def final_content_view(
             "normalized_title": content.normalized_title,
             "summary": content.summary,
             "language": content.language,
+            "content_scope": content.content_scope,
             "status": content.status,
             "canonical_url": content.canonical_url,
             "quality_score": content.quality_score,
@@ -170,6 +218,7 @@ def get_content_detail(content_id: uuid.UUID, user: User = Depends(get_current_u
         "summary": html.unescape(content.summary) if content.summary else content.summary,
         "full_text": html.unescape(full_text) if full_text else full_text,
         "language": content.language,
+        "content_scope": content.content_scope,
         "status": content.status,
         "published_at": content.published_at,
         "duration_seconds": content.duration_seconds,
@@ -230,6 +279,7 @@ def _content_response(content: ContentItem) -> dict:
         "normalized_title": content.normalized_title,
         "summary": content.summary,
         "language": content.language,
+        "content_scope": content.content_scope,
         "status": content.status,
         "canonical_url": content.canonical_url,
         "quality_score": content.quality_score,
@@ -256,6 +306,7 @@ def _final_content_list_item(content: ContentItem, primary_source: dict, source_
         "canonical_title": html.unescape(content.canonical_title) if content.canonical_title else content.canonical_title,
         "summary": html.unescape(content.summary) if content.summary else content.summary,
         "language": content.language,
+        "content_scope": content.content_scope,
         "status": content.status,
         "quality_score": float(content.quality_score or 0),
         "created_at": content.created_at,
@@ -557,18 +608,6 @@ def _metadata_terms(metadata: dict, key: str) -> list[str]:
     if isinstance(value, str):
         return _split_terms(value)
     return []
-
-
-def _content_match_text(content: ContentItem, source_metadata: dict) -> str:
-    tags = source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else []
-    values = [
-        content.canonical_title,
-        content.normalized_title,
-        content.summary,
-        source_metadata.get("category"),
-        " ".join(str(tag) for tag in tags),
-    ]
-    return " ".join(str(value or "") for value in values).lower()
 
 
 def _split_terms(value: str | None) -> list[str]:

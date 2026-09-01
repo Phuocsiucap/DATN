@@ -734,26 +734,6 @@ def _partition_text_range_for_video(
 
 
 
-def _prevent_subtitle_overlap(scenes: list[dict[str, Any]], fps: int) -> None:
-    minimum = 1 / max(1, fps)
-    previous_end = 0.0
-    for scene in scenes:
-        start = float(scene.get("subtitle_start") or scene.get("subtitleStart") or previous_end)
-        duration = float(scene.get("subtitle_duration") or scene.get("subtitleDuration") or scene.get("duration") or minimum)
-        start = max(previous_end, start)
-        duration = max(minimum, duration)
-        end = start + duration
-        scene["subtitle_start"] = round_to_frame(start, fps)
-        scene["subtitle_duration"] = round_to_frame(duration, fps)
-        timing = scene.get("timing") if isinstance(scene.get("timing"), dict) else {}
-        if timing:
-            timing["start"] = scene["subtitle_start"]
-            timing["end"] = round_to_frame(end, fps)
-            scene["timing"] = timing
-        previous_end = end
-
-
-
 def collect_image_urls(source: dict[str, Any]) -> list[str]:
     images = [str(item) for item in source.get("images", []) if item]
     for item in _collect_media_items(source):

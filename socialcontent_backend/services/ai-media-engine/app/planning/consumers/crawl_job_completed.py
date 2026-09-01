@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
@@ -20,6 +22,8 @@ from common.db.media_workflows import content_category_payload
 from common.db.models import (
     ContentItem,
     ContentSeries,
+    CrawlJob,
+    CrawlJobContent,
     MediaWorkflow,
     PlanningCandidate,
     PlanningRun,
@@ -29,7 +33,7 @@ from common.db.models import (
 )
 from common.db.session import SessionLocal
 from common.events.kafka import consumer
-from common.events.topics import CRAWL_JOB_COMPLETED
+from common.events.topics import CRAWL_JOB_COMPLETED, PROFILE_STRATEGY_UPDATED
 from common.planning.embedding_matcher import StrategyCandidateScore, StrategyEmbeddingMatcher
 from common.planning.auto_draft_policy import draft_script_signature
 from app.planning.services.auto_workflow_planner import AutoWorkflowDecision, AutoWorkflowPlanner
@@ -45,7 +49,10 @@ def run_crawl_job_completed_consumer() -> None:
         logger.info("Kafka disabled; crawl_job_completed consumer idle")
         return
 
-    kafka_consumer = consumer([CRAWL_JOB_COMPLETED], group_id="planning-orchestrator-auto-project-queue")
+    kafka_consumer = consumer(
+        [CRAWL_JOB_COMPLETED, PROFILE_STRATEGY_UPDATED],
+        group_id="planning-orchestrator-auto-project-queue",
+    )
     for record in kafka_consumer:
         try:
             message = record.value
@@ -54,7 +61,10 @@ def run_crawl_job_completed_consumer() -> None:
                 if event_id and not claim_event(db, event_id, "planning-orchestrator-auto-project-queue"):
                     kafka_consumer.commit()
                     continue
-                _handle_crawl_job_completed(db, message)
+                if message.get("event_type") == PROFILE_STRATEGY_UPDATED:
+                    _handle_profile_strategy_updated(db, message)
+                else:
+                    _handle_crawl_job_completed(db, message)
             kafka_consumer.commit()
         except Exception as exc:
             logger.exception("[planning-orchestrator] Error processing crawl_job_completed record offset %s: %s", record.offset, exc)
@@ -72,20 +82,34 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
         print("[planning-orchestrator] Skipping auto workflow because crawl job id is missing")
         return
 
-    profiles = _auto_enabled_profiles(db)
+    job_uuid = _as_uuid(job_id)
+    job = db.get(CrawlJob, job_uuid) if job_uuid else None
+    if not job:
+        print(f"[planning-orchestrator] Skipping auto workflow because crawl job {job_id} was not found")
+        return
+    if str(job.content_scope or "").upper() != "GLOBAL":
+        print(
+            f"[planning-orchestrator] Skipping crawl job {job_id}; only GLOBAL content can be distributed to creator profiles"
+        )
+        return
+
+    profiles = _global_receiving_profiles(db)
     if not profiles:
-        print(f"[planning-orchestrator] No active auto workflow profiles found for crawl job {job_id}")
+        print(f"[planning-orchestrator] No active profiles are configured to receive GLOBAL content for crawl job {job_id}")
         return
 
     matcher = StrategyEmbeddingMatcher()
     planner = AutoWorkflowPlanner()
-    items = _content_items_for_crawl_job(db, uuid.UUID(str(job_id)))
+    items = _content_items_for_crawl_job(db, job_uuid)
     if not items:
         print(f"[planning-orchestrator] No READY content found for crawl job {job_id}; recording 0-candidate planning run")
 
     for profile in profiles:
         strategy = profile.strategy
         if not strategy:
+            continue
+        if _has_completed_global_job_plan(db, profile.id, job_uuid, items):
+            print(f"[planning-orchestrator] GLOBAL planning run already exists for profile {profile.id} and crawl job {job_id}")
             continue
         try:
             _process_profile_auto_workflows(
@@ -96,30 +120,122 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
                 items=items,
                 matcher=matcher,
                 planner=planner,
+                trigger="global_crawl_completed",
             )
         except Exception as exc:
             db.rollback()
+            _mark_failed_planning_run(db, profile.id, job_uuid, exc)
             print(f"[planning-orchestrator] Failed auto workflow planning for profile {profile.id} on crawl job {job_id}: {exc}")
 
 
-def _auto_enabled_profiles(db: Session) -> list[SocialProfile]:
-    return (
+def _handle_profile_strategy_updated(db: Session, message: dict[str, Any]) -> None:
+    payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+    profile_id = _as_uuid(payload.get("profile_id"))
+    if not profile_id:
+        print("[planning-orchestrator] Skipping strategy update because profile_id is missing or invalid")
+        return
+
+    profile = _global_receiving_profiles(db, profile_id=profile_id)
+    profile = profile[0] if profile else None
+    if not profile or not profile.strategy:
+        print(f"[planning-orchestrator] Profile {profile_id} is not enabled to receive GLOBAL content")
+        return
+
+    items = _recent_global_content(db, limit=500)
+    if not items:
+        print(f"[planning-orchestrator] No GLOBAL content is available to score for profile {profile_id}")
+
+    try:
+        _process_profile_auto_workflows(
+            db,
+            profile=profile,
+            strategy=profile.strategy,
+            job_id=None,
+            items=items,
+            matcher=StrategyEmbeddingMatcher(),
+            planner=AutoWorkflowPlanner(),
+            trigger="profile_strategy_updated",
+        )
+    except Exception as exc:
+        db.rollback()
+        _mark_failed_planning_run(db, profile.id, None, exc)
+        print(f"[planning-orchestrator] Failed strategy-triggered GLOBAL planning for profile {profile_id}: {exc}")
+
+
+def _global_receiving_profiles(db: Session, *, profile_id: uuid.UUID | None = None) -> list[SocialProfile]:
+    query = (
         db.query(SocialProfile)
         .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
         .filter(
             SocialProfile.status == "active",
             SocialProfileStrategy.receive_system_content.is_(True),
-            SocialProfileStrategy.auto_project_queue_enabled.is_(True),
         )
-        .all()
     )
+    if profile_id:
+        query = query.filter(SocialProfile.id == profile_id)
+    return query.all()
+
+
+def _has_completed_global_job_plan(
+    db: Session,
+    profile_id: uuid.UUID,
+    crawl_job_id: uuid.UUID,
+    items: list[ContentItem],
+) -> bool:
+    existing = (
+        db.query(PlanningRun)
+        .filter(
+            PlanningRun.profile_id == profile_id,
+            PlanningRun.crawl_job_id == crawl_job_id,
+            PlanningRun.planning_mode == "AUTO",
+            PlanningRun.status.in_(["RUNNING", "SUCCEEDED", "WAITING_REVIEW"]),
+        )
+        .order_by(PlanningRun.created_at.desc())
+        .first()
+    )
+    if not existing:
+        return False
+    candidate_count = int((existing.input_jsonb or {}).get("candidate_count") or 0)
+    return candidate_count > 0 or not items
+
+
+def _mark_failed_planning_run(
+    db: Session,
+    profile_id: uuid.UUID,
+    crawl_job_id: uuid.UUID | None,
+    error: Exception,
+) -> None:
+    run = (
+        db.query(PlanningRun)
+        .filter(
+            PlanningRun.profile_id == profile_id,
+            PlanningRun.crawl_job_id == crawl_job_id,
+            PlanningRun.planning_mode == "AUTO",
+            PlanningRun.status == "RUNNING",
+        )
+        .order_by(PlanningRun.created_at.desc())
+        .first()
+    )
+    if not run:
+        return
+    run.status = "FAILED"
+    run.completed_at = datetime.now(timezone.utc)
+    run.metadata_json = {
+        **(run.metadata_json if isinstance(run.metadata_json, dict) else {}),
+        "error_code": "GLOBAL_PLANNING_FAILED",
+        "error_message": str(error)[:2000],
+    }
+    db.add(run)
+    db.commit()
 
 
 def _content_items_for_crawl_job(db: Session, crawl_job_id: uuid.UUID) -> list[ContentItem]:
     return (
         db.query(ContentItem)
+        .join(CrawlJobContent, CrawlJobContent.content_id == ContentItem.id)
         .filter(
-            ContentItem.crawl_job_id == crawl_job_id,
+            CrawlJobContent.job_id == crawl_job_id,
+            ContentItem.content_scope == "GLOBAL",
             ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
         )
         .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
@@ -128,27 +244,140 @@ def _content_items_for_crawl_job(db: Session, crawl_job_id: uuid.UUID) -> list[C
     )
 
 
+def _recent_global_content(db: Session, *, limit: int) -> list[ContentItem]:
+    return (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.content_scope == "GLOBAL",
+            ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
+        )
+        .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def _daily_recommendation_limit(strategy: SocialProfileStrategy) -> int:
+    try:
+        return max(1, min(500, int(strategy.max_system_recommendations or 20)))
+    except (TypeError, ValueError):
+        return 20
+
+
+def _strategy_day_window(
+    strategy: SocialProfileStrategy,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    timezone_name = str(getattr(strategy, "schedule_timezone", None) or "Asia/Bangkok").strip()
+    try:
+        strategy_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        strategy_timezone = timezone.utc
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    local_date = current.astimezone(strategy_timezone).date()
+    local_start = datetime.combine(local_date, time.min, tzinfo=strategy_timezone)
+    local_end = local_start + timedelta(days=1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
+def _daily_recommendation_count(
+    db: Session,
+    profile_id: uuid.UUID,
+    strategy: SocialProfileStrategy,
+    *,
+    now: datetime | None = None,
+) -> int:
+    day_start, day_end = _strategy_day_window(strategy, now=now)
+    value = (
+        db.query(func.count(distinct(ProfileContentLink.content_id)))
+        .filter(
+            ProfileContentLink.profile_id == profile_id,
+            ProfileContentLink.source_scope == "GLOBAL",
+            ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
+            ProfileContentLink.recommended_at >= day_start,
+            ProfileContentLink.recommended_at < day_end,
+        )
+        .scalar()
+    )
+    return max(0, int(value or 0))
+
+
+def _existing_recommendation_content_ids(
+    db: Session,
+    profile_id: uuid.UUID,
+    content_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    if not content_ids:
+        return set()
+    rows = (
+        db.query(ProfileContentLink.content_id)
+        .filter(
+            ProfileContentLink.profile_id == profile_id,
+            ProfileContentLink.source_scope == "GLOBAL",
+            ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
+            ProfileContentLink.recommended_at.is_not(None),
+            ProfileContentLink.content_id.in_(content_ids),
+        )
+        .all()
+    )
+    return {row[0] for row in rows if row[0] is not None}
+
+
+def _lock_profile_recommendation_quota(db: Session, profile_id: uuid.UUID) -> None:
+    # Serialize quota reservation for one profile. The lock is released by the
+    # commit immediately after links are created, before any creative AI call.
+    (
+        db.query(SocialProfileStrategy.id)
+        .filter(SocialProfileStrategy.profile_id == profile_id)
+        .with_for_update()
+        .first()
+    )
+
+
 def _process_profile_auto_workflows(
     db: Session,
     *,
     profile: SocialProfile,
     strategy: SocialProfileStrategy,
-    job_id: str,
+    job_id: str | None,
     items: list[ContentItem],
     matcher: StrategyEmbeddingMatcher,
     planner: AutoWorkflowPlanner,
+    trigger: str = "global_crawl_completed",
 ) -> None:
     ranked = matcher.rank_candidates(db, items, strategy, limit=len(items))
     db.commit()
 
     eligible = [score for score in ranked if score.eligible]
-    for score in ranked:
+    _lock_profile_recommendation_quota(db, profile.id)
+    daily_limit = _daily_recommendation_limit(strategy)
+    received_today = _daily_recommendation_count(db, profile.id, strategy)
+    remaining_quota = max(0, daily_limit - received_today)
+    existing_content_ids = _existing_recommendation_content_ids(
+        db,
+        profile.id,
+        [score.content.id for score in ranked],
+    )
+    new_recommendations = [
+        score for score in eligible if score.content.id not in existing_content_ids
+    ][:remaining_quota]
+    recommendation_ids = {score.content.id for score in new_recommendations}
+    existing_scores = [score for score in ranked if score.content.id in existing_content_ids]
+    for score in existing_scores:
         _upsert_profile_content_link(db, profile, score, decision=None)
+    for score in new_recommendations:
+        _upsert_profile_content_link(db, profile, score, decision=None, assigned_now=True)
     db.commit()
 
     avoid_blocked_count = sum(1 for score in ranked if score.avoided_topics)
     print(
-        f"[planning-orchestrator] Profile {profile.id}: {len(eligible)}/{len(ranked)} candidates passed topic cosine threshold + avoid-topic gates for crawl job {job_id}; avoid_blocked={avoid_blocked_count}"
+        f"[planning-orchestrator] Profile {profile.id}: {len(eligible)}/{len(ranked)} GLOBAL candidates passed; "
+        f"assigned={len(new_recommendations)}, daily_quota={daily_limit}, already_received_today={received_today}; "
+        f"trigger={trigger}; crawl_job={job_id}; avoid_blocked={avoid_blocked_count}"
     )
 
     now = datetime.now(timezone.utc)
@@ -156,34 +385,45 @@ def _process_profile_auto_workflows(
         user_id=profile.user_id,
         profile_id=profile.id,
         workflow_id=None,
-        crawl_job_id=uuid.UUID(str(job_id)),
+        crawl_job_id=_as_uuid(job_id),
         planning_mode="AUTO",
-        status="SUCCEEDED",
+        status="RUNNING",
         input_jsonb={
-            "crawl_job_id": str(job_id),
+            "crawl_job_id": str(job_id) if job_id else None,
+            "source_scope": "GLOBAL",
             "candidate_count": len(ranked),
             "eligible_count": len(eligible),
             "avoid_blocked_count": avoid_blocked_count,
             "strategy_similarity_threshold": matcher.strategy_similarity_threshold(strategy),
+            "daily_recommendation_limit": daily_limit,
+            "received_before_run": received_today,
+            "remaining_quota_before_run": remaining_quota,
         },
         output_jsonb={
             "candidate_count": len(ranked),
             "eligible_count": len(eligible),
+            "recommendations_assigned": len(new_recommendations),
+            "recommended_content_ids": [str(score.content.id) for score in new_recommendations],
+            "daily_recommendation_limit": daily_limit,
+            "daily_quota_exhausted": len(new_recommendations) >= remaining_quota,
             "workflows_created": [],
+            "auto_workflow_enabled": bool(strategy.auto_project_queue_enabled),
         },
         reason_jsonb={
-            "trigger": "crawl_job_completed",
+            "trigger": trigger,
             "selection_reasons": [
-                f"Evaluated {len(ranked)} candidate items for profile {profile.id} with topic cosine threshold scoring.",
+                f"Evaluated {len(ranked)} GLOBAL candidate items for profile {profile.id} with topic cosine threshold scoring.",
                 f"{len(eligible)} candidates passed similarity threshold and avoid-topic filters.",
+                f"Assigned {len(new_recommendations)} new recommendations within the daily limit of {daily_limit}.",
             ],
         },
         metadata_json={
-            "trigger": "crawl_job_completed",
+            "trigger": trigger,
+            "source_scope": "GLOBAL",
             "selection_algorithm": AUTO_SELECTION_ALGORITHM,
         },
         started_at=now,
-        completed_at=now,
+        completed_at=None,
     )
     db.add(planning_run)
     db.flush()
@@ -199,20 +439,40 @@ def _process_profile_auto_workflows(
             selected=False,
             eligible=score.eligible,
             reason_jsonb={
-                "crawl_job_id": str(job_id),
+                "crawl_job_id": str(job_id) if job_id else None,
+                "source_scope": "GLOBAL",
                 "selection_reasons": score.selection_reasons,
                 "rejection_reasons": score.rejection_reasons,
             },
-            metadata_json=score.metadata,
+            metadata_json={
+                **score.metadata,
+                "recommended_to_profile": score.content.id in recommendation_ids,
+                "daily_recommendation_limit": daily_limit,
+            },
         )
         db.add(cand)
         candidate_records[score.content.id] = cand
     db.flush()
+    # Persist the scored plan before any paid/remote creative call. If draft
+    # generation fails later, the creator still sees the candidates and error.
+    db.commit()
 
     created_workflows: list[str] = []
     selected_content_ids: list[str] = []
     ai_decisions: list[dict[str, Any]] = []
-    for score in eligible:
+    if not strategy.auto_project_queue_enabled:
+        output_info = dict(planning_run.output_jsonb or {})
+        output_info["workflows_created"] = []
+        output_info["selected_content_ids"] = []
+        output_info["ai_decisions"] = []
+        output_info["auto_creation_skipped_reason"] = "AUTO_PROJECT_QUEUE_DISABLED"
+        planning_run.output_jsonb = output_info
+        planning_run.status = "SUCCEEDED"
+        planning_run.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        return
+
+    for score in new_recommendations:
         existing = _existing_auto_workflow(db, profile.id, score.content.id, job_id)
         if existing:
             _mark_existing_auto_workflow_link(db, profile, score, existing)
@@ -294,20 +554,28 @@ def _process_profile_auto_workflows(
     if selected_content_ids:
         output_info["selected_content_id"] = selected_content_ids[0]
     planning_run.output_jsonb = output_info
+    planning_run.status = "SUCCEEDED"
+    planning_run.completed_at = datetime.now(timezone.utc)
     db.commit()
 
 
-def _existing_auto_workflow(db: Session, profile_id: uuid.UUID, content_id: uuid.UUID, job_id: str) -> MediaWorkflow | None:
+def _existing_auto_workflow(
+    db: Session,
+    profile_id: uuid.UUID,
+    content_id: uuid.UUID,
+    job_id: str | None,
+) -> MediaWorkflow | None:
     rows = (
         db.query(MediaWorkflow)
         .filter(MediaWorkflow.profile_id == profile_id, MediaWorkflow.primary_content_id == content_id)
         .order_by(MediaWorkflow.created_at.desc())
-        .limit(20)
         .all()
     )
     for workflow in rows:
         metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
-        if metadata.get("selection_mode") == "AUTO" and str(metadata.get("crawl_job_id") or "") == str(job_id):
+        if metadata.get("selection_mode") != "AUTO":
+            continue
+        if job_id is None or str(metadata.get("crawl_job_id") or "") == str(job_id):
             return workflow
     return None
 
@@ -318,7 +586,7 @@ def _create_auto_workflow_from_decision(
     strategy: SocialProfileStrategy,
     score: StrategyCandidateScore,
     decision: AutoWorkflowDecision,
-    job_id: str,
+    job_id: str | None,
 ) -> MediaWorkflow:
     content = score.content
     decision_meta = decision.metadata if isinstance(decision.metadata, dict) else {}
@@ -327,10 +595,11 @@ def _create_auto_workflow_from_decision(
     story.setdefault("meta", {})
     quality = decision_meta.get("quality") if isinstance(decision_meta.get("quality"), dict) else {}
     quality_passed = quality.get("status") == "PASS"
+    source_job_id = str(job_id or content.crawl_job_id or "") or None
     metadata = {
         "selection_mode": "AUTO",
         "selection_algorithm": AUTO_SELECTION_ALGORITHM,
-        "crawl_job_id": str(job_id),
+        "crawl_job_id": source_job_id,
         "content_angle": decision_meta.get("content_angle"),
         "target_audience": decision_meta.get("target_audience") or strategy.target_audience,
         "tone": decision_meta.get("tone") or strategy.tone,
@@ -495,6 +764,8 @@ def _upsert_profile_content_link(
     profile: SocialProfile,
     score: StrategyCandidateScore,
     decision: AutoWorkflowDecision | None,
+    *,
+    assigned_now: bool = False,
 ) -> ProfileContentLink:
     link = (
         db.query(ProfileContentLink)
@@ -515,6 +786,10 @@ def _upsert_profile_content_link(
             source_scope=score.content.content_scope,
             status="ACTIVE",
         )
+    link.status = "ACTIVE"
+    link.source_scope = score.content.content_scope
+    if assigned_now and link.recommended_at is None:
+        link.recommended_at = datetime.now(timezone.utc)
     if score.eligible:
         link.relation_reason = "EMBEDDING_STRATEGY_MATCH"
     elif score.avoided_topics:

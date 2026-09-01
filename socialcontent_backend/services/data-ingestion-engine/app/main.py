@@ -6,6 +6,7 @@ from common.core.config import get_settings
 from common.db.bootstrap import ensure_schema_compatibility
 from common.db.models import Base
 from common.db.session import SessionLocal, engine
+from common.http.responses import configure_api_responses
 from common.workers import run_thread_worker_forever
 
 from app.orchestrator.consumers.job_created import run_job_created_consumer
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 app = FastAPI(title="Data Ingestion Engine", lifespan=lifespan)
+configure_api_responses(app)
 
 @app.get("/health")
 def health():

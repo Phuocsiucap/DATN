@@ -57,18 +57,18 @@ export default function TopNavBar({
           <div className="relative hidden xl:block">
             <button
               onClick={() => setShowUsageModal(!showUsageModal)}
-              className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 text-[12px] font-extrabold text-[#2556ea] transition hover:bg-[#f4f6ff]"
+              className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 text-xs font-extrabold text-[#2556ea] transition hover:bg-[#f4f6ff]"
               title="Xem hạch toán Token AI & Chi phí"
             >
               <Cpu size={15} />
               {formatTokens(aiUsage.total_tokens)}
-              <span className="rounded-[5px] bg-[#eef4ff] px-1.5 py-0.5 text-[10px] text-[#2556ea]">${aiUsage.total_cost_usd}</span>
+              <span className="rounded-[5px] bg-[#eef4ff] px-1.5 py-0.5 text-xs text-[#2556ea]">${aiUsage.total_cost_usd}</span>
             </button>
 
             {showUsageModal && (
               <div className="app-card absolute right-0 mt-2 w-80 p-4">
                 <div className="flex items-center justify-between border-b border-[var(--outline-variant)] pb-2">
-                  <div className="flex items-center gap-2 text-[13px] font-extrabold text-[#111827]">
+                  <div className="flex items-center gap-2 text-sm font-extrabold text-[#111827]">
                     <Coins size={15} className="text-[#f59e0b]" />
                     Hạch toán Token AI
                   </div>
@@ -77,7 +77,7 @@ export default function TopNavBar({
                   </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <UsageBox label="Input" value={aiUsage.total_input_tokens.toLocaleString()} />
                   <UsageBox label="Output" value={aiUsage.total_output_tokens.toLocaleString()} />
                   <UsageBox label="Runs" value={`${aiUsage.prompt_runs_count}`} />
@@ -93,10 +93,10 @@ export default function TopNavBar({
         <button className="flex items-center gap-3" title={currentUser?.email || displayName}>
           <UserAvatar src={null} name={displayName} />
           <div className="hidden text-left sm:block">
-            <div className="text-[13px] font-extrabold leading-tight text-[#111827]">
+            <div className="text-sm font-extrabold leading-tight text-[#111827]">
               {displayName}
             </div>
-            <div className="text-[12px] font-medium text-[#64748b]">{roleLabel}</div>
+            <div className="text-xs font-medium text-[#64748b]">{roleLabel}</div>
           </div>
           <ChevronDown size={16} className="text-[#526179]" />
         </button>
@@ -118,8 +118,8 @@ export default function TopNavBar({
 function UsageBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-[var(--outline-variant)] bg-[#fbfcff] p-2.5">
-      <div className="text-[10px] font-bold uppercase text-[#718096]">{label}</div>
-      <div className="mt-0.5 truncate text-[13px] font-extrabold text-[#111827]">{value}</div>
+      <div className="text-xs font-bold uppercase text-[#718096]">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-extrabold text-[#111827]">{value}</div>
     </div>
   )
 }

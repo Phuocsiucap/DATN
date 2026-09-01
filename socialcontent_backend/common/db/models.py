@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -119,7 +120,9 @@ class CrawlJob(Base):
 
     requester = relationship("User", back_populates="crawl_jobs")
     sources = relationship("CrawlJobSource", back_populates="job", cascade="all, delete-orphan")
+    schedule = relationship("CrawlJobSchedule", back_populates="job", cascade="all, delete-orphan", uselist=False)
     content_items = relationship("ContentItem", back_populates="crawl_job")
+    content_results = relationship("CrawlJobContent", back_populates="job", cascade="all, delete-orphan")
 
     @property
     def creator_name(self) -> str:
@@ -144,6 +147,25 @@ class CrawlJobSource(Base):
     updated_at = updated_col()
 
     job = relationship("CrawlJob", back_populates="sources")
+
+
+class CrawlJobSchedule(Base):
+    __tablename__ = "crawl_job_schedules"
+
+    id = uuid_pk()
+    job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    runs_per_day = Column(SmallInteger, nullable=False, default=1)
+    window_start = Column(Time, nullable=False)
+    window_end = Column(Time, nullable=False)
+    weekdays = Column(JSONB, nullable=False, default=lambda: list(range(7)))
+    timezone = Column(String(80), nullable=False, default="Asia/Ho_Chi_Minh")
+    next_run_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    job = relationship("CrawlJob", back_populates="schedule")
 
 
 class KafkaTask(Base):
@@ -226,6 +248,28 @@ class ContentItem(Base):
     updated_at = updated_col()
 
     crawl_job = relationship("CrawlJob", back_populates="content_items")
+    crawl_job_results = relationship("CrawlJobContent", back_populates="content", cascade="all, delete-orphan")
+
+
+class CrawlJobContent(Base):
+    """Occurrence of one canonical content item in one crawl job."""
+
+    __tablename__ = "crawl_job_contents"
+
+    job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), primary_key=True)
+    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), primary_key=True)
+    is_duplicate = Column(Boolean, default=False, nullable=False, index=True)
+    match_type = Column(String(60), nullable=True, index=True)
+    source_type = Column(String(40), nullable=True, index=True)
+    source_external_id = Column(Text, nullable=True)
+    processed_document_id = Column(String(64), nullable=True, index=True)
+    occurrence_count = Column(Integer, default=1, nullable=False)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    job = relationship("CrawlJob", back_populates="content_results")
+    content = relationship("ContentItem", back_populates="crawl_job_results")
 
 
 class Story(Base):
@@ -427,6 +471,7 @@ class ProfileContentLink(Base):
     score = Column(Numeric(5, 2), default=0, nullable=False)
     status = Column(String(40), default="ACTIVE", nullable=False, index=True)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    recommended_at = Column(DateTime(timezone=True), nullable=True, index=True)
     first_seen_at = now_col()
     last_seen_at = updated_col()
     created_at = now_col()

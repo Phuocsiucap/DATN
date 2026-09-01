@@ -6,22 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-class MediaWorkflowUpdateRequest(BaseModel):
-    title: str | None = None
-    content_angle: str | None = None
-    target_audience: str | None = None
-    tone: str | None = None
-    format: str | None = None
-    target_duration_seconds: int | None = None
-    recommended_part_count: int | None = None
-    risk_level: str | None = None
-    ai_reasoning: list[Any] | None = None
-    production_requirements: dict[str, Any] | None = None
-
-
-class MediaWorkflowReviewRequest(BaseModel):
-    feedback_text: str | None = None
-
 
 class MediaWorkflowResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

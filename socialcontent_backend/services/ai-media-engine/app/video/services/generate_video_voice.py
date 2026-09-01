@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -95,31 +92,6 @@ def enhance_emotion_and_generate_voice(
         "voice_text": voice_text,
         "audio_url": f"/api/v1/generate-video/media/assets/audio/{audio_filename}",
     }
-
-
-
-def save_uploaded_audio(original_filename: str, content: bytes) -> str:
-    suffix = Path(original_filename or "audio").suffix.lower()
-    if suffix not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".webm"}:
-        raise RuntimeError("Unsupported audio file type")
-    if not content:
-        raise RuntimeError("Empty audio file")
-    stem = Path(original_filename or "audio").stem
-    safe_stem = re.sub(r"[^a-zA-Z0-9._-]+", "-", stem).strip("-") or "audio"
-    filename = f"upload-{uuid.uuid4().hex[:10]}-{safe_stem}{suffix}"
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = AUDIO_DIR / filename
-    output_path.write_bytes(content)
-    return f"assets/audio/{filename}"
-
-
-
-def save_uploaded_audio_base64(original_filename: str, content_base64: str) -> str:
-    try:
-        content = base64.b64decode(content_base64, validate=True)
-    except Exception as error:
-        raise RuntimeError("Invalid audio payload") from error
-    return save_uploaded_audio(original_filename, content)
 
 
 

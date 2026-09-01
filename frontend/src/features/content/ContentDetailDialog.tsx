@@ -177,13 +177,13 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-extrabold uppercase tracking-wider text-slate-700">Chi tiết bài viết</span>
                 {contentDetail?.source_type && (
-                  <span className="rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[10px] font-black text-blue-700">
+                  <span className="rounded-full bg-blue-100/80 px-2.5 py-0.5 text-xs font-black text-blue-700">
                     {contentDetail.source_type}
                   </span>
                 )}
                 {contentDetail?.status && <Badge value={contentDetail.status} />}
                 {contentDetail?.quality_score !== undefined && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-black text-emerald-700">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-black text-emerald-700">
                     <ShieldCheck size={11} /> Quality: {Number(contentDetail.quality_score).toFixed(1)}/100
                   </span>
                 )}
@@ -270,26 +270,26 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
               {/* Row 2: Metadata Pills & Key Information */}
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2.5 text-xs">
                 <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
-                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400">
+                  <div className="flex items-center gap-1 text-xs font-bold uppercase text-slate-400">
                     <Calendar size={10} /> Ngày đăng
                   </div>
                   <div className="font-bold text-slate-800 truncate">{formatDate(article.publishedAt || contentDetail.source_published_at)}</div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
-                  <div className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400">
+                  <div className="flex items-center gap-1 text-xs font-bold uppercase text-slate-400">
                     <Clock size={10} /> Ngày thu thập
                   </div>
                   <div className="font-semibold text-slate-700 truncate">{formatDate(contentDetail.created_at)}</div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
-                  <div className="text-[10px] font-bold uppercase text-slate-400">Chuyên mục</div>
+                  <div className="text-xs font-bold uppercase text-slate-400">Chuyên mục</div>
                   <div className="font-bold text-blue-700 truncate">{contentDetail.category || sourceMetadata.category || 'Chung'}</div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
-                  <div className="text-[10px] font-bold uppercase text-slate-400">Tổng quan media</div>
+                  <div className="text-xs font-bold uppercase text-slate-400">Tổng quan media</div>
                   <div className="font-bold text-slate-800 truncate">
                     {imageItems.length} Ảnh • {videoItems.length} Video
                   </div>
@@ -299,8 +299,8 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
               {/* Row 3: Identifiers & Tags */}
               <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                 {(article.articleId || article.categoryId || article.siteId || contentDetail.article_id) && (
-                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-slate-600">
-                    <span className="text-[10px] uppercase text-slate-400 mr-1 font-bold">IDs:</span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-600">
+                    <span className="text-xs uppercase text-slate-400 mr-1 font-bold">IDs:</span>
                     {(article.articleId || contentDetail.article_id) && (
                       <span className="rounded-md bg-white border border-slate-200 px-2 py-0.5">Article {article.articleId || contentDetail.article_id}</span>
                     )}
@@ -315,11 +315,11 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
 
                 {tags.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <div className="flex items-center gap-1 text-[10px] uppercase text-slate-400 font-bold mr-1">
+                    <div className="flex items-center gap-1 text-xs uppercase text-slate-400 font-bold mr-1">
                       <Tag size={11} /> Tags:
                     </div>
                     {tags.map((tag: string) => (
-                      <span key={tag} className="rounded-md bg-blue-50/80 px-2 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-100">
+                      <span key={tag} className="rounded-md bg-blue-50/80 px-2 py-0.5 text-xs font-bold text-blue-700 border border-blue-100">
                         {tag}
                       </span>
                     ))}
@@ -393,7 +393,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
                           <div key={item.source_url || index} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
                             <MediaAssetPreview item={item} index={index} controls />
                             {item.caption && (
-                              <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                              <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
                                 {item.caption}
                               </div>
                             )}
@@ -419,5 +419,5 @@ function Badge({ value }: { value: string }) {
   if (['SUCCEEDED', 'COMPLETED', 'APPROVED', 'READY'].includes(value)) color = 'bg-emerald-100 text-emerald-800'
   if (['FAILED', 'REJECTED'].includes(value)) color = 'bg-rose-100 text-rose-800'
   if (['RUNNING', 'PENDING', 'PROCESSING'].includes(value)) color = 'bg-blue-100 text-blue-800'
-  return <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${color}`}>{value}</span>
+  return <span className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider ${color}`}>{value}</span>
 }
