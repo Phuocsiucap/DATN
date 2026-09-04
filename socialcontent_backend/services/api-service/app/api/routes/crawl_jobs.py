@@ -22,6 +22,11 @@ def create_crawl_job(payload: schemas.CrawlJobCreateRequest, user: User = Depend
 @router.get("", response_model=list[schemas.CrawlJobResponse])
 def list_crawl_jobs(
     content_scope: str | None = None,
+    status: str | None = None,
+    source_type: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    q: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -31,7 +36,27 @@ def list_crawl_jobs(
     elif content_scope:
         query = query.filter(CrawlJob.content_scope == content_scope.upper())
 
-    return query.order_by(CrawlJob.created_at.desc()).limit(100).all()
+    if status:
+        query = query.filter(CrawlJob.status == status.upper())
+    if source_type:
+        from common.db.models import CrawlJobSource
+        query = query.filter(CrawlJob.sources.any(CrawlJobSource.source_type == source_type.upper()))
+    if date_from:
+        from datetime import datetime as dt
+        try:
+            query = query.filter(CrawlJob.created_at >= dt.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        from datetime import datetime as dt, timedelta
+        try:
+            query = query.filter(CrawlJob.created_at < dt.fromisoformat(date_to) + timedelta(days=1))
+        except ValueError:
+            pass
+    if q:
+        query = query.filter(CrawlJob.name.ilike(f"%{q}%"))
+
+    return query.order_by(CrawlJob.created_at.desc()).limit(200).all()
 
 
 @router.get("/{job_id}", response_model=schemas.CrawlJobResponse)

@@ -1,6 +1,7 @@
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -45,6 +46,9 @@ VIDEO_RUN_TYPES = {
 
 WORKSPACE_METADATA_KEYS = {
     "selection_mode",
+    "creation_source",
+    "primary_source",
+    "source_count",
     "note",
     "crawl_job_id",
     "content_angle",
@@ -77,11 +81,17 @@ def _visible_in_video_workspace_filter():
     return MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES)
 
 
+class MediaWorkflowSourceRef(BaseModel):
+    type: Literal["content", "story"]
+    id: uuid.UUID
+
+
 class MediaWorkflowFromSourcesRequest(BaseModel):
     profile_id: uuid.UUID
     crawl_job_id: uuid.UUID | None = None
     content_ids: list[uuid.UUID] = Field(default_factory=list)
     story_ids: list[uuid.UUID] = Field(default_factory=list)
+    primary_source: MediaWorkflowSourceRef | None = None
     title: str | None = None
     note: str | None = None
     selection_mode: str = "MANUAL"
@@ -242,6 +252,7 @@ def get_video_workspace(
         "planning_mode": workflow.planning_mode or "SINGLE",
         "metadata": {key: metadata[key] for key in WORKSPACE_METADATA_KEYS if key in metadata},
         "source_content": source,
+        "inputs": workflow.inputs_jsonb if isinstance(workflow.inputs_jsonb, list) else [],
         "draft": draft,
         "final_video": final_video,
         "tasks": tasks,
@@ -297,35 +308,51 @@ def get_video_workflow_progress(
 
 @router.post("/from-sources", status_code=201)
 def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    profile = db.get(SocialProfile, payload.profile_id)
+    profile = (
+        db.query(SocialProfile)
+        .filter(SocialProfile.id == payload.profile_id)
+        .with_for_update()
+        .first()
+    )
     if not profile or profile.user_id != user.id:
         raise HTTPException(status_code=404, detail="Profile not found")
+
+    source_refs = _ordered_source_refs(payload)
     accessible_contents: dict[uuid.UUID, ContentItem] = {}
     accessible_stories: dict[uuid.UUID, Story] = {}
-    for content_id in payload.content_ids:
+    for content_id in dict.fromkeys(payload.content_ids):
         content = db.get(ContentItem, content_id)
         if not content or not _can_use_content(content, user):
             raise HTTPException(status_code=404, detail=f"ContentItem not found or inaccessible: {content_id}")
         accessible_contents[content_id] = content
-    for story_id in payload.story_ids:
+    for story_id in dict.fromkeys(payload.story_ids):
         story = db.get(Story, story_id)
         if not story or not _can_use_story(db, story, user):
             raise HTTPException(status_code=404, detail=f"Story not found or inaccessible: {story_id}")
         accessible_stories[story_id] = story
-    if not accessible_contents and not accessible_stories:
-        raise HTTPException(status_code=400, detail="Content workflow requires at least one accessible source")
 
-    title = payload.title or _source_workflow_title(db, payload, user) or payload.note or "Content workflow"
+    primary_ref = source_refs[0]
+    primary_content = _source_ref_content(db, primary_ref, accessible_contents, accessible_stories)
+    if not primary_content:
+        raise HTTPException(status_code=400, detail="Nguồn chính chưa có ContentItem để sản xuất video")
 
-    primary_category_payload = content_category_payload(accessible_contents[payload.content_ids[0]]) if payload.content_ids else {}
+    requested_title = (payload.title or "").strip()
+    title = requested_title or _source_ref_title(primary_ref, accessible_contents, accessible_stories) or payload.note or "Content workflow"
+
+    primary_category_payload = content_category_payload(primary_content)
     workflow = MediaWorkflow(
         user_id=user.id,
         profile_id=profile.id,
         title=title,
         status="READY",
         planning_mode=None,
+        primary_content_id=primary_content.id,
+        current_stage="READY",
         metadata_json={
             "selection_mode": payload.selection_mode.upper(),
+            "creation_source": "MANUAL_SOURCE_SELECTION",
+            "primary_source": {"type": primary_ref.type, "id": str(primary_ref.id)},
+            "source_count": len(source_refs),
             "note": payload.note,
             "filters": payload.filters,
             "crawl_job_id": str(payload.crawl_job_id) if payload.crawl_job_id else None,
@@ -336,19 +363,30 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
     db.flush()
 
     inputs = []
-    for content_id in payload.content_ids:
-        content = accessible_contents[content_id]
-        role = "primary" if workflow.primary_content_id is None else "supporting"
-        inputs.append({"type": "content", "id": str(content_id), "role": role, **content_category_payload(content)})
-        if workflow.primary_content_id is None:
-            workflow.primary_content_id = content_id
-    for story_id in payload.story_ids:
-        story = accessible_stories[story_id]
-        role = "primary" if workflow.primary_content_id is None else "supporting"
+    for index, source_ref in enumerate(source_refs):
+        role = "primary" if index == 0 else "supporting"
+        if source_ref.type == "content":
+            content = accessible_contents[source_ref.id]
+            inputs.append({
+                "type": "content",
+                "id": str(source_ref.id),
+                "role": role,
+                "title": content.canonical_title or content.normalized_title,
+                **content_category_payload(content),
+            })
+            continue
+
+        story = accessible_stories[source_ref.id]
         story_content = db.get(ContentItem, story.content_id) if story.content_id else None
-        inputs.append({"type": "story", "id": str(story_id), "role": role, **content_category_payload(story_content)})
-        if workflow.primary_content_id is None and story.content_id:
-            workflow.primary_content_id = story.content_id
+        inputs.append({
+            "type": "story",
+            "id": str(source_ref.id),
+            "role": role,
+            "title": story.canonical_name,
+            "episode_count": int(story.total_episodes or 0),
+            "completion_status": story.completion_status,
+            **content_category_payload(story_content),
+        })
 
     workflow.inputs_jsonb = inputs
 
@@ -546,14 +584,47 @@ def delete_media_workflow(
     return {"message": "Workflow deleted successfully", "workflow_id": str(workflow_id)}
 
 
-def _source_workflow_title(db: Session, payload: MediaWorkflowFromSourcesRequest, user: User) -> str | None:
-    if payload.content_ids:
-        content = db.get(ContentItem, payload.content_ids[0])
-        return (content.canonical_title or content.normalized_title) if content and _can_use_content(content, user) else None
-    if payload.story_ids:
-        story = db.get(Story, payload.story_ids[0])
-        return story.canonical_name if story and _can_use_story(db, story, user) else None
-    return None
+def _ordered_source_refs(payload: MediaWorkflowFromSourcesRequest) -> list[MediaWorkflowSourceRef]:
+    refs = [
+        *[MediaWorkflowSourceRef(type="content", id=value) for value in dict.fromkeys(payload.content_ids)],
+        *[MediaWorkflowSourceRef(type="story", id=value) for value in dict.fromkeys(payload.story_ids)],
+    ]
+    if not refs:
+        raise HTTPException(status_code=400, detail="Workflow cần ít nhất một nguồn nội dung hoặc truyện")
+    if len(refs) > 20:
+        raise HTTPException(status_code=400, detail="Mỗi workflow chỉ hỗ trợ tối đa 20 nguồn")
+    if not payload.primary_source:
+        return refs
+
+    primary_key = (payload.primary_source.type, payload.primary_source.id)
+    selected_keys = {(ref.type, ref.id) for ref in refs}
+    if primary_key not in selected_keys:
+        raise HTTPException(status_code=400, detail="Nguồn chính phải nằm trong danh sách nguồn đã chọn")
+    return [payload.primary_source, *[ref for ref in refs if (ref.type, ref.id) != primary_key]]
+
+
+def _source_ref_content(
+    db: Session,
+    source_ref: MediaWorkflowSourceRef,
+    contents: dict[uuid.UUID, ContentItem],
+    stories: dict[uuid.UUID, Story],
+) -> ContentItem | None:
+    if source_ref.type == "content":
+        return contents.get(source_ref.id)
+    story = stories.get(source_ref.id)
+    return db.get(ContentItem, story.content_id) if story and story.content_id else None
+
+
+def _source_ref_title(
+    source_ref: MediaWorkflowSourceRef,
+    contents: dict[uuid.UUID, ContentItem],
+    stories: dict[uuid.UUID, Story],
+) -> str | None:
+    if source_ref.type == "content":
+        content = contents.get(source_ref.id)
+        return (content.canonical_title or content.normalized_title) if content else None
+    story = stories.get(source_ref.id)
+    return story.canonical_name if story else None
 
 
 def _can_use_content(content: ContentItem, user: User) -> bool:

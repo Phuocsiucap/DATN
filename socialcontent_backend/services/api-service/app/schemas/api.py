@@ -23,7 +23,13 @@ from app.schemas.planning import (
     ContentSeriesUpdateRequest,
     ContentSeriesCreateRequest,
 )
-from app.schemas.sources import CrawlSourceCreateRequest, CrawlSourceUpdateRequest
+from app.schemas.sources import (
+    CrawlSourceCreateRequest,
+    CrawlSourceUpdateRequest,
+    CrawlSourceConfigCreateRequest,
+    CrawlSourceConfigUpdateRequest,
+    CrawlSourceConfigResponse,
+)
 from app.schemas.stories import StoryResponse
 from app.schemas.social_profiles import (
     QueueStatusRequest,

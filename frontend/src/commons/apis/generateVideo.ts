@@ -147,6 +147,7 @@ export type VideoWorkspaceDetail = {
   planning_mode?: string | null
   metadata: Record<string, unknown>
   source_content?: Record<string, unknown> | null
+  inputs?: WorkflowSourceInput[]
   draft: Partial<GenerateVideoStory> & { story_data?: GenerateVideoScene[] }
   final_video?: string | null
   tasks: VideoWorkflowTask[]
@@ -161,6 +162,26 @@ export type VideoWorkspaceDetail = {
   }
   created_at: string
   updated_at: string
+}
+
+export type WorkflowSourceInput = {
+  type: 'content' | 'story' | string
+  id: string
+  role: 'primary' | 'supporting' | string
+  title?: string | null
+  category?: string | null
+  episode_count?: number | null
+  completion_status?: string | null
+}
+
+export type CreateMediaWorkflowFromSourcesInput = {
+  profile_id: string
+  content_ids: string[]
+  story_ids: string[]
+  primary_source: { type: 'content' | 'story'; id: string }
+  title?: string
+  note?: string
+  selection_mode?: 'MANUAL' | string
 }
 
 export type VideoWorkflowProgress = {
@@ -413,6 +434,18 @@ export const createDirectScriptApi = async (payload: {
 }) => {
   const { data } = await api.post(`${basePath}/direct-script`, payload)
   return data as { workflow: Record<string, unknown>; job: GenerateVideoJob | null; reused: boolean }
+}
+
+export const createMediaWorkflowFromSourcesApi = async (payload: CreateMediaWorkflowFromSourcesInput) => {
+  const { data } = await api.post('/media-workflows/from-sources', payload)
+  return data as {
+    id: string
+    title: string
+    status: string
+    profile_id: string
+    primary_content_id?: string | null
+    inputs: WorkflowSourceInput[]
+  }
 }
 
 export const fetchVideoWorkspacesApi = async (params: {

@@ -70,6 +70,7 @@ import {
   type GenerateVideoVoiceProvider,
   type VideoWorkflowProgress,
   type VideoWorkspaceDetail,
+  type WorkflowSourceInput,
 } from '@/commons/apis/generateVideo'
 import { fetchAllContentSeriesApi, fetchContentSeriesApi, type ContentSeries } from '@/commons/apis/planning'
 import { TransferSeriesModal } from './components/SeriesModal'
@@ -781,6 +782,12 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
                 </div>
               </div>
             )}
+            {selectedProject?.inputs?.length ? (
+              <WorkflowSourceSummary
+                inputs={selectedProject.inputs}
+                onOpenContent={(contentSourceId) => setShowContentDetailId(contentSourceId)}
+              />
+            ) : null}
           </div>
           
           <div className="flex shrink-0 items-center gap-2">
@@ -972,6 +979,41 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
         {title}
       </div>
       {children}
+    </div>
+  )
+}
+
+function WorkflowSourceSummary({
+  inputs,
+  onOpenContent,
+}: {
+  inputs: WorkflowSourceInput[]
+  onOpenContent: (contentId: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs md:pl-12">
+      <span className="font-extrabold text-slate-500">Nguồn sản xuất:</span>
+      {inputs.map((input) => {
+        const primary = input.role === 'primary'
+        const label = input.title || `${input.type === 'story' ? 'Truyện' : 'Nội dung'} ${input.id.slice(0, 8)}`
+        const className = `inline-flex max-w-[280px] items-center gap-1.5 rounded-full border px-2.5 py-1 font-bold ${primary
+          ? 'border-blue-200 bg-blue-50 text-blue-800'
+          : 'border-slate-200 bg-slate-50 text-slate-600'}`
+        const content = (
+          <>
+            {input.type === 'story' ? <BookOpen size={12} /> : <FileText size={12} />}
+            <span className="truncate">{label}</span>
+            <span className="shrink-0 font-black">{primary ? 'Chính' : 'Bổ trợ'}</span>
+          </>
+        )
+        return input.type === 'content' ? (
+          <button key={`${input.type}-${input.id}`} type="button" title={label} className={`${className} hover:border-blue-300`} onClick={() => onOpenContent(input.id)}>
+            {content}
+          </button>
+        ) : (
+          <span key={`${input.type}-${input.id}`} title={label} className={className}>{content}</span>
+        )
+      })}
     </div>
   )
 }

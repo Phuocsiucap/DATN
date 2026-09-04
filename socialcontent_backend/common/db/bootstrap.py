@@ -468,6 +468,45 @@ def ensure_schema_compatibility(db: Session) -> None:
                 CREATE INDEX IF NOT EXISTS ix_topic_embeddings_topic_key ON topic_embeddings (topic_key);
                 CREATE INDEX IF NOT EXISTS ix_topic_embeddings_model_name ON topic_embeddings (model_name);
                 CREATE INDEX IF NOT EXISTS ix_topic_embeddings_embedding_text_hash ON topic_embeddings (embedding_text_hash);
+
+                -- US-18: Shared crawl source configs
+                CREATE TABLE IF NOT EXISTS crawl_source_configs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(255) NOT NULL,
+                    source_type VARCHAR(40) NOT NULL,
+                    source_url TEXT,
+                    keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    configuration JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    status VARCHAR(40) NOT NULL DEFAULT 'ACTIVE',
+                    description TEXT,
+                    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE INDEX IF NOT EXISTS ix_crawl_source_configs_source_type ON crawl_source_configs (source_type);
+                CREATE INDEX IF NOT EXISTS ix_crawl_source_configs_status ON crawl_source_configs (status);
+                CREATE INDEX IF NOT EXISTS ix_crawl_source_configs_created_by ON crawl_source_configs (created_by);
+
+                IF to_regclass('crawl_job_sources') IS NOT NULL THEN
+                    ALTER TABLE crawl_job_sources
+                    ADD COLUMN IF NOT EXISTS source_config_id UUID REFERENCES crawl_source_configs(id) ON DELETE SET NULL;
+
+                    CREATE INDEX IF NOT EXISTS ix_crawl_job_sources_source_config_id
+                    ON crawl_job_sources (source_config_id);
+                END IF;
+
+                -- Insert default VNExpress config if it doesn't exist
+                INSERT INTO crawl_source_configs (id, name, source_type, description, configuration)
+                SELECT 
+                    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, 
+                    'VNExpress RSS Mặc định', 
+                    'VNEXPRESS', 
+                    'Nguồn crawl RSS mặc định cho tất cả các chuyên mục của VNExpress', 
+                    '{"rss_feed_keys": ["tin-moi-nhat", "the-gioi", "thoi-su", "kinh-doanh", "giai-tri", "the-thao", "phap-luat", "giao-duc", "suc-khoe", "doi-song", "du-lich", "khoa-hoc", "so-hoa", "xe"]}'::jsonb
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM crawl_source_configs WHERE source_type = 'VNEXPRESS'
+                );
+
             END $$;
             """
                 )

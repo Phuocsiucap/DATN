@@ -139,6 +139,8 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
     media = content.media_jsonb if isinstance(content.media_jsonb, list) else []
     source_content = _serialize_source_content(content) or {"id": str(content.id)}
     source_content["media"] = media
+    supporting_sources, supporting_media = _workflow_supporting_source_context(db, project, content.id)
+    workflow_media = _merge_source_media(media, supporting_media)
     full_text = source_content.get("full_text")
     category_id = source_content.get("category_id") or source_content.get("categoryId")
     article_id = source_content.get("article_id") or source_content.get("articleId")
@@ -171,8 +173,9 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
         "content": content_context,
         "target_duration_seconds": (metadata.get("target_duration_seconds") or project_meta.get("target_duration_seconds")
                                     or (None if project_meta.get("draft_generation_mode") == "compact-v2" else 60)),
-        "images": _image_urls(media),
-        "media": media,
+        "images": _image_urls(workflow_media),
+        "media": workflow_media,
+        "supporting_sources": supporting_sources,
         "series": _current_series_context(project),
         "active_series": _active_series_for_script(db, project),
         "raw_article": {"source_content": source_content},
@@ -181,6 +184,89 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
     if instructions:
         source["instructions"] = instructions
     return source
+
+
+def _workflow_supporting_source_context(db: Any, project: Any, primary_content_id: uuid.UUID) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from common.db.models import ContentItem, Story
+
+    inputs = project.inputs_jsonb if isinstance(project.inputs_jsonb, list) else []
+    seen_content_ids = {primary_content_id}
+    supporting: list[dict[str, Any]] = []
+    media: list[dict[str, Any]] = []
+
+    for source_input in inputs:
+        if not isinstance(source_input, dict):
+            continue
+        input_type = str(source_input.get("type") or "").lower()
+        input_id = _uuid_or_none(source_input.get("id"))
+        if not input_id:
+            continue
+
+        content_rows: list[Any] = []
+        if input_type == "content":
+            content = db.get(ContentItem, input_id)
+            if content:
+                content_rows = [content]
+        elif input_type == "story":
+            story = db.get(Story, input_id)
+            if not story:
+                continue
+            episode_rows = (
+                db.query(ContentItem)
+                .filter(ContentItem.story_id == story.id)
+                .order_by(ContentItem.episode_order.asc().nullslast(), ContentItem.created_at.asc())
+                .limit(12)
+                .all()
+            )
+            representative = db.get(ContentItem, story.content_id) if story.content_id else None
+            content_rows = [representative, *episode_rows] if representative else episode_rows
+        else:
+            continue
+
+        for content in content_rows:
+            if not content or content.id in seen_content_ids:
+                continue
+            seen_content_ids.add(content.id)
+            serialized = _serialize_source_content(content) or {"id": str(content.id)}
+            content_media = content.media_jsonb if isinstance(content.media_jsonb, list) else []
+            serialized["media"] = content_media
+            supporting.append({
+                "input_type": input_type,
+                "input_id": str(input_id),
+                "content_id": str(content.id),
+                "title": serialized.get("canonical_title") or source_input.get("title"),
+                "summary": serialized.get("summary"),
+                "full_text": serialized.get("full_text"),
+                "source_url": serialized.get("source_url") or serialized.get("canonical_url"),
+                "episode_order": getattr(content, "episode_order", None),
+            })
+            media.extend(item for item in content_media if isinstance(item, dict))
+            if len(supporting) >= 20:
+                return supporting, media
+
+    return supporting, media
+
+
+def _merge_source_media(primary: list[dict[str, Any]], supporting: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*primary, *supporting]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("storage_url") or item.get("source_url") or item.get("thumbnail_url") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        result.append(item)
+    return result
+
+
+def _uuid_or_none(value: Any) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def _current_series_context(project: Any) -> dict[str, Any]:

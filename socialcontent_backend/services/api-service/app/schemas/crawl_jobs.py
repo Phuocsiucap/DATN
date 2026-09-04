@@ -14,6 +14,7 @@ class CrawlJobSourceInput(BaseModel):
     source_url: str | None = None
     keywords: list[str] = Field(default_factory=list)
     configuration: dict[str, Any] = Field(default_factory=dict)
+    source_config_id: uuid.UUID | None = None
 
 
 class CrawlJobScheduleRequest(BaseModel):

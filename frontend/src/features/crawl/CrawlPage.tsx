@@ -5,10 +5,13 @@ import {
   cancelCrawlJobApi,
   createCrawlJobApi,
   fetchCrawlJobsApi,
-  fetchVnExpressRssFeedsApi,
+  fetchSourceTypesApi,
+  fetchCrawlSourceConfigsApi,
   retryCrawlJobApi,
   updateCrawlJobScheduleApi,
   type CrawlJob,
+  type CrawlSourceConfig,
+  type SourceTypeConfig,
   type VnExpressRssFeed,
 } from '@/commons/apis/module1'
 import {
@@ -22,6 +25,7 @@ import {
   Thumbnail,
 } from '@/commons/component/social-ui'
 import { CrawlJobDetailSheet } from './components/CrawlJobDetailSheet'
+import { CrawlSourceConfigsTab } from './components/CrawlSourceConfigsTab'
 import { CreateCrawlJobDialog, CrawlScheduleDialog } from './components/CrawlJobDialogs'
 import {
   type CrawlScheduleForm,
@@ -54,9 +58,24 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const [scheduleForm, setScheduleForm] = useState<CrawlScheduleForm>(DEFAULT_SCHEDULE)
   const [scheduleJob, setScheduleJob] = useState<CrawlJob | null>(null)
   const [scheduleSaving, setScheduleSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState<'JOBS' | 'SOURCES'>('JOBS')
+  
+  // Filter State
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterSource, setFilterSource] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 500)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
   
   // Create Form State
-  const [sourceType, setSourceType] = useState<'BILIBILI' | 'VNEXPRESS'>('VNEXPRESS')
+  const [sourceConfigs, setSourceConfigs] = useState<CrawlSourceConfig[]>([])
+  const [selectedSourceConfigId, setSelectedSourceConfigId] = useState<string>('')
+  const [sourceTypes, setSourceTypes] = useState<SourceTypeConfig[]>([])
+  const [sourceType, setSourceType] = useState<string>('VNEXPRESS')
   const [jobName, setJobName] = useState(isSystemUser ? 'Global VNExpress Crawl' : 'Private VNExpress Crawl')
   const [sourceUrl, setSourceUrl] = useState('')
   const [keywords, setKeywords] = useState('')
@@ -64,11 +83,11 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const [vnexpressRssFeeds, setVnexpressRssFeeds] = useState<VnExpressRssFeed[]>([])
   const [selectedVnexpressRssKeys, setSelectedVnexpressRssKeys] = useState<string[]>(['tin-moi-nhat'])
 
-  const updateSourceType = (nextSourceType: 'BILIBILI' | 'VNEXPRESS') => {
+  const updateSourceType = (nextSourceType: string) => {
     setSourceType(nextSourceType)
     setJobName(isSystemUser
-      ? `Global ${nextSourceType === 'VNEXPRESS' ? 'VNExpress' : 'Bilibili'} Crawl`
-      : `Private ${nextSourceType === 'VNEXPRESS' ? 'VNExpress' : 'Bilibili'} Crawl`)
+      ? `Global ${nextSourceType} Crawl`
+      : `Private ${nextSourceType} Crawl`)
     setSourceUrl('')
     setKeywords(nextSourceType === 'VNEXPRESS' ? '' : 'truyen ma, short drama')
     if (nextSourceType === 'VNEXPRESS' && selectedVnexpressRssKeys.length === 0) {
@@ -79,7 +98,11 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const loadCrawlData = async () => {
     setLoading(true)
     try {
-      const nextJobs = await fetchCrawlJobsApi()
+      const nextJobs = await fetchCrawlJobsApi({
+        q: debouncedQuery,
+        source_type: filterSource,
+        status: filterStatus,
+      })
       setJobs(nextJobs)
       setSelectedJob((current) => current ? nextJobs.find((job) => job.id === current.id) ?? current : null)
     } catch (error: unknown) {
@@ -90,20 +113,35 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   }
 
   useEffect(() => {
-    void loadCrawlData()
-    fetchVnExpressRssFeedsApi()
+    if (activeTab === 'JOBS') {
+      void loadCrawlData()
+    }
+  }, [debouncedQuery, filterSource, filterStatus, activeTab])
+
+  useEffect(() => {
+    fetchSourceTypesApi()
       .then((data) => {
-        const feeds = data.items || []
-        setVnexpressRssFeeds(feeds)
-        setSelectedVnexpressRssKeys((current) => {
-          if (current.length) return current
-          return feeds.some((feed) => feed.key === 'tin-moi-nhat') ? ['tin-moi-nhat'] : feeds.slice(0, 1).map((feed) => feed.key)
-        })
+        setSourceTypes(data)
+        const vnexpress = data.find(s => s.type === 'VNEXPRESS')
+        if (vnexpress && vnexpress.rss_feeds) {
+          const feeds = vnexpress.rss_feeds
+          setVnexpressRssFeeds(feeds)
+          setSelectedVnexpressRssKeys((current) => {
+            if (current.length) return current
+            return feeds.some((feed) => feed.key === 'tin-moi-nhat') ? ['tin-moi-nhat'] : feeds.slice(0, 1).map((feed) => feed.key)
+          })
+        }
       })
-      .catch(() => {
-        toast.error('Không tải được danh sách RSS VNExpress')
-      })
+      .catch(() => toast.error('Không tải được cấu hình Source Types'))
   }, [])
+
+  useEffect(() => {
+    if (showCreate) {
+      fetchCrawlSourceConfigsApi()
+        .then((data) => setSourceConfigs(data))
+        .catch(() => console.error('Failed to load source configs'))
+    }
+  }, [showCreate])
 
   const metrics = useMemo(() => {
     const running = jobs.filter((job) => ['RUNNING', 'QUEUED', 'PENDING'].includes(job.status)).length
@@ -139,6 +177,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
           source_type: sourceType,
           source_url: trimmedSourceUrl || null,
           keywords: keywords.split(',').map((item) => item.trim()).filter(Boolean),
+          source_config_id: selectedSourceConfigId || null,
           configuration: {
             max_items: maxItems,
             metadata_only: sourceType === 'BILIBILI',
@@ -154,6 +193,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       setShowCreate(false)
       setScheduleEnabled(false)
       setScheduleForm(DEFAULT_SCHEDULE)
+      setSelectedSourceConfigId('')
       await loadCrawlData()
     } catch (error: unknown) {
       toast.error(apiErrorMessage(error, 'Không thể tạo crawl job'))
@@ -197,49 +237,91 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       description="Tạo và quản lý các job crawl dữ liệu từ nhiều nguồn khác nhau."
       actions={
         <>
-          <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
-          <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
+          <div className="flex rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-1 mr-4">
+            <button
+              type="button"
+              onClick={() => setActiveTab('JOBS')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-sm transition ${activeTab === 'JOBS' ? 'bg-[var(--accent)] text-white shadow-sm' : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]'}`}
+            >
+              Công việc
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('SOURCES')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-sm transition ${activeTab === 'SOURCES' ? 'bg-[var(--accent)] text-white shadow-sm' : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]'}`}
+            >
+              Nguồn chung
+            </button>
+          </div>
+          {activeTab === 'JOBS' && (
+            <>
+              <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
+              <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
+            </>
+          )}
         </>
       }
     >
 
       <section className="min-w-0">
-        {loading && (
-          <div className="mb-4 flex items-center gap-2 text-sm text-[#64748b]">
-            <Loader2 className="animate-spin" size={16} /> Đang xử lý...
-          </div>
+        {activeTab === 'SOURCES' ? (
+          <CrawlSourceConfigsTab isSystemUser={isSystemUser} sourceTypes={sourceTypes} vnexpressRssFeeds={vnexpressRssFeeds} />
+        ) : (
+          <>
+            {loading && (
+              <div className="mb-4 flex items-center gap-2 text-sm text-[#64748b]">
+                <Loader2 className="animate-spin" size={16} /> Đang xử lý...
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <MetricGrid items={[
+                ['Đang chạy', metrics.running, 'bg-blue-500'],
+                ['Thành công', metrics.succeeded, 'bg-emerald-500'],
+                ['Xong một phần', metrics.partial, 'bg-amber-500'],
+                ['Lỗi', metrics.failed, 'bg-red-500'],
+              ]} />
+
+              <div className="min-w-0">
+                <AppCard className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
+                  <SearchField placeholder="Tìm kiếm job..." value={searchQuery} onChange={(e: any) => setSearchQuery(e.target.value)} />
+                  <SelectControl value={filterSource} onChange={(e: any) => setFilterSource(e.target.value)}>
+                    <option value="">Tất cả nguồn</option>
+                    <option value="VNEXPRESS">VNExpress</option>
+                    <option value="BILIBILI">Bilibili</option>
+                  </SelectControl>
+                  <SelectControl value={filterStatus} onChange={(e: any) => setFilterStatus(e.target.value)}>
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="RUNNING">Running</option>
+                    <option value="SUCCEEDED">Succeeded</option>
+                    <option value="FAILED">Failed</option>
+                    <option value="PAUSED">Paused</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </SelectControl>
+                  <SelectControl><option>Người tạo</option></SelectControl>
+                  <SelectControl icon={<CalendarDays size={15} />}><option>Chọn khoảng thời gian</option></SelectControl>
+                </AppCard>
+
+                <JobsTable
+                  jobs={jobs}
+                  selectedJob={selectedJob}
+                  onOpenDetail={(job) => setSelectedJob(job)}
+                  onAction={jobAction}
+                  onEditSchedule={(job) => setScheduleJob(job)}
+                />
+              </div>
+            </div>
+          </>
         )}
-
-        <div className="space-y-4">
-          <MetricGrid items={[
-            ['Đang chạy', metrics.running, 'bg-blue-500'],
-            ['Thành công', metrics.succeeded, 'bg-emerald-500'],
-            ['Xong một phần', metrics.partial, 'bg-amber-500'],
-            ['Lỗi', metrics.failed, 'bg-red-500'],
-          ]} />
-
-          <div className="min-w-0">
-            <AppCard className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
-              <SearchField placeholder="Tìm kiếm job..." />
-              <SelectControl><option>Tất cả nguồn</option></SelectControl>
-              <SelectControl><option>Tất cả trạng thái</option></SelectControl>
-              <SelectControl><option>Người tạo</option></SelectControl>
-              <SelectControl icon={<CalendarDays size={15} />}><option>Chọn khoảng thời gian</option></SelectControl>
-            </AppCard>
-
-            <JobsTable
-              jobs={jobs}
-              selectedJob={selectedJob}
-              onOpenDetail={(job) => setSelectedJob(job)}
-              onAction={jobAction}
-              onEditSchedule={(job) => setScheduleJob(job)}
-            />
-          </div>
-        </div>
       </section>
 
       {showCreate && (
         <CreateCrawlJobDialog
+          sourceConfigs={sourceConfigs}
+          sourceTypes={sourceTypes}
+          selectedSourceConfigId={selectedSourceConfigId}
+          setSelectedSourceConfigId={setSelectedSourceConfigId}
           sourceType={sourceType}
           setSourceType={updateSourceType}
           jobName={jobName}

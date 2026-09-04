@@ -51,6 +51,7 @@ class CrawlJobService:
                     source_url=source_url,
                     keywords=source.keywords,
                     configuration=configuration,
+                    source_config_id=source.source_config_id,
                 )
             )
         if payload.schedule:

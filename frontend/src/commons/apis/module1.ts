@@ -266,6 +266,17 @@ export type FinalContentView = {
   series_items: FinalContentItem[]
 }
 
+export type ContentStory = {
+  id: string
+  canonical_name: string
+  normalized_name: string
+  language: string
+  total_episodes: number
+  completion_status: string
+  grouping_confidence: number
+  created_at: string
+}
+
 export type VnExpressRssFeed = {
   key: string
   label: string
@@ -307,9 +318,55 @@ export const fetchContentDetailApi = async (contentId: string) => {
   return data as ContentDetail
 }
 
-export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string; view?: string }) => {
+export const fetchContentStoriesApi = async () => {
+  const { data } = await api.get('/stories')
+  return data as ContentStory[]
+}
+
+export const fetchFinalContentViewApi = async (params?: {
+  crawl_job_id?: string
+  content_scope?: string
+  view?: string
+  category?: string
+  created_after?: string
+  created_before?: string
+  published_after?: string
+  published_before?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  limit?: number
+}) => {
   const { data } = await api.get('/contents/final-view', { params })
   return data as FinalContentView
+}
+
+// Manual Content Creation
+export type ContentCreateInput = {
+  canonical_title: string
+  summary?: string | null
+  full_text?: string | null
+  canonical_url?: string | null
+  content_type?: 'ARTICLE' | 'VIDEO' | 'IMAGE' | 'AUDIO' | 'POST'
+  source_type?: string
+  category?: string | null
+  tags?: string[]
+  language?: string
+  content_scope?: 'PRIVATE' | 'GLOBAL'
+  published_at?: string | null
+  media_urls?: string[]
+  media_items?: Array<{
+    url: string
+    type: 'IMAGE' | 'VIDEO' | 'AUDIO'
+    thumbnail_url?: string | null
+    caption?: string | null
+    alt?: string | null
+  }>
+  source_author?: string | null
+}
+
+export const createContentApi = async (payload: ContentCreateInput) => {
+  const { data } = await api.post('/contents', payload)
+  return data as ContentItem
 }
 
 // Crawl Source Management
@@ -337,5 +394,69 @@ export const updateCrawlSourceStatusApi = async (sourceId: string, status: 'ACTI
 
 export const deleteCrawlSourceApi = async (sourceId: string) => {
   const { data } = await api.delete(`/crawl-sources/${sourceId}`)
+  return data as { deleted: boolean; message: string }
+}
+
+export type SourceTypeConfig = {
+  type: string
+  supports: string[]
+  rss_feeds?: VnExpressRssFeed[]
+}
+
+export const fetchSourceTypesApi = async () => {
+  const { data } = await api.get('/source-types')
+  return data as SourceTypeConfig[]
+}
+
+// ─── Shared Crawl Source Configs ──────────────────────────────────────────
+
+export type SourceType = {
+  type: string
+  supports: string[]
+  description?: string
+  rss_feeds?: VnExpressRssFeed[]
+}
+
+export const fetchSourceTypesApi = async () => {
+  const { data } = await api.get('/source-types')
+  return data as SourceType[]
+}
+
+export type CrawlSourceConfig = {
+  id: string
+  name: string
+  source_type: string
+  source_url?: string | null
+  keywords: string[]
+  configuration: Record<string, unknown>
+  status: 'ACTIVE' | 'PAUSED' | string
+  description?: string | null
+  creator_name?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const fetchCrawlSourceConfigsApi = async (params?: Record<string, string>) => {
+  const { data } = await api.get('/crawl-source-configs', { params })
+  return data.items as CrawlSourceConfig[]
+}
+
+export const createCrawlSourceConfigApi = async (payload: Partial<CrawlSourceConfig>) => {
+  const { data } = await api.post('/crawl-source-configs', payload)
+  return data as CrawlSourceConfig
+}
+
+export const updateCrawlSourceConfigApi = async (id: string, payload: Partial<CrawlSourceConfig>) => {
+  const { data } = await api.patch(`/crawl-source-configs/${id}`, payload)
+  return data as CrawlSourceConfig
+}
+
+export const toggleCrawlSourceConfigStatusApi = async (id: string, status: 'ACTIVE' | 'PAUSED') => {
+  const { data } = await api.patch(`/crawl-source-configs/${id}/status`, null, { params: { status } })
+  return data as CrawlSourceConfig
+}
+
+export const deleteCrawlSourceConfigApi = async (id: string) => {
+  const { data } = await api.delete(`/crawl-source-configs/${id}`)
   return data as { deleted: boolean; message: string }
 }

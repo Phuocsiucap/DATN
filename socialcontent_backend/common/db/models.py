@@ -133,11 +133,37 @@ class CrawlJob(Base):
         return "Hệ thống"
 
 
+class CrawlSourceConfig(Base):
+    """Standalone shared source configuration, independent of any specific CrawlJob.
+
+    Allows sources to be reused across multiple crawl jobs.  VNExpress RSS feeds
+    that already exist in the system are simply represented with
+    source_type = 'VNEXPRESS'.
+    """
+
+    __tablename__ = "crawl_source_configs"
+
+    id = uuid_pk()
+    name = Column(String(255), nullable=False)
+    source_type = Column(String(40), nullable=False, index=True)
+    source_url = Column(Text, nullable=True)
+    keywords = Column(JSONB, nullable=False, default=list)
+    configuration = Column(JSONB, nullable=False, default=dict)
+    status = Column(String(40), nullable=False, default="ACTIVE", index=True)
+    description = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    creator = relationship("User")
+
+
 class CrawlJobSource(Base):
     __tablename__ = "crawl_job_sources"
 
     id = uuid_pk()
     job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_config_id = Column(UUID(as_uuid=True), ForeignKey("crawl_source_configs.id", ondelete="SET NULL"), nullable=True, index=True)
     source_type = Column(String(40), nullable=False, index=True)
     source_url = Column(Text, nullable=True)
     keywords = Column(JSONB, nullable=False, default=list)
@@ -147,6 +173,8 @@ class CrawlJobSource(Base):
     updated_at = updated_col()
 
     job = relationship("CrawlJob", back_populates="sources")
+    source_config = relationship("CrawlSourceConfig")
+
 
 
 class CrawlJobSchedule(Base):

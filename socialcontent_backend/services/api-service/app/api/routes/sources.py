@@ -1,9 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from common.db.models import CrawlJob, CrawlJobSource, User
+from common.db.models import CrawlJob, CrawlJobSource, CrawlSourceConfig, User
 from common.db.session import get_db
 from common.core.vnexpress_rss import vnexpress_rss_catalog
 from app.api.deps import get_current_user, require_admin
@@ -12,11 +12,14 @@ from app.schemas import api as schemas
 router = APIRouter()
 
 
+# ─── Source Types (reference catalog) ───────────────────────────────────────
+
 @router.get("/source-types")
 def source_types(_: User = Depends(get_current_user)):
     return [
         {"type": "BILIBILI", "supports": ["keywords", "url", "playlist", "metadata"]},
         {"type": "VNEXPRESS", "supports": ["keywords", "url", "rss", "category"], "rss_feeds": vnexpress_rss_catalog()},
+        {"type": "MANUAL", "supports": ["manual_input"], "description": "Nội dung nhập thủ công"},
     ]
 
 
@@ -24,6 +27,116 @@ def source_types(_: User = Depends(get_current_user)):
 def vnexpress_rss_feeds(_: User = Depends(get_current_user)):
     return {"items": vnexpress_rss_catalog()}
 
+
+# ─── US-18, US-19: Shared CrawlSourceConfig CRUD ───────────────────────────
+
+def _serialize_source_config(config: CrawlSourceConfig) -> dict:
+    creator_name = None
+    if config.creator:
+        creator_name = config.creator.full_name or config.creator.email or "Người dùng"
+    return {
+        "id": str(config.id),
+        "name": config.name,
+        "source_type": config.source_type,
+        "source_url": config.source_url,
+        "keywords": config.keywords or [],
+        "configuration": config.configuration or {},
+        "status": config.status,
+        "description": config.description,
+        "creator_name": creator_name,
+        "created_at": config.created_at.isoformat() if config.created_at else None,
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+    }
+
+
+@router.get("/crawl-source-configs")
+def list_source_configs(
+    source_type: str | None = None,
+    status: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(CrawlSourceConfig)
+    if source_type:
+        query = query.filter(CrawlSourceConfig.source_type == source_type.upper())
+    if status:
+        query = query.filter(CrawlSourceConfig.status == status.upper())
+    configs = query.order_by(CrawlSourceConfig.created_at.desc()).limit(200).all()
+    return {"items": [_serialize_source_config(c) for c in configs]}
+
+
+@router.post("/crawl-source-configs", status_code=201)
+def create_source_config(
+    payload: schemas.CrawlSourceConfigCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = CrawlSourceConfig(
+        name=payload.name.strip(),
+        source_type=payload.source_type.strip().upper(),
+        source_url=payload.source_url,
+        keywords=payload.keywords,
+        configuration=payload.configuration,
+        description=payload.description,
+        created_by=user.id,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return _serialize_source_config(config)
+
+
+@router.patch("/crawl-source-configs/{config_id}")
+def update_source_config(
+    config_id: uuid.UUID,
+    payload: schemas.CrawlSourceConfigUpdateRequest,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = db.get(CrawlSourceConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Nguồn crawl không tồn tại")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(config, field, value)
+    db.commit()
+    db.refresh(config)
+    return _serialize_source_config(config)
+
+
+@router.patch("/crawl-source-configs/{config_id}/status")
+def toggle_source_config_status(
+    config_id: uuid.UUID,
+    status: str = Query(...),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = db.get(CrawlSourceConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Nguồn crawl không tồn tại")
+    normalized = status.strip().upper()
+    if normalized not in ("ACTIVE", "PAUSED"):
+        raise HTTPException(status_code=400, detail="Trạng thái phải là ACTIVE hoặc PAUSED")
+    config.status = normalized
+    db.commit()
+    db.refresh(config)
+    return _serialize_source_config(config)
+
+
+@router.delete("/crawl-source-configs/{config_id}")
+def delete_source_config(
+    config_id: uuid.UUID,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = db.get(CrawlSourceConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Nguồn crawl không tồn tại")
+    db.delete(config)
+    db.commit()
+    return {"deleted": True, "message": "Đã xóa nguồn crawl. Các crawl job đã tạo trước đó không bị ảnh hưởng."}
+
+
+# ─── Legacy per-job source management ──────────────────────────────────────
 
 @router.post("/crawl-sources", status_code=201)
 def create_source(payload: schemas.CrawlSourceCreateRequest, user: User = Depends(require_admin), db: Session = Depends(get_db)):

@@ -4,7 +4,59 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class MediaItemInput(BaseModel):
+    """Media item for manual content creation"""
+    url: str
+    type: str = "IMAGE"  # IMAGE, VIDEO, AUDIO
+    thumbnail_url: str | None = None
+    caption: str | None = None
+    alt: str | None = None
+
+
+class ContentCreateRequest(BaseModel):
+    """Schema for manually creating content"""
+    canonical_title: str = Field(..., min_length=1, max_length=500, description="Title of the content")
+    summary: str | None = Field(None, max_length=2000, description="Brief summary or description")
+    full_text: str | None = Field(None, description="Full text content of the article")
+    canonical_url: str | None = Field(None, description="Source URL if available")
+    content_type: str = Field(default="ARTICLE", description="ARTICLE, VIDEO, IMAGE, etc.")
+    source_type: str = Field(default="MANUAL", description="Source platform (MANUAL, VNEXPRESS, etc.)")
+    category: str | None = Field(None, max_length=100, description="Content category")
+    tags: list[str] = Field(default_factory=list, description="List of tags")
+    language: str = Field(default="vi", description="Content language code")
+    content_scope: str = Field(default="PRIVATE", description="PRIVATE or GLOBAL (admin only)")
+    published_at: datetime | None = Field(None, description="Original publication date if known")
+    media_urls: list[str] = Field(default_factory=list, description="List of media URLs (images/videos)")
+    media_items: list[MediaItemInput] = Field(default_factory=list, description="Detailed media items")
+    source_author: str | None = Field(None, max_length=200, description="Original author name")
+    
+    @field_validator('content_type')
+    @classmethod
+    def validate_content_type(cls, v: str) -> str:
+        allowed = ['ARTICLE', 'VIDEO', 'IMAGE', 'AUDIO', 'POST']
+        v_upper = v.upper()
+        if v_upper not in allowed:
+            raise ValueError(f'content_type must be one of {allowed}')
+        return v_upper
+    
+    @field_validator('content_scope')
+    @classmethod
+    def validate_content_scope(cls, v: str) -> str:
+        allowed = ['PRIVATE', 'GLOBAL']
+        v_upper = v.upper()
+        if v_upper not in allowed:
+            raise ValueError(f'content_scope must be one of {allowed}')
+        return v_upper
+    
+    @field_validator('tags')
+    @classmethod
+    def validate_tags(cls, v: list[str]) -> list[str]:
+        # Remove empty tags and limit to 20 tags
+        cleaned = [tag.strip() for tag in v if tag and tag.strip()]
+        return cleaned[:20]
 
 
 class ContentUpdateRequest(BaseModel):

@@ -93,6 +93,13 @@ def list_contents(
     language: str | None = None,
     content_scope: str | None = None,
     crawl_job_id: uuid.UUID | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    published_after: str | None = None,
+    published_before: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+    limit: int = 100,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -742,6 +749,150 @@ def _media_kind(item: dict) -> str:
     if not isinstance(item, dict):
         return ""
     return str(item.get("media_type") or item.get("type") or "").upper()
+
+
+@router.post("", response_model=schemas.ContentResponse, status_code=201)
+def create_content(
+    payload: schemas.ContentCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually create content item. 
+    Creators can add to their PRIVATE scope, admins can add to GLOBAL or PRIVATE.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+    
+    # Validate content_scope permission
+    requested_scope = payload.content_scope.upper()
+    if requested_scope == "GLOBAL" and not user.is_system_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail="Only system admins can create GLOBAL content"
+        )
+    
+    # Build source metadata
+    source_metadata = {
+        "created_via": "manual_input",
+        "created_by_user_id": str(user.id),
+        "created_by_email": user.email,
+    }
+    
+    if payload.category:
+        source_metadata["category"] = payload.category
+    
+    if payload.tags:
+        source_metadata["tags"] = payload.tags
+    
+    if payload.source_author:
+        source_metadata["author"] = payload.source_author
+    
+    # Build media_jsonb from media_urls and media_items
+    media_jsonb = []
+    
+    # Add simple media URLs
+    for idx, url in enumerate(payload.media_urls):
+        media_jsonb.append({
+            "media_type": "IMAGE",  # Default assumption
+            "source_url": url,
+            "order": idx,
+        })
+    
+    # Add detailed media items
+    for idx, media in enumerate(payload.media_items):
+        media_jsonb.append({
+            "media_type": media.type.upper(),
+            "source_url": media.url,
+            "thumbnail_url": media.thumbnail_url,
+            "caption": media.caption,
+            "alt": media.alt,
+            "order": len(payload.media_urls) + idx,
+        })
+    
+    # Build sources_jsonb
+    sources_jsonb = [{
+        "source_type": payload.source_type.upper(),
+        "source_url": payload.canonical_url,
+        "source_author": payload.source_author,
+        "source_published_at": payload.published_at.isoformat() if payload.published_at else None,
+        "metadata_json": source_metadata,
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+    }]
+    
+    # Generate content hash for deduplication
+    hash_input = f"{payload.canonical_title}|{payload.canonical_url or ''}".lower()
+    content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
+    
+    # Check for duplicates
+    existing = db.query(ContentItem).filter(
+        ContentItem.content_hash == content_hash,
+        ContentItem.owner_user_id == user.id if requested_scope == "PRIVATE" else True
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Content with similar title/URL already exists (ID: {existing.id})"
+        )
+    
+    # Calculate initial quality score (manual content gets a baseline score)
+    quality_score = 75.0  # Baseline for manual content
+    if payload.full_text and len(payload.full_text) > 200:
+        quality_score += 5.0
+    if payload.media_urls or payload.media_items:
+        quality_score += 10.0
+    if payload.tags and len(payload.tags) >= 2:
+        quality_score += 5.0
+    quality_score = min(quality_score, 95.0)  # Cap at 95
+    
+    # Create ContentItem
+    content = ContentItem(
+        content_type=payload.content_type.upper(),
+        canonical_title=payload.canonical_title,
+        normalized_title=payload.canonical_title,  # Same as canonical for manual input
+        summary=payload.summary,
+        language=payload.language,
+        content_scope=requested_scope,
+        owner_user_id=user.id if requested_scope == "PRIVATE" else None,
+        created_by_type="MANUAL",
+        status="AVAILABLE",  # Manual content is immediately available
+        published_at=payload.published_at,
+        canonical_url=payload.canonical_url,
+        content_hash=content_hash,
+        quality_score=quality_score,
+        sources_jsonb=sources_jsonb,
+        media_jsonb=media_jsonb,
+        duplicate_count=0,
+    )
+    
+    db.add(content)
+    
+    # Store full_text in MongoDB if provided
+    if payload.full_text:
+        try:
+            from bson import ObjectId
+            from common.db.mongo import processed_documents
+            
+            normalized_doc = {
+                "content": payload.full_text,
+                "title": payload.canonical_title,
+                "description": payload.summary or "",
+                "source": "manual_input",
+                "created_by": str(user.id),
+            }
+            
+            proc_coll = processed_documents()
+            result = proc_coll.insert_one({"normalized": normalized_doc})
+            content.mongo_normalized_id = str(result.inserted_id)
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Warning: Failed to store full_text in MongoDB: {e}")
+    
+    db.commit()
+    db.refresh(content)
+    
+    return _content_response(content)
 
 
 @router.patch("/{content_id}", response_model=schemas.ContentResponse)

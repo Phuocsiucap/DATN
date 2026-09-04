@@ -894,6 +894,7 @@ def compact_story_source_for_ai(source: dict[str, Any]) -> dict[str, Any]:
             "summary": raw_source.get("summary"),
             "text": truncate_text(str(raw_source.get("text") or raw_source.get("content") or ""), 5000),
         },
+        "supporting_sources": _compact_supporting_sources(source.get("supporting_sources")),
     }
 
 
@@ -909,7 +910,27 @@ def compact_review_source_for_ai(source: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "summary": summary,
         "full_text": truncate_text(str(full_text or ""), 5000),
+        "supporting_sources": _compact_supporting_sources(source.get("supporting_sources")),
     }
+
+
+def _compact_supporting_sources(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for raw in value[:8]:
+        if not isinstance(raw, dict):
+            continue
+        result.append({
+            "input_type": raw.get("input_type"),
+            "input_id": raw.get("input_id"),
+            "content_id": raw.get("content_id"),
+            "title": raw.get("title"),
+            "summary": truncate_text(str(raw.get("summary") or ""), 400),
+            "full_text": truncate_text(str(raw.get("full_text") or ""), 1200),
+            "episode_order": raw.get("episode_order"),
+        })
+    return result
 
 
 def compact_active_series_for_ai(value: Any) -> list[dict[str, Any]]:
@@ -1078,6 +1099,7 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
             "Create text clips from hook_direction, each main_beats item, and ending_direction in that order.",
             "Do not drop any non-empty script beat.",
             "Use the raw article/full_text/source_content only to ground facts. Do not invent facts outside it.",
+            "Treat source_document title, summary, and full_text as the primary source. Use supporting_sources only to add corroborating context or ordered story details.",
             "Every subtitle must preserve source meaning and be natural Vietnamese narration.",
             "The plan target_duration_seconds is binding. The final timeline duration must be within +/-10% of that target.",
             f"Create at least {target_clip_count} text clips and matching video clips for this target duration.",

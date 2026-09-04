@@ -1168,7 +1168,13 @@ def create_direct_script(
     db.flush()
 
     workflow.primary_content_id = content.id
-    workflow.inputs_jsonb = [{"type": "content", "id": str(content.id), "role": "primary", **category_payload}]
+    workflow.inputs_jsonb = [{
+        "type": "content",
+        "id": str(content.id),
+        "role": "primary",
+        "title": content.canonical_title or content.normalized_title,
+        **category_payload,
+    }]
     db.flush()
 
     task_payload = _script_task_payload(
