@@ -221,20 +221,20 @@ export default function OpenAiUsagePage() {
     >
 
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white flex flex-col">
-          <h2 className="mb-2 text-sm text-gray-400">Total Spend</h2>
-          <div className="mb-6 text-3xl font-extrabold text-white">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col">
+          <h2 className="mb-2 text-sm font-bold text-slate-500 uppercase tracking-wider">Total Spend</h2>
+          <div className="mb-6 text-3xl font-black text-slate-900">
             ${totalCost.toFixed(4)}
           </div>
           <div className="h-[250px] w-full mt-auto">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={spendSeriesData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#333" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(val) => `$${val.toFixed(2)}`} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} tickFormatter={(val) => `$${val.toFixed(2)}`} />
                 <Tooltip
-                  cursor={{ fill: '#333' }}
-                  contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: '1px solid #333', color: '#fff' }}
+                  cursor={{ fill: '#f8faff' }}
+                  contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#0f172a', fontWeight: 'bold', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                   formatter={(value: any) => [`$${Number(value || 0).toFixed(4)}`, 'Chi phí']}
                 />
                 <Bar dataKey="cost" fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={60} />
@@ -243,24 +243,24 @@ export default function OpenAiUsagePage() {
           </div>
         </div>
 
-        <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white flex flex-col">
-          <h2 className="mb-2 text-sm text-gray-400">Total tokens</h2>
-          <div className="mb-6 text-3xl font-extrabold text-white">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col">
+          <h2 className="mb-2 text-sm font-bold text-slate-500 uppercase tracking-wider">Total tokens</h2>
+          <div className="mb-6 text-3xl font-black text-slate-900">
             {totalTokens.toLocaleString()}
           </div>
           <div className="h-[250px] w-full mt-auto">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={timeSeriesData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#333" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
                 <Tooltip
-                  cursor={{ stroke: '#333', strokeWidth: 1 }}
-                  contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: '1px solid #333', color: '#fff' }}
+                  cursor={{ stroke: '#cbd5e1', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#0f172a', fontWeight: 'bold', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} iconType="plainline" />
-                <Line type="monotone" dataKey="input_tokens" name="Input Tokens" stroke="#f97316" strokeWidth={2} dot={{ r: 3, fill: '#1a1a1a', strokeWidth: 2 }} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="output_tokens" name="Output Tokens" stroke="#ec4899" strokeWidth={2} dot={{ r: 3, fill: '#1a1a1a', strokeWidth: 2 }} activeDot={{ r: 5 }} />
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', fontWeight: 'bold' }} iconType="plainline" />
+                <Line type="monotone" dataKey="input_tokens" name="Input Tokens" stroke="#f97316" strokeWidth={3} dot={{ r: 4, fill: '#ffffff', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="output_tokens" name="Output Tokens" stroke="#ec4899" strokeWidth={3} dot={{ r: 4, fill: '#ffffff', strokeWidth: 2 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -268,41 +268,41 @@ export default function OpenAiUsagePage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white">
-          <h2 className="mb-6 text-sm font-bold text-gray-200">Cache performance</h2>
-          <div className="grid grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-6 text-sm font-bold text-slate-800 uppercase tracking-wider">Cache performance</h2>
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="text-sm text-gray-400">Hit rate (cache-read ratio)</div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="text-sm font-semibold text-slate-500">Hit rate (cache-read ratio)</div>
+              <div className="mt-2 text-3xl font-black text-slate-900">
                 {cacheHitRate}%
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-400">Cache reads per write</div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="text-sm font-semibold text-slate-500">Cache reads per write</div>
+              <div className="mt-2 text-3xl font-black text-slate-900">
                 {totalInputCacheWrite > 0 ? (totalInputCached / totalInputCacheWrite).toFixed(1) : '—'}
               </div>
             </div>
           </div>
         </div>
-        <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white">
-          <h2 className="mb-6 text-sm font-bold text-gray-200">Token volume</h2>
-          <div className="grid grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-6 text-sm font-bold text-slate-800 uppercase tracking-wider">Token volume</h2>
+          <div className="grid grid-cols-3 gap-4">
             <div>
-              <div className="text-sm text-gray-400">Cache-read tokens</div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="text-sm font-semibold text-slate-500">Cache-read tokens</div>
+              <div className="mt-2 text-2xl font-black text-emerald-600">
                 {totalInputCached >= 1000 ? (totalInputCached/1000).toFixed(0) + 'K' : totalInputCached}
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-400">Cache-write tokens</div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="text-sm font-semibold text-slate-500">Cache-write tokens</div>
+              <div className="mt-2 text-2xl font-black text-blue-600">
                 {totalInputCacheWrite >= 1000 ? (totalInputCacheWrite/1000).toFixed(0) + 'K' : totalInputCacheWrite}
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-400">Uncached tokens</div>
-              <div className="mt-2 text-2xl font-semibold">
+              <div className="text-sm font-semibold text-slate-500">Uncached tokens</div>
+              <div className="mt-2 text-2xl font-black text-amber-500">
                 {totalInputUncached >= 1000 ? (totalInputUncached/1000).toFixed(0) + 'K' : totalInputUncached}
               </div>
             </div>
@@ -310,21 +310,21 @@ export default function OpenAiUsagePage() {
         </div>
       </div>
       
-      <div className="rounded-[12px] border border-[#333] bg-[#1a1a1a] p-6 shadow-sm text-white">
-        <h2 className="mb-6 text-sm font-bold text-gray-200">Input token composition</h2>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-6 text-sm font-bold text-slate-800 uppercase tracking-wider">Input token composition</h2>
         <div className="h-[250px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={timeSeriesData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#333" />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} dy={10} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#9ca3af' }} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
               <Tooltip
-                cursor={{ fill: '#333' }}
-                contentStyle={{ backgroundColor: '#000', borderRadius: '8px', border: '1px solid #333', color: '#fff' }}
+                cursor={{ fill: '#f8faff' }}
+                contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#0f172a', fontWeight: 'bold', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
               />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} iconType="square" />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', fontWeight: 'bold' }} iconType="square" />
               <Bar dataKey="cache_read" name="Cache reads" stackId="a" fill="#10b981" maxBarSize={40} />
-              <Bar dataKey="cache_write" name="Cache writes" stackId="a" fill="#8b5cf6" maxBarSize={40} />
+              <Bar dataKey="cache_write" name="Cache writes" stackId="a" fill="#3b82f6" maxBarSize={40} />
               <Bar dataKey="uncached" name="Uncached" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={40} />
             </BarChart>
           </ResponsiveContainer>

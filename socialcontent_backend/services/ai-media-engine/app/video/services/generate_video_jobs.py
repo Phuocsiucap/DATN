@@ -12,10 +12,16 @@ from common.db.content_series import (
     lock_profile_series_scope,
     sync_series_current_part,
 )
-from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow
+from common.planning.auto_draft_policy import (
+    auto_production_allowed,
+    draft_has_script,
+    draft_script_signature,
+    high_risk_flags,
+    invalidate_draft_media,
+    is_auto_workflow,
+)
 
 from app.video.services.generate_video_constants import EDGE_TTS_NAMMINH_PROVIDER
-from app.video.services.generate_video_assets import hydrate_source_video_assets
 from app.video.services.generate_video_scripting import create_story_from_raw
 from app.video.services.generate_video_voice import DEFAULT_VOICE_SPEED
 from app.video.services.generate_video_timeline import normalize_story_for_project, public_story_payload
@@ -73,10 +79,6 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
         _update_task_progress(db, task, project, "LOADING_SOURCE", 10, project_status="SCRIPTING")
 
         source = _build_script_source_from_project(db, project, metadata)
-        source_video_assets = hydrate_source_video_assets(source)
-        if source_video_assets:
-            source.setdefault("content", {})["source_video_assets"] = source_video_assets
-            source.setdefault("raw_article", {}).setdefault("source_content", {})["source_video_assets"] = source_video_assets
         _update_task_progress(db, task, project, "GENERATING_DRAFT", 30, project_status="SCRIPTING")
         story = create_story_from_raw(source)
         _update_task_progress(db, task, project, "NORMALIZING_DRAFT", 72, project_status="SCRIPTING")
@@ -509,16 +511,25 @@ def _preserve_compact_scenes(original: dict[str, Any], updated: dict[str, Any]) 
 
 def _mark_auto_draft_for_human_review(project: Any, story: dict[str, Any], *, reason: str) -> bool:
     metadata = dict(project.metadata_json or {})
-    if not is_auto_workflow(metadata):
+    if not is_auto_workflow(metadata) and not metadata.get("ai_review_required"):
         return False
+    signature = draft_script_signature(story)
     metadata["draft_review_approved"] = False
     metadata.pop("approved_script_signature", None)
     metadata["draft_review"] = {
         "status": "REVIEW_REQUIRED",
         "reason": reason,
-        "script_signature": draft_script_signature(story),
+        "script_signature": signature,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if metadata.get("ai_review_required") and reason != "AI_REVIEW_REQUIRED":
+        metadata["draft_ai_review"] = {
+            "status": "PENDING",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "script_signature": signature,
+            "reason": reason,
+        }
     project.metadata_json = metadata
     return True
 
@@ -550,6 +561,74 @@ def _recheck_auto_compact_quality(project: Any, story: dict[str, Any]) -> None:
     review["automated_recheck_score"] = recheck.get("score")
     metadata["draft_review"] = review
     project.metadata_json = metadata
+
+
+def _apply_auto_ai_review_gate(project: Any, story: dict[str, Any]) -> bool:
+    """Persist DeepSeek review, plus deterministic quality for AUTO workflows."""
+    metadata = dict(project.metadata_json or {})
+    if not metadata.get("ai_review_required"):
+        return False
+
+    story_meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    review = story_meta.get("ai_story_review") if isinstance(story_meta.get("ai_story_review"), dict) else {}
+    recheck = metadata.get("draft_quality_recheck") if isinstance(metadata.get("draft_quality_recheck"), dict) else {}
+    signature = draft_script_signature(story)
+    ai_passed = (
+        bool(review.get("approved"))
+        and str(review.get("verdict") or "").strip().upper() == "PASS"
+        and str(review.get("provider") or "").strip().lower() == "deepseek"
+    )
+    deterministic_required = is_auto_workflow(metadata)
+    deterministic_passed = str(recheck.get("status") or "").strip().upper() == "PASS"
+    review_passed = ai_passed and (deterministic_passed or not deterministic_required)
+    now = datetime.now(timezone.utc).isoformat()
+
+    metadata["draft_ai_review"] = {
+        "status": "PASS" if review_passed else "REVIEW_REQUIRED",
+        "provider": review.get("provider") or "deepseek",
+        "model": review.get("model") or "deepseek-v4-flash",
+        "prompt_version": review.get("prompt_version"),
+        "script_signature": signature,
+        "reviewed_at": review.get("reviewed_at") or now,
+        "score": review.get("score"),
+        "action": review.get("action"),
+        "issues": review.get("issues") if isinstance(review.get("issues"), list) else [],
+        "notes": review.get("notes") if isinstance(review.get("notes"), list) else [],
+        "deterministic_status": recheck.get("status") if deterministic_required else "NOT_REQUIRED",
+        "deterministic_score": recheck.get("score"),
+    }
+
+    if review_passed:
+        if deterministic_required:
+            metadata["draft_quality"] = recheck
+            metadata["quality_script_signature"] = signature
+        metadata["draft_review_approved"] = False
+        metadata.pop("approved_script_signature", None)
+        metadata["draft_review"] = {
+            "status": "AI_APPROVED",
+            "reason": "DEEPSEEK_REVIEW_PASSED",
+            "script_signature": signature,
+            "reviewed_at": now,
+        }
+        project.metadata_json = metadata
+        story_meta["draft_review"] = metadata["draft_review"]
+        story["meta"] = story_meta
+        return True
+
+    metadata["draft_review_approved"] = False
+    metadata.pop("approved_script_signature", None)
+    metadata["draft_review"] = {
+        "status": "REVIEW_REQUIRED",
+        "reason": "AI_REVIEW_REQUIRED",
+        "script_signature": signature,
+        "updated_at": now,
+        "ai_review_status": metadata["draft_ai_review"]["status"],
+        "deterministic_status": recheck.get("status") if deterministic_required else "NOT_REQUIRED",
+    }
+    project.metadata_json = metadata
+    story_meta["draft_review"] = metadata["draft_review"]
+    story["meta"] = story_meta
+    return False
 
 
 def _cancel_blocked_auto_production(db: Any, task: Any, project: Any) -> bool:
@@ -675,8 +754,17 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
         public_story["project_status"] = "REVIEWING"
         _update_task_progress(db, task, project, "SAVING_DRAFT", 95, project_status="REVIEWING")
         _upsert_project_rendered_draft(project, public_story)
-        requires_review = _mark_auto_draft_for_human_review(project, public_story, reason="AI_REVIEW_COMPLETED")
         _recheck_auto_compact_quality(project, public_story)
+        automatic_gate = bool((project.metadata_json or {}).get("ai_review_required"))
+        if automatic_gate:
+            review_passed = _apply_auto_ai_review_gate(project, public_story)
+            requires_review = not review_passed
+        else:
+            review_passed = False
+            requires_review = _mark_auto_draft_for_human_review(project, public_story, reason="AI_REVIEW_COMPLETED")
+
+        # The gate mutates review metadata stored inside the public story.
+        _upsert_project_rendered_draft(project, public_story)
 
         task.status = "COMPLETED"
         task.progress_percent = 100
@@ -687,11 +775,13 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
             "review": (public_story.get("meta") or {}).get("ai_story_review"),
         }
         task.completed_at = datetime.now(timezone.utc)
-        project.status = "EDITING" if requires_review else "REVIEWING"
+        project.status = "EDITING" if requires_review else "DRAFT_READY"
         project.current_stage = "DRAFT_REVIEW_REQUIRED" if requires_review else "REVIEW_COMPLETE"
         project.progress_percent = 80 if requires_review else 100
         db.add_all([task, project])
         db.commit()
+        if review_passed:
+            _maybe_enqueue_auto_voice_or_render(db, project, public_story, trigger="deepseek_review_passed")
     except Exception as error:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
@@ -788,10 +878,113 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
     finally:
         db.close()
 
+def _maybe_enqueue_auto_generate_video_review(db, project, *, trigger: str):
+    from common.db.models import KafkaTask, SocialProfile
+    from common.events.envelope import build_event
+    from common.events.kafka import publish
+    from common.events.topics import GENERATE_VIDEO_REVIEW_REQUESTED
+
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    story = project.draft_json if isinstance(project.draft_json, dict) else {}
+    if not metadata.get("ai_review_required") or not draft_has_script(story):
+        return None
+
+    profile = db.get(SocialProfile, project.profile_id)
+    strategy = getattr(profile, "strategy", None) if profile else None
+    automatic = is_auto_workflow(metadata)
+    if automatic and not getattr(strategy, "auto_project_queue_enabled", False):
+        return None
+
+    signature = draft_script_signature(story)
+    quality = metadata.get("draft_quality") if isinstance(metadata.get("draft_quality"), dict) else {}
+    if automatic and (
+        str(quality.get("status") or "").strip().upper() != "PASS"
+        or str(metadata.get("quality_script_signature") or "") != signature
+        or high_risk_flags(metadata, story)
+    ):
+        return None
+
+    existing = (
+        db.query(KafkaTask)
+        .filter(
+            KafkaTask.reference_id == project.id,
+            KafkaTask.task_type == "GENERATE_VIDEO_REVIEW",
+            KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
+        )
+        .order_by(KafkaTask.created_at.desc())
+        .first()
+    )
+    if existing:
+        return existing
+
+    task = KafkaTask(
+        reference_id=project.id,
+        reference_type="media_workflow",
+        profile_id=project.profile_id,
+        task_type="GENERATE_VIDEO_REVIEW",
+        status="PENDING",
+        progress_percent=0,
+        current_stage="QUEUED_REVIEW",
+        payload_jsonb={
+            "trigger": trigger,
+            "automatic": True,
+            "review_mode": "POST_DRAFT_DEEPSEEK",
+            "selection_mode": str(metadata.get("selection_mode") or "").strip().upper(),
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "script_signature": signature,
+            "instructions": "Duyệt độc lập độ chính xác, cấu trúc video và toàn bộ voice_text trước khi sản xuất.",
+        },
+    )
+    next_metadata = dict(metadata)
+    next_metadata["draft_ai_review"] = {
+        "status": "QUEUED",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "script_signature": signature,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
+    project.metadata_json = next_metadata
+    project.status = "REVIEWING"
+    project.current_stage = "QUEUED_REVIEW"
+    project.progress_percent = 0
+    db.add_all([task, project])
+    db.commit()
+    db.refresh(task)
+    publish(
+        GENERATE_VIDEO_REVIEW_REQUESTED,
+        build_event(
+            event_type=GENERATE_VIDEO_REVIEW_REQUESTED,
+            source="generate-video-worker",
+            job_id=task.id,
+            payload={
+                "workflow_id": str(project.id),
+                "run_type": task.task_type,
+                "task_id": str(task.id),
+                "trigger": trigger,
+                "review_mode": "POST_DRAFT_DEEPSEEK",
+            },
+            correlation_id=project.id,
+        ),
+    )
+    return task
 
 
 def _maybe_enqueue_auto_voice_or_render(db, project, story: dict[str, Any], *, trigger: str) -> None:
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    signature = draft_script_signature(story)
+    human_approved = bool(metadata.get("draft_review_approved")) and str(metadata.get("approved_script_signature") or "") == signature
+    if metadata.get("ai_review_required") and not human_approved:
+        ai_review = metadata.get("draft_ai_review") if isinstance(metadata.get("draft_ai_review"), dict) else {}
+        review_is_current = (
+            str(ai_review.get("status") or "").strip().upper() == "PASS"
+            and str(ai_review.get("script_signature") or "") == signature
+            and str(ai_review.get("provider") or "").strip().lower() == "deepseek"
+        )
+        if not review_is_current:
+            if str(ai_review.get("status") or "PENDING").strip().upper() != "REVIEW_REQUIRED":
+                _maybe_enqueue_auto_generate_video_review(db, project, trigger=trigger)
+            return
     if not auto_production_allowed(metadata, story):
         return
     if _story_has_voice(story):
@@ -817,7 +1010,9 @@ def _maybe_enqueue_auto_generate_video_voice(db, project, *, trigger: str) -> No
 
     profile = db.get(SocialProfile, project.profile_id)
     strategy = getattr(profile, "strategy", None) if profile else None
-    if getattr(strategy, "video_render_mode", "manual") != "auto":
+    # Voice belongs to automatic workflow/draft creation. Rendering remains a
+    # separate choice and is checked only after the voice task completes.
+    if not getattr(strategy, "auto_project_queue_enabled", False):
         return
     story = project.draft_json if isinstance(project.draft_json, dict) else {}
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
@@ -1044,7 +1239,8 @@ def _default_module4_caption(project, story: dict[str, Any]) -> str:
 
 def _upsert_project_rendered_draft(project, story: dict[str, Any]) -> None:
     previous = project.draft_json if isinstance(project.draft_json, dict) else {}
-    if previous and is_auto_workflow(project.metadata_json) and draft_script_signature(previous) != draft_script_signature(story):
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if previous and (is_auto_workflow(metadata) or metadata.get("ai_review_required")) and draft_script_signature(previous) != draft_script_signature(story):
         invalidate_draft_media(project, story)
         _mark_auto_draft_for_human_review(project, story, reason="DRAFT_CHANGED")
     story.setdefault("meta", {})

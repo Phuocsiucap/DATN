@@ -80,10 +80,12 @@ def high_risk_flags(metadata: dict[str, Any] | None, story: dict[str, Any] | Non
 
 
 def auto_production_allowed(metadata: dict[str, Any] | None, story: dict[str, Any] | None) -> bool:
-    """Guard every automatic/manual production entry for AUTO-selected drafts."""
+    """Guard production for AUTO drafts and any workflow explicitly requiring AI review."""
     value = metadata if isinstance(metadata, dict) else {}
     payload = story if isinstance(story, dict) else {}
-    if not is_auto_workflow(value):
+    automatic = is_auto_workflow(value)
+    ai_review_required = bool(value.get("ai_review_required"))
+    if not automatic and not ai_review_required:
         return True
     if not draft_has_script(payload):
         return False
@@ -94,9 +96,24 @@ def auto_production_allowed(metadata: dict[str, Any] | None, story: dict[str, An
     if approved and approved_signature and approved_signature == signature:
         return True
 
+    if ai_review_required:
+        ai_review = value.get("draft_ai_review") if isinstance(value.get("draft_ai_review"), dict) else {}
+        if (
+            str(ai_review.get("status") or "").strip().upper() != "PASS"
+            or str(ai_review.get("script_signature") or "") != signature
+            or str(ai_review.get("provider") or "").strip().lower() != "deepseek"
+        ):
+            return False
+
     review = value.get("draft_review") if isinstance(value.get("draft_review"), dict) else {}
     if review.get("status") == "REVIEW_REQUIRED":
         return False
+
+    # Direct-script workflows are selected by the user rather than by the
+    # automatic candidate planner, so the DeepSeek review is their production
+    # gate. AUTO workflows additionally retain their deterministic quality gate.
+    if not automatic:
+        return True
 
     quality = draft_quality_payload(value, payload)
     if str(quality.get("status") or "").strip().upper() != "PASS":
@@ -148,6 +165,15 @@ def sync_compact_scenes(story: dict[str, Any]) -> None:
 def auto_production_block_reason(metadata: dict[str, Any] | None, story: dict[str, Any] | None) -> str:
     value = metadata if isinstance(metadata, dict) else {}
     payload = story if isinstance(story, dict) else {}
+    if value.get("ai_review_required"):
+        signature = draft_script_signature(payload)
+        ai_review = value.get("draft_ai_review") if isinstance(value.get("draft_ai_review"), dict) else {}
+        if (
+            str(ai_review.get("status") or "").strip().upper() != "PASS"
+            or str(ai_review.get("script_signature") or "") != signature
+            or str(ai_review.get("provider") or "").strip().lower() != "deepseek"
+        ):
+            return "Draft chưa vượt qua lớp kiểm tra tự động của hệ thống cho phiên bản lời thoại hiện tại."
     if high_risk_flags(value, payload):
         return "Draft có cờ rủi ro cao và cần người dùng duyệt trước khi tạo voice hoặc render."
     quality = draft_quality_payload(value, payload)

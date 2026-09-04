@@ -26,7 +26,7 @@ export function RegeneratePlanSheet({
           <SheetHeader>
             <div className="mb-2 inline-flex rounded-md bg-blue-100 px-2 py-0.5 text-xs font-black uppercase text-blue-800">Regenerate bài</div>
             <SheetTitle>{plan.title || 'Viết lại bài'}</SheetTitle>
-            <SheetDescription>Nhập yêu cầu cụ thể để AI viết lại đúng bài này.</SheetDescription>
+            <SheetDescription>Nhập yêu cầu cụ thể để hệ thống viết lại đúng bài này.</SheetDescription>
           </SheetHeader>
           <SheetBody>
             <label className="block">

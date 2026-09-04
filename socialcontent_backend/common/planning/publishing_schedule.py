@@ -67,11 +67,14 @@ def _schedule_times(strategy: Any) -> list[time]:
     return sorted(result)
 
 
-def _daily_limit(strategy: Any) -> int:
+def _daily_limit(strategy: Any) -> int | None:
+    value = getattr(strategy, "post_frequency_per_day", None)
+    if value in (None, ""):
+        return None
     try:
-        return max(1, int(getattr(strategy, "post_frequency_per_day", 2) or 2))
+        return max(1, int(value))
     except (TypeError, ValueError):
-        return 2
+        return None
 
 
 def _occupied_at(item: Any, now: datetime) -> datetime | None:
@@ -109,7 +112,7 @@ def available_schedule_slots(
     slots = []
     for offset in range(SEARCH_DAYS):
         day = local_today + timedelta(days=offset)
-        if day.weekday() not in days or daily_counts[day] >= limit:
+        if day.weekday() not in days or (limit is not None and daily_counts[day] >= limit):
             continue
         # Without configured hours, offer hourly slots starting at least an
         # hour from now; still respect weekdays, reservations and daily limits.
@@ -272,10 +275,12 @@ def choose_publish_schedule(
     if selected not in fresh_slots:
         selected, provider = fresh_slots[0], "rules"
         explanation = "Đã cập nhật lại giờ hiện tại; chọn khung giờ trống kế tiếp theo quy tắc."
+    daily_limit = _daily_limit(strategy)
+    limit_reason = f"tối đa {daily_limit} bài/ngày" if daily_limit is not None else "không giới hạn riêng số bài/ngày"
     reason = (
         f"{explanation} Giờ kiểm tra: {now.astimezone(tzinfo).isoformat()}; "
         f"lịch chọn: {selected.astimezone(tzinfo).isoformat()} ({tzinfo.key}); "
         f"đã xét {context['queue_total']} bài trong hàng đợi/lịch sử đăng, "
-        f"tối đa {_daily_limit(strategy)} bài/ngày, cách nhau ít nhất 30 phút."
+        f"{limit_reason}, cách nhau ít nhất 30 phút."
     )
     return PublishScheduleDecision(selected, reason, provider)

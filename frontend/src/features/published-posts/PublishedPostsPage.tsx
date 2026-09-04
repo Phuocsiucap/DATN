@@ -32,6 +32,8 @@ import {
   SelectControl,
   SocialProfileAvatar,
   StatusPill,
+  TableRowActions,
+  type TableRowActionItem,
   platformLabel,
 } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
@@ -448,20 +450,16 @@ function PostRow({ post, active, onSelect }: { post: SocialPost; active: boolean
       <MetricCell icon={<MessageCircle size={13} />} value={metricValue(post, 'comments')} />
       <MetricCell icon={<Share2 size={13} />} value={metricValue(post, 'shares')} />
       <div className="flex justify-end">
-        {post.post_url ? (
-          <a
-            href={post.post_url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
-            className="icon-button border border-[var(--outline-variant)] bg-white text-[#2556ea]"
-            title="Mở bài đăng"
-          >
-            <ExternalLink size={15} />
-          </a>
-        ) : (
-          <span className="text-xs font-semibold text-[#94a3b8]">-</span>
-        )}
+        <TableRowActions
+          actions={([
+            { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: onSelect },
+            post.post_url ? {
+              label: 'Mở trang bài gốc',
+              icon: <ExternalLink size={14} />,
+              onClick: () => window.open(post.post_url!, '_blank'),
+            } : null,
+          ].filter(Boolean)) as TableRowActionItem[]}
+        />
       </div>
     </div>
   )

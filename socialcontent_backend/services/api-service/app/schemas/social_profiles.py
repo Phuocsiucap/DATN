@@ -25,7 +25,7 @@ class SocialProfileStrategyRequest(BaseModel):
     avoid_topic_descriptions: dict[str, str] | None = None
     tone: str | None = None
     target_audience: str | None = None
-    post_frequency_per_day: int | None = None
+    post_frequency_per_day: int | None = Field(default=None, ge=1, le=100)
     active_hours: str | None = None
     schedule_days: str | None = None
     schedule_times: str | None = None
@@ -75,7 +75,7 @@ class SocialProfileStrategyResponse(BaseModel):
     avoid_topic_details: list[StrategyTopicDetailResponse] = Field(default_factory=list)
     tone: str
     target_audience: str
-    post_frequency_per_day: int
+    post_frequency_per_day: int | None
     active_hours: str
     schedule_days: str
     schedule_times: str
@@ -98,7 +98,7 @@ class SocialProfileStrategyResponse(BaseModel):
 class SchedulerSettingsRequest(BaseModel):
     vnexpress_interval_minutes: int = Field(default=30, ge=1, le=1440)
     bilibili_interval_minutes: int = Field(default=30, ge=1, le=1440)
-    publish_queue_interval_minutes: int = Field(default=5, ge=1, le=1440)
+    publish_queue_interval_minutes: int = Field(default=1, ge=1, le=1440)
 
 
 class QueueStatusRequest(BaseModel):

@@ -196,17 +196,26 @@ def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, sta
 
     metadata = dict(project.metadata_json or {})
     script_changed = bool(previous_story) and draft_script_signature(previous_story) != draft_script_signature(public_story)
-    if script_changed and is_auto_workflow(metadata):
+    if script_changed and (is_auto_workflow(metadata) or metadata.get("ai_review_required")):
         invalidate_draft_media(project, public_story)
         metadata = dict(project.metadata_json or {})
+        signature = draft_script_signature(public_story)
         metadata["draft_review_approved"] = False
         metadata.pop("approved_script_signature", None)
         metadata["draft_review"] = {
             "status": "REVIEW_REQUIRED",
             "reason": "DRAFT_CHANGED",
-            "script_signature": draft_script_signature(public_story),
+            "script_signature": signature,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if metadata.get("ai_review_required"):
+            metadata["draft_ai_review"] = {
+                "status": "PENDING",
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "script_signature": signature,
+                "reason": "DRAFT_CHANGED",
+            }
         project.current_stage = "DRAFT_REVIEW_REQUIRED"
         project.progress_percent = 80
         status = "EDITING"
@@ -551,10 +560,10 @@ def approve_project_draft(
     job = None
     profile = db.get(SocialProfile, project.profile_id)
     strategy = getattr(profile, "strategy", None) if profile else None
-    if getattr(strategy, "video_render_mode", "manual") == "auto":
-        if _story_has_voice(story):
+    if getattr(strategy, "auto_project_queue_enabled", False):
+        if _story_has_voice(story) and getattr(strategy, "video_render_mode", "manual") == "auto":
             job = _enqueue_project_render_job(db, project, story, trigger="draft_approved", mode="auto")
-        else:
+        elif not _story_has_voice(story):
             job = _enqueue_project_voice_job(db, project, trigger="draft_approved")
 
     return {
@@ -1075,16 +1084,55 @@ def create_direct_script(
     """
     Tạo MediaWorkflow trực tiếp từ một ContentItem,
     sau đó ngay lập tức enqueue KafkaTask GENERATE_VIDEO_SCRIPT.
-    Bỏ qua toàn bộ phần AI chọn lọc / đánh giá điểm.
+    Bỏ qua phần AI chọn lọc / Fit Judge, nhưng draft sinh ra vẫn bắt buộc
+    đi qua DeepSeek Review trước voice hoặc render.
     """
-    # Validate profile
-    profile = db.get(SocialProfile, payload.profile_id)
+    # Lock one profile while checking/creating the workflow. This makes the
+    # endpoint idempotent even when the browser submits two requests at once.
+    profile = (
+        db.query(SocialProfile)
+        .filter(SocialProfile.id == payload.profile_id)
+        .with_for_update()
+        .first()
+    )
     if not profile or profile.user_id != user.id:
         raise HTTPException(status_code=404, detail="Profile not found")
 
     content = db.get(ContentItem, payload.content_id)
     if not content or not _can_use_content(content, user):
         raise HTTPException(status_code=404, detail="ContentItem không tồn tại hoặc không thuộc quyền truy cập")
+
+    existing_workflow = (
+        db.query(MediaWorkflow)
+        .filter(
+            MediaWorkflow.user_id == user.id,
+            MediaWorkflow.profile_id == profile.id,
+            MediaWorkflow.primary_content_id == content.id,
+        )
+        .order_by(MediaWorkflow.created_at.desc())
+        .first()
+    )
+    if existing_workflow:
+        existing_job = (
+            db.query(KafkaTask)
+            .filter(
+                KafkaTask.reference_id == existing_workflow.id,
+                KafkaTask.reference_type == "media_workflow",
+            )
+            .order_by(KafkaTask.created_at.desc())
+            .first()
+        )
+        return {
+            "workflow": {
+                "id": str(existing_workflow.id),
+                "title": existing_workflow.title,
+                "status": existing_workflow.status,
+                "profile_id": str(existing_workflow.profile_id),
+                "primary_content_id": str(existing_workflow.primary_content_id),
+            },
+            "job": _serialize_workflow_run(db, existing_job) if existing_job else None,
+            "reused": True,
+        }
 
     # Resolve title từ content nếu không truyền
     title = payload.title
@@ -1102,6 +1150,15 @@ def create_direct_script(
         planning_mode=None,
         metadata_json={
             "selection_mode": "MANUAL",
+            "creation_source": "DIRECT_SCRIPT",
+            "ai_review_required": True,
+            "draft_ai_review": {
+                "status": "PENDING",
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "script_signature": None,
+                "reason": "WAITING_FOR_DRAFT",
+            },
             "target_duration_seconds": payload.target_duration_seconds,
             "note": payload.note,
             **category_payload,
@@ -1158,4 +1215,5 @@ def create_direct_script(
             "primary_content_id": str(workflow.primary_content_id),
         },
         "job": _serialize_workflow_run(db, job),
+        "reused": False,
     }

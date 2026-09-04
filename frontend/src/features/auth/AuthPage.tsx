@@ -85,8 +85,8 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const passwordValue = mode === 'login' ? loginForm.password : registerForm.password
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 p-4 font-sans text-slate-900 sm:p-6 lg:p-8">
-      <div className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60 lg:grid-cols-12">
+    <div className="flex h-full min-h-0 w-full overflow-auto bg-slate-50 font-sans text-slate-900">
+      <div className="grid min-h-full w-full bg-white lg:grid-cols-12">
         {/* Left Side: Clean Modern Branding Banner */}
         <div className="relative flex flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 p-8 text-white sm:p-10 lg:col-span-5">
           <div className="relative z-10">
@@ -140,7 +140,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
         <div className="flex flex-col justify-center bg-white p-8 sm:p-10 lg:col-span-7">
           <div className="mx-auto w-full max-w-md">
             {/* Tab Switcher */}
-            <div className="mb-8 flex rounded-xl border border-slate-200/60 bg-slate-100 p-1">
+            <div className="mb-5 flex rounded-xl border border-slate-200/60 bg-slate-100 p-1">
               <button
                 type="button"
                 onClick={() => setMode('login')}

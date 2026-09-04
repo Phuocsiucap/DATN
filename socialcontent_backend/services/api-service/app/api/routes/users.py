@@ -1,10 +1,12 @@
 import uuid
 from collections import defaultdict
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 
-from common.db.models import PromptRun, User
+from common.db.models import PromptRun, Role, User
 from common.db.session import get_db
 from app.schemas import api as schemas
 from app.api.deps import get_current_user, require_admin, require_system_admin
@@ -120,8 +122,33 @@ def _usage_breakdown(runs: list[PromptRun], key_fn) -> list[dict]:
 
 
 @router.get("", response_model=list[schemas.UserResponse])
-def list_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return [to_user_response(user) for user in db.query(User).order_by(User.created_at.desc()).all()]
+def list_users(
+    search: Optional[str] = Query(None, description="Tìm theo email hoặc họ tên (case-insensitive)"),
+    role: Optional[str] = Query(None, description="Lọc theo tên vai trò, vd: CREATOR, SYSTEM_ADMIN"),
+    is_active: Optional[bool] = Query(None, description="Lọc theo trạng thái kích hoạt"),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List users with optional server-side search and filters (Admin only)."""
+    q = db.query(User).options(joinedload(User.roles))
+
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                User.email.ilike(term),
+                User.full_name.ilike(term),
+            )
+        )
+
+    if is_active is not None:
+        q = q.filter(User.is_active == is_active)
+
+    if role:
+        normalized_role = role.strip().upper()
+        q = q.join(User.roles).filter(Role.name == normalized_role)
+
+    return [to_user_response(u) for u in q.order_by(User.created_at.desc()).all()]
 
 
 @router.post("", response_model=schemas.UserResponse, status_code=201)

@@ -5,6 +5,7 @@ import { getTikTokQrHelpText, getTikTokQrStatusLabel, isTikTokQrProcessingStatus
 
 export function AddTikTokProfileDialog({
   open,
+  platform,
   name,
   username,
   adding,
@@ -13,6 +14,7 @@ export function AddTikTokProfileDialog({
   qrUrl,
   qrReady,
   sessionStatus,
+  onPlatformChange,
   onNameChange,
   onUsernameChange,
   onClose,
@@ -20,6 +22,7 @@ export function AddTikTokProfileDialog({
   onStartQr,
 }: {
   open: boolean
+  platform: string
   name: string
   username: string
   adding: boolean
@@ -28,6 +31,7 @@ export function AddTikTokProfileDialog({
   qrUrl: string | null
   qrReady: boolean
   sessionStatus: string
+  onPlatformChange: (value: string) => void
   onNameChange: (value: string) => void
   onUsernameChange: (value: string) => void
   onClose: () => void
@@ -38,16 +42,25 @@ export function AddTikTokProfileDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Thêm TikTok Profile</DialogTitle>
-          <DialogDescription>Tạo profile social content mới và kết nối TikTok bằng mã QR.</DialogDescription>
+          <DialogTitle>Thêm Kênh Social</DialogTitle>
+          <DialogDescription>Tạo profile social content mới và kết nối nền tảng.</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
+          <label className="block space-y-1.5 text-sm">
+            <span className="font-bold text-slate-700">Nền tảng</span>
+            <select value={platform} onChange={(event) => onPlatformChange(event.target.value)} className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)] bg-white">
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+              <option value="instagram">Instagram</option>
+              <option value="youtube">YouTube</option>
+            </select>
+          </label>
           <label className="block space-y-1.5 text-sm">
             <span className="font-bold text-slate-700">Tên profile</span>
             <input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="VD: TikTok Storytelling Channel" className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]" />
           </label>
           <label className="block space-y-1.5 text-sm">
-            <span className="font-bold text-slate-700">Username TikTok</span>
+            <span className="font-bold text-slate-700">Username</span>
             <input value={username} onChange={(event) => onUsernameChange(event.target.value)} placeholder="@username hoặc để trống" className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]" />
           </label>
 
@@ -66,8 +79,12 @@ export function AddTikTokProfileDialog({
         </DialogBody>
         <DialogFooter>
           {sessionId ? <button onClick={onClose} className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white">Dừng QR</button> : <>
-            <button onClick={onCreate} disabled={adding} className="h-9 rounded-md border border-[var(--outline-variant)] px-4 text-sm font-semibold text-[var(--on-surface-variant)] hover:bg-white disabled:opacity-60">Tạo trước, đăng nhập sau</button>
-            <button onClick={onStartQr} disabled={adding} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60"><QrCode size={14} /> Thêm bằng QR</button>
+            <button onClick={onCreate} disabled={adding} className="h-9 rounded-md border border-[var(--outline-variant)] px-4 text-sm font-semibold text-[var(--on-surface-variant)] hover:bg-white disabled:opacity-60">
+              {platform === 'tiktok' ? 'Tạo trước, đăng nhập sau' : 'Thêm kênh social'}
+            </button>
+            {platform === 'tiktok' && (
+              <button onClick={onStartQr} disabled={adding} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60"><QrCode size={14} /> Thêm bằng QR</button>
+            )}
           </>}
         </DialogFooter>
       </DialogContent>

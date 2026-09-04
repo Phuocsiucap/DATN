@@ -1,5 +1,6 @@
 import { ExternalLink, Play } from 'lucide-react'
 import ReactPlayer from 'react-player'
+import { mediaProxyPlaybackUrl } from '@/commons/mediaUrls'
 
 type MediaLike = {
   media_type?: string | null
@@ -24,7 +25,8 @@ export function cleanMediaUrl(value?: unknown) {
 
 export function mediaPlaybackUrl(item?: MediaLike | null) {
   if (!item) return ''
-  return cleanMediaUrl(item.embed_url) || cleanMediaUrl(item.storage_url) || cleanMediaUrl(item.source_url)
+  const url = cleanMediaUrl(item.embed_url) || cleanMediaUrl(item.storage_url) || cleanMediaUrl(item.source_url)
+  return mediaProxyPlaybackUrl(url)
 }
 
 export function mediaPreviewUrl(item?: MediaLike | null) {

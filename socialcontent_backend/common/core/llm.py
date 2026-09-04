@@ -67,6 +67,8 @@ def deepseek_chat_completion(
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
     max_tokens: int | None = None,
+    thinking: bool | None = None,
+    reasoning_effort: str | None = None,
     timeout: int = 120,
 ) -> ChatCompletionResult:
     return chat_completion(
@@ -78,6 +80,8 @@ def deepseek_chat_completion(
         temperature=temperature,
         response_format=response_format,
         max_tokens=max_tokens,
+        thinking=thinking,
+        reasoning_effort=reasoning_effort,
         timeout=timeout,
     )
 
@@ -92,6 +96,8 @@ def chat_completion(
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
     max_tokens: int | None = None,
+    thinking: bool | None = None,
+    reasoning_effort: str | None = None,
     timeout: int = 120,
 ) -> ChatCompletionResult:
     if not api_key:
@@ -106,6 +112,10 @@ def chat_completion(
         payload["response_format"] = response_format
     if max_tokens is not None:
         payload["max_completion_tokens" if provider == "openai" else "max_tokens"] = max(1, int(max_tokens))
+    if provider == "deepseek" and thinking is not None:
+        payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
+    if provider == "deepseek" and reasoning_effort:
+        payload["reasoning_effort"] = str(reasoning_effort)
 
     start_time = time.time()
     raw_response = post_json(
@@ -116,9 +126,20 @@ def chat_completion(
     )
     latency_ms = int((time.time() - start_time) * 1000)
     try:
-        content = raw_response["choices"][0]["message"]["content"]
+        choice = raw_response["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"Unexpected {provider} chat completion response: {raw_response}") from exc
+    finish_reason = str(choice.get("finish_reason") or "")
+    if finish_reason == "length":
+        usage = raw_response.get("usage") if isinstance(raw_response.get("usage"), dict) else {}
+        details = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
+        raise RuntimeError(
+            f"{provider} chat completion reached max_tokens"
+            f" (completion_tokens={usage.get('completion_tokens', 0)}, reasoning_tokens={details.get('reasoning_tokens', 0)})"
+        )
+    if not str(content or "").strip():
+        raise RuntimeError(f"{provider} chat completion returned empty content (finish_reason={finish_reason or 'unknown'})")
 
     return ChatCompletionResult(
         provider=provider,

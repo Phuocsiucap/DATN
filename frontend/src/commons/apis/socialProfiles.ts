@@ -43,7 +43,7 @@ export type SocialProfileStrategy = {
   avoid_topic_details?: StrategyTopicDetail[]
   tone: string
   target_audience: string
-  post_frequency_per_day: number
+  post_frequency_per_day: number | null
   active_hours: string
   schedule_days: string
   schedule_times: string

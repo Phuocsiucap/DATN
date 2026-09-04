@@ -27,10 +27,14 @@ ASSIGNED_STATUSES = (
 
 
 def upgrade() -> None:
-    op.add_column(
-        "profile_content_links",
-        sa.Column("recommended_at", sa.DateTime(timezone=True), nullable=True),
-    )
+    inspector = sa.inspect(op.get_bind())
+    columns = {column["name"] for column in inspector.get_columns("profile_content_links")}
+    indexes = {index["name"] for index in inspector.get_indexes("profile_content_links")}
+    if "recommended_at" not in columns:
+        op.add_column(
+            "profile_content_links",
+            sa.Column("recommended_at", sa.DateTime(timezone=True), nullable=True),
+        )
     statuses = ", ".join(f"'{status}'" for status in ASSIGNED_STATUSES)
     op.execute(
         sa.text(
@@ -42,12 +46,13 @@ def upgrade() -> None:
             """
         )
     )
-    op.create_index(
-        op.f("ix_profile_content_links_recommended_at"),
-        "profile_content_links",
-        ["recommended_at"],
-        unique=False,
-    )
+    if op.f("ix_profile_content_links_recommended_at") not in indexes:
+        op.create_index(
+            op.f("ix_profile_content_links_recommended_at"),
+            "profile_content_links",
+            ["recommended_at"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:

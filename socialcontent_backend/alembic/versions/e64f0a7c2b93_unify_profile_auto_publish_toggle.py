@@ -16,6 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    columns = {column["name"] for column in inspector.get_columns("social_profile_strategies")}
+    if "schedule_enabled" not in columns:
+        return
     # Preserve the old scheduler's effective opt-in before removing its gate.
     op.execute(
         "UPDATE social_profile_strategies "

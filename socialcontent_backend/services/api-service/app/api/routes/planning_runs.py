@@ -67,7 +67,6 @@ def list_planning_runs(
         db.query(
             PlanningRun.id,
             PlanningRun.profile_id,
-            PlanningRun.workflow_id,
             PlanningRun.crawl_job_id,
             PlanningRun.planning_mode,
             PlanningRun.status,
@@ -82,11 +81,9 @@ def list_planning_runs(
             SocialProfile.username.label("profile_username"),
             SocialProfile.platform.label("profile_platform"),
             SocialProfile.avatar_url.label("profile_avatar_url"),
-            MediaWorkflow.title.label("workflow_title"),
             CrawlJob.name.label("crawl_job_name"),
         )
         .join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
-        .outerjoin(MediaWorkflow, MediaWorkflow.id == PlanningRun.workflow_id)
         .outerjoin(CrawlJob, CrawlJob.id == PlanningRun.crawl_job_id)
         .filter(*filters)
         .order_by(PlanningRun.created_at.desc())
@@ -236,15 +233,17 @@ def _serialize_run_summary(row, counts: dict) -> dict:
     reason = row.reason_jsonb if isinstance(row.reason_jsonb, dict) else {}
     return {
         "id": str(row.id),
-        "profile_id": str(row.profile_id),
-        "profile_name": row.profile_name,
-        "profile_username": row.profile_username,
-        "profile_platform": row.profile_platform,
-        "profile_avatar_url": row.profile_avatar_url,
-        "workflow_id": str(row.workflow_id) if row.workflow_id else None,
-        "workflow_title": row.workflow_title,
-        "crawl_job_id": str(row.crawl_job_id) if row.crawl_job_id else None,
-        "crawl_job_name": row.crawl_job_name,
+        "profile": {
+            "profile_id": str(row.profile_id),
+            "profile_name": row.profile_name,
+            "profile_username": row.profile_username,
+            "profile_platform": row.profile_platform,
+            "profile_avatar_url": row.profile_avatar_url,
+        },
+        "crawl_job": {
+            "id": str(row.crawl_job_id),
+            "name": row.crawl_job_name,
+        } if row.crawl_job_id else None,
         "planning_mode": row.planning_mode,
         "status": row.status,
         "current_stage": "COMPLETED" if terminal else "SELECTING_CANDIDATES",

@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from common.db.crawl_status import add_crawl_log, finalize_job_if_ready
+from common.db.content_history import processed_source_identities_for_user
 from common.db.idempotency import claim_event
 from common.db.models import CrawlJob, KafkaTask
 from app.crawler.crawlers.bilibili import BilibiliCrawler
@@ -72,6 +73,16 @@ class CrawlerRunner:
             task.started_at = datetime.utcnow()
             task.attempt_count += 1
             crawler = self.pick_crawler(source_type)
+            configuration = dict(payload.get("configuration") or {})
+            if str(job.content_scope or "").upper() == "PRIVATE" and job.requested_by:
+                excluded_urls, excluded_external_ids = processed_source_identities_for_user(
+                    db,
+                    job.requested_by,
+                    source_type=source_type,
+                    current_crawl_job_id=job.id,
+                )
+                configuration["excluded_source_urls"] = sorted(excluded_urls)
+                configuration["excluded_source_external_ids"] = sorted(excluded_external_ids)
             add_crawl_log(
                 db,
                 job_id=job.id,
@@ -79,7 +90,12 @@ class CrawlerRunner:
                 source_type=source_type,
                 stage="CRAWLING",
                 message="Crawler task started",
-                metadata={"attempt": task.attempt_count, "source_url": payload.get("source_url"), "keywords": payload.get("keywords") or []},
+                metadata={
+                    "attempt": task.attempt_count,
+                    "source_url": payload.get("source_url"),
+                    "keywords": payload.get("keywords") or [],
+                    "excluded_previous_source_count": len(configuration.get("excluded_source_urls") or []),
+                },
             )
             documents = crawler.fetch_many(
                 job_id=str(job.id),
@@ -87,7 +103,7 @@ class CrawlerRunner:
                 source_type=source_type,
                 source_url=payload.get("source_url"),
                 keywords=payload.get("keywords") or [],
-                configuration=payload.get("configuration") or {},
+                configuration=configuration,
             )
             for error in getattr(crawler, "last_errors", []):
                 add_crawl_log(
@@ -118,7 +134,11 @@ class CrawlerRunner:
                 source_type=source_type,
                 stage="CRAWLING",
                 message="Crawler task completed",
-                metadata={"processed_document_count": len(processed_document_ids), "skipped_count": len(getattr(crawler, "last_errors", []))},
+                metadata={
+                    "processed_document_count": len(processed_document_ids),
+                    "skipped_count": len(getattr(crawler, "last_errors", [])),
+                    "skipped_previous_content_count": len(getattr(crawler, "last_skipped_existing", [])),
+                },
             )
             finalized = finalize_job_if_ready(db, job) if len(processed_document_ids) == 0 else False
             db.commit()

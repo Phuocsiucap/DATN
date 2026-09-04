@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -11,7 +12,9 @@ from common.planning.auto_draft_policy import sync_compact_scenes
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-RENDER_WORKSPACE_ROOT = PROJECT_ROOT / "data_demo" / "video_gen_demo"
+RENDER_WORKSPACE_ROOT = Path(
+    os.getenv("VIDEO_STORAGE_ROOT", str(PROJECT_ROOT / "runtime" / "video-generation"))
+).expanduser()
 PUBLIC_DIR = RENDER_WORKSPACE_ROOT / "public"
 AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_OUT_DIR = RENDER_WORKSPACE_ROOT / "out"

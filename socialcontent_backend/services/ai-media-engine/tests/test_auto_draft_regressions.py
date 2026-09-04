@@ -5,7 +5,7 @@ import json
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from common.core.llm import ChatCompletionResult, chat_completion
 from common.db.content_series import lock_active_series, normalized_series_title
@@ -13,8 +13,10 @@ from common.planning.auto_draft_policy import auto_production_allowed, draft_scr
 from app.planning.services.auto_draft_compact import evaluate_compact_draft, normalize_compact_draft
 from app.planning.services.auto_workflow_planner import AutoWorkflowPlanner
 from app.video.services.generate_video_jobs import (
+    _apply_auto_ai_review_gate,
     _cancel_blocked_auto_production,
     _mark_video_task_failed,
+    _maybe_enqueue_auto_generate_video_review,
     _maybe_enqueue_auto_voice_or_render,
     _maybe_enqueue_auto_generate_video_voice,
     _maybe_enqueue_auto_generate_video_render,
@@ -62,6 +64,22 @@ class ProductionPolicyTests(unittest.TestCase):
         self.metadata.pop("quality_script_signature")
         self.assertFalse(auto_production_allowed(self.metadata, self.story))
 
+    def test_required_deepseek_review_must_pass_for_current_script(self):
+        signature = draft_script_signature(self.story)
+        self.metadata["ai_review_required"] = True
+        self.metadata["draft_ai_review"] = {
+            "status": "PENDING",
+            "provider": "deepseek",
+            "script_signature": signature,
+        }
+        self.assertFalse(auto_production_allowed(self.metadata, self.story))
+
+        self.metadata["draft_ai_review"]["status"] = "PASS"
+        self.assertTrue(auto_production_allowed(self.metadata, self.story))
+
+        self.story["timeline"]["text"][0]["voice_text"] = "Nội dung lời thoại đã thay đổi."
+        self.assertFalse(auto_production_allowed(self.metadata, self.story))
+
     def test_human_approval_is_bound_to_current_script(self):
         self.metadata.update(draft_quality={"status": "REVIEW_REQUIRED"}, risk_flags=[{"severity": "HIGH"}], draft_review_approved=True, approved_script_signature=draft_script_signature(self.story))
         self.assertTrue(auto_production_allowed(self.metadata, self.story))
@@ -74,6 +92,26 @@ class ProductionPolicyTests(unittest.TestCase):
 
     def test_manual_workflow_behavior_is_unchanged(self):
         self.assertTrue(auto_production_allowed({"selection_mode": "MANUAL"}, self.story))
+
+    def test_manual_direct_workflow_requires_current_deepseek_review(self):
+        signature = draft_script_signature(self.story)
+        metadata = {
+            "selection_mode": "MANUAL",
+            "creation_source": "DIRECT_SCRIPT",
+            "ai_review_required": True,
+            "draft_ai_review": {
+                "status": "PENDING",
+                "provider": "deepseek",
+                "script_signature": signature,
+            },
+        }
+        self.assertFalse(auto_production_allowed(metadata, self.story))
+
+        metadata["draft_ai_review"]["status"] = "PASS"
+        self.assertTrue(auto_production_allowed(metadata, self.story))
+
+        self.story["timeline"]["text"][0]["voice_text"] = "Lời thoại đã bị sửa sau review."
+        self.assertFalse(auto_production_allowed(metadata, self.story))
 
     def test_public_payload_preserves_evidence_and_compact_scenes(self):
         payload = public_story_payload(self.story)
@@ -140,10 +178,186 @@ class ProductionPolicyTests(unittest.TestCase):
     def test_auto_enqueuers_cannot_bypass_review(self):
         project = SimpleNamespace(id=uuid.uuid4(), profile_id=uuid.uuid4(), metadata_json={"selection_mode": "AUTO", "draft_quality": {"status": "REVIEW_REQUIRED"}}, draft_json=self.story)
         db = MagicMock()
-        db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(video_render_mode="auto"))
+        db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(auto_project_queue_enabled=True, video_render_mode="auto"))
         _maybe_enqueue_auto_voice_or_render(db, project, self.story, trigger="test")
         _maybe_enqueue_auto_generate_video_voice(db, project, trigger="test")
         _maybe_enqueue_auto_generate_video_render(db, project, self.story, trigger="test")
+        db.add_all.assert_not_called()
+        db.commit.assert_not_called()
+
+    def test_auto_draft_enqueues_voice_even_when_render_is_manual(self):
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            profile_id=uuid.uuid4(),
+            status="EDITING",
+            current_stage="DRAFT_READY",
+            progress_percent=100,
+            metadata_json=self.metadata,
+            draft_json=self.story,
+        )
+        db = MagicMock()
+        db.get.return_value = SimpleNamespace(
+            strategy=SimpleNamespace(
+                auto_project_queue_enabled=True,
+                video_render_mode="manual",
+            )
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        with patch("common.events.kafka.publish") as publish:
+            _maybe_enqueue_auto_generate_video_voice(db, project, trigger="test")
+
+        db.add_all.assert_called_once()
+        task = db.add_all.call_args.args[0][0]
+        self.assertEqual(task.task_type, "GENERATE_VIDEO_VOICE")
+        self.assertEqual(project.current_stage, "QUEUED_VOICE")
+        publish.assert_called_once()
+
+    def test_auto_pipeline_routes_new_draft_to_deepseek_review_before_voice(self):
+        signature = draft_script_signature(self.story)
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            profile_id=uuid.uuid4(),
+            metadata_json={
+                **self.metadata,
+                "ai_review_required": True,
+                "draft_ai_review": {
+                    "status": "PENDING",
+                    "provider": "deepseek",
+                    "script_signature": signature,
+                },
+            },
+            draft_json=self.story,
+        )
+        with (
+            patch("app.video.services.generate_video_jobs._maybe_enqueue_auto_generate_video_review") as review,
+            patch("app.video.services.generate_video_jobs._maybe_enqueue_auto_generate_video_voice") as voice,
+        ):
+            _maybe_enqueue_auto_voice_or_render(MagicMock(), project, self.story, trigger="test")
+
+        review.assert_called_once_with(ANY, project, trigger="test")
+        voice.assert_not_called()
+
+    def test_auto_review_job_declares_deepseek_contract(self):
+        signature = draft_script_signature(self.story)
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            profile_id=uuid.uuid4(),
+            status="DRAFT_READY",
+            current_stage="DRAFT_READY",
+            progress_percent=100,
+            metadata_json={
+                **self.metadata,
+                "ai_review_required": True,
+                "draft_ai_review": {"status": "PENDING"},
+            },
+            draft_json=self.story,
+        )
+        db = MagicMock()
+        db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(auto_project_queue_enabled=True))
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        with patch("common.events.kafka.publish") as publish:
+            task = _maybe_enqueue_auto_generate_video_review(db, project, trigger="draft_created")
+
+        self.assertEqual(task.task_type, "GENERATE_VIDEO_REVIEW")
+        self.assertEqual(task.payload_jsonb["provider"], "deepseek")
+        self.assertEqual(task.payload_jsonb["model"], "deepseek-v4-flash")
+        self.assertEqual(task.payload_jsonb["script_signature"], signature)
+        self.assertEqual(project.current_stage, "QUEUED_REVIEW")
+        publish.assert_called_once()
+
+    def test_manual_direct_review_is_enqueued_without_auto_profile_setting_or_quality_gate(self):
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            profile_id=uuid.uuid4(),
+            status="DRAFT_READY",
+            current_stage="DRAFT_READY",
+            progress_percent=100,
+            metadata_json={
+                "selection_mode": "MANUAL",
+                "creation_source": "DIRECT_SCRIPT",
+                "ai_review_required": True,
+                "draft_ai_review": {"status": "PENDING"},
+            },
+            draft_json=self.story,
+        )
+        db = MagicMock()
+        db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(auto_project_queue_enabled=False))
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        with patch("common.events.kafka.publish") as publish:
+            task = _maybe_enqueue_auto_generate_video_review(db, project, trigger="script_completed")
+
+        self.assertEqual(task.task_type, "GENERATE_VIDEO_REVIEW")
+        self.assertEqual(task.payload_jsonb["selection_mode"], "MANUAL")
+        self.assertEqual(project.current_stage, "QUEUED_REVIEW")
+        publish.assert_called_once()
+
+    def test_successful_ai_review_gate_refreshes_quality_signature(self):
+        reviewed = deepcopy(self.story)
+        reviewed.setdefault("meta", {})["ai_story_review"] = {
+            "approved": True,
+            "verdict": "PASS",
+            "action": "REVISED",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "score": 96,
+            "issues": [],
+            "notes": [],
+        }
+        project = SimpleNamespace(metadata_json={
+            **self.metadata,
+            "ai_review_required": True,
+            "draft_quality_recheck": {"status": "PASS", "score": 98, "issues": []},
+        })
+
+        self.assertTrue(_apply_auto_ai_review_gate(project, reviewed))
+        signature = draft_script_signature(reviewed)
+        self.assertEqual(project.metadata_json["draft_ai_review"]["status"], "PASS")
+        self.assertEqual(project.metadata_json["quality_script_signature"], signature)
+        self.assertTrue(auto_production_allowed(project.metadata_json, reviewed))
+
+    def test_manual_direct_deepseek_pass_does_not_require_auto_quality_recheck(self):
+        reviewed = deepcopy(self.story)
+        reviewed.setdefault("meta", {})["ai_story_review"] = {
+            "approved": True,
+            "verdict": "PASS",
+            "action": "APPROVED",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "score": 95,
+            "issues": [],
+            "notes": [],
+        }
+        project = SimpleNamespace(metadata_json={
+            "selection_mode": "MANUAL",
+            "creation_source": "DIRECT_SCRIPT",
+            "ai_review_required": True,
+        })
+
+        self.assertTrue(_apply_auto_ai_review_gate(project, reviewed))
+        self.assertEqual(project.metadata_json["draft_ai_review"]["status"], "PASS")
+        self.assertEqual(project.metadata_json["draft_ai_review"]["deterministic_status"], "NOT_REQUIRED")
+        self.assertTrue(auto_production_allowed(project.metadata_json, reviewed))
+
+    def test_auto_voice_stops_when_auto_draft_is_disabled(self):
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            profile_id=uuid.uuid4(),
+            metadata_json=self.metadata,
+            draft_json=self.story,
+        )
+        db = MagicMock()
+        db.get.return_value = SimpleNamespace(
+            strategy=SimpleNamespace(
+                auto_project_queue_enabled=False,
+                video_render_mode="auto",
+            )
+        )
+
+        _maybe_enqueue_auto_generate_video_voice(db, project, trigger="test")
+
         db.add_all.assert_not_called()
         db.commit.assert_not_called()
 

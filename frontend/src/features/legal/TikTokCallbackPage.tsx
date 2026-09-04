@@ -8,9 +8,9 @@ export default function TikTokCallbackPage() {
   const hasSuccess = Boolean(code) && !error
 
   return (
-    <main className="min-h-screen bg-[var(--surface)] px-4 py-8 text-[var(--on-surface)] sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-2xl">
-        <section className="rounded-md border border-[var(--outline-variant)] bg-white p-6 shadow-sm">
+    <main className="h-full w-full overflow-y-auto bg-[var(--surface)] p-3 text-[var(--on-surface)]">
+      <div className="flex min-h-full w-full items-center justify-center">
+        <section className="w-full rounded-md border border-[var(--outline-variant)] bg-white p-4 shadow-sm">
           <div className="mb-4 flex items-center gap-3">
             <div className={`flex h-10 w-10 items-center justify-center rounded-full ${hasSuccess ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
               {hasSuccess ? <CheckCircle2 size={22} /> : <XCircle size={22} />}

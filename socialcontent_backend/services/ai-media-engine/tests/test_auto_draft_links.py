@@ -19,7 +19,7 @@ from app.video.services.generate_video_alignment import fit_frames_with_whisper
 from app.video.services.generate_video_jobs import _recheck_auto_compact_quality
 from app.video.services.generate_video_timeline import normalize_story_for_project, public_story_payload
 from app.video.services.generate_video_voice import build_voice_text
-from app.video.services.generate_video_scripting import edit_story_with_ai, review_story_with_ai
+from app.video.services.generate_video_scripting import edit_story_with_ai, generate_story_timeline_with_ai, review_story_with_ai
 
 
 FACTS = [{"id": "F1", "text": "người dân đăng ký hồ sơ. cán bộ hướng dẫn thủ tục. kết quả được trả tại địa phương."}]
@@ -201,17 +201,35 @@ class LinkedDraftTests(unittest.TestCase):
 
     def test_successful_ai_review_keeps_shared_links(self):
         original = story()
-        response = {"approved": True, "timeline": deepcopy(original["timeline"]), "notes": []}
+        response = {"approved": True, "verdict": "PASS", "score": 97, "issues": [], "timeline": deepcopy(original["timeline"]), "notes": []}
+        response["timeline"]["video"][0]["src"] = "IMG1"
+        response["timeline"]["video"][1]["src"] = "VIDEO1"
+        response["timeline"]["video"][2]["src"] = "IMG2"
         completion = ChatCompletionResult(provider="deepseek", model="test", content=json.dumps(response), raw_response={}, latency_ms=0)
         with (
             patch("app.video.services.generate_video_scripting.get_settings", return_value=SimpleNamespace(deepseek_api_key="test", deepseek_base_url="https://example.test")),
-            patch("app.video.services.generate_video_scripting.deepseek_chat_completion", return_value=completion),
+            patch("app.video.services.generate_video_scripting.deepseek_chat_completion", return_value=completion) as call,
             patch("app.video.services.generate_video_scripting.log_prompt_run"),
         ):
             reviewed = review_story_with_ai(original)
         self.assertEqual(reviewed["timeline"]["text"][2]["video_ids"], ["b", "c"])
         self.assertEqual(reviewed["timeline"]["video"][0]["text_ids"], ["first", "second"])
         self.assertIn("reviewed_at", reviewed["meta"]["ai_story_review"])
+        self.assertEqual(reviewed["meta"]["ai_story_review"]["verdict"], "PASS")
+        self.assertEqual(call.call_args.kwargs["model"], "deepseek-v4-flash")
+        self.assertEqual(call.call_args.kwargs["temperature"], 0.25)
+        self.assertFalse(call.call_args.kwargs["thinking"])
+        payload = json.loads(call.call_args.kwargs["messages"][1]["content"])
+        rules = " ".join(payload["rules"])
+        self.assertIn("không tạo lại draft từ đầu", rules)
+        self.assertIn("Phải trả lại toàn bộ timeline", rules)
+        self.assertIn("chỉ sửa text/voice_text", rules)
+        self.assertEqual(payload["source_document"]["sections"], original["meta"]["source_facts"])
+        self.assertIn("issues", payload["required_output"])
+        self.assertIn("timeline", payload["required_output"])
+        self.assertEqual([item["id"] for item in payload["media_catalog"]], ["IMG1", "VIDEO1", "IMG2"])
+        self.assertNotIn("https://example.test", call.call_args.kwargs["messages"][1]["content"])
+        self.assertEqual(reviewed["timeline"]["video"][1]["src"], CATALOG[1]["src"])
 
     def test_ai_edit_preserves_omitted_links_by_id_and_sends_full_source(self):
         original = story()
@@ -236,6 +254,8 @@ class LinkedDraftTests(unittest.TestCase):
         payload = json.loads(call.call_args.kwargs["messages"][1]["content"])
         self.assertEqual(payload["source_document"]["sections"], original["meta"]["source_facts"])
         self.assertIn("text_ids", payload["required_output"]["timeline"]["video"][0])
+        self.assertFalse(call.call_args.kwargs["thinking"])
+        self.assertNotIn("https://example.test", call.call_args.kwargs["messages"][1]["content"])
 
     def test_ai_review_does_not_add_duration_contract_or_accept_broken_links(self):
         original = story()
@@ -248,11 +268,58 @@ class LinkedDraftTests(unittest.TestCase):
             patch("app.video.services.generate_video_scripting.deepseek_chat_completion", return_value=completion) as call,
             patch("app.video.services.generate_video_scripting.log_prompt_run"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "UNKNOWN_LINK_ID"):
+            with self.assertRaisesRegex(RuntimeError, "changed immutable"):
                 review_story_with_ai(original)
         payload = json.loads(call.call_args.kwargs["messages"][1]["content"])
         self.assertNotIn("duration_contract", payload)
         self.assertEqual(original, before)
+
+    def test_script_generation_uses_media_aliases_and_maps_them_back(self):
+        source = {
+            "id": str(uuid.uuid4()),
+            "title": "Tin thử nghiệm",
+            "summary": "Tóm tắt có căn cứ.",
+            "full_text": "Nội dung nguồn có căn cứ để dựng ba đoạn video.",
+            "target_duration_seconds": 12,
+            "media": [{"media_type": "VIDEO", "source_url": "https://example.test/source.mp4", "title": "Trailer Tin thử nghiệm"}],
+        }
+        timeline = {
+            "version": 1,
+            "duration": 12,
+            "video": [
+                {"id": "video-1", "type": "image", "start": 0, "end": 4, "src": "IMG1", "effect": "slow-zoom"},
+                {"id": "video-2", "type": "video", "start": 4, "end": 8, "src": "VIDEO1", "effect": "pan-right"},
+                {"id": "video-3", "type": "image", "start": 8, "end": 12, "src": "IMG1", "effect": "pan-left"},
+            ],
+            "text": [
+                {"id": "text-1", "type": "subtitle", "start": 0, "end": 4, "text": "Mở đầu", "voice_text": "Mở đầu có căn cứ."},
+                {"id": "text-2", "type": "subtitle", "start": 4, "end": 8, "text": "Diễn biến", "voice_text": "Diễn biến có căn cứ."},
+                {"id": "text-3", "type": "subtitle", "start": 8, "end": 12, "text": "Kết luận", "voice_text": "Kết luận có căn cứ."},
+            ],
+            "audio": [],
+        }
+        completion = ChatCompletionResult(
+            provider="deepseek",
+            model="test",
+            content=json.dumps({"series_decision": {"action": "NONE"}, "timeline": timeline}),
+            raw_response={},
+            latency_ms=0,
+        )
+        with (
+            patch("app.video.services.generate_video_scripting.get_settings", return_value=SimpleNamespace(deepseek_api_key="test", deepseek_base_url="https://example.test")),
+            patch("app.video.services.generate_video_scripting.deepseek_chat_completion", return_value=completion) as call,
+            patch("app.video.services.generate_video_scripting.log_prompt_run"),
+        ):
+            result = generate_story_timeline_with_ai(source, ["https://example.test/source.jpg"])
+        payload_text = call.call_args.kwargs["messages"][1]["content"]
+        payload = json.loads(payload_text)
+        self.assertFalse(call.call_args.kwargs["thinking"])
+        self.assertEqual([item["id"] for item in payload["available_media"][:2]], ["VIDEO1", "IMG1"])
+        self.assertEqual(payload["available_media"][0]["label"], "Trailer Tin thử nghiệm")
+        self.assertNotIn("https://example.test/source.jpg", payload_text)
+        self.assertNotIn("https://example.test/source.mp4", payload_text)
+        self.assertEqual(result["video"][0]["src"], "https://example.test/source.jpg")
+        self.assertEqual(result["video"][1]["src"], "https://example.test/source.mp4")
 
     def test_review_without_provider_keeps_independent_tracks(self):
         with patch("app.video.services.generate_video_scripting.get_settings", return_value=SimpleNamespace(deepseek_api_key="")):

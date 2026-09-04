@@ -71,6 +71,9 @@ def list_social_profiles(platform: str | None = None, db: Session = Depends(get_
 
 @router.post("", response_model=schemas.SocialProfileResponse, status_code=201)
 def create_social_profile(payload: schemas.SocialProfileCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if payload.platform.strip().lower() != "tiktok":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=501, detail="Tạm thời chưa triển khai cho nền tảng này")
     service = SocialProfileService()
     profile = service.create_profile(db, current_user, payload)
     return service.serialize_profile(profile)

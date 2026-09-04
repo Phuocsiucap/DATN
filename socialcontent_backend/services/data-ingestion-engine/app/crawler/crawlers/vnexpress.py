@@ -28,6 +28,7 @@ class VNExpressCrawler(BaseCrawler):
 
     def __init__(self) -> None:
         self.last_errors: list[dict[str, Any]] = []
+        self.last_skipped_existing: list[str] = []
 
     def fetch_many(
         self,
@@ -44,8 +45,19 @@ class VNExpressCrawler(BaseCrawler):
         topics = self._terms(keywords)
         timeout = float(configuration.get("timeout_seconds", 20))
         headers = self._headers(configuration)
+        excluded_urls = {
+            self._source_url_key(value)
+            for value in configuration.get("excluded_source_urls") or []
+            if self._source_url_key(value)
+        }
+        excluded_external_ids = {
+            str(value).strip().casefold()
+            for value in configuration.get("excluded_source_external_ids") or []
+            if str(value).strip()
+        }
 
         self.last_errors = []
+        self.last_skipped_existing = []
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=headers) as client:
             links = self.discover_links(client, source_url=source_url, limit=max(limit * 5, limit), configuration=configuration)
             seen: set[str] = set()
@@ -54,12 +66,19 @@ class VNExpressCrawler(BaseCrawler):
                 if not link or link in seen:
                     continue
                 seen.add(link)
+                if self._is_excluded_source(link, excluded_urls, excluded_external_ids):
+                    self.last_skipped_existing.append(link)
+                    continue
                 if len(documents) >= limit:
                     break
                 try:
                     article = self.fetch_article(client, link)
                 except Exception as exc:
                     self.last_errors.append({"url": link, "stage": "FETCH_ARTICLE", "error": str(exc)})
+                    continue
+                article_url = str(article.get("link") or link)
+                if self._is_excluded_source(article_url, excluded_urls, excluded_external_ids):
+                    self.last_skipped_existing.append(article_url)
                     continue
                 if not self.matches_terms(article, topics):
                     continue
@@ -121,17 +140,17 @@ class VNExpressCrawler(BaseCrawler):
         lead = self._first_match(body, [r"<p[^>]*class=[\"'][^\"']*description[^\"']*[\"'][^>]*>(.*?)</p>"])
         content = self._article_paragraphs(body)
         json_ld_videos = self._json_ld_videos(body)
+        videos = self._normalize_videos([*json_ld_videos, *self._dom_videos(body), *self._regex_videos(body)])
         video_thumbnail_fps = {
-            self._image_fingerprint(video.get("thumbnailUrl") or "")
-            for video in json_ld_videos
-            if video.get("thumbnailUrl")
+            self._image_fingerprint(video.get("thumbnail") or "")
+            for video in videos
+            if video.get("thumbnail")
         }
         images = [
             image
             for image in self._dedupe_dicts([*self._metadata_images(body), *self._image_objects(body, url)], "src")
             if self._image_fingerprint(image.get("src") or "") not in video_thumbnail_fps
         ]
-        videos = self._normalize_videos([*json_ld_videos, *self._dom_videos(body), *self._regex_videos(body)])
 
         return {
             "link": url,
@@ -482,7 +501,7 @@ class VNExpressCrawler(BaseCrawler):
                         "poster": self._clean_url(
                             self._attr(attrs, "poster")
                             or self._attr(attrs, "data-poster")
-                            or self._first_image_url(block)
+                            or self._video_poster_url(block)
                         ),
                         "modes": self._attr(attrs, "data-mode") or "",
                         "maxMode": self._attr(attrs, "max-mode") or "",
@@ -500,7 +519,7 @@ class VNExpressCrawler(BaseCrawler):
                             "src": source_src,
                             "type": self._attr(source_attrs, "type") or "",
                             "videoId": self._video_id(attrs, block),
-                            "poster": self._clean_url(self._first_image_url(block)),
+                            "poster": self._clean_url(self._video_poster_url(block)),
                             "name": self._dom_video_title(block),
                         }
                     )
@@ -531,6 +550,17 @@ class VNExpressCrawler(BaseCrawler):
                 if src and not self._is_blocked_image(src):
                     return src
         return ""
+
+    def _video_poster_url(self, html_fragment: str) -> str:
+        for attrs in re.findall(
+            r"<img\b([^>]*class=[\"'][^\"']*thumb-above-video[^\"']*[\"'][^>]*)>",
+            html_fragment,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            for src in self._image_urls_from_attrs(attrs):
+                if src and not self._is_blocked_image(src):
+                    return src
+        return self._first_image_url(html_fragment)
 
     def _video_id(self, attrs: str, container: str) -> str:
         for value in [self._attr(attrs, "data-vid"), self._attr(container, "data-vid"), self._attr(attrs, "id")]:
@@ -615,14 +645,16 @@ class VNExpressCrawler(BaseCrawler):
             "mimeType": existing.get("mimeType") or incoming.get("mimeType"),
             "embedUrl": existing.get("embedUrl") or incoming.get("embedUrl"),
             "provider": existing.get("provider") or incoming.get("provider"),
-            "title": existing.get("title") or incoming.get("title"),
+            # DOM player captions are usually more specific than the page-level
+            # JSON-LD VideoObject name, which may repeat the article headline.
+            "title": incoming.get("title") or existing.get("title"),
             "description": existing.get("description") or incoming.get("description"),
             "thumbnail": existing.get("thumbnail") or incoming.get("thumbnail"),
             "uploadDate": existing.get("uploadDate") or incoming.get("uploadDate"),
             "duration": existing.get("duration") or incoming.get("duration"),
             "qualities": existing.get("qualities") or incoming.get("qualities") or [],
             "maxQuality": existing.get("maxQuality") or incoming.get("maxQuality"),
-            "videoId": existing.get("videoId") or incoming.get("videoId"),
+            "videoId": incoming.get("videoId") or existing.get("videoId"),
             "extractionSource": ",".join(sources),
         }
 
@@ -1046,6 +1078,20 @@ class VNExpressCrawler(BaseCrawler):
             return hashlib.sha256(str(datetime.now(timezone.utc)).encode("utf-8")).hexdigest()
         match = re.search(r"-(\d+)\.html", url)
         return match.group(1) if match else hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    def _is_excluded_source(
+        self,
+        url: str,
+        excluded_urls: set[str],
+        excluded_external_ids: set[str],
+    ) -> bool:
+        return (
+            self._source_url_key(url) in excluded_urls
+            or self._external_id(url).strip().casefold() in excluded_external_ids
+        )
+
+    def _source_url_key(self, value: Any) -> str:
+        return self._clean_url(value).split("#", 1)[0].rstrip("/").casefold()
 
     def _limit(self, configuration: dict[str, Any]) -> int:
         value = configuration.get("max_items", configuration.get("limit", 10))

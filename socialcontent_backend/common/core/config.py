@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
     embedding_service_url: str = Field(default="http://localhost:8075", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))
+    data_ingestion_service_url: str = Field(default="http://localhost:8010", validation_alias=AliasChoices("DATA_INGESTION_SERVICE_URL"))
+    planning_service_url: str = Field(default="http://localhost:8050", validation_alias=AliasChoices("PLANNING_SERVICE_URL"))
+    ai_media_worker_url: str = Field(default="http://localhost:8060", validation_alias=AliasChoices("AI_MEDIA_WORKER_URL"))
+    remotion_worker_url: str = Field(default="http://localhost:8090", validation_alias=AliasChoices("REMOTION_WORKER_URL"))
     embedding_model_name: str = Field(default="text-embedding-3-small", validation_alias=AliasChoices("EMBEDDING_MODEL_NAME", "OPENAI_EMBEDDING_MODEL"))
     embedding_dimensions: int = Field(default=512, validation_alias=AliasChoices("EMBEDDING_DIMENSIONS", "OPENAI_EMBEDDING_DIMENSIONS"))
     embedding_batch_size: int = Field(default=64, validation_alias=AliasChoices("EMBEDDING_BATCH_SIZE"))

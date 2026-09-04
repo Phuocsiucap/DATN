@@ -11,6 +11,7 @@ export type Tab =
   | 'analyticsPosts'
   | 'users'
   | 'settings'
+  | 'profile'
   | 'openaiUsage'
 
 export const TAB_PATHS: Record<Tab, string> = {
@@ -26,5 +27,9 @@ export const TAB_PATHS: Record<Tab, string> = {
   analyticsPosts: '/analytics/posts',
   users: '/users',
   settings: '/settings',
+  profile: '/profile',
   openaiUsage: '/admin/openai-usage',
 }
+
+export const ADMIN_DASHBOARD_PATH = '/admin/dashboard'
+export const CREATOR_DASHBOARD_PATH = '/creator/dashboard'

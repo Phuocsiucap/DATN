@@ -1,4 +1,18 @@
-import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import axios, {
+  AxiosError,
+  type AxiosRequestConfig,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios'
+
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** Bypass a completed RTK Query cache entry for this GET request. */
+    cache?: boolean
+    /** Skip a cached value and fetch a fresh response. */
+    forceRefresh?: boolean
+  }
+}
 
 export type ApiPagination = {
   page: number
@@ -22,12 +36,45 @@ export type ApiResponse<T> = {
 }
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
+  baseURL: import.meta.env?.VITE_API_BASE_URL || '/api/v1',
   timeout: 12000,
   withCredentials: true,
 })
 
 export const isSocialContentApiBase = () => String(api.defaults.baseURL || '').includes('/api/v1')
+
+type ApiGetCacheHandler = (url: string, config?: AxiosRequestConfig) => Promise<AxiosResponse>
+type ApiMutationInvalidator = (url: string) => void
+
+let getCacheHandler: ApiGetCacheHandler | null = null
+let mutationInvalidator: ApiMutationInvalidator | null = null
+let cacheResetter: (() => void) | null = null
+
+export const registerApiCacheHandlers = (handlers: {
+  get: ApiGetCacheHandler
+  invalidateMutation: ApiMutationInvalidator
+  reset: () => void
+}) => {
+  getCacheHandler = handlers.get
+  mutationInvalidator = handlers.invalidateMutation
+  cacheResetter = handlers.reset
+}
+
+export const invalidateApiCache = () => cacheResetter?.()
+
+const isReusableResponseType = (config?: AxiosRequestConfig) => (
+  !config?.responseType || config.responseType === 'json' || config.responseType === 'text'
+)
+
+const uncachedGet = api.get.bind(api)
+
+const cachedGet: typeof api.get = ((url: string, config?: AxiosRequestConfig) => {
+  const canShareRequest = !config?.signal && isReusableResponseType(config)
+  if (!canShareRequest || !getCacheHandler) return uncachedGet(url, config)
+  return getCacheHandler(url, config)
+}) as typeof api.get
+
+api.get = cachedGet
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean
@@ -42,6 +89,7 @@ const isApiResponse = (value: unknown): value is ApiResponse<unknown> => {
 }
 
 export const setAccessToken = (token: string | null) => {
+  invalidateApiCache()
   if (token) {
     localStorage.setItem('access_token', token)
   } else {
@@ -64,6 +112,11 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
+    const method = response.config.method?.toLowerCase()
+    if (method && ['post', 'put', 'patch', 'delete'].includes(method)) {
+      mutationInvalidator?.(response.config.url || '')
+    }
+
     // Keep existing feature APIs focused on domain data while the wire format
     // remains the shared ApiResponse envelope.
     if (isApiResponse(response.data)) {

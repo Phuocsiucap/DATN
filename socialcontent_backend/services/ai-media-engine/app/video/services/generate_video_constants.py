@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
-RENDER_WORKSPACE_ROOT = PROJECT_ROOT / "data_demo" / "video_gen_demo"
+RENDER_WORKSPACE_ROOT = Path(
+    os.getenv("VIDEO_STORAGE_ROOT", str(PROJECT_ROOT / "runtime" / "video-generation"))
+).expanduser()
 PUBLIC_DIR = RENDER_WORKSPACE_ROOT / "public"
 AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_ASSET_DIR = PUBLIC_DIR / "assets" / "videos"

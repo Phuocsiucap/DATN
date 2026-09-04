@@ -37,7 +37,7 @@ import {
   type SocialPost,
   type SocialProfile,
 } from '@/commons/apis/api'
-import { AppButton, EmptyBlock, PageHeader, SelectControl, SocialProfileAvatar, StatusPill, platformLabel } from '@/commons/component/social-ui'
+import { AppButton, EmptyBlock, PageLayout, SelectControl, SocialProfileAvatar, StatusPill, platformLabel } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
 import TikTokEmbedPlayer from './TikTokEmbedPlayer'
 
@@ -154,26 +154,25 @@ export default function PostAnalyticsPage() {
   const hasTraffic = Boolean(charts?.data_availability?.traffic_sources && charts.traffic_sources.length)
 
   return (
-    <div className="app-page">
-      <PageHeader
-        title="Phân tích theo bài đăng"
-        description="Theo dõi hiệu suất từng video đã xuất bản, tăng trưởng tương tác và nguồn dữ liệu TikTok."
-        actions={
-          <>
-            <SelectControl value={selectedProfileId} onChange={setSelectedProfileId} className="w-full sm:w-[260px]">
-              {profiles.length === 0 && <option value="">Chưa có tài khoản</option>}
-              {profiles.map((profile) => <option key={profile.id} value={String(profile.id)}>{profile.profile_name}</option>)}
-            </SelectControl>
-            <SelectControl value={selectedPostId} onChange={setSelectedPostId} className="w-full sm:w-[320px]">
-              {posts.length === 0 && <option value="">Chưa có bài đăng</option>}
-              {posts.map((item) => <option key={item.id} value={String(item.id)}>{item.title || item.platform_post_id || item.id}</option>)}
-            </SelectControl>
-            <AppButton variant="secondary" icon={<RefreshCw size={15} className={(loadingPosts || loadingAnalytics) ? 'animate-spin' : ''} />} onClick={() => void loadPosts()} disabled={loadingProfiles || loadingPosts}>
-              Tải lại
-            </AppButton>
-          </>
-        }
-      />
+    <PageLayout
+      title="Phân tích theo bài đăng"
+      description="Theo dõi hiệu suất từng video đã xuất bản, tăng trưởng tương tác và nguồn dữ liệu TikTok."
+      actions={
+        <>
+          <SelectControl value={selectedProfileId} onChange={setSelectedProfileId} className="w-full sm:w-[260px]">
+            {profiles.length === 0 && <option value="">Chưa có tài khoản</option>}
+            {profiles.map((profile) => <option key={profile.id} value={String(profile.id)}>{profile.profile_name}</option>)}
+          </SelectControl>
+          <SelectControl value={selectedPostId} onChange={setSelectedPostId} className="w-full sm:w-[320px]">
+            {posts.length === 0 && <option value="">Chưa có bài đăng</option>}
+            {posts.map((item) => <option key={item.id} value={String(item.id)}>{item.title || item.platform_post_id || item.id}</option>)}
+          </SelectControl>
+          <AppButton variant="secondary" icon={<RefreshCw size={15} className={(loadingPosts || loadingAnalytics) ? 'animate-spin' : ''} />} onClick={() => void loadPosts()} disabled={loadingProfiles || loadingPosts}>
+            Tải lại
+          </AppButton>
+        </>
+      }
+    >
 
       <div className="flex gap-6 overflow-x-auto border-b border-[var(--outline-variant)]">
         {tabs.map((tab) => (
@@ -293,7 +292,7 @@ export default function PostAnalyticsPage() {
           </section>
         </>
       )}
-    </div>
+    </PageLayout>
   )
 }
 

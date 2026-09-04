@@ -4,7 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 
 const compositionId = process.env.GENERATE_VIDEO_REMOTION_COMPOSITION_ID || 'StorytellingDemo';
-const publicDir = process.env.REMOTION_PUBLIC_DIR || '/app/data_demo/video_gen_demo/public';
+const videoStorageRoot = process.env.VIDEO_STORAGE_ROOT || '/app/runtime/video-generation';
+const publicDir = process.env.REMOTION_PUBLIC_DIR || path.join(videoStorageRoot, 'public');
 let bundledServeUrl;
 
 export async function renderStory({story, outputPath, onProgress}) {

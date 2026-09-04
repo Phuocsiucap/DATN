@@ -66,11 +66,29 @@ def update_source(source_id: uuid.UUID, payload: schemas.CrawlSourceUpdateReques
     return source
 
 
+@router.patch("/crawl-sources/{source_id}/status")
+def update_source_status(source_id: uuid.UUID, status: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Update crawl source status to ACTIVE or INACTIVE. Does not affect already crawled content items."""
+    source = db.get(CrawlJobSource, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Crawl source not found")
+    
+    normalized_status = status.upper()
+    if normalized_status not in ["ACTIVE", "INACTIVE"]:
+        raise HTTPException(status_code=400, detail="Status must be ACTIVE or INACTIVE")
+    
+    source.status = normalized_status
+    db.commit()
+    db.refresh(source)
+    return source
+
+
 @router.delete("/crawl-sources/{source_id}")
 def delete_source(source_id: uuid.UUID, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Delete a crawl source. Does not affect already crawled content items."""
     source = db.get(CrawlJobSource, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Crawl source not found")
     db.delete(source)
     db.commit()
-    return {"deleted": True}
+    return {"deleted": True, "message": "Crawl source deleted. Existing content items are preserved."}

@@ -17,28 +17,38 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "crawl_job_contents",
-        sa.Column("job_id", sa.UUID(), nullable=False),
-        sa.Column("content_id", sa.UUID(), nullable=False),
-        sa.Column("is_duplicate", sa.Boolean(), server_default=sa.false(), nullable=False),
-        sa.Column("match_type", sa.String(length=60), nullable=True),
-        sa.Column("source_type", sa.String(length=40), nullable=True),
-        sa.Column("source_external_id", sa.Text(), nullable=True),
-        sa.Column("processed_document_id", sa.String(length=64), nullable=True),
-        sa.Column("occurrence_count", sa.Integer(), server_default="1", nullable=False),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["content_id"], ["content_items.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["job_id"], ["crawl_jobs.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("job_id", "content_id"),
-    )
-    op.create_index(op.f("ix_crawl_job_contents_content_id"), "crawl_job_contents", ["content_id"], unique=False)
-    op.create_index(op.f("ix_crawl_job_contents_is_duplicate"), "crawl_job_contents", ["is_duplicate"], unique=False)
-    op.create_index(op.f("ix_crawl_job_contents_match_type"), "crawl_job_contents", ["match_type"], unique=False)
-    op.create_index(op.f("ix_crawl_job_contents_processed_document_id"), "crawl_job_contents", ["processed_document_id"], unique=False)
-    op.create_index(op.f("ix_crawl_job_contents_source_type"), "crawl_job_contents", ["source_type"], unique=False)
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table("crawl_job_contents"):
+        op.create_table(
+            "crawl_job_contents",
+            sa.Column("job_id", sa.UUID(), nullable=False),
+            sa.Column("content_id", sa.UUID(), nullable=False),
+            sa.Column("is_duplicate", sa.Boolean(), server_default=sa.false(), nullable=False),
+            sa.Column("match_type", sa.String(length=60), nullable=True),
+            sa.Column("source_type", sa.String(length=40), nullable=True),
+            sa.Column("source_external_id", sa.Text(), nullable=True),
+            sa.Column("processed_document_id", sa.String(length=64), nullable=True),
+            sa.Column("occurrence_count", sa.Integer(), server_default="1", nullable=False),
+            sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.ForeignKeyConstraint(["content_id"], ["content_items.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["job_id"], ["crawl_jobs.id"], ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("job_id", "content_id"),
+        )
+        existing_indexes: set[str] = set()
+    else:
+        existing_indexes = {index["name"] for index in inspector.get_indexes("crawl_job_contents")}
+
+    for name, columns in (
+        (op.f("ix_crawl_job_contents_content_id"), ["content_id"]),
+        (op.f("ix_crawl_job_contents_is_duplicate"), ["is_duplicate"]),
+        (op.f("ix_crawl_job_contents_match_type"), ["match_type"]),
+        (op.f("ix_crawl_job_contents_processed_document_id"), ["processed_document_id"]),
+        (op.f("ix_crawl_job_contents_source_type"), ["source_type"]),
+    ):
+        if name not in existing_indexes:
+            op.create_index(name, "crawl_job_contents", columns, unique=False)
     op.execute(
         sa.text(
             """

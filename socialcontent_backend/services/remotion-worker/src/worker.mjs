@@ -7,32 +7,41 @@ import {createServer} from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import {renderStory} from './render.mjs';
+import {materializeRemoteVideoSources} from './source-video-assets.mjs';
 
 const RENDER_TOPIC = 'generate-video.render.requested';
 const WORKER_ID = process.env.WORKER_ID || `remotion-worker-${process.pid}`;
 const POLL_INTERVAL_MS = Number(process.env.REMOTION_WORKER_POLL_INTERVAL_MS || 5000);
 const TASK_STALE_MINUTES = Number(process.env.REMOTION_WORKER_STALE_MINUTES || 20);
 const RENDER_TIMEOUT_MS = Number(process.env.REMOTION_RENDER_TIMEOUT_MS || 30 * 60 * 1000);
-const PUBLIC_DIR = process.env.REMOTION_PUBLIC_DIR || '/app/data_demo/video_gen_demo/public';
-const OUT_DIR = process.env.REMOTION_OUT_DIR || '/app/data_demo/video_gen_demo/out';
+const VIDEO_STORAGE_ROOT = process.env.VIDEO_STORAGE_ROOT || '/app/runtime/video-generation';
+const PUBLIC_DIR = process.env.REMOTION_PUBLIC_DIR || path.join(VIDEO_STORAGE_ROOT, 'public');
+const OUT_DIR = process.env.REMOTION_OUT_DIR || path.join(VIDEO_STORAGE_ROOT, 'out');
 const ASSET_SERVER_HOST = process.env.REMOTION_ASSET_SERVER_HOST || '127.0.0.1';
 const ASSET_SERVER_PORT = Number(process.env.REMOTION_ASSET_SERVER_PORT || 0);
+const HEALTH_SERVER_PORT = Number(process.env.HEALTH_PORT || 8090);
 let activeRenderTaskId = null;
 let queueProcessing = false;
 let assetServerBaseUrl = null;
+let databaseReady = false;
+let workerMode = 'starting';
 
 const pool = new Pool({
   connectionString: nodePostgresUrl(process.env.DATABASE_URL),
 });
 
 async function main() {
+  await startHealthServer();
+  await fs.mkdir(PUBLIC_DIR, {recursive: true});
   await fs.mkdir(OUT_DIR, {recursive: true});
   await startPublicAssetServer();
   await waitForDatabase();
+  databaseReady = true;
   await recoverStaleRenderTasks();
   await processPendingRenderTasks();
 
   if (String(process.env.DISABLE_KAFKA || '').toLowerCase() === 'true') {
+    workerMode = 'database-polling';
     console.log('Kafka disabled; remotion-worker using DB polling');
     await pollForever();
     return;
@@ -55,6 +64,7 @@ async function main() {
       heartbeatInterval,
     });
     await consumer.connect();
+    workerMode = 'kafka';
     startMaintenanceLoop();
     await consumer.subscribe({topic: RENDER_TOPIC, fromBeginning: false});
     console.log(`remotion-worker subscribed to ${RENDER_TOPIC} (sessionTimeout=${sessionTimeout}ms)`);
@@ -77,9 +87,41 @@ async function main() {
       },
     });
   } catch (error) {
+    workerMode = 'database-polling';
     console.warn(`[Kafka Warning] remotion-worker falling back to DB polling: ${error.message}`);
     await pollForever();
   }
+}
+
+async function startHealthServer() {
+  const server = createServer((request, response) => {
+    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1');
+    if (request.method !== 'GET' || requestUrl.pathname !== '/health') {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    const payload = JSON.stringify({
+      status: databaseReady ? 'ok' : 'starting',
+      service: 'remotion-worker',
+      detail: databaseReady ? `Worker đang chạy ở chế độ ${workerMode}` : 'Đang kết nối cơ sở dữ liệu',
+      mode: workerMode,
+      worker_id: WORKER_ID,
+      active_render_task_id: activeRenderTaskId,
+      queue_processing: queueProcessing,
+    });
+    response.writeHead(databaseReady ? 200 : 503, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(payload),
+      'Cache-Control': 'no-store',
+    });
+    response.end(payload);
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(HEALTH_SERVER_PORT, '0.0.0.0', resolve);
+  });
+  console.log(`[Health] Listening on 0.0.0.0:${HEALTH_SERVER_PORT}`);
 }
 
 async function waitForDatabase(maxRetries = 30, delayMs = 2000) {
@@ -176,6 +218,13 @@ async function processRenderTask(taskId, onHeartbeat) {
     const outputName = outputNameFor(project.id, task.id);
     const outputPath = path.join(OUT_DIR, outputName);
     const artifactPath = `out/${outputName}`;
+
+    await updateProgress(task.id, project.id, 'PREPARING_SOURCE_VIDEO', 18, 'RENDERING');
+    await materializeRemoteVideoSources(story, {
+      publicDir: PUBLIC_DIR,
+      publicUrlFor: localPublicAssetUrl,
+      onHeartbeat,
+    });
 
     await updateProgress(task.id, project.id, 'RENDERING_VIDEO', 30, 'RENDERING');
     if (onHeartbeat) {
@@ -839,10 +888,39 @@ async function startPublicAssetServer() {
         return;
       }
 
-      response.writeHead(200, {
-        'Content-Length': stat.size,
+      const baseHeaders = {
+        'Accept-Ranges': 'bytes',
         'Content-Type': contentTypeFor(assetPath),
         'Cache-Control': 'no-store',
+      };
+      const range = parseByteRange(request.headers.range, stat.size);
+      if (range === false) {
+        response.writeHead(416, {
+          ...baseHeaders,
+          'Content-Range': `bytes */${stat.size}`,
+          'Content-Length': 0,
+        });
+        response.end();
+        return;
+      }
+      if (range) {
+        const contentLength = range.end - range.start + 1;
+        response.writeHead(206, {
+          ...baseHeaders,
+          'Content-Length': contentLength,
+          'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`,
+        });
+        if (request.method === 'HEAD') {
+          response.end();
+          return;
+        }
+        createReadStream(assetPath, {start: range.start, end: range.end}).pipe(response);
+        return;
+      }
+
+      response.writeHead(200, {
+        ...baseHeaders,
+        'Content-Length': stat.size,
       });
       if (request.method === 'HEAD') {
         response.end();
@@ -864,6 +942,39 @@ async function startPublicAssetServer() {
   assetServerBaseUrl = `http://${ASSET_SERVER_HOST}:${port}`;
   console.log(`[Asset Server] Serving ${publicRoot} at ${assetServerBaseUrl}`);
   return assetServerBaseUrl;
+}
+
+function parseByteRange(value, size) {
+  if (!value) {
+    return null;
+  }
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(String(value).trim());
+  if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(size) || size <= 0) {
+    return false;
+  }
+
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+      return false;
+    }
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
+      return false;
+    }
+    end = Math.min(end, size - 1);
+  }
+
+  if (start < 0 || start >= size || end < start) {
+    return false;
+  }
+  return {start, end};
 }
 
 function encodeAssetPath(relPath) {
@@ -914,11 +1025,14 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
              s.auto_queue_enabled,
              s.auto_publish_enabled,
              s.schedule_days,
-             s.schedule_times
+             s.schedule_times,
+             s.schedule_timezone,
+             s.post_frequency_per_day
       FROM social_profiles sp
       LEFT JOIN social_profile_strategies s ON s.profile_id = sp.id
       WHERE sp.id = $1
       LIMIT 1
+      FOR UPDATE OF sp
     `,
     [project.profile_id],
   );
@@ -961,7 +1075,12 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
     queueItem = existing.rows[0] || null;
   }
 
-  const scheduledAt = nextStrategyScheduledAt(profile);
+  const scheduledAt = queueItem?.scheduled_at || await nextStrategyScheduledAt(
+    client,
+    profile,
+    project.profile_id,
+    queueItem?.id,
+  );
   const generatedContent = defaultModule4Caption(project, story);
   if (!queueItem) {
     const created = await client.query(
@@ -1029,40 +1148,73 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
   return {metadata, projectStatus: 'QUEUED_FOR_PUBLISHING', currentStage: 'QUEUED_FOR_PUBLISHING'};
 }
 
-function nextStrategyScheduledAt(strategy) {
-  const now = new Date();
+async function nextStrategyScheduledAt(client, strategy, profileId, excludeItemId = null) {
   const times = String(strategy.schedule_times || '')
     .split(',')
     .map((item) => item.trim())
-    .filter(Boolean);
-  const days = new Set(
+    .filter((item) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(item));
+  const days = [...new Set(
     String(strategy.schedule_days || '0,1,2,3,4,5,6')
       .split(',')
       .map((item) => Number(item.trim()))
-      .filter((item) => Number.isInteger(item)),
-  );
+      .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6),
+  )];
   if (times.length === 0) {
-    return new Date(now.getTime() + 60 * 60 * 1000);
+    return new Date(Date.now() + 60 * 60 * 1000);
   }
-  for (let dayOffset = 0; dayOffset < 8; dayOffset += 1) {
-    const candidateDay = new Date(now.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-    const pythonWeekday = (candidateDay.getDay() + 6) % 7;
-    if (days.size > 0 && !days.has(pythonWeekday)) {
-      continue;
-    }
-    for (const value of times) {
-      const [hour, minute] = value.split(':').map((part) => Number(part));
-      if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
-        continue;
-      }
-      const candidate = new Date(candidateDay);
-      candidate.setHours(hour, minute, 0, 0);
-      if (candidate > now) {
-        return candidate;
-      }
-    }
+
+  const timezoneName = String(strategy.schedule_timezone || 'Asia/Bangkok').trim() || 'Asia/Bangkok';
+  const dailyLimit = Number.isInteger(Number(strategy.post_frequency_per_day))
+    && Number(strategy.post_frequency_per_day) > 0
+    ? Number(strategy.post_frequency_per_day)
+    : null;
+  const result = await client.query(
+    `
+      WITH candidate_slots AS (
+        SELECT (
+          ((NOW() AT TIME ZONE $3)::date + day_offset + time_value::time)
+          AT TIME ZONE $3
+        ) AS scheduled_at
+        FROM generate_series(0, 89) AS offsets(day_offset)
+        CROSS JOIN unnest($4::text[]) AS configured_times(time_value)
+        WHERE ((EXTRACT(ISODOW FROM ((NOW() AT TIME ZONE $3)::date + day_offset))::int + 6) % 7)
+              = ANY($5::int[])
+      )
+      SELECT candidate.scheduled_at
+      FROM candidate_slots candidate
+      WHERE candidate.scheduled_at > NOW() + INTERVAL '5 minutes'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM publishing_queue_items occupied
+          WHERE occupied.profile_id = $1
+            AND ($2::uuid IS NULL OR occupied.id <> $2::uuid)
+            AND occupied.status IN ('needs_approval', 'queued', 'approved', 'publishing', 'published')
+            AND COALESCE(occupied.published_at, occupied.scheduled_at) IS NOT NULL
+            AND ABS(EXTRACT(EPOCH FROM (
+              COALESCE(occupied.published_at, occupied.scheduled_at) - candidate.scheduled_at
+            ))) < 1800
+        )
+        AND (
+          $6::int IS NULL OR (
+            SELECT COUNT(*)
+            FROM publishing_queue_items daily
+            WHERE daily.profile_id = $1
+              AND ($2::uuid IS NULL OR daily.id <> $2::uuid)
+              AND daily.status IN ('needs_approval', 'queued', 'approved', 'publishing', 'published')
+              AND COALESCE(daily.published_at, daily.scheduled_at) IS NOT NULL
+              AND (COALESCE(daily.published_at, daily.scheduled_at) AT TIME ZONE $3)::date
+                  = (candidate.scheduled_at AT TIME ZONE $3)::date
+          ) < $6::int
+        )
+      ORDER BY candidate.scheduled_at
+      LIMIT 1
+    `,
+    [profileId, excludeItemId, timezoneName, times, days.length ? days : [0, 1, 2, 3, 4, 5, 6], dailyLimit],
+  );
+  if (result.rows[0]?.scheduled_at) {
+    return new Date(result.rows[0].scheduled_at);
   }
-  return new Date(now.getTime() + 60 * 60 * 1000);
+  throw new Error(`No publishing slot is available for profile ${profileId} in ${timezoneName}`);
 }
 
 function defaultModule4Caption(project, story) {

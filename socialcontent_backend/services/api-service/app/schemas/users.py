@@ -26,6 +26,11 @@ class UserUpdateRequest(BaseModel):
     roles: list[str] | None = None
 
 
+class MyProfileUpdateRequest(BaseModel):
+    full_name: str | None = None
+    password: str | None = None
+
+
 class AdminUserCreateRequest(BaseModel):
     email: str
     password: str

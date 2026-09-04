@@ -20,7 +20,7 @@ export function EditStoryWithAiDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Chỉnh sửa story bằng AI</DialogTitle>
+          <DialogTitle>Chỉnh sửa story bằng hệ thống</DialogTitle>
           <DialogDescription>Nhập yêu cầu chỉnh sửa cho story data hiện tại.</DialogDescription>
         </DialogHeader>
         <DialogBody>

@@ -16,7 +16,7 @@ import {
   Send,
 } from 'lucide-react'
 import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
-import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar } from '@/commons/component/social-ui'
+import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar, TableRowActions, type TableRowActionItem } from '@/commons/component/social-ui'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { MediaAssetPreview } from '@/commons/media'
@@ -392,7 +392,6 @@ export default function SchedulePage() {
     <PageLayout
       title="Lịch đăng bài"
       description="Quản lý lịch xuất bản theo kênh social, nền tảng và video đã render."
-      contentClassName="flex-none"
       actions={
         <>
           <SearchField
@@ -480,32 +479,28 @@ export default function SchedulePage() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-            <div className="flex items-center justify-center gap-4 border-b px-4 py-3" style={{ borderColor: 'var(--outline-variant)' }}>
-              <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="icon-button">
-                <ChevronLeft size={17} />
+          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm ring-1 ring-slate-900/5">
+            <div className="flex items-center justify-center gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+              <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 bg-white text-slate-500 shadow-xs transition hover:bg-slate-50 hover:text-slate-800">
+                <ChevronLeft size={16} />
               </button>
-              <div className="text-base font-bold" style={{ color: 'var(--on-surface)' }}>{weekRangeLabel}</div>
-              <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="icon-button">
-                <ChevronRight size={17} />
+              <div className="min-w-[140px] text-center text-sm font-black text-slate-800">{weekRangeLabel}</div>
+              <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 bg-white text-slate-500 shadow-xs transition hover:bg-slate-50 hover:text-slate-800">
+                <ChevronRight size={16} />
               </button>
             </div>
 
             <div className="table-scroll">
               <div className="min-w-[1020px]">
-                <div className="grid grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b" style={{ borderColor: 'var(--outline-variant)' }}>
-                  <div className="px-3 py-3 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>Cả ngày</div>
+                <div className="grid grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b border-slate-100 bg-slate-50/30">
+                  <div className="px-3 py-4 text-xs font-bold text-slate-400">Giờ</div>
                   {weekDays.map((day) => (
                     <div
                       key={day.key}
-                      className="border-l px-3 py-3 text-center"
-                      style={{
-                        borderColor: 'var(--outline-variant)',
-                        backgroundColor: day.isToday ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                      }}
+                      className={`border-l border-slate-100 px-3 py-4 text-center ${day.isToday ? 'bg-blue-50/40' : ''}`}
                     >
-                      <div className="text-sm font-semibold" style={{ color: 'var(--on-surface)' }}>{day.label}</div>
-                      <div className={`mx-auto mt-1 flex h-6 w-fit min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold ${day.isToday ? 'bg-blue-600 text-white' : ''}`}>
+                      <div className="text-xs font-black uppercase tracking-wider text-slate-500">{day.label}</div>
+                      <div className={`mx-auto mt-2 flex h-8 min-w-[32px] w-fit items-center justify-center rounded-full px-2.5 text-sm font-black transition-all ${day.isToday ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-700'}`}>
                         {day.subLabel}
                       </div>
                     </div>
@@ -513,8 +508,8 @@ export default function SchedulePage() {
                 </div>
 
                 {calendarSlots.map((slot) => (
-                  <div key={slot} className="grid min-h-[92px] grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b last:border-b-0" style={{ borderColor: 'var(--outline-variant)' }}>
-                    <div className="px-3 py-3 text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>
+                  <div key={slot} className="grid min-h-[120px] grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b border-slate-100 last:border-b-0">
+                    <div className="px-3 py-4 text-xs font-extrabold text-slate-400">
                       {String(slot).padStart(2, '0')}:00
                     </div>
                     {weekDays.map((day) => {
@@ -522,13 +517,9 @@ export default function SchedulePage() {
                       return (
                         <div
                           key={`${day.key}-${slot}`}
-                          className="border-l p-1.5"
-                          style={{
-                            borderColor: 'var(--outline-variant)',
-                            backgroundColor: day.isToday ? 'rgba(37, 99, 235, 0.035)' : 'transparent',
-                          }}
+                          className={`border-l border-slate-100 p-2 transition-colors ${day.isToday ? 'bg-blue-50/10' : 'hover:bg-slate-50/50'}`}
                         >
-                          <div className="space-y-1.5">
+                          <div className="space-y-2">
                             {dayItems.map((item) => (
                               <ScheduleEventCard
                                 key={item.id}
@@ -562,31 +553,6 @@ export default function SchedulePage() {
         </main>
 
         <aside className="w-full shrink-0 space-y-3 xl:w-[320px]">
-          <div className="rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold" style={{ color: 'var(--on-surface)' }}>Lịch hôm nay</h3>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold" style={{ color: 'var(--on-surface-variant)' }}>{todayItems.length}</span>
-              </div>
-              <button className="text-xs font-semibold" style={{ color: 'var(--secondary)' }} onClick={() => setSelectedProfileId('all')}>
-                Xem tất cả
-              </button>
-            </div>
-            <div className="space-y-2.5">
-              {todayItems.length === 0 && (
-                <div className="empty-state">Không có bài sắp đăng hôm nay.</div>
-              )}
-              {todayItems.map((item) => (
-                <TodayItem
-                  key={item.id}
-                  item={item}
-                  profile={profilesById.get(String(item.profile_id))}
-                  active={quickItem?.id === item.id}
-                  onClick={() => setQuickItem(item)}
-                />
-              ))}
-            </div>
-          </div>
 
           <QuickDetailCard
             item={quickItem}
@@ -610,14 +576,14 @@ export default function SchedulePage() {
 
 function StatCard({ icon, tint, label, value, helper }: { icon: ReactNode; tint: string; label: string; value: string; helper: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg" style={{ color: tint, backgroundColor: `${tint}14` }}>
+    <div className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs ring-1 ring-slate-900/5 transition hover:shadow-sm">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ color: tint, backgroundColor: `${tint}14` }}>
         {icon}
       </div>
       <div className="min-w-0">
-        <div className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>{label}</div>
-        <div className="text-xl font-bold" style={{ color: 'var(--on-surface)' }}>{value}</div>
-        <div className="text-xs font-semibold text-emerald-600">{helper}</div>
+        <div className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div>
+        <div className="text-2xl font-black text-slate-900">{value}</div>
+        <div className="mt-0.5 text-xs font-semibold text-emerald-600">{helper}</div>
       </div>
     </div>
   )
@@ -669,7 +635,7 @@ function ScheduleEventCard({
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') onSelect()
       }}
-      className="rounded-md border p-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+      className="group rounded-md border p-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
       style={{ borderColor: active ? platform.color : platform.border, backgroundColor: platform.bg }}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -677,96 +643,49 @@ function ScheduleEventCard({
           <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-xs text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
           {formatTime(scheduledValue(item))}
         </div>
-        <button
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpen()
-          }}
-          className="flex h-6 w-6 items-center justify-center rounded-md bg-white/80"
-          style={{ color: 'var(--on-surface-variant)' }}
-        >
-          <Eye size={12} />
-        </button>
+        <TableRowActions
+          actions={([
+            { label: 'Xem chi tiết', icon: <Eye size={13} />, onClick: onOpen },
+            item.status === 'needs_approval' ? {
+              label: 'Duyệt bài',
+              icon: <CheckCircle2 size={13} />,
+              onClick: onApprove,
+              disabled: loading,
+            } : null,
+            ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (hasTikTokScope(item, 'video.publish') || hasTikTokScope(item, 'video.upload')) ? {
+              label: hasTikTokScope(item, 'video.publish') ? 'Đăng TikTok ngay' : 'Gửi vào Inbox TikTok',
+              icon: hasTikTokScope(item, 'video.publish') ? <Rocket size={13} /> : <Send size={13} />,
+              onClick: onPublish,
+              disabled: loading,
+            } : null,
+          ].filter(Boolean)) as TableRowActionItem[]}
+        />
       </div>
-      <div className="mb-2 h-24 w-full overflow-hidden rounded-md bg-slate-100 relative">
+      <div className="relative mb-2 aspect-video w-full overflow-hidden rounded-lg bg-slate-950 ring-1 ring-black/5 transition-shadow group-hover:shadow-md">
         {item.article_link ? (
-          <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: generateVideoOutputUrl(item.article_link) }} compact />
+          <MediaAssetPreview
+            item={{
+              media_type: 'VIDEO',
+              source_url: generateVideoOutputUrl(item.article_link),
+              title: item.article_title,
+            }}
+            compact
+            className="h-full w-full"
+          />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-xl font-black text-white opacity-40" style={{ backgroundColor: platform.color }}>{platform.short}</div>
+          <div className="flex h-full w-full items-center justify-center text-xl font-black text-white opacity-80" style={{ backgroundColor: platform.color }}>{platform.short}</div>
         )}
       </div>
-      <div className="line-clamp-2 text-xs font-bold leading-snug" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
-      <div className="mt-2 flex items-center gap-1.5 truncate text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
+      <div className="line-clamp-2 text-xs font-bold leading-relaxed text-slate-800">{item.article_title}</div>
+      <div className="mt-2 flex items-center gap-1.5 truncate text-[11px] font-semibold text-slate-500">
         <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
         <span className="truncate">{profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}</span>
       </div>
-      <div className="mt-1 flex items-center gap-1 text-xs font-semibold" style={{ color: status.color }}>
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
+      <div className="mt-2 mb-1 border-t border-slate-100 pt-2 flex items-center gap-1.5 text-xs font-bold" style={{ color: status.color }}>
+        <span className="h-2 w-2 rounded-full shadow-xs" style={{ backgroundColor: status.dot }} />
         {status.label}
       </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {item.status === 'needs_approval' && (
-          <button
-            onClick={(event) => {
-              event.stopPropagation()
-              onApprove()
-            }}
-            disabled={loading}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-bold text-white disabled:opacity-50"
-            style={{ backgroundColor: '#4f46e5' }}
-          >
-            <CheckCircle2 size={11} />
-            Duyệt
-          </button>
-        )}
-        {['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (hasTikTokScope(item, 'video.publish') || hasTikTokScope(item, 'video.upload')) && (
-          <button
-            onClick={(event) => {
-              event.stopPropagation()
-              onPublish()
-            }}
-            disabled={loading}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-bold text-white disabled:opacity-50"
-            style={{ backgroundColor: '#0f766e' }}
-          >
-            {hasTikTokScope(item, 'video.publish') ? <Rocket size={11} /> : <Send size={11} />}
-            {hasTikTokScope(item, 'video.publish') ? 'Đăng' : 'Inbox'}
-          </button>
-        )}
-      </div>
     </div>
-  )
-}
-
-function TodayItem({ item, profile, active, onClick }: { item: QueueItem; profile?: SocialProfile; active: boolean; onClick: () => void }) {
-  const platform = getPlatformMeta(item.platform)
-  const status = statusMeta[item.status] || statusMeta.queued
-  const videoUrl = item.article_link ? generateVideoOutputUrl(item.article_link) : ''
-  return (
-    <button
-      onClick={onClick}
-      className="flex w-full gap-3 rounded-md border p-2 text-left transition-colors"
-      style={{ borderColor: active ? platform.border : 'transparent', backgroundColor: active ? platform.bg : 'transparent' }}
-    >
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-slate-100">
-        {videoUrl ? (
-          <MediaAssetPreview item={{ media_type: 'VIDEO', source_url: videoUrl }} compact />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs font-black text-white" style={{ backgroundColor: platform.color }}>{platform.short}</div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
-          <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
-          <span className="truncate">{profile?.profile_name || item.profile_name || platform.label}</span>
-        </div>
-        <div className="line-clamp-2 text-sm font-semibold" style={{ color: 'var(--on-surface)' }}>{item.article_title}</div>
-        <div className="mt-1 flex items-center gap-1 text-xs font-semibold" style={{ color: status.color }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
-          {status.label}
-        </div>
-      </div>
-    </button>
   )
 }
 
@@ -793,12 +712,12 @@ function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem |
         <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="md" />
         <span className="line-clamp-2">{item.article_title}</span>
       </div>
-      <div className="mb-3 overflow-hidden rounded-lg border bg-slate-950" style={{ borderColor: 'var(--outline-variant)' }}>
+      <div className="mb-3 flex justify-center overflow-hidden rounded-lg border bg-slate-950 p-2" style={{ borderColor: 'var(--outline-variant)' }}>
         {videoUrl ? (
           <MediaAssetPreview
-            item={{ media_type: 'VIDEO', source_url: videoUrl }}
+            item={{ media_type: 'VIDEO', source_url: videoUrl, title: item.article_title }}
             controls
-            className="aspect-[9/16] max-h-[360px] w-full"
+            className="aspect-[9/16] h-[360px] max-h-[44vh] w-auto max-w-full"
           />
         ) : (
           <div className="flex h-[220px] w-full items-center justify-center text-xs font-semibold text-white/70">

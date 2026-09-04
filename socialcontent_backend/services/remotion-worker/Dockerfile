@@ -6,6 +6,7 @@ ENV CHROME_BIN=/usr/bin/chromium
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         chromium \
+        ffmpeg \
         fonts-liberation \
         fonts-noto-core \
         fonts-noto-color-emoji \

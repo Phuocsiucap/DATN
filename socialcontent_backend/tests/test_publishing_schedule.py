@@ -21,7 +21,7 @@ def local(value: str) -> datetime:
 def strategy(**kwargs):
     return SimpleNamespace(**{
         "schedule_days": "0,1,2,3,4,5,6", "schedule_times": "08:30,20:30",
-        "schedule_timezone": TZ.key, "post_frequency_per_day": 2,
+        "schedule_timezone": TZ.key, "post_frequency_per_day": None,
         "active_hours": "08:00-11:00,19:00-22:00", "target_audience": "Người xem Việt Nam",
         **kwargs,
     })
@@ -77,11 +77,21 @@ class ScheduleSlotTests(unittest.TestCase):
 
     def test_local_day_capacity_includes_published_posts(self):
         rows = [queued(status="published", published_at=local("2026-08-31T00:15:00")), queued(local("2026-08-31T08:30:00"))]
-        self.assertEqual(self.slots(rows=rows)[0], local("2026-09-01T08:30:00"))
+        self.assertEqual(self.slots(rows=rows, post_frequency_per_day=2)[0], local("2026-09-01T08:30:00"))
 
     def test_overdue_executable_posts_count_against_today(self):
         rows = [queued(local("2026-08-30T08:30:00")), queued(local("2026-08-30T20:30:00"))]
-        self.assertEqual(self.slots(rows=rows)[0], local("2026-09-01T08:30:00"))
+        self.assertEqual(self.slots(rows=rows, post_frequency_per_day=2)[0], local("2026-09-01T08:30:00"))
+
+    def test_null_daily_limit_allows_more_slots_on_the_same_local_day(self):
+        rows = [queued(local("2026-08-31T09:00:00")), queued(local("2026-08-31T10:00:00"))]
+        first = self.slots(rows=rows, schedule_times="", post_frequency_per_day=None, schedule_days="0")[0]
+        self.assertEqual(first, local("2026-08-31T11:00:00"))
+
+    def test_explicit_daily_limit_still_applies_to_configured_times(self):
+        rows = [queued(local("2026-08-31T08:30:00"))]
+        first = self.slots(rows=rows, post_frequency_per_day=1)[0]
+        self.assertEqual(first, local("2026-09-01T08:30:00"))
 
     def test_unscheduled_review_draft_does_not_reserve_capacity(self):
         self.assertEqual(self.slots(rows=[queued(status="needs_approval")])[0], local("2026-08-31T08:30:00"))
@@ -159,6 +169,7 @@ class DeepSeekScheduleTests(unittest.TestCase):
         self.assertEqual(context["queue"][0]["id"], str(self.rows[0].id))
         self.assertEqual(context["queue"][0]["title"], self.rows[0].article_title)
         self.assertEqual(context["candidate_slots"][0]["local"], "2026-08-31T20:30:00+07:00")
+        self.assertIsNone(context["strategy"]["post_frequency_per_day"])
         self.assertEqual(request["api_key"], "test-key")
         self.assertEqual(request["model"], "deepseek-v4-flash")
         self.assertEqual(decision.provider, "deepseek")

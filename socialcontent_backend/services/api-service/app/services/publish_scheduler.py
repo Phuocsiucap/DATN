@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
-from common.db.models import PublishingQueueItem, SocialProfile, SystemSetting, User
+from common.db.models import PublishingQueueItem, SocialProfile, SocialProfileStrategy, SystemSetting, User
 from common.db.session import SessionLocal
 from app.services.social_profiles import SocialProfileService
 
@@ -18,10 +19,13 @@ SCHEDULER_SETTING_KEY = "scheduler_settings"
 DEFAULT_SCHEDULER_SETTINGS = {
     "vnexpress_interval_minutes": 30,
     "bilibili_interval_minutes": 30,
-    "publish_queue_interval_minutes": 5,
+    "publish_queue_interval_minutes": 1,
 }
 
 _publish_queue_task: asyncio.Task | None = None
+_publish_cycle_tasks: set[asyncio.Task] = set()
+_analytics_task: asyncio.Task | None = None
+MAX_CONCURRENT_PUBLISH_CYCLES = 2
 _last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
 _last_account_snapshot_run: datetime | None = None
 _last_video_analytics_run: datetime | None = None
@@ -93,44 +97,86 @@ async def start_publish_queue_scheduler() -> None:
 
 
 async def stop_publish_queue_scheduler() -> None:
-    global _publish_queue_task
-    if not _publish_queue_task:
-        return
+    global _publish_queue_task, _analytics_task
     task = _publish_queue_task
     _publish_queue_task = None
-    task.cancel()
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    child_tasks = list(_publish_cycle_tasks)
+    if _analytics_task and not _analytics_task.done():
+        child_tasks.append(_analytics_task)
+    for child in child_tasks:
+        child.cancel()
+    if child_tasks:
+        await asyncio.gather(*child_tasks, return_exceptions=True)
+    _publish_cycle_tasks.clear()
+    _analytics_task = None
+
+
+def seconds_until_next_interval(now: datetime, interval_minutes: int) -> float:
+    """Return a wall-clock-aligned delay instead of drifting after work completes."""
+    current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    step = max(int(interval_minutes), 1) * 60
+    remainder = current.timestamp() % step
+    return float(step if remainder < 0.001 else step - remainder)
+
+
+async def _run_publish_cycle() -> None:
     try:
-        await task
+        result = await asyncio.to_thread(run_publish_queue_once)
+        _last_run.update(result)
     except asyncio.CancelledError:
-        pass
+        raise
+    except Exception as exc:
+        logger.exception("Publish queue scheduler cycle failed: %s", exc)
+
+
+async def _run_analytics_cycle() -> None:
+    try:
+        await run_due_analytics_tracking()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Analytics scheduler cycle failed: %s", exc)
 
 
 async def _publish_queue_scheduler_loop() -> None:
+    global _analytics_task
     logger.info("Publish queue scheduler started")
     while True:
-        interval_seconds = 300
+        interval_minutes = 1
         try:
             settings = get_settings()
             if settings.enable_scheduler:
-                result = await asyncio.to_thread(run_publish_queue_once)
-                _last_run.update(result)
-                await run_due_analytics_tracking()
+                if len(_publish_cycle_tasks) < MAX_CONCURRENT_PUBLISH_CYCLES:
+                    cycle = asyncio.create_task(_run_publish_cycle(), name="api_publish_queue_cycle")
+                    _publish_cycle_tasks.add(cycle)
+                    cycle.add_done_callback(_publish_cycle_tasks.discard)
+                else:
+                    logger.warning("Publish queue minute skipped because %s cycles are still running", len(_publish_cycle_tasks))
+                if _analytics_task is None or _analytics_task.done():
+                    _analytics_task = asyncio.create_task(_run_analytics_cycle(), name="api_analytics_cycle")
                 with SessionLocal() as db:
-                    interval_seconds = get_scheduler_settings(db)["publish_queue_interval_minutes"] * 60
+                    interval_minutes = get_scheduler_settings(db)["publish_queue_interval_minutes"]
             else:
                 logger.info("Publish queue scheduler idle because ENABLE_SCHEDULER=false")
-                interval_seconds = max(settings.scheduler_poll_seconds, 5)
+                interval_minutes = max(int(settings.scheduler_poll_seconds / 60), 1)
         except asyncio.CancelledError:
             logger.info("Publish queue scheduler stopped")
             raise
         except Exception as exc:
             logger.exception("Publish queue scheduler cycle failed: %s", exc)
-        await asyncio.sleep(max(interval_seconds, 30))
+        await asyncio.sleep(seconds_until_next_interval(datetime.now(timezone.utc), interval_minutes))
 
 
 def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
     service = SocialProfileService()
-    result = {"checked_at": datetime.utcnow().isoformat(), "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
+    result = {"checked_at": datetime.now(timezone.utc).isoformat(), "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
     with SessionLocal() as db:
         finalize_result = service.finalize_tiktok_publish_statuses(db, limit=limit * 2)
         result["finalized"] += finalize_result["completed"]
@@ -140,18 +186,30 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
         due_items = (
             db.query(PublishingQueueItem)
             .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+            .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
             .filter(
                 PublishingQueueItem.platform == "tiktok",
                 PublishingQueueItem.status.in_(["queued", "approved"]),
                 PublishingQueueItem.scheduled_at.isnot(None),
-                PublishingQueueItem.scheduled_at <= datetime.utcnow(),
+                PublishingQueueItem.scheduled_at <= datetime.now(timezone.utc),
                 SocialProfile.status == "active",
                 SocialProfile.access_token.isnot(None),
+                SocialProfileStrategy.auto_publish_enabled.is_(True),
+                or_(
+                    PublishingQueueItem.status == "approved",
+                    and_(PublishingQueueItem.status == "queued", SocialProfileStrategy.approval_mode == "auto"),
+                ),
             )
             .order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.asc())
-            .limit(limit)
+            # Scan past broken legacy rows while keeping each minute's actual
+            # TikTok dispatch batch bounded.
+            .limit(max(limit * 10, 50))
+            # Multiple API instances or a manual "run once" cannot claim the
+            # same due row while this transaction is validating it.
+            .with_for_update(of=PublishingQueueItem, skip_locked=True)
             .all()
         )
+        ready_items = []
         for item in due_items:
             strategy = item.profile.strategy
             if not strategy or not strategy.auto_publish_enabled:
@@ -161,9 +219,41 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
                 result["skipped"] += 1
                 continue
             try:
+                service.resolve_rendered_video_path(item.article_link)
+            except Exception as exc:
+                item.status = "failed"
+                item.error = str(getattr(exc, "detail", exc))[-2000:]
+                item.ai_reason = "Auto publish dừng vì file video không còn tồn tại hoặc không hợp lệ."
+                db.add(item)
+                result["failed"] += 1
+                continue
+            ready_items.append(item)
+            if len(ready_items) >= limit:
+                break
+
+        # Claim the whole batch before any network request. The next minute can
+        # therefore dispatch other due rows even while TikTok is still working.
+        claimed_at = datetime.now(timezone.utc).isoformat()
+        for item in ready_items:
+            item.status = "publishing"
+            item.error = None
+            item.ai_reason = f"Scheduler nhận bài lúc {claimed_at}; đang gửi TikTok."
+            db.add(item)
+        db.commit()
+
+        for item in ready_items:
+            try:
                 service.publish_queue_item_to_tiktok(db, item.id, item.profile.user, source="scheduler", mode="direct")
                 result["published"] += 1
             except Exception as exc:
+                db.rollback()
+                failed_item = db.get(PublishingQueueItem, item.id)
+                if failed_item and failed_item.status == "publishing" and not failed_item.platform_publish_id:
+                    failed_item.status = "failed"
+                    failed_item.error = str(getattr(exc, "detail", exc))[-2000:]
+                    failed_item.ai_reason = "Auto publish thất bại trước khi TikTok nhận video."
+                    db.add(failed_item)
+                    db.commit()
                 logger.exception("Auto publish failed queue_item_id=%s: %s", item.id, exc)
                 result["failed"] += 1
     return result

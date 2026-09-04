@@ -55,10 +55,16 @@ type AiUsageData = {
   total_tokens: number
   total_cost_usd: number
   prompt_runs_count: number
-  recent_runs: any[]
+  recent_runs: unknown[]
 }
 
 const creatorSections: NavSection[] = [
+  {
+    title: 'TỔNG QUAN',
+    items: [
+      { key: 'dashboard', label: 'Không gian sáng tạo', icon: <LayoutDashboard size={17} /> },
+    ],
+  },
   {
     title: 'NỘI DUNG',
     items: [
@@ -90,7 +96,7 @@ const adminSections: NavSection[] = [
   {
     title: 'TỔNG QUAN HỆ THỐNG',
     items: [
-      { key: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard size={17} /> },
+      { key: 'dashboard', label: 'Vận hành hệ thống', icon: <LayoutDashboard size={17} /> },
       { key: 'openaiUsage', label: 'OpenAI Usage', icon: <BarChart3 size={17} /> },
     ],
   },
@@ -154,7 +160,7 @@ export default function Sidebar({
   return (
     <>
       <aside className={cn(
-        'sticky left-0 top-0 z-50 hidden h-screen shrink-0 flex-col border-r border-[var(--outline-variant)] bg-white py-5 transition-all duration-300 md:flex',
+        'sticky left-0 top-0 z-50 hidden h-screen shrink-0 flex-col border-r border-[var(--outline-variant)] bg-white pt-5 pb-0 transition-all duration-300 md:flex',
         isCollapsed ? 'w-[68px] px-2' : 'w-[var(--app-sidebar-width)] px-4'
       )}>
         <div className="flex items-center justify-between">
@@ -191,13 +197,13 @@ export default function Sidebar({
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">
                     <Coins size={15} />
                   </span>
-                  Token AI
+                  Token hệ thống
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowUsageModal(!showUsageModal)}
                   className="inline-flex items-center gap-1 rounded-[6px] bg-[#eef4ff] px-2 py-0.5 text-xs font-extrabold text-[#2556ea] transition hover:bg-[#e0eafe]"
-                  title="Xem hạch toán Token AI & Chi phí"
+                  title="Xem hạch toán Token hệ thống & Chi phí"
                 >
                   <Cpu size={12} />
                   {aiUsage ? `${formatTokens(aiUsage.total_tokens)} Token` : 'Chi tiết'}
@@ -220,7 +226,7 @@ export default function Sidebar({
                   <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-2">
                     <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#111827]">
                       <Coins size={14} className="text-amber-500" />
-                      Thống kê Token AI
+                      Thống kê Token hệ thống
                     </div>
                     <button
                       type="button"
@@ -246,7 +252,7 @@ export default function Sidebar({
                 type="button"
                 onClick={() => setShowUsageModal(!showUsageModal)}
                 className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--outline-variant)] bg-[#eef4ff] text-[#2556ea] hover:scale-105 transition-transform"
-                title={`Token AI - ${aiUsage ? formatTokens(aiUsage.total_tokens) : '72'}/200K Token`}
+                title={`Token hệ thống - ${aiUsage ? formatTokens(aiUsage.total_tokens) : '72'}/200K Token`}
               >
                 <Coins size={17} />
               </button>
@@ -255,7 +261,7 @@ export default function Sidebar({
                   <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-2">
                     <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#111827]">
                       <Coins size={14} className="text-amber-500" />
-                      Thống kê Token AI
+                      Thống kê Token hệ thống
                     </div>
                     <button
                       type="button"
@@ -311,7 +317,7 @@ export default function Sidebar({
                   type="button"
                   onClick={() => {
                     setShowUserMenu(false)
-                    onTabChange('settings')
+                    onTabChange('profile')
                   }}
                   className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-xs font-bold text-[#1e293b] hover:bg-[#f1f5f9] transition-colors"
                 >
@@ -379,7 +385,7 @@ function NavButton({
       onClick={onClick}
       title={isCollapsed ? item.label : undefined}
       className={cn(
-        'group relative flex h-[38px] w-full items-center transition-colors cursor-pointer select-none overflow-hidden',
+        'group relative m-0 flex h-[38px] w-full items-center transition-colors cursor-pointer select-none overflow-hidden',
         isCollapsed ? 'justify-center px-0' : 'justify-between px-2.5',
         active
           ? 'bg-[#eff4ff] text-[#2556ea] font-extrabold'

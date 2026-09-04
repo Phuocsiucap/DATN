@@ -13,9 +13,56 @@ from app.services.publish_scheduler import (
     start_publish_queue_scheduler,
     stop_publish_queue_scheduler,
 )
+from app.services.admin_dashboard import (
+    admin_dashboard_errors,
+    admin_dashboard_pipeline,
+    admin_dashboard_services,
+    admin_dashboard_summary,
+    admin_operations_snapshot,
+)
 from app.services.users import UserService, to_user_response
 
 router = APIRouter()
+
+
+@router.get("/system/dashboard/summary")
+def get_admin_dashboard_summary(
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_dashboard_summary(db)
+
+
+@router.get("/system/dashboard/pipeline")
+def get_admin_dashboard_pipeline(
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_dashboard_pipeline(db)
+
+
+@router.get("/system/dashboard/errors")
+def get_admin_dashboard_errors(
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_dashboard_errors(db)
+
+
+@router.get("/system/dashboard/services")
+async def get_admin_dashboard_services(
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    return await admin_dashboard_services(db)
+
+
+@router.get("/system/dashboard", deprecated=True)
+async def get_admin_dashboard(
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    return await admin_operations_snapshot(db)
 
 
 @router.post("/system/bootstrap", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)

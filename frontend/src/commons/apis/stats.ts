@@ -5,9 +5,9 @@ type ApiItem = Record<string, unknown>
 export const fetchStatsApi = async () => {
   if (isSocialContentApiBase()) {
     const [contentsResult, profilesResult, queueResult] = await Promise.allSettled([
-      api.get('/contents'),
+      api.get('/contents', { cache: false }),
       api.get('/social-profiles'),
-      api.get('/social-profiles/queue/items'),
+      api.get('/social-profiles/queue/items', { cache: false }),
     ])
     const contents: ApiItem[] =
       contentsResult.status === 'fulfilled' && Array.isArray(contentsResult.value.data) ? contentsResult.value.data : []

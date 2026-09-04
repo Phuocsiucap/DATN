@@ -17,6 +17,8 @@ import {
   PageLayout,
   SearchField,
   SelectControl,
+  TableRowActions,
+  type TableRowActionItem,
   Thumbnail,
 } from '@/commons/component/social-ui'
 import { CrawlJobDetailSheet } from './components/CrawlJobDetailSheet'
@@ -54,10 +56,10 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const [scheduleSaving, setScheduleSaving] = useState(false)
   
   // Create Form State
-  const [sourceType, setSourceType] = useState<'BILIBILI' | 'VNEXPRESS'>('BILIBILI')
-  const [jobName, setJobName] = useState(isSystemUser ? 'Global Bilibili Crawl' : 'Private Bilibili Crawl')
+  const [sourceType, setSourceType] = useState<'BILIBILI' | 'VNEXPRESS'>('VNEXPRESS')
+  const [jobName, setJobName] = useState(isSystemUser ? 'Global VNExpress Crawl' : 'Private VNExpress Crawl')
   const [sourceUrl, setSourceUrl] = useState('')
-  const [keywords, setKeywords] = useState('truyen ma, short drama')
+  const [keywords, setKeywords] = useState('')
   const [maxItems, setMaxItems] = useState(20)
   const [vnexpressRssFeeds, setVnexpressRssFeeds] = useState<VnExpressRssFeed[]>([])
   const [selectedVnexpressRssKeys, setSelectedVnexpressRssKeys] = useState<string[]>(['tin-moi-nhat'])
@@ -217,7 +219,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
           ]} />
 
           <div className="min-w-0">
-            <AppCard className="mb-4 grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
+            <AppCard className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
               <SearchField placeholder="Tìm kiếm job..." />
               <SelectControl><option>Tất cả nguồn</option></SelectControl>
               <SelectControl><option>Tất cả trạng thái</option></SelectControl>
@@ -374,12 +376,15 @@ function JobsTable({
                 <Thumbnail index={2} className="h-6 w-6 rounded-full" />
                 <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
               </div>
-              <div className="flex flex-wrap gap-1">
-                <button className="icon-button text-[var(--accent)] hover:bg-[var(--surface-container-low)]" title="Xem chi tiết" onClick={(event) => { event.stopPropagation(); onOpenDetail(job) }}><Eye size={14} /></button>
-                {canEditSchedule && <button className="icon-button text-violet-600 hover:bg-violet-50" title="Thiết lập lịch" onClick={(event) => { event.stopPropagation(); onEditSchedule(job) }}><CalendarClock size={14} /></button>}
-                {job.crawl_mode !== 'SOURCE_CONFIG' && <button className="icon-button text-[var(--accent)] hover:bg-[var(--surface-container-low)]" title="Chạy lại" onClick={(event) => { event.stopPropagation(); onAction('retry', job) }}><RotateCcw size={14} /></button>}
-                <button className="icon-button text-red-600 hover:bg-red-50" title="Dừng job" onClick={(event) => { event.stopPropagation(); onAction('cancel', job) }}><Square size={14} /></button>
-                <button className="icon-button text-[#526179] hover:bg-[var(--surface-container-low)]" title="Khác"><MoreHorizontal size={14} /></button>
+              <div>
+                <TableRowActions
+                  actions={([
+                    { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: () => onOpenDetail(job) },
+                    canEditSchedule ? { label: 'Thiết lập lịch', icon: <CalendarClock size={14} />, onClick: () => onEditSchedule(job) } : null,
+                    job.crawl_mode !== 'SOURCE_CONFIG' ? { label: 'Chạy lại job', icon: <RotateCcw size={14} />, onClick: () => onAction('retry', job) } : null,
+                    { label: 'Dừng job', icon: <Square size={14} />, onClick: () => onAction('cancel', job), danger: true },
+                  ].filter(Boolean)) as TableRowActionItem[]}
+                />
               </div>
             </div>
           )})

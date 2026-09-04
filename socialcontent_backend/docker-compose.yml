@@ -66,11 +66,15 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EMBEDDING_SERVICE_URL: http://embedding-service:8075
+      DATA_INGESTION_SERVICE_URL: http://data-ingestion-worker:8010
+      PLANNING_SERVICE_URL: http://ai-media-planning-worker:8050
+      AI_MEDIA_WORKER_URL: http://ai-media-worker:8060
+      REMOTION_WORKER_URL: http://remotion-worker:8090
+      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
     ports:
       - "8000:8000"
     volumes:
-      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
-      - ./data_demo/video_gen_demo/out:/app/data_demo/video_gen_demo/out
+      - ./runtime/video-generation:/app/runtime/video-generation
 
   data-ingestion-worker:
     build:
@@ -157,8 +161,10 @@ services:
       EMBEDDING_SERVICE_URL: http://embedding-service:8075
       GENERATE_VIDEO_DISABLE_RENDER: "true"
       PYTHONUNBUFFERED: "1"
+      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
+      HEALTH_PORT: "8060"
     volumes:
-      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
+      - ./runtime/video-generation:/app/runtime/video-generation
 
   remotion-worker:
     build:
@@ -179,13 +185,12 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/socialcontent
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CHROME_BIN: /usr/bin/chromium
-      REMOTION_PUBLIC_DIR: /app/data_demo/video_gen_demo/public
-      REMOTION_OUT_DIR: /app/data_demo/video_gen_demo/out
+      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
       GENERATE_VIDEO_REMOTION_CONCURRENCY: "1"
       REMOTION_RENDER_TIMEOUT_MS: "1800000"
+      HEALTH_PORT: "8090"
     volumes:
-      - ./data_demo/video_gen_demo/public:/app/data_demo/video_gen_demo/public
-      - ./data_demo/video_gen_demo/out:/app/data_demo/video_gen_demo/out
+      - ./runtime/video-generation:/app/runtime/video-generation
 
 volumes:
   socialcontent_postgres:

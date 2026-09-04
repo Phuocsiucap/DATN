@@ -27,6 +27,100 @@ class AutoDraftApiTests(unittest.TestCase):
         self.db.query.return_value.filter.return_value.first.return_value = None
         self.db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(video_render_mode="manual"))
 
+    def test_direct_script_reuses_existing_workflow_for_same_profile_and_content(self):
+        profile = SimpleNamespace(id=self.project.profile_id, user_id=self.user.id)
+        content = SimpleNamespace(id=self.project.primary_content_id)
+        existing = SimpleNamespace(
+            id=self.project.id,
+            title="Existing workflow",
+            status="EDITING",
+            profile_id=profile.id,
+            primary_content_id=content.id,
+        )
+        existing_job = SimpleNamespace(id=uuid.uuid4())
+
+        def query_with_first(value):
+            query = MagicMock()
+            query.filter.return_value = query
+            query.with_for_update.return_value = query
+            query.order_by.return_value = query
+            query.first.return_value = value
+            return query
+
+        db = MagicMock()
+        db.query.side_effect = [
+            query_with_first(profile),
+            query_with_first(existing),
+            query_with_first(existing_job),
+        ]
+        db.get.return_value = content
+        payload = route.DirectScriptRequest(profile_id=profile.id, content_id=content.id)
+
+        with (
+            patch.object(route, "_can_use_content", return_value=True),
+            patch.object(route, "_serialize_workflow_run", return_value={"id": str(existing_job.id)}),
+            patch.object(route, "publish") as publish,
+        ):
+            result = route.create_direct_script(payload, self.user, db)
+
+        self.assertTrue(result["reused"])
+        self.assertEqual(result["workflow"]["id"], str(existing.id))
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+        publish.assert_not_called()
+
+    def test_new_direct_script_requires_automatic_deepseek_review(self):
+        profile = SimpleNamespace(id=uuid.uuid4(), user_id=self.user.id)
+        content = SimpleNamespace(
+            id=uuid.uuid4(),
+            canonical_title="Nội dung thủ công",
+            normalized_title="Nội dung thủ công",
+            sources_jsonb=[],
+        )
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            user_id=self.user.id,
+            profile_id=profile.id,
+            title="Nội dung thủ công",
+            status="SCRIPTING",
+            primary_content_id=None,
+            metadata_json={},
+            inputs_jsonb=[],
+            current_stage=None,
+            progress_percent=0,
+        )
+        job = SimpleNamespace(id=uuid.uuid4(), task_type="GENERATE_VIDEO_SCRIPT")
+
+        def query_with_first(value):
+            query = MagicMock()
+            query.filter.return_value = query
+            query.with_for_update.return_value = query
+            query.order_by.return_value = query
+            query.first.return_value = value
+            return query
+
+        db = MagicMock()
+        db.query.side_effect = [query_with_first(profile), query_with_first(None)]
+        db.get.return_value = content
+        payload = route.DirectScriptRequest(profile_id=profile.id, content_id=content.id)
+
+        with (
+            patch.object(route, "_can_use_content", return_value=True),
+            patch.object(route, "MediaWorkflow", return_value=workflow) as workflow_type,
+            patch.object(route, "KafkaTask", return_value=job),
+            patch.object(route, "_serialize_workflow_run", return_value={"id": str(job.id)}),
+            patch.object(route, "publish"),
+        ):
+            result = route.create_direct_script(payload, self.user, db)
+
+        metadata = workflow_type.call_args.kwargs["metadata_json"]
+        self.assertFalse(result["reused"])
+        self.assertEqual(metadata["selection_mode"], "MANUAL")
+        self.assertEqual(metadata["creation_source"], "DIRECT_SCRIPT")
+        self.assertTrue(metadata["ai_review_required"])
+        self.assertEqual(metadata["draft_ai_review"]["status"], "PENDING")
+        self.assertEqual(metadata["draft_ai_review"]["provider"], "deepseek")
+
     def test_api_fallback_retains_compact_evidence(self):
         result = public_story_payload(self.story)
         self.assertEqual(result["compact_scenes"][0]["evidence_ids"], ["F1"])
@@ -100,7 +194,9 @@ class AutoDraftApiTests(unittest.TestCase):
         self.assertIsNone(result["job"])
 
     def test_approval_enqueues_voice_for_auto_profile(self):
-        self.db.get.return_value = SimpleNamespace(strategy=SimpleNamespace(video_render_mode="auto"))
+        self.db.get.return_value = SimpleNamespace(
+            strategy=SimpleNamespace(auto_project_queue_enabled=True, video_render_mode="auto")
+        )
         with patch.object(route, "_get_owned_project", return_value=self.project), patch.object(route, "_enqueue_project_voice_job", return_value=MagicMock()) as enqueue, patch.object(route, "_serialize_workflow_run", return_value={"id": "job"}):
             result = route.approve_project_draft(self.project.id, route.ApproveDraftRequest(script_signature=draft_script_signature(self.story)), self.user, self.db)
         enqueue.assert_called_once()

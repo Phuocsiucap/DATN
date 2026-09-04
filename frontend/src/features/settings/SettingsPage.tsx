@@ -48,7 +48,7 @@ type SettingsNavigationState = { openProfileId?: string; openTab?: string } | nu
 const DEFAULT_SETTINGS: SchedulerSettings = {
   vnexpress_interval_minutes: 30,
   bilibili_interval_minutes: 30,
-  publish_queue_interval_minutes: 5,
+  publish_queue_interval_minutes: 1,
 }
 const TIKTOK_QR_WARMUP_MS = 5000
 
@@ -90,6 +90,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   // Add profile state
   const [addProfileOpen, setAddProfileOpen] = useState(false)
+  const [newProfilePlatform, setNewProfilePlatform] = useState('tiktok')
   const [newProfileName, setNewProfileName] = useState('')
   const [newProfileUsername, setNewProfileUsername] = useState('')
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null)
@@ -114,6 +115,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     avoid_topic_descriptions: {},
     tone: 'Professional & Authoritative',
     target_audience: '',
+    post_frequency_per_day: null,
     approval_mode: 'manual',
     schedule_days: '0,1,2,3,4,5,6',
     schedule_times: '08:30,20:30',
@@ -308,7 +310,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setAddingProfile(true)
     try {
       await createSocialProfileApi({
-        platform: 'tiktok',
+        platform: newProfilePlatform,
         profile_name: profileName,
         username: newProfileUsername.trim() || undefined,
       })
@@ -316,7 +318,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setNewProfileName('')
       setNewProfileUsername('')
       await loadProfiles()
-      toast.success('Đã thêm profile TikTok. Bạn có thể mở QR để đăng nhập.')
+      toast.success(newProfilePlatform === 'tiktok' ? 'Đã thêm profile TikTok. Bạn có thể mở QR để đăng nhập.' : 'Đã thêm kênh social.')
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể thêm profile')
     } finally {
@@ -482,7 +484,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   return (
     <PageLayout
       title="Quản lý kênh social"
-      description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược AI tự động hóa."
+      description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược hệ thống tự động hóa."
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <SearchField placeholder="Tìm kiếm (Ctrl + K)" className="hidden w-[300px] lg:flex" />
@@ -523,7 +525,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                 <FilterChip label="Instagram" />
                 <FilterChip label="YouTube" />
               </div>
-              <span className="text-xs text-slate-500 font-medium">Click "Cấu hình chiến lược AI" để chỉnh sửa định hướng từng kênh</span>
+              <span className="text-xs text-slate-500 font-medium">Click "Cấu hình chiến lược hệ thống" để chỉnh sửa định hướng từng kênh</span>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -602,7 +604,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             </button>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3 mb-8">
+          <div className="mb-3 grid gap-3 md:grid-cols-3">
             <label className="space-y-2 text-sm">
               <span className="font-bold text-slate-700">VNExpress Crawl (phút)</span>
               <input type="number" min={1} value={schedulerForm.vnexpress_interval_minutes} onChange={e => updateSchedulerField('vnexpress_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
@@ -612,7 +614,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               <input type="number" min={1} value={schedulerForm.bilibili_interval_minutes} onChange={e => updateSchedulerField('bilibili_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
             </label>
             <label className="space-y-2 text-sm">
-              <span className="font-bold text-slate-700">Publish Queue (phút)</span>
+              <span className="font-bold text-slate-700">Publish Queue (phút, mặc định 1)</span>
               <input type="number" min={1} value={schedulerForm.publish_queue_interval_minutes} onChange={e => updateSchedulerField('publish_queue_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
             </label>
           </div>
@@ -636,6 +638,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
       <AddTikTokProfileDialog
         open={addProfileOpen}
+        platform={newProfilePlatform}
         name={newProfileName}
         username={newProfileUsername}
         adding={addingProfile}
@@ -644,6 +647,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         qrUrl={pendingQrUrl}
         qrReady={pendingQrReady}
         sessionStatus={sessionStatus}
+        onPlatformChange={setNewProfilePlatform}
         onNameChange={setNewProfileName}
         onUsernameChange={setNewProfileUsername}
         onClose={() => void closeAddProfile()}
@@ -742,7 +746,7 @@ function SocialProfileCard({
           icon={<SlidersHorizontal size={15} />}
           onClick={onOpenStrategy}
         >
-          Cấu hình chiến lược AI
+          Cấu hình chiến lược hệ thống
         </AppButton>
 
         <div className="grid grid-cols-2 gap-2">

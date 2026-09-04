@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from common.db.models import CrawlJob, CrawlJobContent, ContentItem, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User
+from common.db.models import CrawlJob, CrawlJobContent, ContentItem, MediaWorkflow, ProfileContentLink, SocialProfile, SocialProfileStrategy, Story, User
 from common.db.session import get_db
 from common.db.media_workflows import _load_content_full_text
 from common.planning.embedding_matcher import StrategyEmbeddingMatcher
@@ -337,12 +337,25 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
         .all()
     )
     link_by_profile = {link.profile_id: link for link in links}
+    workflows = (
+        db.query(MediaWorkflow)
+        .filter(
+            MediaWorkflow.user_id == user.id,
+            MediaWorkflow.primary_content_id == content.id,
+        )
+        .order_by(MediaWorkflow.created_at.desc())
+        .all()
+    )
+    workflow_by_profile: dict[uuid.UUID, MediaWorkflow] = {}
+    for workflow in workflows:
+        workflow_by_profile.setdefault(workflow.profile_id, workflow)
     matcher = StrategyEmbeddingMatcher()
     matcher.ensure_content_embedding(db, content, preferred_model_name=matcher.model_name())
     matches = []
     for profile in profiles:
         strategy = profile.strategy
         link = link_by_profile.get(profile.id)
+        existing_workflow = workflow_by_profile.get(profile.id)
         metadata = link.metadata_json if link and isinstance(link.metadata_json, dict) else {}
         if strategy and link and _has_stored_embedding_match(metadata):
             score = round(float(link.score or _metadata_float(metadata, "strategy_score", "score") or 0), 1)
@@ -399,6 +412,8 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
             can_create_script = str(profile.status or "").lower() == "active" and score >= threshold
             recommendation_status = link.recommendation_status if link else ("RECOMMENDED" if score >= threshold else "LOW_MATCH")
             relation_reason = link.relation_reason if link else "QUALITY_FALLBACK"
+        if existing_workflow:
+            can_create_script = False
         selection = _profile_selection_explanation(
             content=content,
             source_metadata=source_metadata,
@@ -437,6 +452,8 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
             "tone": strategy.tone if strategy else None,
             "target_audience": strategy.target_audience if strategy else None,
             "can_create_script": can_create_script,
+            "existing_workflow_id": existing_workflow.id if existing_workflow else None,
+            "existing_workflow_status": existing_workflow.status if existing_workflow else None,
             **selection,
         })
     return sorted(matches, key=lambda item: item["score"], reverse=True)
@@ -523,7 +540,7 @@ def _profile_selection_explanation(
 
     reason_parts: list[str] = []
     if recommendation_status == "AI_REJECTED":
-        reason_parts.append("Không được đề xuất sau bước đánh giá AI.")
+        reason_parts.append("Không được đề xuất sau bước đánh giá hệ thống.")
     elif recommendation_status == "HUMAN_REJECTED":
         reason_parts.append("Người dùng đã quyết định không sản xuất bài này.")
     elif recommendation_status == "DRAFT_QUEUED":
@@ -598,7 +615,7 @@ def _content_selection_summary(content: ContentItem, source_metadata: dict) -> s
     tags = source_metadata.get("tags") if isinstance(source_metadata.get("tags"), list) else []
     topic = source_metadata.get("category") or ", ".join(str(tag) for tag in tags[:3]) or "nội dung này"
     score = round(float(content.quality_score or 0), 1)
-    return f"AI giữ bài vì điểm chất lượng {score}/100 và tín hiệu chủ đề từ {topic} đủ để đưa vào bước phân tích tài khoản."
+    return f"Hệ thống giữ bài vì điểm chất lượng {score}/100 và tín hiệu chủ đề từ {topic} đủ để đưa vào bước phân tích tài khoản."
 
 
 def _metadata_terms(metadata: dict, key: str) -> list[str]:

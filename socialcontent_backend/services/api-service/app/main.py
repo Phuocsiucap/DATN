@@ -15,6 +15,7 @@ from app.api.routes import (
     media_workflows,
     content_series,
     contents,
+    creator_dashboard,
     crawl_jobs,
     media_proxy,
     generate_video,
@@ -58,6 +59,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin-system"])
+app.include_router(creator_dashboard.router, prefix="/api/v1/creator/dashboard", tags=["creator-dashboard"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(social_profiles.router, prefix="/api/v1/social-profiles", tags=["social-profiles"])

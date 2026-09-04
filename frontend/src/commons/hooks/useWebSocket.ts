@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useAppDispatch } from './useAppDispatch'
 import { addEvent } from '@/commons/store/slices/eventsSlice'
-import { fetchStats } from '@/commons/store/slices/statsSlice'
 import { subscribeWebSocket } from './webSocketClient'
 
 type DashboardEvent = {
@@ -35,10 +34,6 @@ export function useWebSocket(enabled: boolean) {
       if (!isDashboardEvent(event)) return
 
       dispatch(addEvent(event))
-
-      if (event.type === 'article_crawled' || event.type === 'article_published') {
-        dispatch(fetchStats())
-      }
     })
 
     return () => {

@@ -9,7 +9,6 @@ export type VideoKanbanColumnId =
   | 'approved'
   | 'queued'
   | 'published'
-  | 'failed'
   | 'unknown'
 
 export type VideoKanbanBucket = {
@@ -27,7 +26,6 @@ export const VIDEO_KANBAN_BUCKETS: VideoKanbanBucket[] = [
   { id: 'editing', title: 'Biên tập & Voice', badgeClass: 'bg-[#eef4ff] text-[#2556ea]' },
   { id: 'rendering', title: 'Render MP4', badgeClass: 'bg-[#fff3d6] text-[#f59e0b]' },
   { id: 'review', title: 'Video hoàn tất', badgeClass: 'bg-emerald-50 text-emerald-700' },
-  { id: 'failed', title: 'Thất bại', badgeClass: 'bg-rose-50 text-rose-700' },
 ]
 
 export function isFailedVideoWorkspace(item: Pick<VideoWorkspaceSummary, 'status' | 'task_status'>) {
@@ -58,7 +56,18 @@ export function getVideoWorkspaceActivity(item: Pick<VideoWorkspaceSummary, 'sta
 }
 
 export function classifyVideoWorkspace(item: VideoWorkspaceSummary): VideoKanbanColumnId {
-  if (isFailedVideoWorkspace(item)) return 'failed'
+  switch (item.status) {
+    case 'RENDERED':
+      return 'review'
+    case 'VIDEO_APPROVED':
+      return 'approved'
+    case 'QUEUED_FOR_PUBLISHING':
+      return 'queued'
+    case 'PUBLISHED':
+      return 'published'
+  }
+
+  if (isFailedVideoWorkspace(item)) return failedStageColumn(item.current_stage)
 
   switch (item.status) {
     case 'SCRIPTING':
@@ -71,17 +80,27 @@ export function classifyVideoWorkspace(item: VideoWorkspaceSummary): VideoKanban
       return 'editing'
     case 'RENDERING':
       return 'rendering'
-    case 'RENDERED':
-      return 'review'
-    case 'VIDEO_APPROVED':
-      return 'approved'
-    case 'QUEUED_FOR_PUBLISHING':
-      return 'queued'
-    case 'PUBLISHED':
-      return 'published'
     default:
       return hasActiveVideoTask(item) ? 'rendering' : 'unknown'
   }
+}
+
+function failedStageColumn(currentStage?: string | null): VideoKanbanColumnId {
+  const stage = String(currentStage || '').trim().toUpperCase()
+  if (stage.includes('RENDER') || stage.includes('ENCOD') || stage.includes('EXPORT')) {
+    return 'rendering'
+  }
+  if (
+    stage.includes('VOICE')
+    || stage.includes('EDIT')
+    || stage.includes('REVIEW')
+    || stage.includes('APPROV')
+  ) {
+    return 'editing'
+  }
+  // Script/draft failures and legacy failures without a recorded stage remain
+  // at the first production step instead of moving to a synthetic error column.
+  return 'draft'
 }
 
 export function buildVideoKanbanColumns(items: VideoWorkspaceSummary[]) {
@@ -89,8 +108,8 @@ export function buildVideoKanbanColumns(items: VideoWorkspaceSummary[]) {
   const byId = new Map(columns.map((column) => [column.id, column]))
   items.forEach((item) => {
     const columnId = classifyVideoWorkspace(item)
-    // Publishing states stay at the completed production stage. Their actions
-    // live in Approvals; failed/unknown items are shown in a separate panel.
+    // Publishing states stay at the completed production stage. Failed items
+    // stay in the production step reported by current_stage.
     const productionColumn = ['approved', 'queued', 'published'].includes(columnId) ? 'review' : columnId
     byId.get(productionColumn)?.items.push(item)
   })

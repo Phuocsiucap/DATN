@@ -133,7 +133,7 @@ export function ApprovalDetail({
             <div className="mb-3 flex flex-wrap gap-2">
               {(['manual', 'ai'] as const).map((mode) => (
                 <button key={mode} type="button" disabled={actionDisabled} aria-pressed={scheduleMode === mode} onClick={() => onScheduleModeChange(mode)} className={`min-h-10 rounded-lg border px-3 text-xs font-bold disabled:opacity-50 ${scheduleMode === mode ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
-                  {mode === 'manual' ? 'Chọn giờ thủ công' : 'AI chọn giờ'}
+                  {mode === 'manual' ? 'Chọn giờ thủ công' : 'Hệ thống chọn giờ'}
                 </button>
               ))}
             </div>
@@ -160,14 +160,14 @@ export function ApprovalDetail({
                 </label>
               ) : (
                 <div className="flex min-h-10 items-center rounded-[8px] border border-[#edf1f7] bg-white px-3 text-xs font-semibold leading-5 text-[#526179]">
-                  DeepSeek chọn giờ dựa trên thời gian hiện tại, múi giờ tài khoản, các bài đã trong hàng đợi và giới hạn bài/ngày. Nếu AI không khả dụng, hệ thống chọn giờ trống gần nhất theo quy tắc; các bài cách nhau ít nhất 30 phút.
+                  Hệ thống chọn giờ dựa trên thời gian hiện tại, múi giờ tài khoản, các bài đã trong hàng đợi và giới hạn bài/ngày. Nếu dịch vụ tự động không khả dụng, hệ thống chọn giờ trống gần nhất theo quy tắc; các bài cách nhau ít nhất 30 phút.
                 </div>
               )}
             </div>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
               <AppButton variant="secondary" disabled={loading} onClick={onCloseSchedule}>Hủy chọn lịch</AppButton>
               <AppButton icon={<CalendarDays size={15} />} disabled={actionDisabled || (scheduleMode === 'manual' && !manualScheduledAt)} onClick={() => { void onApproveSchedule().then((saved) => { if (saved) onCloseSchedule() }) }}>
-                {scheduleMode === 'manual' ? 'Xác nhận lịch đăng' : 'Xác nhận để AI chọn lịch'}
+                {scheduleMode === 'manual' ? 'Xác nhận lịch đăng' : 'Xác nhận để hệ thống chọn lịch'}
               </AppButton>
             </div>
           </section>}

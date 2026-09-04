@@ -77,6 +77,15 @@ class UserService:
         db.refresh(user)
         return user
 
+    def update_my_profile(self, db: Session, user: User, payload: schemas.MyProfileUpdateRequest) -> User:
+        if payload.password:
+            user.hashed_password = hash_password(payload.password)
+        if payload.full_name is not None:
+            user.full_name = payload.full_name
+        db.commit()
+        db.refresh(user)
+        return user
+
     def get_roles(self, db: Session, role_names: list[str]) -> list[Role]:
         roles = db.query(Role).filter(Role.name.in_(role_names)).all()
         role_map = {role.name: role for role in roles}

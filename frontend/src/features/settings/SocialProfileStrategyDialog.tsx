@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Activity, Bot, Clock, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { Activity, Bot, Calendar, Clock, Globe, RefreshCw, Save, Trash2, X, ListOrdered } from 'lucide-react'
 import { AppButton, SelectControl, SocialProfileAvatar, StatusPill } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
 
@@ -108,7 +108,7 @@ export function SocialProfileStrategyDialog({
   onChange,
   onSave,
 }: SocialProfileStrategyDialogProps) {
-  const [activeTab, setActiveTab] = useState<'content' | 'ai' | 'automation'>('content')
+  const [activeTab, setActiveTab] = useState<'content' | 'automation'>('content')
 
   if (!open || !profile) return null
 
@@ -169,9 +169,8 @@ export function SocialProfileStrategyDialog({
         {/* Tab Navigation */}
         <div className="flex shrink-0 border-b px-6 bg-slate-50/50" style={{ borderColor: 'var(--outline-variant)' }}>
           {[
-            { id: 'content', label: '1. Nội dung & Topic AI', icon: <Bot size={15} /> },
-            { id: 'ai', label: '2. Ngưỡng tương đồng AI', icon: <Activity size={15} /> },
-            { id: 'automation', label: '3. Tự động hóa & Lịch đăng', icon: <Clock size={15} /> },
+            { id: 'content', label: '1. Nội dung & Topic Hệ thống', icon: <Bot size={15} /> },
+            { id: 'automation', label: '2. Tự động hóa & Lịch đăng', icon: <Clock size={15} /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -199,16 +198,14 @@ export function SocialProfileStrategyDialog({
             <>
               {activeTab === 'content' && (
                 <div className="space-y-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-[var(--on-surface)] flex items-center gap-2">
-                      <Bot size={16} className="text-[var(--accent)]" /> Định hướng chủ đề & Phong cách
-                    </h3>
-                    <p className="mt-1 text-xs text-[var(--on-surface-variant)] leading-5">
-                      Xác định chủ đề ưu tiên, từ khóa loại trừ và giọng điệu chính để AI chấm điểm, đề xuất bài viết và biên soạn kịch bản.
+                  <div className="space-y-[6px]">
+                    <h4 className="text-xs font-black uppercase text-indigo-700">Tùy biến nội dung & Định hướng bài viết</h4>
+                    <p className="text-xs leading-5 text-slate-500">
+                      Xác định chủ đề ưu tiên, từ khóa loại trừ và giọng điệu chính để Hệ thống chấm điểm, đề xuất bài viết và biên soạn kịch bản.
                     </p>
                   </div>
 
-                  <Field label="Preferred Topics" description="Các chủ đề AI nên ưu tiên khi crawl và chọn bài. Phân tách bằng dấu phẩy.">
+                  <Field label="Preferred Topics" description="Các chủ đề hệ thống nên ưu tiên khi crawl và chọn bài. Phân tách bằng dấu phẩy.">
                     <TagInput
                       value={strategyForm.content_topics || ''}
                       onChange={(value) => onChange('content_topics', value)}
@@ -228,7 +225,7 @@ export function SocialProfileStrategyDialog({
                     }}
                   />
 
-                  <Field label="Topics to Avoid" description="Các chủ đề rủi ro hoặc lệch định hướng kênh cần loại khỏi luồng AI.">
+                  <Field label="Topics to Avoid" description="Các chủ đề rủi ro hoặc lệch định hướng kênh cần loại khỏi luồng hệ thống.">
                     <TagInput
                       danger
                       value={strategyForm.avoid_topics || ''}
@@ -290,59 +287,6 @@ export function SocialProfileStrategyDialog({
                 </div>
               )}
 
-              {activeTab === 'ai' && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-[var(--on-surface)] flex items-center gap-2">
-                      <Activity size={16} className="text-[var(--accent)]" /> Cài đặt điểm tương đồng AI Matching
-                    </h3>
-                    <p className="mt-1 text-xs text-[var(--on-surface-variant)] leading-5">
-                      Điều chỉnh các ngưỡng Cosine Similarity để lọc bài viết đạt yêu cầu trước khi đề xuất cho kênh.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <SwitchRow
-                      label="Nhận bài từ kho Global"
-                      description="Nhận bài Global, tự tạo plan và chấm độ phù hợp theo topic/avoid topic của kênh"
-                      checked={strategyForm.receive_system_content ?? true}
-                      onChange={(checked) => onChange('receive_system_content', checked)}
-                    />
-
-                    <Field label="Số bài Global nhận mỗi ngày" description="Số bài phù hợp tối đa được đưa vào inbox của kênh trong một ngày, theo múi giờ lịch đăng (1-500)">
-                      <input
-                        className="app-input"
-                        type="number"
-                        min={1}
-                        max={500}
-                        value={strategyForm.max_system_recommendations ?? 20}
-                        onChange={(event) => onChange('max_system_recommendations', parseInt(event.target.value, 10))}
-                      />
-                    </Field>
-                  </div>
-
-                  <div className="space-y-5 rounded-xl border border-[var(--outline-variant)] bg-slate-50/50 p-5">
-                    <SliderField
-                      label="Embedding Similarity Threshold (Ngưỡng khớp topic)"
-                      value={Number(strategyForm.min_similarity ?? 0.62)}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      onChange={(value) => onChange('min_similarity', value)}
-                    />
-
-                    <SliderField
-                      label="Avoid Topic Similarity Limit (Ngưỡng tránh rủi ro)"
-                      value={Number(strategyForm.avoid_similarity_threshold ?? 0.72)}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      onChange={(value) => onChange('avoid_similarity_threshold', value)}
-                    />
-                  </div>
-                </div>
-              )}
-
               {activeTab === 'automation' && (
                 <div className="space-y-6">
                   <div>
@@ -354,70 +298,125 @@ export function SocialProfileStrategyDialog({
                     </p>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Duyệt video thành phẩm">
-                      <SelectControl value={strategyForm.approval_mode || 'manual'} onChange={(value) => onChange('approval_mode', value)}>
-                        <option value="manual">Thủ công: Đưa vào tab Chờ duyệt</option>
-                        <option value="auto">Tự động: Duyệt khi render xong và qua kiểm tra cơ bản</option>
-                      </SelectControl>
-                    </Field>
+                  <div className="rounded-2xl border border-indigo-100/50 bg-gradient-to-br from-indigo-50/50 to-white p-5 shadow-sm">
+                    <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-700">
+                      <Activity size={16} /> Cấu hình điểm tương đồng
+                    </h4>
+                    <p className="mt-1 text-xs leading-5 text-[var(--on-surface-variant)]">
+                      Điều chỉnh ngưỡng cosine similarity dùng để chọn bài khớp chủ đề và loại bài gần với chủ đề cần tránh.
+                    </p>
 
-                    <Field label="Video Render Mode">
-                      <SelectControl value={strategyForm.video_render_mode || 'manual'} onChange={(value) => onChange('video_render_mode', value)}>
-                        <option value="manual">Manual render sau khi duyệt kịch bản</option>
-                        <option value="auto">Auto render ngay khi kịch bản sẵn sàng</option>
-                      </SelectControl>
-                    </Field>
+                    <div className="mt-4 grid gap-5 sm:grid-cols-2">
+                      <SliderField
+                        label="Ngưỡng khớp chủ đề (min_similarity)"
+                        value={Number(strategyForm.min_similarity ?? 0.62)}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        onChange={(value) => onChange('min_similarity', value)}
+                      />
+
+                      <SliderField
+                        label="Ngưỡng chủ đề cần tránh (avoid_similarity_threshold)"
+                        value={Number(strategyForm.avoid_similarity_threshold ?? 0.72)}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        onChange={(value) => onChange('avoid_similarity_threshold', value)}
+                      />
+                    </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-3">
                     <SwitchRow
-                      label="Tự tạo workflow từ plan đạt"
-                      description="Sau khi chấm đạt ngưỡng strategy, tự tạo workflow và draft; tắt để chỉ nhận plan đề xuất"
+                      label="Auto chấm điểm, tạo kịch bản và voice"
+                      description="Tự động tạo workflow, kịch bản và voice sau khi bài viết đạt điểm và draft vượt kiểm tra chất lượng."
                       checked={strategyForm.auto_project_queue_enabled || false}
                       onChange={(checked) => onChange('auto_project_queue_enabled', checked)}
                     />
+
                     <SwitchRow
-                      label="Tự lên lịch sau khi tự duyệt"
-                      description="Bật: luồng tự động chọn giờ đăng sau khi duyệt. Tắt: video nằm ở tab Đã duyệt, chờ bạn bấm Lên lịch. Nút Duyệt thủ công luôn chỉ duyệt."
+                      label="Tự động render video"
+                      description="Tự động render MP4 sau khi voice hoàn tất; tắt tùy chọn này sẽ dừng workflow ở bước Voice sẵn sàng."
+                      checked={strategyForm.video_render_mode === 'auto'}
+                      onChange={(checked) => onChange('video_render_mode', checked ? 'auto' : 'manual')}
+                    />
+
+                    <SwitchRow
+                      label="Tự động duyệt"
+                      description="Tự động phê duyệt video thành phẩm để chuyển sang bước lên lịch."
+                      checked={strategyForm.approval_mode === 'auto'}
+                      onChange={(checked) => onChange('approval_mode', checked ? 'auto' : 'manual')}
+                    />
+
+                    <SwitchRow
+                      label="Tự động tạo lịch sau khi duyệt"
+                      description="Video đã duyệt sẽ tự động được xếp vào lịch đăng trống kế tiếp của hệ thống."
                       checked={strategyForm.auto_queue_enabled ?? true}
                       onChange={(checked) => onChange('auto_queue_enabled', checked)}
                     />
+
+                    <SwitchRow
+                      label="Tự động đăng theo lịch"
+                      description="Cho phép hệ thống đẩy video lên mạng xã hội khi đến giờ đăng đã xếp."
+                      checked={strategyForm.auto_publish_enabled ?? false}
+                      onChange={(checked) => onChange('auto_publish_enabled', checked)}
+                    />
                   </div>
 
-                  <div className="border-t pt-5 space-y-4" style={{ borderColor: 'var(--outline-variant)' }}>
-                    <h4 className="text-xs font-extrabold uppercase text-[var(--on-surface-variant)]">Cấu hình khung giờ đăng bài</h4>
+                  <div className="rounded-2xl border border-indigo-100/50 bg-gradient-to-br from-indigo-50/50 to-white p-5 shadow-sm">
+                    <h4 className="mb-4 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-700">
+                      <Clock size={16} /> Cấu hình khung giờ đăng bài
+                    </h4>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <SwitchRow
-                        label="Tự động đăng theo lịch"
-                        description="Tự động gửi bài đủ điều kiện lên TikTok khi tới lịch. Tắt để chỉ lưu lịch, không tự đăng."
-                        checked={strategyForm.auto_publish_enabled ?? false}
-                        onChange={(checked) => onChange('auto_publish_enabled', checked)}
-                      />
-                      <Field label="Múi giờ">
-                        <input
-                          className="app-input"
-                          value={strategyForm.schedule_timezone || 'Asia/Bangkok'}
-                          onChange={(event) => onChange('schedule_timezone', event.target.value)}
-                        />
+                    <div className="grid gap-5 sm:grid-cols-3">
+                      <Field label="Ngày chạy (0: T2, 6: CN)">
+                        <div className="group relative">
+                          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                            <Calendar size={15} />
+                          </div>
+                          <input
+                            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 hover:border-slate-300"
+                            value={strategyForm.schedule_days || '0,1,2,3,4,5,6'}
+                            onChange={(event) => onChange('schedule_days', event.target.value)}
+                            placeholder="Ví dụ: 1,2,3"
+                          />
+                        </div>
                       </Field>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Các ngày chạy scheduler trong tuần (0: CN, 1: T2...)">
-                        <input
-                          className="app-input"
-                          value={strategyForm.schedule_days || '0,1,2,3,4,5,6'}
-                          onChange={(event) => onChange('schedule_days', event.target.value)}
-                        />
+                      <Field label="Khung giờ đăng" description="Để trống: đăng linh hoạt theo bài/ngày.">
+                        <div className="group relative">
+                          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                            <Clock size={15} />
+                          </div>
+                          <input
+                            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 hover:border-slate-300"
+                            value={strategyForm.schedule_times ?? '08:30,20:30'}
+                            onChange={(event) => onChange('schedule_times', event.target.value)}
+                            placeholder="Ví dụ: 08:30, 20:30"
+                          />
+                        </div>
                       </Field>
-                      <Field label="Khung giờ xuất bản bài viết">
-                        <input
-                          className="app-input"
-                          value={strategyForm.schedule_times || '08:30,20:30'}
-                          onChange={(event) => onChange('schedule_times', event.target.value)}
-                        />
+                      <Field
+                        label="Tối đa bài/ngày"
+                        description="Để trống = không giới hạn."
+                      >
+                        <div className="group relative">
+                          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                            <ListOrdered size={15} />
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 hover:border-slate-300"
+                            value={strategyForm.post_frequency_per_day ?? ''}
+                            onChange={(event) => onChange(
+                              'post_frequency_per_day',
+                              event.target.value === '' ? null : Number(event.target.value),
+                            )}
+                            placeholder="Không giới hạn"
+                          />
+                        </div>
                       </Field>
                     </div>
                   </div>
@@ -580,10 +579,10 @@ function SliderField({
   onChange: (value: number) => void
 }) {
   return (
-    <div className="space-y-1.5 bg-white p-3 rounded-lg border border-slate-200">
+    <div className="space-y-2 rounded-xl border border-[var(--outline-variant)] bg-white p-4 shadow-sm transition-all focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-indigo-100/50">
       <div className="flex items-center justify-between text-xs">
-        <span className="font-semibold text-[var(--on-surface)]">{label}</span>
-        <span className="rounded-md border border-[var(--outline-variant)] bg-slate-50 px-2 py-0.5 font-mono font-bold text-[var(--accent)]">
+        <span className="font-bold text-[var(--on-surface)]">{label}</span>
+        <span className="rounded-md border border-[var(--outline-variant)] bg-slate-50 px-2.5 py-1 font-mono font-extrabold text-[var(--accent)] shadow-sm">
           {suffix ? `${Math.round(value)}${suffix}` : value.toFixed(2)}
         </span>
       </div>
@@ -594,7 +593,7 @@ function SliderField({
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full accent-[var(--accent)]"
+        className="mt-1 w-full accent-[var(--accent)]"
       />
     </div>
   )

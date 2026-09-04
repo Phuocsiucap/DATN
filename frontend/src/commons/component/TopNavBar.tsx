@@ -58,7 +58,7 @@ export default function TopNavBar({
             <button
               onClick={() => setShowUsageModal(!showUsageModal)}
               className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 text-xs font-extrabold text-[#2556ea] transition hover:bg-[#f4f6ff]"
-              title="Xem hạch toán Token AI & Chi phí"
+              title="Xem hạch toán Token hệ thống & Chi phí"
             >
               <Cpu size={15} />
               {formatTokens(aiUsage.total_tokens)}
@@ -70,7 +70,7 @@ export default function TopNavBar({
                 <div className="flex items-center justify-between border-b border-[var(--outline-variant)] pb-2">
                   <div className="flex items-center gap-2 text-sm font-extrabold text-[#111827]">
                     <Coins size={15} className="text-[#f59e0b]" />
-                    Hạch toán Token AI
+                    Hạch toán Token hệ thống
                   </div>
                   <button onClick={() => setShowUsageModal(false)} className="grid h-7 w-7 place-items-center rounded-[8px] text-[#64748b] hover:bg-[#f4f6ff]">
                     <X size={15} />

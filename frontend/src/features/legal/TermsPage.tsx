@@ -53,9 +53,9 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-[var(--surface)] px-4 py-12 text-[var(--on-surface)] sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl">
-        <header className="mb-10">
+    <main className="h-full w-full overflow-y-auto bg-[var(--surface)] p-3 text-[var(--on-surface)]">
+      <div className="w-full">
+        <header className="mb-6">
           <div className="mb-4 inline-flex items-center gap-2 rounded-md bg-[var(--surface-variant)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-strong)]">
             <FileText size={14} />
             <span>Legal</span>
@@ -67,7 +67,7 @@ export default function TermsPage() {
           <p className="mt-2 text-sm font-medium text-[var(--on-surface-variant)]">Last updated: August 25, 2026</p>
         </header>
 
-        <div className="space-y-10">
+        <div className="space-y-6">
           {sections.map((section) => (
             <section key={section.title}>
               <h2 className="text-xl font-bold text-[var(--on-surface)]">{section.title}</h2>
@@ -80,7 +80,7 @@ export default function TermsPage() {
           ))}
         </div>
 
-        <footer className="mt-16 pt-8 text-sm text-[var(--on-surface-variant)]">
+        <footer className="mt-8 pt-4 text-sm text-[var(--on-surface-variant)]">
           <p>SocialContentHub is a social media content management and automation workspace.</p>
           <div className="mt-4 flex flex-wrap gap-4">
             <a className="font-semibold text-[var(--accent-strong)] hover:underline" href="/terms">

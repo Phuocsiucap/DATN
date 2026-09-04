@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle,
   Calendar,
-  CheckCircle,
   Clock,
   ExternalLink,
   FileText,
@@ -11,15 +9,11 @@ import {
   Loader2,
   Newspaper,
   ShieldCheck,
-  Sparkles,
   Tag,
   Video,
-  Wand2,
   X,
 } from 'lucide-react'
 import { fetchContentDetailApi } from '@/commons/apis/module1'
-import { createDirectScriptApi } from '@/commons/apis/generateVideo'
-import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
 import { MediaAssetPreview } from '@/commons/media'
 
 const formatDate = (value?: string | null) => {
@@ -31,16 +25,11 @@ const formatDate = (value?: string | null) => {
 type ContentDetailDialogProps = {
   contentId: string | null
   onClose: () => void
-  onOpenModule2?: (jobId?: string) => void
 }
 
-export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: ContentDetailDialogProps) {
+export function ContentDetailDialog({ contentId, onClose }: ContentDetailDialogProps) {
   const [contentDetail, setContentDetail] = useState<any | null>(null)
   const [loading, setLoading] = useState(false)
-  const [profiles, setProfiles] = useState<Array<{ id: string; profile_name: string; username?: string | null; platform: string }>>([])
-  const [selectedProfileId, setSelectedProfileId] = useState('')
-  const [creatingScript, setCreatingScript] = useState(false)
-  const [scriptResult, setScriptResult] = useState<{ success: boolean; message: string } | null>(null)
 
   useEffect(() => {
     if (contentId) {
@@ -53,37 +42,6 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
       setContentDetail(null)
     }
   }, [contentId])
-
-  useEffect(() => {
-    if (!contentId) return
-    fetchSocialProfilesApi()
-      .then((res: any) => {
-        const items = res?.items || res || []
-        setProfiles(items)
-        setSelectedProfileId((current) => current || items[0]?.id || '')
-      })
-      .catch(() => setProfiles([]))
-  }, [contentId])
-
-  const createDirectScript = async () => {
-    if (!contentDetail?.id || !selectedProfileId) return
-    setCreatingScript(true)
-    setScriptResult(null)
-    try {
-      const result = await createDirectScriptApi({
-        profile_id: selectedProfileId,
-        content_id: contentDetail.id,
-        title: contentDetail.canonical_title || contentDetail.normalized_title || undefined,
-        target_duration_seconds: 60,
-      })
-      setScriptResult({ success: true, message: 'Đã tạo job kịch bản! Chuyển tới Xưởng sản xuất...' })
-      onOpenModule2?.((result.workflow as any)?.id || (result.job as any)?.id)
-    } catch (error: any) {
-      setScriptResult({ success: false, message: error?.response?.data?.detail || error?.message || 'Không tạo được kịch bản trực tiếp' })
-    } finally {
-      setCreatingScript(false)
-    }
-  }
 
   if (!contentId) return null
 
@@ -166,7 +124,7 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
 
   const dialogContent = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-slate-950/60 backdrop-blur-xs">
-      <div className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="relative flex max-h-[92vh] w-full max-w-[95vw] 2xl:max-w-[90vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Modal Header */}
         <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-4 bg-slate-50/80">
           <div className="flex items-center gap-3 min-w-0">
@@ -191,12 +149,24 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {(article.url || contentDetail.source_url || contentDetail.canonical_url) && (
+              <a
+                href={article.url || contentDetail.source_url || contentDetail.canonical_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-2xs transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <ExternalLink size={13} /> Mở bài gốc
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {loading || !contentDetail ? (
@@ -207,66 +177,6 @@ export function ContentDetailDialog({ contentId, onClose, onOpenModule2 }: Conte
           <div className="flex flex-1 flex-col overflow-y-auto p-6 space-y-5">
             {/* TOP BAR: Metadata & Actions Container */}
             <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 p-4 space-y-3.5 shadow-2xs">
-              {/* Row 1: Quick Action (Module 2 Manual) + External Link */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 pb-3">
-                <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
-                  <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-blue-900 shrink-0">
-                    <Wand2 size={15} className="text-blue-600" />
-                    <span>Module 2 Manual</span>
-                  </div>
-
-                  <select
-                    value={selectedProfileId}
-                    onChange={(event) => setSelectedProfileId(event.target.value)}
-                    className="h-8 max-w-[240px] rounded-lg border border-blue-200 bg-white px-2.5 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
-                  >
-                    {profiles.length === 0 && <option value="">Chưa có profile</option>}
-                    {profiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {profile.profile_name}{profile.username ? ` (@${profile.username})` : ''} - {profile.platform}
-                      </option>
-                    ))}
-                  </select>
-
-                  <button
-                    onClick={() => void createDirectScript()}
-                    disabled={creatingScript || loading || !contentDetail?.id || !selectedProfileId}
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-3.5 text-xs font-bold text-white shadow-2xs transition-all hover:opacity-95 disabled:opacity-50"
-                  >
-                    {creatingScript ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                    Tạo luôn kịch bản
-                  </button>
-                </div>
-
-                {(article.url || contentDetail.source_url || contentDetail.canonical_url) && (
-                  <a
-                    href={article.url || contentDetail.source_url || contentDetail.canonical_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-2xs transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                  >
-                    <ExternalLink size={13} /> Mở bài đăng gốc
-                  </a>
-                )}
-              </div>
-
-              {scriptResult && (
-                <div
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                    scriptResult.success
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-rose-200 bg-rose-50 text-rose-800'
-                  }`}
-                >
-                  {scriptResult.success ? (
-                    <CheckCircle size={14} className="shrink-0 text-emerald-600" />
-                  ) : (
-                    <AlertCircle size={14} className="shrink-0 text-rose-600" />
-                  )}
-                  <span>{scriptResult.message}</span>
-                </div>
-              )}
-
               {/* Row 2: Metadata Pills & Key Information */}
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2.5 text-xs">
                 <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">

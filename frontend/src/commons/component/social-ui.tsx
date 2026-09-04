@@ -1,4 +1,4 @@
-import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import {
   BarChart3,
   Bell,
@@ -10,6 +10,7 @@ import {
   HelpCircle,
   Loader2,
   MoreHorizontal,
+  MoreVertical,
   Plus,
   Search,
   ShieldCheck,
@@ -184,7 +185,7 @@ export function PageHeader({
   className?: string
 }) {
   return (
-    <div className={cn('flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between', className)}>
+    <div className={cn('app-page-header flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between', className)}>
       <div className="min-w-0">
         <h1 className="app-title">{title}</h1>
         {description && <p className="mt-1 text-sm font-medium text-[var(--on-surface-variant)]">{description}</p>}
@@ -212,13 +213,13 @@ export function PageLayout({
   contentClassName?: string
 }) {
   return (
-    <div className={cn('app-page flex-1 min-h-0 h-full flex flex-col gap-4', className)}>
+    <div className={cn('app-page', className)}>
       {header ? (
         header
       ) : title ? (
         <PageHeader title={title} description={description} actions={actions} />
       ) : null}
-      <div className={cn('flex-1 min-h-0 w-full flex flex-col gap-4', contentClassName)}>
+      <div className={cn('app-page-content', contentClassName)}>
         {children}
       </div>
     </div>
@@ -588,4 +589,77 @@ export function EmptyBlock({ label }: { label: string }) {
 
 export function connectedStatus(status?: string | null) {
   return String(status || '').toLowerCase() === 'active' ? 'Đã kết nối' : (status || 'Đang hoạt động')
+}
+
+export type TableRowActionItem = {
+  label: string
+  icon?: ReactNode
+  onClick: () => void
+  danger?: boolean
+  disabled?: boolean
+}
+
+export function TableRowActions({
+  actions,
+  className,
+}: {
+  actions: TableRowActionItem[]
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  const visibleActions = actions.filter(Boolean)
+  if (visibleActions.length === 0) return null
+
+  return (
+    <div ref={menuRef} className={cn('relative inline-block text-left', className)} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className={cn(
+          'grid h-8 w-8 place-items-center rounded-lg border border-slate-200/80 bg-white text-slate-600 shadow-2xs transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95',
+          open && 'border-blue-300 bg-blue-50/80 text-blue-600 ring-2 ring-blue-500/15'
+        )}
+        title="Thao tác"
+      >
+        <MoreVertical size={15} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 min-w-[150px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg backdrop-blur-xs">
+          {visibleActions.map((action, index) => (
+            <button
+              key={index}
+              disabled={action.disabled}
+              onClick={() => {
+                setOpen(false)
+                action.onClick()
+              }}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-bold transition disabled:opacity-50',
+                action.danger
+                  ? 'text-rose-600 hover:bg-rose-50'
+                  : 'text-[#172033] hover:bg-slate-100/80'
+              )}
+            >
+              {action.icon && <span className="shrink-0 text-slate-500">{action.icon}</span>}
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }

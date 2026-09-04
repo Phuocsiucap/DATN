@@ -206,6 +206,8 @@ export type ProfileContentMatch = {
   tone?: string | null
   target_audience?: string | null
   can_create_script?: boolean
+  existing_workflow_id?: string | null
+  existing_workflow_status?: string | null
   selection_reason?: string | null
   ai_decision_reason?: string | null
   fit_insights?: Array<{
@@ -308,4 +310,32 @@ export const fetchContentDetailApi = async (contentId: string) => {
 export const fetchFinalContentViewApi = async (params?: { crawl_job_id?: string; content_scope?: string; view?: string }) => {
   const { data } = await api.get('/contents/final-view', { params })
   return data as FinalContentView
+}
+
+// Crawl Source Management
+export type CrawlSource = {
+  id: string
+  job_id: string
+  source_type: string
+  source_url?: string | null
+  keywords: string[]
+  configuration: Record<string, unknown>
+  status: 'ACTIVE' | 'INACTIVE' | string
+  created_at: string
+  updated_at: string
+}
+
+export const fetchCrawlSourcesApi = async () => {
+  const { data } = await api.get('/crawl-sources')
+  return data as CrawlSource[]
+}
+
+export const updateCrawlSourceStatusApi = async (sourceId: string, status: 'ACTIVE' | 'INACTIVE') => {
+  const { data } = await api.patch(`/crawl-sources/${sourceId}/status`, null, { params: { status } })
+  return data as CrawlSource
+}
+
+export const deleteCrawlSourceApi = async (sourceId: string) => {
+  const { data } = await api.delete(`/crawl-sources/${sourceId}`)
+  return data as { deleted: boolean; message: string }
 }

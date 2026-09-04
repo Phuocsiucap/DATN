@@ -80,6 +80,8 @@ class ProfileContentMatchResponse(BaseModel):
     tone: str | None = None
     target_audience: str | None = None
     can_create_script: bool = False
+    existing_workflow_id: uuid.UUID | None = None
+    existing_workflow_status: str | None = None
     selection_reason: str | None = None
     ai_decision_reason: str | None = None
     fit_insights: list[ContentFitInsightResponse] = Field(default_factory=list)

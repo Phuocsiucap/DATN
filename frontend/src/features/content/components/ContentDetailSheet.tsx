@@ -1,4 +1,7 @@
-import { ChevronDown, ExternalLink, FileText, Wand2 } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, ExternalLink, FileText, Loader2, Play, Wand2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { createDirectScriptApi } from '@/commons/apis/generateVideo'
 import type { ContentDetail, FinalContentItem, ProfileContentMatch } from '@/commons/apis/module1'
 import { AppButton, EmptyBlock, PlatformIcon, SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
 import { SocialPostPreview } from '@/commons/component/social-previews'
@@ -76,6 +79,8 @@ export function ContentDetailSheet({
   onClose: () => void
   onOpenModule2?: (jobId?: string) => void
 }) {
+  const [creatingProfileId, setCreatingProfileId] = useState<string | null>(null)
+
   if (!item && !loading) return null
 
   if (loading) {
@@ -102,10 +107,38 @@ export function ContentDetailSheet({
   const contentLines = contentText.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 8)
   const mediaItems = getContentMedia(item)
   const imageItems = mediaItems.filter((media) => /image/i.test(String(media.media_type || media.mime_type || '')))
+  const videoItems = mediaItems.filter((media) => /video/i.test(String(media.media_type || media.mime_type || '')) || ['hls', 'mp4'].includes(String(media.format || '').toLowerCase()))
   const sourceUrl = getSourceUrl(item)
   const profileMatches = item.profile_matches || []
   const tiktokMatch = profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok' && match.can_create_script)
     || profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok')
+
+  const createScriptForProfile = async (match: ProfileContentMatch) => {
+    if (creatingProfileId) return
+    if (match.existing_workflow_id) {
+      onOpenModule2?.(match.existing_workflow_id)
+      return
+    }
+    setCreatingProfileId(match.profile_id)
+    try {
+      const result = await createDirectScriptApi({
+        profile_id: match.profile_id,
+        content_id: item.id,
+        title: item.canonical_title || item.normalized_title || undefined,
+        target_duration_seconds: 60,
+      })
+      const workflowId = typeof result.workflow?.id === 'string' ? result.workflow.id : undefined
+      toast.success(result.reused
+        ? `Bài này đã có quy trình cho ${match.profile_name}; đang mở lại.`
+        : `Đã đưa kịch bản cho ${match.profile_name} vào hàng đợi.`)
+      onOpenModule2?.(workflowId)
+    } catch (error: unknown) {
+      const candidate = error as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(candidate.response?.data?.detail || candidate.message || 'Không thể tạo kịch bản ngay lúc này.')
+    } finally {
+      setCreatingProfileId(null)
+    }
+  }
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
@@ -163,24 +196,55 @@ export function ContentDetailSheet({
             )}
           </section>
 
-          <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
-            <div className="mb-3 text-sm font-extrabold text-[#111827]">Hình ảnh đính kèm ({imageItems.length})</div>
-            {imageItems.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3">
-                {imageItems.slice(0, 4).map((media, index) => (
-                  <Thumbnail
-                    key={`${media.source_url || media.storage_url || index}`}
-                    src={media.thumbnail_url || media.source_url || media.storage_url}
-                    title={media.title || item.canonical_title}
-                    className="h-[110px]"
-                    fallback={false}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyBlock label="Chưa có hình ảnh đính kèm." />
+          <div className="flex flex-col gap-4">
+            <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
+              <div className="mb-3 text-sm font-extrabold text-[#111827]">Hình ảnh đính kèm ({imageItems.length})</div>
+              {imageItems.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {imageItems.slice(0, 4).map((media, index) => (
+                    <Thumbnail
+                      key={`${media.source_url || media.storage_url || index}`}
+                      src={media.thumbnail_url || media.source_url || media.storage_url}
+                      title={media.title || item.canonical_title}
+                      className="h-[110px]"
+                      fallback={false}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyBlock label="Chưa có hình ảnh đính kèm." />
+              )}
+            </section>
+
+            {videoItems.length > 0 && (
+              <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
+                <div className="mb-3 text-sm font-extrabold text-[#111827]">Video đính kèm ({videoItems.length})</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {videoItems.slice(0, 4).map((media, index) => (
+                    <a
+                      key={`${media.source_url || index}`}
+                      href={media.source_url || sourceUrl || '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative block h-[110px] overflow-hidden rounded-lg bg-slate-100 ring-1 ring-[var(--outline-variant)]"
+                    >
+                      <Thumbnail
+                        src={media.thumbnail_url || media.source_url || ''}
+                        title={media.title || item.canonical_title}
+                        className="h-full w-full opacity-90 transition-opacity group-hover:opacity-100"
+                        fallback={false}
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+                        <div className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#2556ea] shadow-sm">
+                          <Play size={14} className="ml-0.5" />
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </section>
             )}
-          </section>
+          </div>
         </div>
 
         <section className="mt-4 rounded-[8px] border border-[var(--outline-variant)] p-4">
@@ -193,7 +257,13 @@ export function ContentDetailSheet({
           {profileMatches.length > 0 ? (
             <div className="divide-y divide-[#edf1f7]">
               {profileMatches.map((match) => (
-                <ProfileMatchRow key={`${item.id}-${match.profile_id}`} match={match} onOpenModule2={onOpenModule2} />
+                <ProfileMatchRow
+                  key={`${item.id}-${match.profile_id}`}
+                  match={match}
+                  creating={creatingProfileId === match.profile_id}
+                  createDisabled={Boolean(creatingProfileId)}
+                  onCreateScript={createScriptForProfile}
+                />
               ))}
             </div>
           ) : (
@@ -227,7 +297,6 @@ export function ContentDetailSheet({
 
       <SheetFooter>
         <AppButton variant="secondary" icon={<ExternalLink size={15} />} disabled={!sourceUrl} onClick={() => sourceUrl && window.open(sourceUrl, '_blank', 'noopener,noreferrer')}>Mở bài gốc</AppButton>
-        <AppButton icon={<Wand2 size={15} />} onClick={() => onOpenModule2?.()}>Tạo kịch bản</AppButton>
       </SheetFooter>
       </div>
       </SheetContent>
@@ -244,7 +313,17 @@ function MetaCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ProfileMatchRow({ match, onOpenModule2 }: { match: ProfileContentMatch; onOpenModule2?: (jobId?: string) => void }) {
+function ProfileMatchRow({
+  match,
+  creating,
+  createDisabled,
+  onCreateScript,
+}: {
+  match: ProfileContentMatch
+  creating: boolean
+  createDisabled: boolean
+  onCreateScript: (match: ProfileContentMatch) => void
+}) {
   const score = Number(match.score ?? 0)
   const threshold = Number(match.threshold ?? 70)
   const passedSimilarityGate = typeof match.passed_similarity_gate === 'boolean' ? match.passed_similarity_gate : score >= threshold
@@ -257,7 +336,7 @@ function ProfileMatchRow({ match, onOpenModule2 }: { match: ProfileContentMatch;
     RECOMMENDED: 'Được đề xuất',
     LOW_MATCH: 'Độ phù hợp thấp',
     AVOID_TOPIC_MATCH: 'Khớp chủ đề cần tránh',
-    AI_REJECTED: 'AI không đề xuất',
+    AI_REJECTED: 'Hệ thống không đề xuất',
     HUMAN_REJECTED: 'Người dùng không sản xuất',
     DRAFT_QUEUED: 'Đã duyệt, đang sinh draft',
     DRAFT_FAILED: 'Sinh draft sau duyệt thất bại',
@@ -293,9 +372,14 @@ function ProfileMatchRow({ match, onOpenModule2 }: { match: ProfileContentMatch;
           <div className="text-xs text-[#526179]">Điểm phù hợp <strong className="ml-1 text-lg text-[#111827]">{formatScore(match.score)}</strong><span className="text-[#64748b]">/100</span></div>
           <div className="text-xs text-[#64748b]">Ngưỡng kênh: <span className="font-semibold text-[#34415a]">{formatScore(threshold)}/100</span></div>
         </div>
-        {match.can_create_script && onOpenModule2 && (
-          <AppButton className="h-8 px-3" icon={<Wand2 size={14} />} onClick={() => onOpenModule2()}>Tạo kịch bản</AppButton>
-        )}
+        <AppButton
+          className="h-8 px-3"
+          icon={creating ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+          disabled={createDisabled}
+          onClick={() => onCreateScript(match)}
+        >
+          {creating ? 'Đang tạo...' : match.existing_workflow_id ? 'Mở quy trình đã có' : 'Tạo kịch bản ngay'}
+        </AppButton>
       </div>
       {topTopicMatch && <p className="mt-2 text-xs leading-5 text-[#64748b]">Chủ đề gần nhất: <span className="font-semibold text-[#34415a]">{topTopicMatch.topic}</span>{!passedSimilarityGate && ' · Chưa đạt ngưỡng tương đồng'}</p>}
       {match.blocked_by_avoid_topics && <p className="mt-2 text-xs leading-5 text-[#c4253c]">Nội dung chạm chủ đề cần tránh{match.avoided_topics?.length ? `: ${match.avoided_topics.join(', ')}` : '.'}</p>}

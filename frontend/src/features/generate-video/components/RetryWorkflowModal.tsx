@@ -27,7 +27,7 @@ export function RetryWorkflowModal({
   if (!isOpen || !item) return null
 
   const columnId = classifyVideoWorkspace(item)
-  const isRenderStage = columnId === 'rendering' || columnId === 'review' || (columnId === 'failed' && (item.current_stage?.includes('RENDER') || item.status === 'RENDERING' || item.status === 'FAILED'))
+  const isRenderStage = columnId === 'rendering' || columnId === 'review'
   const isEditStage = columnId === 'editing' || (item.status === 'EDITING' || item.status === 'VOICE_READY' || item.status === 'REVIEWING')
 
   const handleConfirm = async () => {
@@ -122,7 +122,7 @@ export function RetryWorkflowModal({
                   <div>
                     <div className="text-xs font-black text-slate-900">2. Tạo lại kịch bản mới</div>
                     <p className="mt-0.5 text-xs text-slate-500 leading-normal">
-                      Xóa bỏ bản thảo cũ và chạy AI viết lại kịch bản hoàn toàn mới từ nguồn bài viết.
+                      Xóa bỏ bản thảo cũ và hệ thống sẽ viết lại kịch bản hoàn toàn mới từ nguồn bài viết.
                     </p>
                   </div>
                 </label>
@@ -135,7 +135,7 @@ export function RetryWorkflowModal({
                 <div className="space-y-1">
                   <p className="font-extrabold text-rose-900">Cảnh báo mất nội dung chỉnh sửa</p>
                   <p className="leading-relaxed">
-                    Mọi thay đổi kịch bản & timeline hiện tại sẽ bị xóa hoàn toàn. AI sẽ sinh ra một kịch bản mới từ đầu.
+                    Mọi thay đổi kịch bản & timeline hiện tại sẽ bị xóa hoàn toàn. Hệ thống sẽ sinh ra một kịch bản mới từ đầu.
                   </p>
                 </div>
               </div>

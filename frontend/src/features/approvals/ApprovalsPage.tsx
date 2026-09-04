@@ -256,17 +256,16 @@ export default function ApprovalsPage() {
       }
     >
 
-      <SocialProfileFilter profiles={profiles} value={profileFilter} onChange={setProfileFilter} allOption loading={loadingProfiles} disabled={loading} className="mb-3" emptyLabel={profileError || 'Chưa có kênh TikTok để duyệt video.'} />
+      <SocialProfileFilter profiles={profiles} value={profileFilter} onChange={setProfileFilter} allOption loading={loadingProfiles} disabled={loading} emptyLabel={profileError || 'Chưa có kênh TikTok để duyệt video.'} />
       <TabStrip
         value={activeTab}
         onChange={setActiveTab}
         tabs={approvalTabs.map((tab) => ({ ...tab, count: counts[tab.value] }))}
-        className="mb-4"
       />
 
       <div className="grid gap-4 xl:grid-cols-[500px_minmax(0,1fr)] 2xl:grid-cols-[520px_minmax(0,1fr)]">
           <section className="min-w-0">
-            <SearchField value={search} onChange={setSearch} placeholder="Tìm video, kênh hoặc nội dung..." className="mb-4" />
+            <SearchField value={search} onChange={setSearch} placeholder="Tìm video, kênh hoặc nội dung..." className="mb-3" />
 
             {loading && filteredItems.length === 0 ? (
               <LoadingBlock />

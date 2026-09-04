@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import distinct, func
+from sqlalchemy import and_, distinct, func, or_
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
@@ -18,6 +18,7 @@ from common.db.content_series import (
     sync_series_current_part,
 )
 from common.db.idempotency import claim_event
+from common.db.content_history import processed_content_ids_for_user
 from common.db.media_workflows import content_category_payload
 from common.db.models import (
     ContentItem,
@@ -87,29 +88,75 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
     if not job:
         print(f"[planning-orchestrator] Skipping auto workflow because crawl job {job_id} was not found")
         return
-    if str(job.content_scope or "").upper() != "GLOBAL":
-        print(
-            f"[planning-orchestrator] Skipping crawl job {job_id}; only GLOBAL content can be distributed to creator profiles"
-        )
+    source_scope = str(job.content_scope or "").upper()
+    if source_scope not in {"GLOBAL", "PRIVATE"}:
+        print(f"[planning-orchestrator] Skipping crawl job {job_id}; unsupported content scope {source_scope!r}")
         return
 
-    profiles = _global_receiving_profiles(db)
+    profiles = _profiles_for_crawl_job(db, job)
     if not profiles:
-        print(f"[planning-orchestrator] No active profiles are configured to receive GLOBAL content for crawl job {job_id}")
+        print(
+            f"[planning-orchestrator] No active profiles are eligible for {source_scope} crawl job {job_id}"
+        )
         return
 
     matcher = StrategyEmbeddingMatcher()
     planner = AutoWorkflowPlanner()
-    items = _content_items_for_crawl_job(db, job_uuid)
+    items = _content_items_for_crawl_job(
+        db,
+        job_uuid,
+        source_scope=source_scope,
+        owner_user_id=job.requested_by if source_scope == "PRIVATE" else None,
+    )
     if not items:
         print(f"[planning-orchestrator] No READY content found for crawl job {job_id}; recording 0-candidate planning run")
+
+    content_ids = [item.id for item in items]
+    # PRIVATE history belongs to the user, so capture it before processing any
+    # profile. Re-querying after the first profile commits its candidates and
+    # workflows would incorrectly hide this crawl job from the next profile.
+    private_processed_content_ids = (
+        _processed_content_ids_for_user(
+            db,
+            job.requested_by,
+            content_ids,
+            current_crawl_job_id=job_uuid,
+        )
+        if source_scope == "PRIVATE"
+        else set()
+    )
 
     for profile in profiles:
         strategy = profile.strategy
         if not strategy:
             continue
-        if _has_completed_global_job_plan(db, profile.id, job_uuid, items):
-            print(f"[planning-orchestrator] GLOBAL planning run already exists for profile {profile.id} and crawl job {job_id}")
+        if _has_completed_job_plan(db, profile.id, job_uuid, items):
+            print(
+                f"[planning-orchestrator] {source_scope} planning run already exists for profile {profile.id} "
+                f"and crawl job {job_id}"
+            )
+            continue
+        if source_scope == "PRIVATE":
+            processed_content_ids = private_processed_content_ids
+            dedupe_scope = f"user {job.requested_by}"
+        else:
+            processed_content_ids = _processed_content_ids_for_profile(
+                db,
+                profile.id,
+                content_ids,
+            )
+            dedupe_scope = f"profile {profile.id}"
+        fresh_items = [item for item in items if item.id not in processed_content_ids]
+        if processed_content_ids:
+            print(
+                f"[planning-orchestrator] {dedupe_scope}: skipped {len(processed_content_ids)} "
+                f"previously crawled or used content item(s) from crawl job {job_id}"
+            )
+        if items and not fresh_items:
+            print(
+                f"[planning-orchestrator] Skipping {source_scope} planning for profile {profile.id}; "
+                f"crawl job {job_id} contains no new content for this profile"
+            )
             continue
         try:
             _process_profile_auto_workflows(
@@ -117,14 +164,15 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
                 profile=profile,
                 strategy=strategy,
                 job_id=str(job_id),
-                items=items,
+                items=fresh_items,
                 matcher=matcher,
                 planner=planner,
-                trigger="global_crawl_completed",
+                trigger=f"{source_scope.lower()}_crawl_completed",
+                source_scope=source_scope,
             )
         except Exception as exc:
             db.rollback()
-            _mark_failed_planning_run(db, profile.id, job_uuid, exc)
+            _mark_failed_planning_run(db, profile.id, job_uuid, exc, source_scope=source_scope)
             print(f"[planning-orchestrator] Failed auto workflow planning for profile {profile.id} on crawl job {job_id}: {exc}")
 
 
@@ -176,7 +224,24 @@ def _global_receiving_profiles(db: Session, *, profile_id: uuid.UUID | None = No
     return query.all()
 
 
-def _has_completed_global_job_plan(
+def _profiles_for_crawl_job(db: Session, job: CrawlJob) -> list[SocialProfile]:
+    source_scope = str(job.content_scope or "").upper()
+    if source_scope == "GLOBAL":
+        return _global_receiving_profiles(db)
+    if source_scope != "PRIVATE" or not job.requested_by:
+        return []
+    return (
+        db.query(SocialProfile)
+        .join(SocialProfileStrategy, SocialProfileStrategy.profile_id == SocialProfile.id)
+        .filter(
+            SocialProfile.status == "active",
+            SocialProfile.user_id == job.requested_by,
+        )
+        .all()
+    )
+
+
+def _has_completed_job_plan(
     db: Session,
     profile_id: uuid.UUID,
     crawl_job_id: uuid.UUID,
@@ -204,6 +269,8 @@ def _mark_failed_planning_run(
     profile_id: uuid.UUID,
     crawl_job_id: uuid.UUID | None,
     error: Exception,
+    *,
+    source_scope: str = "GLOBAL",
 ) -> None:
     run = (
         db.query(PlanningRun)
@@ -222,22 +289,47 @@ def _mark_failed_planning_run(
     run.completed_at = datetime.now(timezone.utc)
     run.metadata_json = {
         **(run.metadata_json if isinstance(run.metadata_json, dict) else {}),
-        "error_code": "GLOBAL_PLANNING_FAILED",
+        "error_code": f"{source_scope}_PLANNING_FAILED",
         "error_message": str(error)[:2000],
     }
     db.add(run)
     db.commit()
 
 
-def _content_items_for_crawl_job(db: Session, crawl_job_id: uuid.UUID) -> list[ContentItem]:
+def _content_items_for_crawl_job(
+    db: Session,
+    crawl_job_id: uuid.UUID,
+    *,
+    source_scope: str,
+    owner_user_id: uuid.UUID | None = None,
+) -> list[ContentItem]:
+    filters = [
+        CrawlJobContent.job_id == crawl_job_id,
+        ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
+    ]
+    if source_scope == "GLOBAL":
+        filters.append(ContentItem.content_scope == "GLOBAL")
+    elif source_scope == "PRIVATE":
+        if not owner_user_id:
+            return []
+        # A creator's PRIVATE crawl may resolve to a canonical GLOBAL item that
+        # an admin imported earlier. It is still a valid result of this job and
+        # must remain available to that creator's strategy planner.
+        filters.append(
+            or_(
+                ContentItem.content_scope == "GLOBAL",
+                and_(
+                    ContentItem.content_scope == "PRIVATE",
+                    ContentItem.owner_user_id == owner_user_id,
+                ),
+            )
+        )
+    else:
+        return []
     return (
         db.query(ContentItem)
         .join(CrawlJobContent, CrawlJobContent.content_id == ContentItem.id)
-        .filter(
-            CrawlJobContent.job_id == crawl_job_id,
-            ContentItem.content_scope == "GLOBAL",
-            ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
-        )
+        .filter(*filters)
         .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
         .limit(500)
         .all()
@@ -327,6 +419,76 @@ def _existing_recommendation_content_ids(
     return {row[0] for row in rows if row[0] is not None}
 
 
+def _processed_content_ids_for_profile(
+    db: Session,
+    profile_id: uuid.UUID,
+    content_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    """Return content already scored/planned for this profile.
+
+    This is intentionally profile-scoped: the same canonical article may be a
+    valid input for two channels with different strategies, but a later crawl
+    must not add it to the same channel's plan again.
+    """
+    if not content_ids:
+        return set()
+
+    candidate_rows = (
+        db.query(PlanningCandidate.content_id)
+        .join(PlanningRun, PlanningRun.id == PlanningCandidate.planning_run_id)
+        .filter(
+            PlanningRun.profile_id == profile_id,
+            PlanningCandidate.content_id.in_(content_ids),
+        )
+        .all()
+    )
+    workflow_rows = (
+        db.query(MediaWorkflow.primary_content_id)
+        .filter(
+            MediaWorkflow.profile_id == profile_id,
+            MediaWorkflow.primary_content_id.in_(content_ids),
+        )
+        .all()
+    )
+    recommendation_rows = (
+        db.query(ProfileContentLink.content_id)
+        .filter(
+            ProfileContentLink.profile_id == profile_id,
+            ProfileContentLink.content_id.in_(content_ids),
+            ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
+            ProfileContentLink.recommended_at.is_not(None),
+        )
+        .all()
+    )
+    return {
+        row[0]
+        for row in (*candidate_rows, *workflow_rows, *recommendation_rows)
+        if row[0] is not None
+    }
+
+
+def _processed_content_ids_for_user(
+    db: Session,
+    user_id: uuid.UUID,
+    content_ids: list[uuid.UUID],
+    *,
+    current_crawl_job_id: uuid.UUID | None,
+) -> set[uuid.UUID]:
+    """Return PRIVATE content already crawled or used anywhere in a user account.
+
+    A private crawl is owned by the user, not by one social profile. Once an
+    article has been seen in an earlier private job or entered planning,
+    production, recommendations, or the publishing queue for any of that
+    user's profiles, a later pass must not score or schedule it again.
+    """
+    return processed_content_ids_for_user(
+        db,
+        user_id,
+        content_ids,
+        current_crawl_job_id=current_crawl_job_id,
+    )
+
+
 def _lock_profile_recommendation_quota(db: Session, profile_id: uuid.UUID) -> None:
     # Serialize quota reservation for one profile. The lock is released by the
     # commit immediately after links are created, before any creative AI call.
@@ -348,39 +510,101 @@ def _process_profile_auto_workflows(
     matcher: StrategyEmbeddingMatcher,
     planner: AutoWorkflowPlanner,
     trigger: str = "global_crawl_completed",
+    source_scope: str = "GLOBAL",
 ) -> None:
+    source_scope = str(source_scope or "GLOBAL").upper()
     ranked = matcher.rank_candidates(db, items, strategy, limit=len(items))
     db.commit()
 
     eligible = [score for score in ranked if score.eligible]
-    _lock_profile_recommendation_quota(db, profile.id)
-    daily_limit = _daily_recommendation_limit(strategy)
-    received_today = _daily_recommendation_count(db, profile.id, strategy)
-    remaining_quota = max(0, daily_limit - received_today)
-    existing_content_ids = _existing_recommendation_content_ids(
-        db,
-        profile.id,
-        [score.content.id for score in ranked],
-    )
-    new_recommendations = [
-        score for score in eligible if score.content.id not in existing_content_ids
-    ][:remaining_quota]
-    recommendation_ids = {score.content.id for score in new_recommendations}
-    existing_scores = [score for score in ranked if score.content.id in existing_content_ids]
-    for score in existing_scores:
-        _upsert_profile_content_link(db, profile, score, decision=None)
-    for score in new_recommendations:
-        _upsert_profile_content_link(db, profile, score, decision=None, assigned_now=True)
+    daily_limit: int | None = None
+    received_today: int | None = None
+    remaining_quota: int | None = None
+    if source_scope == "GLOBAL":
+        _lock_profile_recommendation_quota(db, profile.id)
+        daily_limit = _daily_recommendation_limit(strategy)
+        received_today = _daily_recommendation_count(db, profile.id, strategy)
+        remaining_quota = max(0, daily_limit - received_today)
+        existing_content_ids = _existing_recommendation_content_ids(
+            db,
+            profile.id,
+            [score.content.id for score in ranked],
+        )
+        selected_scores = [
+            score for score in eligible if score.content.id not in existing_content_ids
+        ][:remaining_quota]
+        existing_scores = [score for score in ranked if score.content.id in existing_content_ids]
+        for score in existing_scores:
+            _upsert_profile_content_link(db, profile, score, decision=None)
+        for score in selected_scores:
+            _upsert_profile_content_link(db, profile, score, decision=None, assigned_now=True)
+    else:
+        # A PRIVATE crawl belongs to one user. Preserve the original behavior:
+        # score every result for that user's profiles and plan every eligible item,
+        # without consuming the daily GLOBAL recommendation quota.
+        selected_scores = eligible
+        for score in ranked:
+            _upsert_profile_content_link(
+                db,
+                profile,
+                score,
+                decision=None,
+                assigned_now=score.eligible,
+            )
+    recommendation_ids = {score.content.id for score in selected_scores}
     db.commit()
 
     avoid_blocked_count = sum(1 for score in ranked if score.avoided_topics)
+    quota_log = (
+        f", daily_quota={daily_limit}, already_received_today={received_today}"
+        if source_scope == "GLOBAL"
+        else ""
+    )
     print(
-        f"[planning-orchestrator] Profile {profile.id}: {len(eligible)}/{len(ranked)} GLOBAL candidates passed; "
-        f"assigned={len(new_recommendations)}, daily_quota={daily_limit}, already_received_today={received_today}; "
-        f"trigger={trigger}; crawl_job={job_id}; avoid_blocked={avoid_blocked_count}"
+        f"[planning-orchestrator] Profile {profile.id}: {len(eligible)}/{len(ranked)} {source_scope} candidates passed; "
+        f"selected={len(selected_scores)}{quota_log}; trigger={trigger}; crawl_job={job_id}; "
+        f"avoid_blocked={avoid_blocked_count}"
     )
 
     now = datetime.now(timezone.utc)
+    input_info = {
+        "crawl_job_id": str(job_id) if job_id else None,
+        "source_scope": source_scope,
+        "candidate_count": len(ranked),
+        "eligible_count": len(eligible),
+        "avoid_blocked_count": avoid_blocked_count,
+        "strategy_similarity_threshold": matcher.strategy_similarity_threshold(strategy),
+    }
+    output_info = {
+        "candidate_count": len(ranked),
+        "eligible_count": len(eligible),
+        "recommendations_assigned": len(selected_scores),
+        "recommended_content_ids": [str(score.content.id) for score in selected_scores],
+        "workflows_created": [],
+        "auto_workflow_enabled": bool(strategy.auto_project_queue_enabled),
+    }
+    selection_reasons = [
+        f"Evaluated {len(ranked)} {source_scope} candidate items for profile {profile.id} with topic cosine threshold scoring.",
+        f"{len(eligible)} candidates passed similarity threshold and avoid-topic filters.",
+    ]
+    if source_scope == "GLOBAL":
+        input_info.update(
+            {
+                "daily_recommendation_limit": daily_limit,
+                "received_before_run": received_today,
+                "remaining_quota_before_run": remaining_quota,
+            }
+        )
+        output_info.update(
+            {
+                "daily_recommendation_limit": daily_limit,
+                "daily_quota_exhausted": len(selected_scores) >= int(remaining_quota or 0),
+            }
+        )
+        selection_reasons.append(
+            f"Assigned {len(selected_scores)} new recommendations within the daily limit of {daily_limit}."
+        )
+
     planning_run = PlanningRun(
         user_id=profile.user_id,
         profile_id=profile.id,
@@ -388,38 +612,15 @@ def _process_profile_auto_workflows(
         crawl_job_id=_as_uuid(job_id),
         planning_mode="AUTO",
         status="RUNNING",
-        input_jsonb={
-            "crawl_job_id": str(job_id) if job_id else None,
-            "source_scope": "GLOBAL",
-            "candidate_count": len(ranked),
-            "eligible_count": len(eligible),
-            "avoid_blocked_count": avoid_blocked_count,
-            "strategy_similarity_threshold": matcher.strategy_similarity_threshold(strategy),
-            "daily_recommendation_limit": daily_limit,
-            "received_before_run": received_today,
-            "remaining_quota_before_run": remaining_quota,
-        },
-        output_jsonb={
-            "candidate_count": len(ranked),
-            "eligible_count": len(eligible),
-            "recommendations_assigned": len(new_recommendations),
-            "recommended_content_ids": [str(score.content.id) for score in new_recommendations],
-            "daily_recommendation_limit": daily_limit,
-            "daily_quota_exhausted": len(new_recommendations) >= remaining_quota,
-            "workflows_created": [],
-            "auto_workflow_enabled": bool(strategy.auto_project_queue_enabled),
-        },
+        input_jsonb=input_info,
+        output_jsonb=output_info,
         reason_jsonb={
             "trigger": trigger,
-            "selection_reasons": [
-                f"Evaluated {len(ranked)} GLOBAL candidate items for profile {profile.id} with topic cosine threshold scoring.",
-                f"{len(eligible)} candidates passed similarity threshold and avoid-topic filters.",
-                f"Assigned {len(new_recommendations)} new recommendations within the daily limit of {daily_limit}.",
-            ],
+            "selection_reasons": selection_reasons,
         },
         metadata_json={
             "trigger": trigger,
-            "source_scope": "GLOBAL",
+            "source_scope": source_scope,
             "selection_algorithm": AUTO_SELECTION_ALGORITHM,
         },
         started_at=now,
@@ -440,7 +641,7 @@ def _process_profile_auto_workflows(
             eligible=score.eligible,
             reason_jsonb={
                 "crawl_job_id": str(job_id) if job_id else None,
-                "source_scope": "GLOBAL",
+                "source_scope": source_scope,
                 "selection_reasons": score.selection_reasons,
                 "rejection_reasons": score.rejection_reasons,
             },
@@ -472,7 +673,7 @@ def _process_profile_auto_workflows(
         db.commit()
         return
 
-    for score in new_recommendations:
+    for score in selected_scores:
         existing = _existing_auto_workflow(db, profile.id, score.content.id, job_id)
         if existing:
             _mark_existing_auto_workflow_link(db, profile, score, existing)
@@ -563,21 +764,16 @@ def _existing_auto_workflow(
     db: Session,
     profile_id: uuid.UUID,
     content_id: uuid.UUID,
-    job_id: str | None,
+    _job_id: str | None,
 ) -> MediaWorkflow | None:
-    rows = (
+    # A profile/content pair represents one production intent regardless of
+    # which crawl job or manual/automatic path created it first.
+    return (
         db.query(MediaWorkflow)
         .filter(MediaWorkflow.profile_id == profile_id, MediaWorkflow.primary_content_id == content_id)
         .order_by(MediaWorkflow.created_at.desc())
-        .all()
+        .first()
     )
-    for workflow in rows:
-        metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
-        if metadata.get("selection_mode") != "AUTO":
-            continue
-        if job_id is None or str(metadata.get("crawl_job_id") or "") == str(job_id):
-            return workflow
-    return None
 
 
 def _create_auto_workflow_from_decision(
@@ -599,6 +795,13 @@ def _create_auto_workflow_from_decision(
     metadata = {
         "selection_mode": "AUTO",
         "selection_algorithm": AUTO_SELECTION_ALGORITHM,
+        "ai_review_required": True,
+        "draft_ai_review": {
+            "status": "PENDING",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "script_signature": draft_script_signature(story),
+        },
         "crawl_job_id": source_job_id,
         "content_angle": decision_meta.get("content_angle"),
         "target_audience": decision_meta.get("target_audience") or strategy.target_audience,
@@ -817,7 +1020,7 @@ def _mark_existing_auto_workflow_link(
     workflow: MediaWorkflow,
 ) -> ProfileContentLink:
     link = _upsert_profile_content_link(db, profile, score, decision=None)
-    skip_reason = f"Auto workflow already exists for this crawl job: {workflow.id}"
+    skip_reason = f"A workflow already exists for this profile and content: {workflow.id}"
     existing_metadata = link.metadata_json if isinstance(link.metadata_json, dict) else {}
     selection_reasons = list(existing_metadata.get("selection_reasons") or score.selection_reasons)
     if skip_reason not in selection_reasons:
@@ -880,7 +1083,7 @@ def _workflow_ai_decision_payload(workflow: MediaWorkflow, content_id: uuid.UUID
         **decision,
         "status": decision.get("status") or "WORKFLOW_ALREADY_EXISTS",
         "should_create_workflow": bool(decision.get("should_create_workflow", True)),
-        "reason": decision.get("reason") or "Auto workflow already exists for this content and crawl job.",
+        "reason": decision.get("reason") or "A workflow already exists for this profile and content.",
         "confidence_score": decision.get("confidence_score") or metadata.get("confidence_score"),
         "provider": decision.get("provider"),
         "model": decision.get("model"),

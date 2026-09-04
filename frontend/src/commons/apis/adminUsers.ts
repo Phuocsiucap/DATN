@@ -8,8 +8,18 @@ const normalizeUserList = (data: unknown) => ({
       : [],
 })
 
-export const fetchAdminUsersApi = async () => {
-  const { data } = await api.get('/users')
+export type AdminUserFilterParams = {
+  search?: string
+  role?: string
+  is_active?: boolean
+}
+
+export const fetchAdminUsersApi = async (filters?: AdminUserFilterParams) => {
+  const params: Record<string, string> = {}
+  if (filters?.search?.trim()) params.search = filters.search.trim()
+  if (filters?.role) params.role = filters.role
+  if (filters?.is_active !== undefined) params.is_active = String(filters.is_active)
+  const { data } = await api.get('/users', { params })
   return normalizeUserList(data)
 }
 

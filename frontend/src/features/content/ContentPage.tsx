@@ -17,11 +17,12 @@ import {
   AppButton,
   AppCard,
   EmptyBlock,
-  PageHeader,
+  PageLayout,
   PlatformIcon,
   SearchField,
   SelectControl,
   StatusPill,
+  TableRowActions,
   TabStrip,
   Thumbnail,
 } from '@/commons/component/social-ui'
@@ -119,17 +120,15 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
   ]
 
   return (
-    <div className="app-page">
-      <PageHeader
-        title="Bài viết"
-        description={isSystemUser
-          ? 'Danh sách bài viết trong kho Global'
-          : 'Bài riêng và bài Global được phân cho creator theo strategy của kênh'}
-        actions={<AppButton icon={<Plus size={16} />}>Tạo job crawl</AppButton>}
-      />
-
-      <div className="min-h-[calc(100vh-150px)]">
-        <AppCard className="min-w-0 overflow-hidden">
+    <PageLayout
+      title="Bài viết"
+      description={isSystemUser
+        ? 'Danh sách bài viết trong kho Global'
+        : 'Bài riêng và bài Global được phân cho creator theo strategy của kênh'}
+      actions={<AppButton icon={<Plus size={16} />}>Tạo job crawl</AppButton>}
+    >
+      <div className="flex min-h-0 flex-1">
+        <AppCard className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="px-5">
             <TabStrip value={activeTab} onChange={setActiveTab} tabs={tabs} />
           </div>
@@ -149,7 +148,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
           ) : filteredItems.length === 0 ? (
             <div className="p-5"><EmptyBlock label="Chưa có dữ liệu bài viết." /></div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="min-h-0 flex-1 overflow-auto">
               <div className="min-w-[920px]">
                 <div className="app-table-header grid grid-cols-[34px_minmax(300px,1.8fr)_120px_130px_130px_120px_90px] items-center gap-3 px-5 py-3">
                   <input type="checkbox" className="h-4 w-4 rounded border-[#cbd5e1]" />
@@ -185,7 +184,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
         }}
         onOpenModule2={onOpenModule2}
       />
-    </div>
+    </PageLayout>
   )
 }
 
@@ -262,9 +261,12 @@ function ContentRow({
       <span className="text-xs font-semibold text-[#34415a]">{formatDate(item.published_at || item.created_at)}</span>
       <span className={`text-sm font-extrabold ${score >= 80 ? 'text-[#16a34a]' : score >= 70 ? 'text-[#f59e0b]' : 'text-[#ef233c]'}`}>{formatScore(item.quality_score)}<span className="text-[#64748b]">/100</span></span>
       <StatusPill value={item.status || '-'} />
-      <div className="flex items-center gap-1">
-        <Eye size={16} className="text-[#526179]" />
-        <MoreVertical size={16} className="text-[#526179]" />
+      <div>
+        <TableRowActions
+          actions={[
+            { label: 'Xem chi tiết bài viết', icon: <Eye size={14} />, onClick },
+          ]}
+        />
       </div>
     </button>
   )

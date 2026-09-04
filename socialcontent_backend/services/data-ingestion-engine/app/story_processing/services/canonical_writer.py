@@ -460,10 +460,18 @@ class CanonicalWriter:
 
     def _extract_media(self, normalized: dict) -> list[dict]:
         media_items = normalized.get("media") if isinstance(normalized.get("media"), list) else []
-        if normalized.get("thumbnail_url"):
+        video_thumbnail_urls = {
+            self._media_url_fingerprint(item.get("thumbnail_url"))
+            for item in media_items
+            if isinstance(item, dict)
+            and str(item.get("media_type") or item.get("type") or "").upper().startswith("VIDEO")
+            and item.get("thumbnail_url")
+        }
+        primary_thumbnail = normalized.get("thumbnail_url")
+        if primary_thumbnail and self._media_url_fingerprint(primary_thumbnail) not in video_thumbnail_urls:
             media_items = [
                 *media_items,
-                {"media_type": "IMAGE", "source_url": normalized.get("thumbnail_url"), "role": "thumbnail"},
+                {"media_type": "IMAGE", "source_url": primary_thumbnail, "role": "thumbnail"},
             ]
         seen: set[tuple[str, str]] = set()
         result = []
@@ -501,6 +509,10 @@ class CanonicalWriter:
                 "caption": item.get("caption"),
             })
         return result
+
+    @staticmethod
+    def _media_url_fingerprint(value: str | None) -> str:
+        return str(value or "").split("?", 1)[0].split("#", 1)[0].lower()
 
     def _apply_episode(self, content: ContentItem, story: Story, normalized: dict) -> None:
         content.story_id = story.id

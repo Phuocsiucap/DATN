@@ -44,3 +44,11 @@ def require_system_admin(user: User = Depends(get_current_user)) -> User:
     if user.is_system_admin or "SYSTEM_ADMIN" in role_names:
         return user
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System admin access required")
+
+
+def require_creator(user: User = Depends(get_current_user)) -> User:
+    role_names = {role.name for role in user.roles}
+    if not user.is_system_admin and "SYSTEM_ADMIN" not in role_names and "ADMIN" not in role_names:
+        if "CREATOR" in role_names or "USER" in role_names:
+            return user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Creator access required")

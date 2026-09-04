@@ -37,15 +37,22 @@ export type InputItem = {
 
 export type PlanningRun = {
   id: string
-  profile_id: string
-  profile_name: string
-  profile_username?: string | null
-  profile_platform?: string | null
-  profile_avatar_url?: string | null
-  workflow_id?: string | null
-  workflow_title?: string | null
-  crawl_job_id?: string | null
+  // Legacy flat fields remain optional while cached/older responses are still
+  // readable alongside the normalized profile and crawl_job objects.
+  profile_id?: string
+  profile_name?: string
   crawl_job_name?: string | null
+  profile: {
+    profile_id: string
+    profile_name: string
+    profile_username?: string | null
+    profile_platform?: string | null
+    profile_avatar_url?: string | null
+  }
+  crawl_job?: {
+    id?: string | null
+    name?: string | null
+  } | null
   planning_mode: string
   status: string
   current_stage: string

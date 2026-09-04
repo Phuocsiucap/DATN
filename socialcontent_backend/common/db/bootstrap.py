@@ -48,6 +48,23 @@ def _schema_has_constraint(db: Session, constraint_name: str) -> bool:
     )
 
 
+def _schema_column_is_nullable(db: Session, table_name: str, column_name: str) -> bool:
+    return bool(
+        db.execute(
+            text(
+                """
+                SELECT is_nullable = 'YES'
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar()
+    )
+
+
 def _schema_compatibility_current(db: Session) -> bool:
     required_tables = {
         "social_profile_strategies",
@@ -66,6 +83,7 @@ def _schema_compatibility_current(db: Session) -> bool:
 
     required_columns = {
         "social_profile_strategies": {
+            "post_frequency_per_day",
             "receive_system_content",
             "auto_project_queue_enabled",
             "video_render_mode",
@@ -103,7 +121,10 @@ def _schema_compatibility_current(db: Session) -> bool:
     if not all(_schema_has_columns(db, table, columns) for table, columns in required_columns.items()):
         return False
 
-    return _schema_has_constraint(db, "uq_topic_embedding_model_text")
+    return (
+        _schema_has_constraint(db, "uq_topic_embedding_model_text")
+        and _schema_column_is_nullable(db, "social_profile_strategies", "post_frequency_per_day")
+    )
 
 
 def ensure_schema_compatibility(db: Session) -> None:
@@ -168,6 +189,19 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     ALTER TABLE social_profile_strategies
                     ADD COLUMN IF NOT EXISTS avoid_topic_descriptions JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+                    ALTER TABLE social_profile_strategies
+                    ADD COLUMN IF NOT EXISTS post_frequency_per_day INTEGER;
+
+                    ALTER TABLE social_profile_strategies
+                    ALTER COLUMN post_frequency_per_day DROP NOT NULL;
+
+                    ALTER TABLE social_profile_strategies
+                    ALTER COLUMN post_frequency_per_day DROP DEFAULT;
+
+                    UPDATE social_profile_strategies
+                    SET post_frequency_per_day = NULL
+                    WHERE post_frequency_per_day = 2;
                 END IF;
 
                 IF to_regclass('content_items') IS NOT NULL THEN
@@ -319,6 +353,22 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     CREATE INDEX IF NOT EXISTS ix_publishing_queue_items_platform_publish_id
                     ON publishing_queue_items (platform_publish_id);
+
+                    CREATE INDEX IF NOT EXISTS ix_publishing_queue_due_auto
+                    ON publishing_queue_items (scheduled_at, created_at)
+                    WHERE status IN ('queued', 'approved') AND scheduled_at IS NOT NULL;
+                END IF;
+
+                IF to_regclass('system_settings') IS NOT NULL THEN
+                    UPDATE system_settings
+                    SET value = jsonb_set(
+                        COALESCE(value, '{}'::jsonb),
+                        '{publish_queue_interval_minutes}',
+                        '1'::jsonb,
+                        TRUE
+                    )
+                    WHERE key = 'scheduler_settings'
+                      AND COALESCE((value->>'publish_queue_interval_minutes')::integer, 5) = 5;
                 END IF;
 
                 IF to_regclass('social_posts') IS NOT NULL THEN

@@ -1915,8 +1915,6 @@ class SocialProfileService:
             normalized = parsed.strftime("%H:%M")
             if normalized not in times:
                 times.append(normalized)
-        if not times:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_times không được để trống")
         return ",".join(times)
 
     def is_system_user(self, user: User) -> bool:

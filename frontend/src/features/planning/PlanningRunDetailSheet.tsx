@@ -22,7 +22,7 @@ const labels: Record<string, string> = {
   REVIEW_REQUIRED: 'Cần duyệt', DRAFT_REVIEW_REQUIRED: 'Draft cần duyệt',
   PRODUCTION_REJECTED: 'Không sản xuất', AI_APPROVED: 'Draft đạt kiểm tra',
   WORKFLOW_CREATED: 'Đã có workflow', EXISTING_AUTO_WORKFLOW: 'Đã có workflow',
-  SKIPPED_NO_API_KEY: 'Thiếu cấu hình AI', AI_ERROR: 'Lỗi sinh draft',
+  SKIPPED_NO_API_KEY: 'Thiếu cấu hình hệ thống', AI_ERROR: 'Lỗi sinh draft',
   PASS: 'Đạt', DRAFT_READY: 'Draft sẵn sàng', VOICE_READY: 'Voice sẵn sàng',
   DRAFT_QUEUED: 'Đã duyệt, đang sinh draft', DRAFT_FAILED: 'Sinh draft thất bại',
   FILTERED: 'Không qua bộ lọc', ELIGIBLE: 'Qua bộ lọc đầu vào',
@@ -35,7 +35,7 @@ const issueLabels: Record<string, string> = {
   UNSUPPORTED_NUMBER: 'Số liệu chưa có trong fact được trích dẫn',
   MISSING_EVIDENCE: 'Cảnh thiếu fact hỗ trợ', INVALID_EVIDENCE_ID: 'Mã fact không hợp lệ',
   NARRATION_TOO_LONG: 'Lời thoại vượt giới hạn từ', NARRATION_TOO_SHORT: 'Lời thoại quá ngắn',
-  HIGH_RISK_FLAG: 'Draft có cảnh báo rủi ro cao', LOW_MODEL_CONFIDENCE: 'AI chưa đủ chắc chắn',
+  HIGH_RISK_FLAG: 'Draft có cảnh báo rủi ro cao', LOW_MODEL_CONFIDENCE: 'Hệ thống chưa đủ chắc chắn',
   RISK_EXCEEDS_PROFILE_TOLERANCE: 'Rủi ro vượt mức cho phép của profile',
 }
 
@@ -245,19 +245,20 @@ export function PlanningRunDetailSheet({ run, detail, loading, onClose, onOpenPr
   const invalidCompletionTime = !!current?.started_at && !!current.completed_at && !!current.updated_at &&
     new Date(current.completed_at).getTime() <= new Date(current.started_at).getTime() &&
     new Date(current.updated_at).getTime() > new Date(current.completed_at).getTime()
+  const profileId = current?.profile?.id || run.profile?.profile_id || run.profile_id
 
   return <Sheet open onOpenChange={open => { if (!open) onClose() }}>
-    <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[800px] overflow-y-auto bg-slate-50 p-6">
+    <SheetContent side="right" className="w-[calc(100vw-1rem)] max-w-[1200px] overflow-y-auto bg-slate-50 p-6">
       <div className="space-y-5">
         <header className="space-y-2 border-b border-slate-200 pb-4">
           <div className="flex items-center gap-2"><span className="font-mono text-xs text-slate-500">#{shortId(run.id)}</span><Badge value={current?.status || run.status} /></div>
-          <h2 className="text-xl font-black text-slate-900">Chi tiết plan · {current?.profile?.name || run.profile_name}</h2>
-          <p className="text-xs text-slate-500">{current?.planning_mode || run.planning_mode} · Crawl: {current?.crawl_job?.name || run.crawl_job_name || 'Không có'}</p>
-          <p className="text-xs text-slate-500">Trạng thái planning không phải trạng thái hoàn tất video. Quyết định AI ban đầu được giữ trong lịch sử khi người dùng duyệt; workflow bên dưới là trạng thái hiện tại.</p>
+          <h2 className="text-xl font-black text-slate-900">Chi tiết plan · {current?.profile?.name || run.profile?.profile_name || run.profile_name || 'Không rõ profile'}</h2>
+          <p className="text-xs text-slate-500">{current?.planning_mode || run.planning_mode} · Crawl: {current?.crawl_job?.name || run.crawl_job?.name || run.crawl_job_name || 'Không có'}</p>
+          <p className="text-xs text-slate-500">Trạng thái planning không phải trạng thái hoàn tất video. Quyết định hệ thống ban đầu được giữ trong lịch sử khi người dùng duyệt; workflow bên dưới là trạng thái hiện tại.</p>
         </header>
         {error && <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <AlertTriangle size={16} className="shrink-0" /><p className="flex-1">{error}</p>
-          {onOpenProfileSettings && <button onClick={() => { onClose(); onOpenProfileSettings(current?.profile?.id || run.profile_id) }} className="inline-flex items-center gap-1 font-bold"><Settings2 size={13} /> Cấu hình</button>}
+          {onOpenProfileSettings && profileId && <button onClick={() => { onClose(); onOpenProfileSettings(profileId) }} className="inline-flex items-center gap-1 font-bold"><Settings2 size={13} /> Cấu hình</button>}
         </div>}
         {loading && <div className="flex items-center justify-center gap-2 p-8 text-sm text-slate-500"><Loader2 size={18} className="animate-spin" /> Đang tải chi tiết plan...</div>}
         {!loading && !current && <p className="p-5 text-center text-sm text-slate-500">Chưa tải được chi tiết plan. Hãy đóng và mở lại.</p>}

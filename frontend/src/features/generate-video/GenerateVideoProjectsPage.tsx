@@ -15,7 +15,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Share2,
   Sparkles,
   Trash2,
   X,
@@ -78,7 +77,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     () => items.filter(hasActiveTask).length,
     [items],
   )
-  const attentionItems = items.filter((item) => ['failed', 'unknown'].includes(classifyVideoWorkspace(item)))
+  const attentionItems = items.filter((item) => classifyVideoWorkspace(item) === 'unknown')
   const approvalsUrl = `/approvals${selectedProfileId ? `?profile_id=${encodeURIComponent(selectedProfileId)}` : ''}`
 
   // Compute KPI metrics
@@ -253,7 +252,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
   return (
     <PageLayout
       title="Xưởng sản xuất video"
-      description="Quản lý và theo dõi quy trình tạo kịch bản, tổng hợp voice AI và render MP4 theo thời gian thực."
+      description="Quản lý và theo dõi quy trình tạo kịch bản, tổng hợp voice hệ thống và render MP4 theo thời gian thực."
       actions={
         <>
           <span className="inline-flex items-center rounded-full border border-blue-200/80 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
@@ -358,7 +357,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       {/* Main Content Area */}
       {attentionItems.length > 0 && (
         <details open={true} className="shrink-0 rounded-xl border border-rose-200 bg-rose-50 p-3">
-          <summary className="cursor-pointer text-xs font-bold text-rose-700">Cần xử lý ({attentionItems.length}) — video lỗi hoặc trạng thái chưa xác định</summary>
+          <summary className="cursor-pointer text-xs font-bold text-rose-700">Cần xử lý ({attentionItems.length}) — trạng thái chưa xác định</summary>
           <div className="mt-2 grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
             {attentionItems.map((item) => (
               <button key={item.id} onClick={() => onOpenProject(item.id)} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-left text-xs">
@@ -369,7 +368,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           </div>
         </details>
       )}
-      <div className="min-h-0 flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden">
+      <div className="flex min-h-[420px] flex-1 flex-col gap-3 lg:flex-row">
         {/* Series Sidebar */}
         <aside className="w-full lg:w-64 shrink-0 overflow-y-auto rounded-2xl border border-slate-200/90 bg-white shadow-xs">
           <div className="sticky top-0 z-10 bg-white/95 p-4 backdrop-blur-sm border-b border-slate-100 flex items-center justify-between">
@@ -473,7 +472,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           <div className="h-full overflow-x-auto overflow-y-hidden pb-1">
             <div className="flex h-full min-w-full gap-3">
             {buildVideoKanbanColumns(items).map((column, columnIndex) => (
-              <section key={column.id} className="flex h-[calc(100vh-270px)] min-h-[450px] w-[250px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs lg:w-auto lg:min-w-[220px] lg:flex-1">
+              <section key={column.id} className="flex h-full w-[250px] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200/90 bg-white shadow-xs lg:w-auto lg:min-w-[220px] lg:flex-1">
                 <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3">
                   <div className="flex items-center gap-2">
                     <span className={`grid h-5 w-5 place-items-center rounded-full text-xs font-black ${column.badgeClass}`}>{columnIndex + 1}</span>
@@ -658,21 +657,18 @@ export function VideoKanbanCard({
           <span className="inline-flex items-center gap-1 text-xs text-slate-400"><Clock size={11} />{formatDateTime(item.updated_at)}</span>
         </div>
 
-        <div className="flex items-center justify-between">
-          <button onClick={onCopy} className="inline-flex items-center gap-1 rounded-[6px] bg-slate-50 px-2 py-1 font-mono text-xs font-bold text-slate-500 hover:bg-slate-100">
+        <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+          <button onClick={onCopy} className="inline-flex items-center gap-1 rounded-[6px] bg-slate-50 px-2 py-1 font-mono text-xs font-bold text-slate-500 hover:bg-slate-100" title="Sao chép ID">
             <Hash size={10} />
             {item.id.slice(0, 8)}
             {copied ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
           </button>
           <div className="flex items-center gap-1">
-            <button disabled={disabled} onClick={onDelete} title="Xóa workflow này" className="grid h-8 w-8 place-items-center rounded-[8px] border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 disabled:opacity-40 transition-colors">
-              <Trash2 size={13} />
+            <button onClick={onRegenerate} disabled={disabled} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 transition-colors" title="Tạo lại draft">
+              <RefreshCw size={14} />
             </button>
-            <button disabled={disabled} onClick={onRegenerate} title="Tạo lại draft" className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-              <RefreshCw size={13} className={busy ? 'animate-spin text-[#2556ea]' : ''} />
-            </button>
-            <button onClick={onOpen} className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-[#2556ea] px-2.5 text-xs font-extrabold text-white">
-              Mở <ArrowUpRight size={13} />
+            <button onClick={onDelete} disabled={disabled} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 transition-colors" title="Xóa workflow này">
+              <Trash2 size={14} />
             </button>
           </div>
         </div>

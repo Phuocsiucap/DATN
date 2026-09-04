@@ -1,5 +1,6 @@
 import { api } from './client'
 import { normalizeVideoWorkspaceList } from './videoWorkspaceList'
+import { mediaProxyPlaybackUrl } from '@/commons/mediaUrls'
 export type { VideoWorkspaceSummary } from './videoWorkspaceList'
 
 export type GenerateVideoScene = {
@@ -382,7 +383,8 @@ export const generateVideoMediaUrl = (assetPath: string) => {
   let cleaned = assetPath.trim()
   cleaned = cleaned.replace(/^https?:\/\/(127\.0\.0\.1|localhost|host\.docker\.internal)(:\d+)?\/?/, '')
   cleaned = cleaned.replace(/^\/?(api\/v1\/generate-video\/media\/)+/, '')
-  if (/^(https?:|blob:)/i.test(cleaned)) return cleaned
+  if (/^https?:/i.test(cleaned)) return mediaProxyPlaybackUrl(cleaned)
+  if (/^blob:/i.test(cleaned)) return cleaned
   const base = api.defaults.baseURL || ''
   return `${base}${basePath}/media/${cleaned.replace(/^\/+/, '')}`
 }
@@ -410,7 +412,7 @@ export const createDirectScriptApi = async (payload: {
   note?: string
 }) => {
   const { data } = await api.post(`${basePath}/direct-script`, payload)
-  return data as { workflow: Record<string, unknown>; job: GenerateVideoJob }
+  return data as { workflow: Record<string, unknown>; job: GenerateVideoJob | null; reused: boolean }
 }
 
 export const fetchVideoWorkspacesApi = async (params: {

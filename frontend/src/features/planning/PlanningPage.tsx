@@ -36,7 +36,7 @@ import {
 } from '@/commons/apis/planning'
 import { updateVideoWorkspaceApi } from '@/commons/apis/generateVideo'
 import { fetchSocialProfilesApi } from '@/commons/apis/socialProfiles'
-import { SocialProfileAvatar, platformLabel } from '@/commons/component/social-ui'
+import { SocialProfileAvatar, TableRowActions, type TableRowActionItem, platformLabel } from '@/commons/component/social-ui'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { SeriesModal, TransferSeriesModal, type SeriesFormData } from '@/features/generate-video/components/SeriesModal'
 import { PlanningRunDetailSheet } from './PlanningRunDetailSheet'
@@ -54,11 +54,12 @@ const formatDate = (value?: string | null) => value ? new Date(value).toLocaleSt
 const shortId = (value: string) => value.slice(0, 8)
 
 function planningRunTitle(job: PlanningRun) {
-  if (job.workflow_title) return job.workflow_title
-  if (job.selected_count > 0) return `Đã chọn ${job.selected_count} nội dung cho ${job.profile_name}`
-  if (job.eligible_count > 0) return `${job.eligible_count} nội dung đủ điều kiện chờ tạo workflow`
-  if (job.candidate_count > 0) return `Chưa có nội dung phù hợp từ ${job.crawl_job_name || 'crawl job'}`
-  return `Không có nội dung mới từ ${job.crawl_job_name || 'crawl job'}`
+  if (job.crawl_job?.name) return job.crawl_job.name
+  if (job.trigger === 'profile_strategy_updated') return 'Chấm lại strategy profile'
+  if (job.selected_count > 0) return `Đã chọn ${job.selected_count} nội dung cho ${job.profile.profile_name}`
+  if (job.eligible_count > 0) return `${job.eligible_count} nội dung đủ điều kiện chờ duyệt`
+  if (job.candidate_count > 0) return `Chưa có nội dung phù hợp (crawl id: ${shortId(job.crawl_job?.id || 'unknown')})`
+  return `Không có nội dung mới (crawl id: ${shortId(job.crawl_job?.id || 'unknown')})`
 }
 
 function planningRunOutcome(job: PlanningRun) {
@@ -72,6 +73,7 @@ function triggerLabel(value: string) {
   const key = value.toLowerCase()
   if (key === 'crawl_job_completed') return 'Sau crawl'
   if (key === 'global_crawl_completed') return 'Bài Global mới'
+  if (key === 'private_crawl_completed') return 'Bài Private mới'
   if (key === 'profile_strategy_updated') return 'Chấm lại strategy'
   return value.replace(/_/g, ' ')
 }
@@ -85,7 +87,7 @@ function stageLabel(value?: string | null) {
 
 function humanPlanningReason(reason: string, job: PlanningRun) {
   return reason
-    .replace(`profile ${job.profile_id}`, `profile ${job.profile_name}`)
+    .replace(`profile ${job.profile.profile_id}`, `profile ${job.profile.profile_name}`)
     .replace(/Evaluated (\d+) (?:GLOBAL )?candidate items/i, 'Đã đánh giá $1 nội dung Global')
     .replace(/with topic cosine threshold scoring\./i, 'bằng ngưỡng cosine theo chủ đề.')
     .replace(/against strategy embedding vector\./i, 'theo vector chiến lược.')
@@ -94,6 +96,9 @@ function humanPlanningReason(reason: string, job: PlanningRun) {
 }
 
 type PipelineStep = 'jobs' | 'plans' | 'series'
+type VisiblePipelineStep = Exclude<PipelineStep, 'series'>
+
+const visiblePipelineStep = (step: PipelineStep): VisiblePipelineStep => step === 'series' ? 'plans' : step
 
 const isTopicConfigError = (job: PlanningRun) =>
   job.status === 'FAILED' &&
@@ -111,7 +116,9 @@ export default function PlanningPage({
   onOpenProfileSettings?: (profileId: string) => void
   onOpenGenerateVideo?: (workflowId?: string) => void
 }) {
-  const activeStep = initialStep
+  const initialVisibleStep = visiblePipelineStep(initialStep)
+  const [activeStep, setActiveStep] = useState<VisiblePipelineStep>(initialVisibleStep)
+  const activeStepRef = useRef<VisiblePipelineStep>(initialVisibleStep)
   const [jobs, setJobs] = useState<PlanningRun[]>([])
   const [selectedRun, setSelectedRun] = useState<PlanningRun | null>(null)
   const [runDetail, setRunDetail] = useState<PlanningRunDetail | null>(null)
@@ -119,11 +126,21 @@ export default function PlanningPage({
   const runDetailRequest = useRef(0)
   const [reviewSeries, setReviewSeries] = useState<ProfileSeriesReview[]>([])
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState<string>(initialStep === 'jobs' ? 'all' : '')
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(visiblePipelineStep(initialStep) === 'jobs' ? 'all' : '')
   const [loadingProfiles, setLoadingProfiles] = useState(true)
   const runsRequest = useRef(0)
   const currentRunFilter = useRef(selectedProfileId)
   useEffect(() => { currentRunFilter.current = selectedProfileId }, [selectedProfileId])
+
+  const handleStepChange = (nextStep: VisiblePipelineStep) => {
+    activeStepRef.current = nextStep
+    setActiveStep(nextStep)
+    setSelectedProfileId(current => {
+      if (nextStep === 'jobs') return current || 'all'
+      if (current !== 'all' && profiles.some(profile => profile.id === current)) return current
+      return profiles[0]?.id || ''
+    })
+  }
 
   const loadRuns = useCallback(async () => {
     const profileId = currentRunFilter.current
@@ -298,9 +315,10 @@ export default function PlanningPage({
       const nextProfiles = profileResponse.items || []
       setProfiles(nextProfiles)
       setSelectedProfileId(current => {
-        if (activeStep === 'jobs' && current === 'all') return current
+        const currentStep = activeStepRef.current
+        if (currentStep === 'jobs' && current === 'all') return current
         if (nextProfiles.some(profile => profile.id === current)) return current
-        return activeStep === 'jobs' ? 'all' : nextProfiles[0]?.id || ''
+        return currentStep === 'jobs' ? 'all' : nextProfiles[0]?.id || ''
       })
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể tải kênh social')
@@ -319,14 +337,14 @@ export default function PlanningPage({
     setJobs([])
     setLoading(true)
     loadRuns().catch((error) => {
-      if (!cancelled) toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning')
+      if (!cancelled) toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu Lập kế hoạch hệ thống')
     }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true; runsRequest.current += 1 }
   }, [activeStep, selectedProfileId, loadRuns])
 
   useEffect(() => {
     if (activeStep !== 'plans') return
-    if (!selectedProfileId) {
+    if (!selectedProfileId || selectedProfileId === 'all') {
       setReviewSeries([])
       return
     }
@@ -357,17 +375,17 @@ export default function PlanningPage({
 
   const pageTitle = activeStep === 'jobs'
     ? 'Lịch Sử Auto Planning'
-    : 'Duyệt Thành Phẩm'
+    : 'Duyệt Plan & Series'
   const pageDescription = activeStep === 'jobs'
     ? 'Theo dõi đầu vào, kết quả chọn content và lý do của mỗi lần auto planning sau crawl.'
     : 'Duyệt kế hoạch theo từng social profile, nhóm theo series và xem từng bài trong series.'
 
   const handleRefresh = () => {
-    if (activeStep === 'plans' && selectedProfileId) {
+    if (activeStep === 'plans' && selectedProfileId && selectedProfileId !== 'all') {
       void loadProfilePlanning(selectedProfileId)
       return
     }
-    void Promise.all([loadProfiles(), loadRuns()]).catch((error) => toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu AI Planning'))
+    void Promise.all([loadProfiles(), loadRuns()]).catch((error) => toast.error(error?.response?.data?.detail || 'Không thể tải dữ liệu Lập kế hoạch hệ thống'))
   }
 
   const openRegenerateArticle = (plan: ContentPlan) => {
@@ -410,14 +428,35 @@ export default function PlanningPage({
         </div>
       </div>
 
-      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} allOption={activeStep === 'jobs'} loading={loadingProfiles} className="mb-5" />
+      <div className="inline-flex w-fit rounded-lg border border-[#d9e0ea] bg-white p-1 shadow-sm" role="tablist" aria-label="Chế độ quản lý planning">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeStep === 'jobs'}
+          onClick={() => handleStepChange('jobs')}
+          className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-bold transition-colors ${activeStep === 'jobs' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+        >
+          <FileText size={14} /> Lịch sử Auto Planning
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeStep === 'plans'}
+          onClick={() => handleStepChange('plans')}
+          className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-bold transition-colors ${activeStep === 'plans' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+        >
+          <ArrowRightLeft size={14} /> Duyệt plan & Series
+        </button>
+      </div>
+
+      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} allOption={activeStep === 'jobs'} loading={loadingProfiles} />
 
       {loading ? (
         <div className="flex items-center justify-center p-12 text-[#64748b]">
           <Loader2 className="animate-spin mr-2" size={24} /> Đang xử lý...
         </div>
       ) : (
-        <div className="min-h-[600px]">
+        <div className="min-h-0 flex-1">
           {activeStep === 'jobs' && (
             <div className="space-y-4">
               {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào cho kênh đã chọn" /></div> : jobs.map((job) => (
@@ -430,9 +469,9 @@ export default function PlanningPage({
                   <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="flex min-w-0 flex-1 gap-3">
                       <SocialProfileAvatar
-                        avatarUrl={job.profile_avatar_url}
-                        name={job.profile_name}
-                        platform={job.profile_platform || 'tiktok'}
+                        avatarUrl={job.profile.profile_avatar_url}
+                        name={job.profile.profile_name}
+                        platform={job.profile.profile_platform || 'tiktok'}
                         size="xl"
                       />
                       <div className="min-w-0 flex-1">
@@ -446,11 +485,10 @@ export default function PlanningPage({
                         </h3>
                         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-500">
                           <span className="truncate">
-                            {job.profile_name}
-                            {job.profile_username ? ` (@${job.profile_username})` : ''}
-                            {job.profile_platform ? ` · ${platformLabel(job.profile_platform)}` : ''}
+                            {job.profile.profile_name}
+                            {job.profile.profile_username ? ` (@${job.profile.profile_username})` : ''}
+                            {job.profile.profile_platform ? ` · ${platformLabel(job.profile.profile_platform)}` : ''}
                           </span>
-                          <span className="truncate">Nguồn: {job.crawl_job_name || 'Crawl job'}</span>
                         </div>
                         <div className="mt-3 text-sm font-bold text-slate-700">
                           {planningRunOutcome(job)}
@@ -498,7 +536,7 @@ export default function PlanningPage({
                         <p className="mt-0.5 text-amber-700">Profile này chưa có <strong>Content Topics</strong>. Auto Planning cần ít nhất 1 chủ đề để chọn bài phù hợp.</p>
                       </div>
                       <button
-                        onClick={() => onOpenProfileSettings?.(job.profile_id)}
+                        onClick={() => onOpenProfileSettings?.(job.profile.profile_id)}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors"
                       >
                         <Settings2 size={13} /> Cấu hình ngay
@@ -608,57 +646,49 @@ export default function PlanningPage({
                           <div className="flex items-center gap-2">
                             <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
                           </div>
-                          <div className="flex justify-end gap-2 flex-wrap">
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                const workflowId = article.plan?.workflow_id || article.plan?.id
-                                if (workflowId) {
-                                  setTransferringArticle({
-                                    workflowId,
-                                    title: article.plan?.title || article.source_content?.canonical_title || 'Bài viết',
-                                    currentSeriesId: item.series.id,
-                                  })
-                                } else {
-                                  toast.error('Bài này chưa tạo workflow kịch bản để chuyển series')
-                                }
-                              }}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors"
-                            >
-                              <ArrowRightLeft size={14} /> Chuyển series
-                            </button>
-                            {article.source_content && (
-                              <button
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setSelectedReviewArticle({ article, seriesTitle: item.series.title })
-                                }}
-                                className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
-                              >
-                                <FileText size={15} /> View full
-                              </button>
-                            )}
-                            {article.plan && (
-                              <>
-                                <button
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    openRegenerateArticle(article.plan!)
-                                  }}
-                                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9e0ea] bg-white px-3 text-xs font-bold text-[#475569] hover:bg-slate-50"
-                                >
-                                  <RefreshCcw size={15} /> Viết lại
-                                </button>
-                                <OpenDraftWorkspaceButton workflowId={article.plan.workflow_id || article.plan.id} onOpenWorkflow={onOpenGenerateVideo}
-                                  reviewRequired={article.plan.current_stage ? article.plan.current_stage === 'DRAFT_REVIEW_REQUIRED' : undefined}
-                                  rejected={article.plan.status === 'REJECTED'} />
-                                {article.plan.status === 'REJECTED' && <button type="button" disabled={restoreSubmitting}
-                                  onClick={event => { event.stopPropagation(); void restoreRejectedPlan(article.plan!) }}
-                                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-bold text-amber-800 disabled:opacity-50"
-                                >Khôi phục workflow</button>}
-                                <button
-                                  onClick={async (event) => {
-                                    event.stopPropagation()
+                          <div className="flex justify-end">
+                            <TableRowActions
+                              actions={([
+                                article.source_content ? {
+                                  label: 'View full bài gốc',
+                                  icon: <FileText size={14} />,
+                                  onClick: () => setSelectedReviewArticle({ article, seriesTitle: item.series.title }),
+                                } : null,
+                                {
+                                  label: 'Chuyển series',
+                                  icon: <ArrowRightLeft size={14} />,
+                                  onClick: () => {
+                                    const workflowId = article.plan?.workflow_id || article.plan?.id
+                                    if (workflowId) {
+                                      setTransferringArticle({
+                                        workflowId,
+                                        title: article.plan?.title || article.source_content?.canonical_title || 'Bài viết',
+                                        currentSeriesId: item.series.id,
+                                      })
+                                    } else {
+                                      toast.error('Bài này chưa tạo workflow kịch bản để chuyển series')
+                                    }
+                                  },
+                                },
+                                article.plan ? {
+                                  label: 'Mở Studio Editor',
+                                  icon: <FileText size={14} />,
+                                  onClick: () => onOpenGenerateVideo?.(article.plan!.workflow_id || article.plan!.id),
+                                } : null,
+                                article.plan ? {
+                                  label: 'Viết lại kịch bản',
+                                  icon: <RefreshCcw size={14} />,
+                                  onClick: () => openRegenerateArticle(article.plan!),
+                                } : null,
+                                article.plan?.status === 'REJECTED' ? {
+                                  label: 'Khôi phục workflow',
+                                  icon: <RefreshCcw size={14} />,
+                                  onClick: () => void restoreRejectedPlan(article.plan!),
+                                } : null,
+                                article.plan ? {
+                                  label: 'Từ chối kịch bản',
+                                  icon: <XCircle size={14} />,
+                                  onClick: async () => {
                                     try {
                                       await rejectContentPlanApi(article.plan!.workflow_id || article.plan!.id, 'Không đạt yêu cầu')
                                       toast.success('Đã từ chối kịch bản.')
@@ -666,13 +696,11 @@ export default function PlanningPage({
                                     } catch (err: any) {
                                       toast.error(err?.response?.data?.detail || 'Lỗi từ chối!')
                                     }
-                                  }}
-                                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-600 hover:bg-red-50"
-                                >
-                                  <XCircle size={15} /> Từ chối
-                                </button>
-                              </>
-                            )}
+                                  },
+                                  danger: true,
+                                } : null,
+                              ].filter(Boolean)) as TableRowActionItem[]}
+                            />
                           </div>
                         </div>
                       ))}

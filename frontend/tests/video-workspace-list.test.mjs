@@ -240,7 +240,7 @@ test('series refresh key ignores card order/count but changes for new or renamed
   assert.equal(videoWorkspaceSeriesKey([{ series: null }]), '[]')
 })
 
-test('production board has exactly four columns and completed videos stop at the fourth', () => {
+test('failed workflows stay in their production stage and the board has no failure column', () => {
   const input = {
     schema_version: 2,
     total: 4,
@@ -250,20 +250,21 @@ test('production board has exactly four columns and completed videos stop at the
     series: { s: { title: 'Chiến tranh thương mại và chính trị' } },
     items: [
       { id: 'queued', profile_id: 'p', title: 'Triều Tiên miễn nhiệm Bộ trưởng Quốc phòng', status: 'QUEUED_FOR_PUBLISHING', current_stage: 'QUEUED_FOR_PUBLISHING', progress_percent: 100, task_status: 'COMPLETED', updated_at: '2026-08-31T05:55:56Z' },
-      { id: 'failed-1', profile_id: 'p', series_id: 's', title: 'Tòa án ngăn ông Trump trục xuất sinh viên nước ngoài chỉ trích Israel', status: 'FAILED', current_stage: 'FAILED', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
-      { id: 'failed-2', profile_id: 'p', series_id: 's', title: 'Đảng Cộng hòa nguy cơ trả giá vì đòn thuế của ông Trump với Canada', status: 'FAILED', current_stage: 'FAILED', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
-      { id: 'failed-3', profile_id: 'p', title: 'Cuộc gặp giữa ông Putin và ông Tập', status: 'FAILED', current_stage: 'FAILED', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
+      { id: 'failed-1', profile_id: 'p', series_id: 's', title: 'Tòa án ngăn ông Trump trục xuất sinh viên nước ngoài chỉ trích Israel', status: 'FAILED', current_stage: 'GENERATING_DRAFT', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
+      { id: 'failed-2', profile_id: 'p', series_id: 's', title: 'Đảng Cộng hòa nguy cơ trả giá vì đòn thuế của ông Trump với Canada', status: 'FAILED', current_stage: 'GENERATING_VOICE', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
+      { id: 'failed-3', profile_id: 'p', title: 'Cuộc gặp giữa ông Putin và ông Tập', status: 'FAILED', current_stage: 'RENDERING_VIDEO', progress_percent: 30, task_status: 'FAILED', updated_at: '2026-08-31T05:54:50Z' },
     ],
   }
   const items = normalizeVideoWorkspaceList(input).items
   const columns = buildVideoKanbanColumns(items)
   const byId = Object.fromEntries(columns.map((column) => [column.id, column.items.map((item) => item.id)]))
 
-  assert.deepEqual(byId.draft, [])
-  assert.deepEqual(columns.map(column => column.id), ['draft', 'editing', 'rendering', 'review', 'failed'])
+  assert.deepEqual(columns.map(column => column.id), ['draft', 'editing', 'rendering', 'review'])
+  assert.deepEqual(byId.draft, ['failed-1'])
+  assert.deepEqual(byId.editing, ['failed-2'])
+  assert.deepEqual(byId.rendering, ['failed-3'])
   assert.deepEqual(byId.review, ['queued'])
-  assert.deepEqual(byId.failed, ['failed-1', 'failed-2', 'failed-3'])
-  assert.deepEqual(items.filter(item => classifyVideoWorkspace(item) === 'failed').map(item => item.id), ['failed-1', 'failed-2', 'failed-3'])
+  assert.deepEqual(items.map(item => classifyVideoWorkspace(item)), ['queued', 'draft', 'editing', 'rendering'])
   assert.equal(columns.flatMap(column => column.items).length, items.length)
 })
 
@@ -292,7 +293,7 @@ test('kanban classifies known terminal statuses before active task fallback', ()
 
   item.status = 'EDITING'
   item.task_status = 'FAILED'
-  assert.equal(classifyVideoWorkspace(item), 'failed')
+  assert.equal(classifyVideoWorkspace(item), 'editing')
 
   item.status = 'BACKEND_NEW_STATUS'
   item.task_status = 'COMPLETED'

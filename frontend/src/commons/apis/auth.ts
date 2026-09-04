@@ -36,3 +36,8 @@ export const getMyAiUsageApi = async () => {
   const { data } = await api.get('/users/me/ai-usage')
   return data
 }
+
+export const updateMyProfileApi = async (payload: { full_name?: string, password?: string }) => {
+  const { data } = await api.patch('/auth/me', payload)
+  return data
+}

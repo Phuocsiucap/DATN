@@ -76,6 +76,15 @@ def auth_me(user: User = Depends(get_current_user)):
     return to_user_response(user)
 
 
+@router.patch("/me", response_model=schemas.UserResponse)
+def update_my_profile(payload: schemas.MyProfileUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if payload.password and len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 6 ký tự")
+    updated_user = UserService().update_my_profile(db, user, payload)
+    return to_user_response(updated_user)
+
+
+
 @router.post("/refresh", response_model=schemas.TokenResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     token = request.cookies.get(REFRESH_COOKIE_NAME)

@@ -760,10 +760,17 @@ def collect_video_urls(source: dict[str, Any]) -> list[str]:
         storage_url = str(item.get("storage_url") or "").strip()
         url = storage_url or item.get("source_url") or item.get("url") or item.get("contentUrl")
         mime_type = str(item.get("mime_type") or item.get("mimeType") or "").lower()
+        media_type = str(item.get("media_type") or item.get("type") or "").upper()
+        media_format = str(item.get("format") or item.get("kind") or "").lower()
         if url and (
             storage_url.startswith("assets/videos/")
             or mime_type.startswith("video/")
-            or re.search(r"\.(?:mp4|webm|mov|m4v)(?:[?#]|$)", str(url), flags=re.IGNORECASE)
+            or "mpegurl" in mime_type
+            or media_format == "hls"
+            or (
+                media_type.startswith("VIDEO")
+                and re.search(r"\.(?:mp4|webm|mov|m4v|m3u8)(?:[?#]|$)", str(url), flags=re.IGNORECASE)
+            )
         ):
             videos.append(str(url))
     return list(dict.fromkeys(videos))
