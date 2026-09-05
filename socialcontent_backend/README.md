@@ -126,18 +126,22 @@ Optional config:
 - `timeout_seconds`: HTTP timeout.
 - `user_agent`: override default browser-like user agent.
 
-Scheduled source configs are supported for rows created through `/api/v1/crawl-sources` when:
+Recurring crawl is configured per Crawl Job. Create a job with a `schedule` object or update it through `PUT /api/v1/crawl-jobs/{job_id}/schedule`:
 
 ```json
 {
-  "configuration": {
-    "schedule_enabled": true,
-    "interval_minutes": 60
-  }
+  "enabled": true,
+  "runs_per_day": 2,
+  "window_start": "08:00",
+  "window_end": "18:00",
+  "weekdays": [0, 1, 2, 3, 4],
+  "timezone": "Asia/Ho_Chi_Minh"
 }
 ```
 
-Scheduler config:
+The Crawl Job Scheduler runs in `data-ingestion-engine` and processes only enabled job schedules. The Publish Queue Scheduler runs separately in `api-service`; System Admin can configure its interval, start or stop it, and trigger one queue pass immediately.
+
+Shared process-level scheduler config:
 
 - `ENABLE_SCHEDULER`, default `true`
 - `SCHEDULER_POLL_SECONDS`, default `60`

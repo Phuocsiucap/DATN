@@ -1,5 +1,6 @@
 from app.schemas.auth import BootstrapAdminRequest, LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.contents import (
+    ContentCreateRequest,
     ContentDetailResponse,
     ContentFitInsightResponse,
     ContentResponse,
@@ -48,12 +49,13 @@ from app.schemas.social_profiles import (
     TikTokPublishRequest,
     TikTokQrStartRequest,
 )
-from app.schemas.users import AdminUserCreateRequest, UserResponse, UserUpdateRequest
+from app.schemas.users import AdminUserCreateRequest, MyProfileUpdateRequest, UserResponse, UserUpdateRequest
 
 __all__ = [
     "BootstrapAdminRequest",
     "AdminUserCreateRequest",
     "ContentResponse",
+    "ContentCreateRequest",
     "ContentDetailResponse",
     "ContentFitInsightResponse",
     "ContentUpdateRequest",
@@ -72,6 +74,7 @@ __all__ = [
     "ProfileSeriesReviewResponse",
     "ProfileSeriesReviewSourceResponse",
     "LoginRequest",
+    "MyProfileUpdateRequest",
     "RegisterRequest",
     "ContentSeriesUpdateRequest",
     "ContentSeriesCreateRequest",

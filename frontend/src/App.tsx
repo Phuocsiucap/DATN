@@ -31,6 +31,8 @@ import TermsPage from '@/features/legal/TermsPage'
 import PrivacyPage from '@/features/legal/PrivacyPage'
 import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
 import OpenAiUsagePage from '@/features/admin/OpenAiUsagePage'
+import DeepseekUsagePage from '@/features/admin/DeepseekUsagePage'
+import AuditLogsPage from '@/features/admin/AuditLogsPage'
 
 import AuthPage from '@/features/auth/AuthPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
@@ -54,7 +56,7 @@ const LEGACY_PATHS: Record<string, string> = {
   '/planningRequest': TAB_PATHS.planning,
 }
 
-const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'settings', 'profile', 'openaiUsage'])
+const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'settings', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs'])
 const CREATOR_TABS = new Set<Tab>([
   'dashboard',
   'crawl',
@@ -276,6 +278,8 @@ function AppContent() {
           {activeTab === 'users' && <UsersPage currentUser={currentUser} />}
           {activeTab === 'profile' && <ProfilePage currentUser={currentUser} onProfileUpdated={() => void loadCurrentUser()} />}
           {activeTab === 'openaiUsage' && <OpenAiUsagePage />}
+          {activeTab === 'deepseekUsage' && <DeepseekUsagePage />}
+          {activeTab === 'auditLogs' && <AuditLogsPage />}
           {activeTab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

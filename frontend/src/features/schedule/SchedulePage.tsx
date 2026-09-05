@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import {
   Activity,
   AlertCircle,
+  CalendarClock,
   CalendarDays,
   CheckCircle,
   CheckCircle2,
@@ -14,13 +15,15 @@ import {
   RefreshCw,
   Rocket,
   Send,
+  SkipForward,
 } from 'lucide-react'
-import { fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { approveAndScheduleQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar, TableRowActions, type TableRowActionItem } from '@/commons/component/social-ui'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
+import { QueueScheduleDialog, type QueueScheduleTarget } from './components/QueueScheduleDialog'
 
 type SocialProfile = {
   id: string
@@ -32,6 +35,7 @@ type SocialProfile = {
   strategy?: {
     approval_mode?: string
     auto_publish_enabled?: boolean
+    schedule_timezone?: string
   } | null
 }
 
@@ -53,18 +57,11 @@ type QueueItem = {
   publish_status?: Record<string, unknown>
   scheduled_at?: string | null
   scheduled_at_local?: string | null
+  schedule_timezone?: string | null
   published_at?: string | null
   created_at?: string | null
   updated_at?: string | null
   error?: string | null
-}
-
-type QueueSummary = {
-  total?: number
-  total_scheduled?: number
-  today?: number
-  date_range?: number
-  status_counts?: Record<string, number>
 }
 
 type CalendarDay = {
@@ -103,6 +100,8 @@ const getPlatformMeta = (platform?: string | null) => {
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return 'Chưa xếp lịch'
+  const local = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/)
+  if (local) return `${local[4]}:${local[5]} ${local[3]}/${local[2]}/${local[1]}`
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
@@ -110,12 +109,44 @@ const formatDateTime = (value?: string | null) => {
 
 const formatTime = (value?: string | null) => {
   if (!value) return '--:--'
+  const local = value.match(/^\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/)
+  if (local) return `${local[1]}:${local[2]}`
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '--:--'
   return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 }
 
 const scheduledValue = (item: QueueItem) => item.scheduled_at_local || item.scheduled_at
+
+const zonedDateTimeValue = (value: string, timezone: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date)
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+    return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}:${values.second}`
+  } catch {
+    return zonedDateTimeValue(value, 'Asia/Bangkok')
+  }
+}
+
+const decorateQueueItem = (item: QueueItem, profile?: SocialProfile): QueueItem => {
+  const timezone = item.schedule_timezone || profile?.strategy?.schedule_timezone || 'Asia/Bangkok'
+  return {
+    ...item,
+    schedule_timezone: timezone,
+    scheduled_at_local: item.scheduled_at ? zonedDateTimeValue(item.scheduled_at, timezone) : null,
+  }
+}
 
 const formatDateKey = (date: Date) => {
   const year = date.getFullYear()
@@ -126,7 +157,16 @@ const formatDateKey = (date: Date) => {
 
 const dateKey = (value?: string | null) => {
   if (!value) return ''
+  const local = value.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (local) return local[1]
   return formatDateKey(new Date(value))
+}
+
+const localHour = (value?: string | null) => {
+  if (!value) return Number.NaN
+  const local = value.match(/^\d{4}-\d{2}-\d{2}[T ](\d{2})/)
+  if (local) return Number(local[1])
+  return new Date(value).getHours()
 }
 
 const startOfDay = (date: Date) => {
@@ -141,8 +181,7 @@ const addDays = (date: Date, days: number) => {
   return next
 }
 
-const makeWeekDays = (start: Date): CalendarDay[] => {
-  const todayKey = formatDateKey(startOfDay(new Date()))
+const makeWeekDays = (start: Date, todayKey: string): CalendarDay[] => {
   return Array.from({ length: 7 }, (_, index) => {
     const date = addDays(start, index)
     const key = formatDateKey(date)
@@ -164,9 +203,8 @@ const hasTikTokScope = (item: QueueItem, scope: string) => {
 const isItemInSlot = (item: QueueItem, slotHour: number, slots: number[]) => {
   const value = scheduledValue(item)
   if (!value) return false
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return false
-  const hour = date.getHours()
+  const hour = localHour(value)
+  if (!Number.isFinite(hour)) return false
   const slotIndex = slots.indexOf(slotHour)
   const nextSlot = slots[slotIndex + 1] ?? 24
   return hour >= slotHour && hour < nextSlot
@@ -180,16 +218,19 @@ export default function SchedulePage() {
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [weekStart, setWeekStart] = useState(() => startOfDay(new Date()))
-  const [summary, setSummary] = useState<QueueSummary>({})
+  const [totalScheduledCount, setTotalScheduledCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [quickItem, setQuickItem] = useState<QueueItem | null>(null)
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
+  const [scheduleItem, setScheduleItem] = useState<QueueScheduleTarget | null>(null)
 
   const mergeQueueItem = useCallback((updated: QueueItem) => {
-    setItems((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item))
-    setQuickItem((current) => current?.id === updated.id ? { ...current, ...updated } : current)
-    setModalItem((current) => current?.id === updated.id ? { ...current, ...updated } : current)
-  }, [])
+    const profile = profiles.find((candidate) => String(candidate.id) === String(updated.profile_id))
+    const normalized = decorateQueueItem(updated, profile)
+    setItems((current) => current.map((item) => item.id === normalized.id ? { ...item, ...normalized } : item))
+    setQuickItem((current) => current?.id === normalized.id ? { ...current, ...normalized } : current)
+    setModalItem((current) => current?.id === normalized.id ? { ...current, ...normalized } : current)
+  }, [profiles])
 
   const loadData = async () => {
     setLoading(true)
@@ -200,18 +241,20 @@ export default function SchedulePage() {
           profile_id: selectedProfileId !== 'all' ? selectedProfileId : undefined,
           platform: selectedPlatform !== 'all' ? selectedPlatform : undefined,
           queue_status: selectedStatus !== 'all' ? selectedStatus : undefined,
-          start_date: formatDateKey(weekStart),
-          end_date: formatDateKey(addDays(weekStart, 6)),
+          start_date: formatDateKey(addDays(weekStart, -1)),
+          end_date: formatDateKey(addDays(weekStart, 7)),
           q: searchQuery.trim() || undefined,
           view: 'schedule',
-          timezone: 'Asia/Bangkok',
+          timezone: 'UTC',
+          include_unscheduled: true,
         }),
       ])
       const nextProfiles = profileData.items || []
-      const nextItems = queueData.items || []
+      const nextProfilesById = new Map(nextProfiles.map((profile: SocialProfile) => [String(profile.id), profile]))
+      const nextItems = (queueData.items || []).map((item: QueueItem) => decorateQueueItem(item, nextProfilesById.get(String(item.profile_id))))
       setProfiles(nextProfiles)
       setItems(nextItems)
-      setSummary(queueData.summary || {})
+      setTotalScheduledCount(Number(queueData.summary?.total_scheduled || 0))
       setQuickItem((current) => current ? (nextItems.find((item: QueueItem) => item.id === current.id) || current) : null)
       setModalItem((current) => {
         if (!current) return null
@@ -275,6 +318,49 @@ export default function SchedulePage() {
     }
   }
 
+  const handleSchedule = async (scheduledAtLocal: string, timezone: string) => {
+    if (!scheduleItem) return false
+    const wasScheduled = Boolean(scheduleItem.scheduled_at)
+    setLoading(true)
+    try {
+      const updated = await approveAndScheduleQueueItemApi(scheduleItem.id, {
+        schedule_mode: 'manual',
+        scheduled_at: scheduledAtLocal,
+        timezone,
+      })
+      mergeQueueItem(updated)
+      await loadData()
+      toast.success(wasScheduled ? 'Đã thay đổi thời điểm xuất bản.' : 'Đã xếp lịch xuất bản cho queue item.')
+      return true
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể lưu lịch xuất bản')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSkip = async (queueItemId: string) => {
+    const item = items.find((candidate) => candidate.id === queueItemId)
+      || (modalItem?.id === queueItemId ? modalItem : null)
+      || (quickItem?.id === queueItemId ? quickItem : null)
+    if (!window.confirm(`Bỏ qua queue item “${item?.article_title || queueItemId}”? Thời điểm đã giữ sẽ được giải phóng.`)) return
+
+    setLoading(true)
+    try {
+      await updatePublishingQueueItemApi(queueItemId, 'skipped')
+      if (modalItem?.id === queueItemId) setModalItem(null)
+      if (quickItem?.id === queueItemId) setQuickItem(null)
+      if (scheduleItem?.id === queueItemId) setScheduleItem(null)
+      await loadData()
+      toast.success('Đã bỏ qua queue item và giải phóng thời điểm xuất bản.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể bỏ qua queue item')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handlePublishNow = async (item: QueueItem, requestedMode?: 'inbox' | 'direct') => {
     setLoading(true)
     const mode = requestedMode || (hasTikTokScope(item, 'video.publish') ? 'direct' : 'inbox')
@@ -303,7 +389,8 @@ export default function SchedulePage() {
     setLoading(true)
     try {
       const detail = await fetchPublishingQueueItemApi(item.id)
-      setModalItem(detail)
+      const profile = profiles.find((candidate) => String(candidate.id) === String(detail.profile_id))
+      setModalItem(decorateQueueItem(detail, profile))
     } catch (error: any) {
       setModalItem(item)
       toast.error(error?.response?.data?.detail || 'Không tải được chi tiết bài, đang hiển thị dữ liệu lịch.')
@@ -312,13 +399,16 @@ export default function SchedulePage() {
     }
   }
 
-  const weekEnd = useMemo(() => addDays(weekStart, 7), [weekStart])
-  const weekDays = useMemo(() => makeWeekDays(weekStart), [weekStart])
-  const todayKey = formatDateKey(startOfDay(new Date()))
-
   const profilesById = useMemo(() => {
     return new Map(profiles.map((profile) => [String(profile.id), profile]))
   }, [profiles])
+
+  const calendarTimezone = selectedProfileId !== 'all'
+    ? profilesById.get(selectedProfileId)?.strategy?.schedule_timezone || 'Asia/Bangkok'
+    : Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Bangkok'
+  const todayKey = dateKey(zonedDateTimeValue(new Date().toISOString(), calendarTimezone))
+  const weekEnd = useMemo(() => addDays(weekStart, 7), [weekStart])
+  const weekDays = useMemo(() => makeWeekDays(weekStart, todayKey), [todayKey, weekStart])
 
   const platforms = useMemo(() => {
     const values = new Set<string>()
@@ -346,17 +436,15 @@ export default function SchedulePage() {
   }, [items, profilesById, searchQuery, selectedPlatform, selectedProfileId])
 
   const weekItems = useMemo(() => {
+    const weekStartKey = formatDateKey(weekStart)
+    const weekEndKey = formatDateKey(weekEnd)
     return filteredItems.filter((item) => {
       const value = scheduledValue(item)
-      if (!value) return false
-      const time = new Date(value).getTime()
-      return time >= weekStart.getTime() && time < weekEnd.getTime()
+      if (!value || item.status === 'skipped') return false
+      const key = dateKey(value)
+      return key >= weekStartKey && key < weekEndKey
     }).sort((a, b) => {
-      const leftValue = scheduledValue(a)
-      const rightValue = scheduledValue(b)
-      const left = leftValue ? new Date(leftValue).getTime() : Number.MAX_SAFE_INTEGER
-      const right = rightValue ? new Date(rightValue).getTime() : Number.MAX_SAFE_INTEGER
-      return left - right
+      return String(scheduledValue(a) || '').localeCompare(String(scheduledValue(b) || ''))
     })
   }, [filteredItems, weekEnd, weekStart])
 
@@ -369,9 +457,9 @@ export default function SchedulePage() {
     weekItems.forEach((item) => {
       const value = scheduledValue(item)
       if (!value) return
-      const date = new Date(value)
-      if (Number.isNaN(date.getTime())) return
-      slots.add(Math.floor(date.getHours() / 2) * 2)
+      const hour = localHour(value)
+      if (!Number.isFinite(hour)) return
+      slots.add(Math.floor(hour / 2) * 2)
     })
     return Array.from(slots).sort((a, b) => a - b)
   }, [weekItems])
@@ -383,10 +471,21 @@ export default function SchedulePage() {
     })
   }, [todayItems, weekItems])
 
+  const unscheduledItems = useMemo(() => filteredItems.filter((item) => (
+    !scheduledValue(item) && ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status)
+  )), [filteredItems])
+
+  const scheduledItems = useMemo(() => filteredItems.filter((item) => (
+    Boolean(scheduledValue(item)) && item.status !== 'skipped'
+  )), [filteredItems])
+
   const weekRangeLabel = `${weekDays[0]?.subLabel || ''} - ${weekDays[6]?.subLabel || ''}`
-  const totalScheduled = summary.total_scheduled ?? items.filter((item) => scheduledValue(item)).length
-  const todayCount = summary.today ?? todayItems.length
-  const thisWeekCount = summary.date_range ?? weekItems.length
+  const totalScheduled = totalScheduledCount || scheduledItems.length
+  const todayCount = scheduledItems.filter((item) => {
+    const itemToday = dateKey(zonedDateTimeValue(new Date().toISOString(), item.schedule_timezone || 'Asia/Bangkok'))
+    return dateKey(scheduledValue(item)) === itemToday
+  }).length
+  const thisWeekCount = weekItems.length
 
   return (
     <PageLayout
@@ -529,6 +628,8 @@ export default function SchedulePage() {
                                 onSelect={() => setQuickItem(item)}
                                 onOpen={() => void handleOpenDetail(item)}
                                 onApprove={() => void handleApprove(item.id)}
+                                onSchedule={() => setScheduleItem(item)}
+                                onSkip={() => void handleSkip(item.id)}
                                 onPublish={() => void handlePublishNow(item)}
                                 loading={loading}
                               />
@@ -560,6 +661,14 @@ export default function SchedulePage() {
             onClose={() => setQuickItem(null)}
             onOpen={() => quickItem && void handleOpenDetail(quickItem)}
           />
+          <UnscheduledQueueList
+            items={unscheduledItems}
+            profilesById={profilesById}
+            loading={loading}
+            onSchedule={(item) => setScheduleItem(item)}
+            onSkip={(item) => void handleSkip(item.id)}
+            onOpen={(item) => void handleOpenDetail(item)}
+          />
         </aside>
       </div>
 
@@ -568,7 +677,16 @@ export default function SchedulePage() {
         loading={loading}
         onClose={() => setModalItem(null)}
         onApprove={(queueItemId) => void handleApprove(queueItemId)}
+        onSchedule={(item) => setScheduleItem(item)}
+        onSkip={(queueItemId) => void handleSkip(queueItemId)}
         onPublish={handlePublishItem}
+      />
+
+      <QueueScheduleDialog
+        item={scheduleItem}
+        loading={loading}
+        onClose={() => setScheduleItem(null)}
+        onSubmit={handleSchedule}
       />
     </PageLayout>
   )
@@ -613,6 +731,8 @@ function ScheduleEventCard({
   onSelect,
   onOpen,
   onApprove,
+  onSchedule,
+  onSkip,
   onPublish,
   loading,
 }: {
@@ -622,6 +742,8 @@ function ScheduleEventCard({
   onSelect: () => void
   onOpen: () => void
   onApprove: () => void
+  onSchedule: () => void
+  onSkip: () => void
   onPublish: () => void
   loading: boolean
 }) {
@@ -650,6 +772,18 @@ function ScheduleEventCard({
               label: 'Duyệt bài',
               icon: <CheckCircle2 size={13} />,
               onClick: onApprove,
+              disabled: loading,
+            } : null,
+            ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) ? {
+              label: item.scheduled_at ? 'Đổi thời điểm đăng' : 'Xếp lịch đăng',
+              icon: <CalendarClock size={13} />,
+              onClick: onSchedule,
+              disabled: loading,
+            } : null,
+            !['published', 'skipped', 'publishing'].includes(item.status) ? {
+              label: 'Bỏ qua queue item',
+              icon: <SkipForward size={13} />,
+              onClick: onSkip,
               disabled: loading,
             } : null,
             ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (hasTikTokScope(item, 'video.publish') || hasTikTokScope(item, 'video.upload')) ? {
@@ -729,6 +863,7 @@ function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem |
         <div>
           <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Thời gian đăng</div>
           {formatDateTime(scheduledValue(item))}
+          <div className="mt-0.5 font-semibold text-[#64748b]">{item.schedule_timezone || 'Asia/Bangkok'}</div>
         </div>
         <div>
           <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Kênh social</div>
@@ -752,5 +887,80 @@ function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem |
         Xem chi tiết bài viết
       </button>
     </div>
+  )
+}
+
+function UnscheduledQueueList({
+  items,
+  profilesById,
+  loading,
+  onSchedule,
+  onSkip,
+  onOpen,
+}: {
+  items: QueueItem[]
+  profilesById: Map<string, SocialProfile>
+  loading: boolean
+  onSchedule: (item: QueueItem) => void
+  onSkip: (item: QueueItem) => void
+  onOpen: (item: QueueItem) => void
+}) {
+  return (
+    <section className="rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-[#172033]">Chưa xếp lịch</h3>
+          <p className="mt-1 text-xs text-[#64748b]">Queue item đang chờ chọn thời điểm theo múi giờ của kênh.</p>
+        </div>
+        <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-xs font-black text-[#4f46e5]">{items.length}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="rounded-[8px] border border-dashed border-[#dbe2ea] px-3 py-5 text-center text-xs font-semibold text-[#64748b]">
+          Không có queue item nào đang chờ xếp lịch.
+        </div>
+      ) : (
+        <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+          {items.slice(0, 12).map((item) => {
+            const profile = profilesById.get(String(item.profile_id))
+            const status = statusMeta[item.status] || statusMeta.approved
+            return (
+              <article key={item.id} className="rounded-[8px] border border-[#e2e8f0] p-3">
+                <button type="button" onClick={() => onOpen(item)} className="flex w-full items-start gap-2.5 text-left">
+                  <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-2 text-xs font-extrabold leading-5 text-[#172033]">{item.article_title}</span>
+                    <span className="mt-1 block truncate text-[11px] font-semibold text-[#64748b]">
+                      {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
+                    </span>
+                    <span className="mt-1 block text-[11px] font-bold" style={{ color: status.color }}>{status.label}</span>
+                  </span>
+                </button>
+                <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => onSchedule(item)}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-[#4f46e5] px-3 text-xs font-extrabold text-white disabled:opacity-50"
+                  >
+                    <CalendarClock size={13} /> Xếp lịch
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Bỏ qua ${item.article_title}`}
+                    title="Bỏ qua queue item"
+                    disabled={loading}
+                    onClick={() => onSkip(item)}
+                    className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#e2e8f0] text-[#64748b] hover:bg-[#f8fafc] disabled:opacity-50"
+                  >
+                    <SkipForward size={14} />
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }

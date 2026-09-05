@@ -28,6 +28,7 @@ test('assigns GET cache tags by related API domain', () => {
   assert.deepEqual(getTagsForGet('/social-profiles/queue/items'), ['PublishingQueue'])
   assert.deepEqual(getTagsForGet('/profile/42/content-series'), ['ContentSeries'])
   assert.deepEqual(getTagsForGet('/media-workflows/abc/workspace'), ['MediaWorkflows'])
+  assert.deepEqual(getTagsForGet('/admin/system/audit-logs?page=1'), ['AuditLogs'])
 })
 
 test('queue mutations invalidate publishing data without evicting unrelated users', () => {
@@ -57,6 +58,15 @@ test('running the publish scheduler invalidates both scheduler and queue consume
   assert.ok(tags.includes('PublishingQueue'))
   assert.ok(tags.includes('SocialPosts'))
   assert.ok(tags.includes('Stats'))
+  assert.ok(tags.includes('AuditLogs'))
+})
+
+test('audited admin mutations invalidate the audit trail', () => {
+  for (const path of ['/users/user-1', '/admin/settings/scheduler', '/crawl-jobs/job-1', '/content-series/series-1']) {
+    const tags = getInvalidationForMutation(path)
+    assert.notEqual(tags, 'all')
+    assert.ok(tags.includes('AuditLogs'))
+  }
 })
 
 test('authentication and unknown mutations safely reset the entire cache', () => {

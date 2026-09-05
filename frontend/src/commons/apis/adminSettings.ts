@@ -1,8 +1,6 @@
 import { api } from './client'
 
 export type SchedulerSettings = {
-  vnexpress_interval_minutes: number
-  bilibili_interval_minutes: number
   publish_queue_interval_minutes: number
 }
 
@@ -11,8 +9,6 @@ export type SchedulerSettingsStatus = {
   interval: number
   settings: SchedulerSettings
   jobs: {
-    vnexpress: { id: string; interval_minutes: number }
-    bilibili: { id: string; interval_minutes: number }
     publish_queue: { id: string; interval_minutes: number }
   }
 }

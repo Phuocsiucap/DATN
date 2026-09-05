@@ -17,6 +17,7 @@ export const API_CACHE_TAG_TYPES = [
   'ContentSeries',
   'PlanningRuns',
   'OpenAiUsage',
+  'AuditLogs',
 ] as const
 
 export type ApiCacheTag = (typeof API_CACHE_TAG_TYPES)[number]
@@ -52,6 +53,7 @@ export const getTagsForGet = (url: string): ApiCacheTag[] => {
   if (/^\/users(?:\/|$)/.test(path)) return ['Users']
   if (/^\/admin\/settings\/scheduler(?:\/|$)/.test(path)) return ['Scheduler']
   if (/^\/admin\/system\/openai-usage(?:\/|$)/.test(path)) return ['OpenAiUsage']
+  if (/^\/admin\/system\/audit-logs(?:\/|$)/.test(path)) return ['AuditLogs']
   if (/^\/stats(?:\/|$)/.test(path)) return ['Stats']
   if (/^\/crawl-jobs(?:\/|$)/.test(path)) return ['CrawlJobs']
   if (/^\/source-types(?:\/|$)/.test(path)) return ['SourceTypes']
@@ -98,14 +100,14 @@ export const getInvalidationForMutation = (url: string): MutationInvalidation =>
 
   if (/^\/auth(?:\/|$)/.test(path)) return 'all'
 
-  if (/^\/users(?:\/|$)/.test(path)) return ['Users', 'Auth', 'Stats']
+  if (/^\/users(?:\/|$)/.test(path)) return ['Users', 'Auth', 'Stats', 'AuditLogs']
   if (/^\/admin\/settings\/scheduler\/publish-queue\/run-once(?:\/|$)/.test(path)) {
-    return uniqueTags(['Scheduler', 'MediaWorkflows'], publishingTags)
+    return uniqueTags(['Scheduler', 'MediaWorkflows', 'AuditLogs'], publishingTags)
   }
-  if (/^\/admin\/settings\/scheduler(?:\/|$)/.test(path)) return ['Scheduler']
+  if (/^\/admin\/settings\/scheduler(?:\/|$)/.test(path)) return ['Scheduler', 'AuditLogs']
 
   if (/^\/(?:crawl-jobs|publish\/crawl-now)(?:\/|$)/.test(path)) {
-    return uniqueTags(['CrawlJobs', 'Contents', 'Stats'], workflowTags)
+    return uniqueTags(['CrawlJobs', 'Contents', 'Stats', 'AuditLogs'], workflowTags)
   }
 
   if (/^\/social-profiles\/queue(?:\/|$)/.test(path)) {
@@ -124,7 +126,7 @@ export const getInvalidationForMutation = (url: string): MutationInvalidation =>
   }
 
   if (/^\/content-series(?:\/|$)/.test(path)) {
-    return ['ContentSeries', 'MediaWorkflows', 'PlanningRuns']
+    return ['ContentSeries', 'MediaWorkflows', 'PlanningRuns', 'AuditLogs']
   }
 
   if (/^\/planning-runs(?:\/|$)/.test(path)) return workflowTags

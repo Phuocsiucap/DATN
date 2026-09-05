@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -608,6 +608,7 @@ class SocialProfileService:
         scheduled_from: datetime | None = None,
         scheduled_to: datetime | None = None,
         search: str | None = None,
+        include_unscheduled: bool = False,
     ) -> list[PublishingQueueItem]:
         query = (
             db.query(PublishingQueueItem)
@@ -620,6 +621,7 @@ class SocialProfileService:
             scheduled_from=scheduled_from,
             scheduled_to=scheduled_to,
             search=search,
+            include_unscheduled=include_unscheduled,
         )
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
@@ -719,6 +721,7 @@ class SocialProfileService:
         scheduled_from: datetime | None = None,
         scheduled_to: datetime | None = None,
         search: str | None = None,
+        include_unscheduled: bool = False,
     ) -> list[PublishingQueueItem]:
         self.sync_rendered_workflows_to_queue(db, user)
         query = db.query(PublishingQueueItem).join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
@@ -734,6 +737,7 @@ class SocialProfileService:
             scheduled_from=scheduled_from,
             scheduled_to=scheduled_to,
             search=search,
+            include_unscheduled=include_unscheduled,
         )
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
@@ -745,15 +749,24 @@ class SocialProfileService:
         scheduled_from: datetime | None = None,
         scheduled_to: datetime | None = None,
         search: str | None = None,
+        include_unscheduled: bool = False,
     ):
         if queue_status == "upcoming":
             query = query.filter(PublishingQueueItem.status.in_(["queued", "approved", "publishing"]))
         elif queue_status:
             query = query.filter(PublishingQueueItem.status == queue_status)
+        schedule_conditions = []
         if scheduled_from:
-            query = query.filter(PublishingQueueItem.scheduled_at >= scheduled_from)
+            schedule_conditions.append(PublishingQueueItem.scheduled_at >= scheduled_from)
         if scheduled_to:
-            query = query.filter(PublishingQueueItem.scheduled_at < scheduled_to)
+            schedule_conditions.append(PublishingQueueItem.scheduled_at < scheduled_to)
+        if schedule_conditions:
+            scheduled_range = and_(*schedule_conditions)
+            query = query.filter(
+                or_(scheduled_range, PublishingQueueItem.scheduled_at.is_(None))
+                if include_unscheduled
+                else scheduled_range
+            )
         term = (search or "").strip()
         if term:
             pattern = f"%{term}%"
@@ -798,6 +811,8 @@ class SocialProfileService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy queue item")
         if item.status in {"published", "skipped"} and next_status != item.status:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item đã kết thúc không thể chuyển lại trạng thái duyệt")
+        if item.status == "publishing" and next_status != item.status:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item đang được xuất bản, không thể đổi trạng thái")
         if next_status in {"queued", "approved"}:
             self.require_queue_draft_ready(db, item, user)
         item.status = next_status
@@ -808,6 +823,11 @@ class SocialProfileService:
                 user,
                 note="Reviewer yêu cầu chỉnh sửa trước khi duyệt.",
             )
+        elif next_status == "skipped":
+            item.scheduled_at = None
+            item.error = None
+            item.ai_reason = _append_human_note(item.ai_reason, "Creator đã bỏ qua queue item và giải phóng lịch đăng.")
+            self.mark_queue_workflow_skipped(db, item, user)
         db.commit()
         db.refresh(item)
         return item
@@ -889,6 +909,30 @@ class SocialProfileService:
         workflow.metadata_json = metadata
         workflow.status = "EDITING"
         workflow.current_stage = "EDITING"
+        db.add(workflow)
+
+    def mark_queue_workflow_skipped(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        user: User,
+    ) -> None:
+        workflow = self.find_workflow_for_queue_item(db, item, user)
+        if not workflow or workflow.status in {"REJECTED", "PUBLISHED"}:
+            return
+
+        skipped_at = datetime.now(timezone.utc).isoformat()
+        metadata = dict(workflow.metadata_json or {})
+        metadata["queue_skipped_at"] = skipped_at
+        metadata["queue_skipped_by"] = str(user.id)
+        metadata["module4_queue"] = {
+            "status": "skipped",
+            "scheduled_at": None,
+            "reason": item.ai_reason,
+        }
+        workflow.metadata_json = metadata
+        workflow.status = "RENDERED"
+        workflow.current_stage = "RENDERED"
         db.add(workflow)
 
     def require_queue_draft_ready(self, db: Session, item: PublishingQueueItem, user: User) -> None:

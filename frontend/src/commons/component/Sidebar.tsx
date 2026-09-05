@@ -16,6 +16,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Send,
+  ScrollText,
   Settings,
   Sparkles,
   UserRound,
@@ -98,6 +99,7 @@ const adminSections: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Vận hành hệ thống', icon: <LayoutDashboard size={17} /> },
       { key: 'openaiUsage', label: 'OpenAI Usage', icon: <BarChart3 size={17} /> },
+      { key: 'deepseekUsage', label: 'DeepSeek Usage', icon: <BarChart3 size={17} /> },
     ],
   },
   {
@@ -106,6 +108,7 @@ const adminSections: NavSection[] = [
       { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
       { key: 'settings', label: 'Cấu hình chiến lược', icon: <Settings size={17} /> },
       { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
+      { key: 'auditLogs', label: 'Nhật ký hệ thống', icon: <ScrollText size={17} /> },
     ],
   },
 ]

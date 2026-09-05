@@ -112,6 +112,7 @@ export type PublishingQueueFilters = {
   q?: string
   view?: 'schedule' | string
   timezone?: string
+  include_unscheduled?: boolean
 }
 
 export const fetchSocialProfileQueueApi = async (profileId: string | number, filters?: string | Omit<PublishingQueueFilters, 'profile_id' | 'platform'>) => {
@@ -273,6 +274,11 @@ export const syncSocialProfileApi = async (profileId: string | number): Promise<
 
 export const fetchSocialPostsApi = async (profileId: string | number): Promise<SocialPostsResponse> => {
   const { data } = await api.get(`/social-profiles/${profileId}/posts`)
+  return data
+}
+
+export const deleteSocialPostApi = async (profileId: string | number, postId: string | number) => {
+  const { data } = await api.delete(`/social-profiles/${profileId}/posts/${postId}`)
   return data
 }
 

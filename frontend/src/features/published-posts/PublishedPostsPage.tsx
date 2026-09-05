@@ -13,11 +13,13 @@ import {
   TrendingUp,
   UsersRound,
   Video,
+  Trash2,
 } from 'lucide-react'
 import {
   fetchSocialPostsApi,
   fetchSocialProfilesApi,
   syncSocialProfileApi,
+  deleteSocialPostApi,
   type SocialPost,
   type SocialProfile,
 } from '@/commons/apis/api'
@@ -103,6 +105,7 @@ export default function PublishedPostsPage() {
   const [loadingPosts, setLoadingPosts] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => String(profile.id) === selectedProfileId) || null,
@@ -225,7 +228,21 @@ export default function PublishedPostsPage() {
     }
   }
 
-  const busy = loadingProfiles || loadingPosts
+  const handleDeletePost = async (postId: string) => {
+    if (!selectedProfileId || !window.confirm('Bạn có chắc chắn muốn xóa bản ghi bài đăng này? Lượt xem và tương tác của bài này sẽ bị xóa khỏi hệ thống.')) return
+    setIsDeleting(true)
+    try {
+      await deleteSocialPostApi(selectedProfileId, postId)
+      toast.success('Đã xóa bản ghi bài đăng.')
+      await loadPosts(selectedProfileId)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể xóa bài đăng')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const busy = loadingProfiles || loadingPosts || isDeleting
 
   return (
     <PageLayout
@@ -308,6 +325,7 @@ export default function PublishedPostsPage() {
                     post={post}
                     active={selectedPost?.id === post.id}
                     onSelect={() => setSelectedPostId(post.id)}
+                    onDelete={() => void handleDeletePost(post.id)}
                   />
                 ))}
               </div>
@@ -429,7 +447,7 @@ function ProfileStatBox({ label, value, icon, tint, bgTint }: { label: string; v
   )
 }
 
-function PostRow({ post, active, onSelect }: { post: SocialPost; active: boolean; onSelect: () => void }) {
+function PostRow({ post, active, onSelect, onDelete }: { post: SocialPost; active: boolean; onSelect: () => void; onDelete: () => void }) {
   return (
     <div
       role="button"
@@ -458,6 +476,7 @@ function PostRow({ post, active, onSelect }: { post: SocialPost; active: boolean
               icon: <ExternalLink size={14} />,
               onClick: () => window.open(post.post_url!, '_blank'),
             } : null,
+            { label: 'Xóa bài đăng', icon: <Trash2 size={14} className="text-red-500" />, onClick: onDelete, danger: true },
           ].filter(Boolean)) as TableRowActionItem[]}
         />
       </div>

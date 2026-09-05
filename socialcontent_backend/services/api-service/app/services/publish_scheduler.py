@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 SCHEDULER_SETTING_KEY = "scheduler_settings"
 DEFAULT_SCHEDULER_SETTINGS = {
-    "vnexpress_interval_minutes": 30,
-    "bilibili_interval_minutes": 30,
     "publish_queue_interval_minutes": 1,
 }
 
@@ -77,8 +75,6 @@ def scheduler_snapshot(db: Session) -> dict[str, Any]:
         "interval": interval,
         "settings": settings,
         "jobs": {
-            "vnexpress": {"id": "source_scheduler", "interval_minutes": settings["vnexpress_interval_minutes"]},
-            "bilibili": {"id": "source_scheduler", "interval_minutes": settings["bilibili_interval_minutes"]},
             "publish_queue": {"id": "api_publish_queue_scheduler", "interval_minutes": interval},
         },
         "last_run": _last_run,

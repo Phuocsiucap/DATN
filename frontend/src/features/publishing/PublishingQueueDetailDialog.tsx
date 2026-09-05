@@ -31,6 +31,8 @@ export type PublishingQueueDetailItem = {
   ai_reason?: string | null
   status: string
   scheduled_at?: string | null
+  scheduled_at_local?: string | null
+  schedule_timezone?: string | null
   published_at?: string | null
   error?: string | null
   created_at?: string | null
@@ -42,6 +44,7 @@ type PublishingQueueDetailDialogProps = {
   loading?: boolean
   onClose: () => void
   onApprove?: (queueItemId: string) => void
+  onSchedule?: (item: PublishingQueueDetailItem) => void
   onSkip?: (queueItemId: string) => void
   onPublish?: (item: PublishingQueueDetailItem, mode: 'inbox' | 'direct') => void
 }
@@ -65,6 +68,7 @@ export function PublishingQueueDetailDialog({
   loading = false,
   onClose,
   onApprove,
+  onSchedule,
   onSkip,
   onPublish,
 }: PublishingQueueDetailDialogProps) {
@@ -166,7 +170,11 @@ export function PublishingQueueDetailDialog({
             )}
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <InfoTile icon={<CalendarClock size={13} />} label="Lịch xuất bản" value={formatDateTime(item.scheduled_at)} />
+              <InfoTile
+                icon={<CalendarClock size={13} />}
+                label={`Lịch xuất bản${item.schedule_timezone ? ` · ${item.schedule_timezone}` : ''}`}
+                value={formatDateTime(item.scheduled_at_local || item.scheduled_at)}
+              />
               <InfoTile icon={<CheckCircle2 size={13} />} label="Đã đăng" value={formatDateTime(item.published_at)} />
             </div>
 
@@ -224,6 +232,17 @@ export function PublishingQueueDetailDialog({
                 >
                   <Send size={14} />
                   Gửi inbox
+                </button>
+              )}
+              {onSchedule && ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && (
+                <button
+                  onClick={() => onSchedule(item)}
+                  disabled={loading}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border px-3 text-xs font-semibold disabled:opacity-50"
+                  style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface)' }}
+                >
+                  <CalendarClock size={14} />
+                  {item.scheduled_at ? 'Đổi lịch' : 'Xếp lịch'}
                 </button>
               )}
               {onSkip && !['published', 'skipped', 'publishing'].includes(item.status) && (

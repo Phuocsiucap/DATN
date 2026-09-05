@@ -65,6 +65,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
   // Filter states
   const [search, setSearch] = useState('')
   const [sourceTypeFilter, setSourceTypeFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [dateRangeFilter, setDateRangeFilter] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
@@ -231,7 +232,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
 
           <div className="grid gap-3 border-b border-[var(--outline-variant)] p-5 md:grid-cols-[minmax(220px,1fr)_150px_170px_130px_190px_110px_42px]">
             <SearchField value={search} onChange={setSearch} placeholder="Tìm kiếm bài viết..." />
-            <SelectControl value={sourceTypeFilter} onChange={(e: any) => setSourceTypeFilter(e.target.value)}>
+            <SelectControl value={sourceTypeFilter} onChange={setSourceTypeFilter}>
               <option value="">Tất cả nguồn</option>
               {sourceTypes.map((type) => (
                 <option key={type.type} value={type.type}>
@@ -239,7 +240,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
                 </option>
               ))}
             </SelectControl>
-            <SelectControl value={categoryFilter} onChange={(e: any) => setCategoryFilter(e.target.value)}>
+            <SelectControl value={categoryFilter} onChange={setCategoryFilter}>
               <option value="">Tất cả chuyên mục</option>
               <option value="Thời sự">Thời sự</option>
               <option value="Giải trí">Giải trí</option>

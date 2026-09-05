@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'sonner'
 
-import { AlertTriangle, Check, CircleUserRound, ExternalLink, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, Zap } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Check, CircleUserRound, ExternalLink, Pause, Play, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, Zap } from 'lucide-react'
 import {
   fetchSocialProfilesApi,
   createSocialProfileApi,
@@ -15,12 +15,15 @@ import {
   deleteSocialProfileApi,
   syncSocialProfileApi,
   fetchAdminSchedulerSettingsApi,
+  fetchCrawlJobsApi,
   runPublishQueueSchedulerOnceApi,
   startAdminSchedulerApi,
   stopAdminSchedulerApi,
   updateAdminSchedulerSettingsApi,
+  updateCrawlJobScheduleApi,
   fetchSocialProfileStrategyApi,
   updateSocialProfileStrategyApi,
+  type CrawlJob,
   type SchedulerSettingsStatus,
   type SchedulerSettings,
 } from '@/commons/apis/api'
@@ -46,11 +49,21 @@ type TabMode = 'profiles' | 'scheduler'
 type SettingsNavigationState = { openProfileId?: string; openTab?: string } | null
 
 const DEFAULT_SETTINGS: SchedulerSettings = {
-  vnexpress_interval_minutes: 30,
-  bilibili_interval_minutes: 30,
   publish_queue_interval_minutes: 1,
 }
 const TIKTOK_QR_WARMUP_MS = 5000
+
+const formatSchedulerDate = (value?: string | null) => {
+  if (!value) return 'Chưa xác định'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Chưa xác định' : date.toLocaleString('vi-VN')
+}
+
+const apiErrorMessage = (error: unknown, fallback: string) => {
+  if (!error || typeof error !== 'object' || !('response' in error)) return fallback
+  const response = (error as { response?: { data?: { detail?: unknown } } }).response
+  return typeof response?.data?.detail === 'string' ? response.data.detail : fallback
+}
 
 function resolveProfileMetric(profile: SocialProfile, key: 'follower_count' | 'following_count' | 'likes_count' | 'video_count') {
   const directValue = profile[key]
@@ -102,6 +115,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   // Scheduler state
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerSettingsStatus | null>(null)
   const [schedulerForm, setSchedulerForm] = useState<SchedulerSettings>(DEFAULT_SETTINGS)
+  const [schedulerLoading, setSchedulerLoading] = useState(false)
+  const [crawlScheduleJobs, setCrawlScheduleJobs] = useState<CrawlJob[]>([])
+  const [crawlSchedulesLoading, setCrawlSchedulesLoading] = useState(false)
+  const [crawlScheduleBusyId, setCrawlScheduleBusyId] = useState<string | null>(null)
   const [syncingProfileId, setSyncingProfileId] = useState<string | null>(null)
 
   // Strategy Modal state
@@ -144,18 +161,38 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   const loadSchedulerSettings = async () => {
+    setSchedulerLoading(true)
     try {
       const data = await fetchAdminSchedulerSettingsApi()
       setSchedulerStatus(data)
       setSchedulerForm(data.settings)
     } catch (error) {
       console.error(error)
+      toast.error('Không tải được trạng thái Publish Queue Scheduler')
+    } finally {
+      setSchedulerLoading(false)
+    }
+  }
+
+  const loadCrawlSchedules = async () => {
+    setCrawlSchedulesLoading(true)
+    try {
+      const jobs = await fetchCrawlJobsApi()
+      setCrawlScheduleJobs(jobs.filter((job) => job.crawl_mode === 'SOURCE_CONFIG' && job.schedule))
+    } catch (error) {
+      console.error(error)
+      toast.error('Không tải được lịch Crawl Jobs')
+    } finally {
+      setCrawlSchedulesLoading(false)
     }
   }
 
   useEffect(() => {
     void loadProfiles()
-    if (isSystemUser) void loadSchedulerSettings()
+    if (isSystemUser) {
+      void loadSchedulerSettings()
+      void loadCrawlSchedules()
+    }
   }, [isSystemUser])
 
   // Auto-select & open strategy dialog when navigating from PlanningPage
@@ -426,60 +463,83 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   const saveSchedulerSettings = async () => {
-    setLoading(true)
+    setSchedulerLoading(true)
     try {
       const data = await updateAdminSchedulerSettingsApi(schedulerForm)
       setSchedulerStatus(data)
       setSchedulerForm(data.settings)
-      toast.success('Đã lưu cấu hình scheduler')
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Không lưu được')
+      toast.success('Đã lưu chu kỳ Publish Queue Scheduler')
+    } catch (error: unknown) {
+      toast.error(apiErrorMessage(error, 'Không lưu được'))
     } finally {
-      setLoading(false)
+      setSchedulerLoading(false)
     }
   }
 
   const startScheduler = async () => {
-    setLoading(true)
+    setSchedulerLoading(true)
     try {
       const data = await startAdminSchedulerApi()
       setSchedulerStatus(data)
       toast.success('Đã bật scheduler publish queue.')
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Không bật được scheduler')
+    } catch (error: unknown) {
+      toast.error(apiErrorMessage(error, 'Không bật được scheduler'))
     } finally {
-      setLoading(false)
+      setSchedulerLoading(false)
     }
   }
 
   const stopScheduler = async () => {
-    setLoading(true)
+    setSchedulerLoading(true)
     try {
       const data = await stopAdminSchedulerApi()
       setSchedulerStatus(data)
       toast.success('Đã dừng scheduler publish queue.')
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Không dừng được scheduler')
+    } catch (error: unknown) {
+      toast.error(apiErrorMessage(error, 'Không dừng được scheduler'))
     } finally {
-      setLoading(false)
+      setSchedulerLoading(false)
     }
   }
 
   const runPublishQueueOnce = async () => {
-    setLoading(true)
+    setSchedulerLoading(true)
     try {
       const data = await runPublishQueueSchedulerOnceApi()
       setSchedulerStatus(data)
       toast.success('Đã chạy publish queue scheduler một lượt.')
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Không chạy được publish queue')
+    } catch (error: unknown) {
+      toast.error(apiErrorMessage(error, 'Không chạy được publish queue'))
     } finally {
-      setLoading(false)
+      setSchedulerLoading(false)
+    }
+  }
+
+  const toggleCrawlSchedule = async (job: CrawlJob) => {
+    if (!job.schedule) return
+    setCrawlScheduleBusyId(job.id)
+    try {
+      const updated = await updateCrawlJobScheduleApi(job.id, {
+        enabled: !job.schedule.enabled,
+        runs_per_day: job.schedule.runs_per_day,
+        window_start: job.schedule.window_start,
+        window_end: job.schedule.window_end,
+        weekdays: job.schedule.weekdays,
+        timezone: job.schedule.timezone,
+      })
+      setCrawlScheduleJobs((jobs) => jobs.map((item) => item.id === updated.id ? updated : item))
+      toast.success(updated.schedule?.enabled ? 'Đã bật lịch Crawl Job.' : 'Đã tạm dừng lịch Crawl Job.')
+    } catch (error: unknown) {
+      toast.error(apiErrorMessage(error, 'Không cập nhật được lịch Crawl Job'))
+    } finally {
+      setCrawlScheduleBusyId(null)
     }
   }
 
   const activeProfiles = profiles.filter((profile) => String(profile.status || '').toLowerCase() === 'active').length
   const connectedPlatforms = new Set(profiles.map((profile) => String(profile.platform || '').toLowerCase()).filter(Boolean)).size
+  const activeCrawlSchedules = crawlScheduleJobs.filter((job) => job.schedule?.enabled).length
+  const pausedCrawlSchedules = crawlScheduleJobs.length - activeCrawlSchedules
 
   return (
     <PageLayout
@@ -593,45 +653,112 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       )}
 
       {activeTab === 'scheduler' && isSystemUser && (
-        <div className="workspace-card p-5">
-           <div className="flex items-center justify-between gap-3 mb-6">
-            <div>
-              <h2 className="text-base font-bold text-[#0f172a]">Cấu Hình Scheduler Admin</h2>
-              <p className="mt-1 text-xs text-[#64748b]">Trạng thái: <span className="font-semibold">{schedulerStatus?.status || '...'}</span></p>
+        <div className="space-y-5">
+          <div className="workspace-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <CalendarClock size={20} />
+                </span>
+                <div>
+                  <h2 className="text-base font-bold text-[#0f172a]">Crawl Job Scheduler</h2>
+                  <p className="mt-1 max-w-2xl text-xs text-[#64748b]">Mỗi Crawl Job có lịch riêng. Bật hoặc tạm dừng từng lịch mà không ảnh hưởng Publish Queue Scheduler.</p>
+                </div>
+              </div>
+              <button onClick={() => void loadCrawlSchedules()} disabled={crawlSchedulesLoading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50 disabled:opacity-60">
+                <RefreshCw size={14} className={crawlSchedulesLoading ? 'animate-spin' : ''} /> Tải lại lịch crawl
+              </button>
             </div>
-            <button onClick={() => void loadSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50">
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Tải lại
-            </button>
+
+            <div className="my-4 grid gap-3 sm:grid-cols-3">
+              <MetricCard icon={<CalendarClock size={18} />} label="Tổng lịch Crawl Job" value={crawlScheduleJobs.length} tint="#2556ea" />
+              <MetricCard icon={<Play size={18} />} label="Đang hoạt động" value={activeCrawlSchedules} tint="#16a34a" />
+              <MetricCard icon={<Pause size={18} />} label="Đang tạm dừng" value={pausedCrawlSchedules} tint="#f97316" />
+            </div>
+
+            <div className="max-h-[360px] overflow-y-auto rounded-xl border border-slate-200">
+              {crawlSchedulesLoading && crawlScheduleJobs.length === 0 ? (
+                <div className="p-8 text-center text-sm font-medium text-slate-500">Đang tải lịch Crawl Jobs...</div>
+              ) : crawlScheduleJobs.length === 0 ? (
+                <div className="p-8 text-center text-sm text-slate-500">Chưa có Crawl Job nào được cấu hình lịch.</div>
+              ) : crawlScheduleJobs.map((job) => {
+                const schedule = job.schedule!
+                const enabled = schedule.enabled
+                const busy = crawlScheduleBusyId === job.id
+                return (
+                  <div key={job.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-bold text-slate-800">{job.name}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {enabled ? 'Đang hoạt động' : 'Tạm dừng'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {schedule.runs_per_day} lần/ngày · {schedule.timezone} · Lần kế tiếp: {enabled ? formatSchedulerDate(schedule.next_run_at) : '—'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void toggleCrawlSchedule(job)}
+                      disabled={crawlScheduleBusyId !== null}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-semibold disabled:opacity-60 ${enabled ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                    >
+                      {busy ? <RefreshCw size={14} className="animate-spin" /> : enabled ? <Pause size={14} /> : <Play size={14} />}
+                      {enabled ? 'Tạm dừng lịch' : 'Bật lịch'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <a href="/crawl" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                <CalendarClock size={14} /> Mở Crawl Jobs để chỉnh lịch chi tiết
+              </a>
+            </div>
           </div>
 
-          <div className="mb-3 grid gap-3 md:grid-cols-3">
-            <label className="space-y-2 text-sm">
-              <span className="font-bold text-slate-700">VNExpress Crawl (phút)</span>
-              <input type="number" min={1} value={schedulerForm.vnexpress_interval_minutes} onChange={e => updateSchedulerField('vnexpress_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="font-bold text-slate-700">Bilibili Crawl (phút)</span>
-              <input type="number" min={1} value={schedulerForm.bilibili_interval_minutes} onChange={e => updateSchedulerField('bilibili_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="font-bold text-slate-700">Publish Queue (phút, mặc định 1)</span>
-              <input type="number" min={1} value={schedulerForm.publish_queue_interval_minutes} onChange={e => updateSchedulerField('publish_queue_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
-            </label>
-          </div>
+          <div className="workspace-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600"><Zap size={20} /></span>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-bold text-[#0f172a]">Publish Queue Scheduler</h2>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${schedulerStatus?.status === 'running' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                      {schedulerStatus?.status === 'running' ? 'Đang chạy' : schedulerStatus ? 'Đã dừng' : 'Đang tải'}
+                    </span>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs text-[#64748b]">Kiểm tra các bài đến lịch đăng và gửi chúng lên nền tảng. Có thể chạy ngay một lượt kể cả khi scheduler đang dừng.</p>
+                </div>
+              </div>
+              <button onClick={() => void loadSchedulerSettings()} disabled={schedulerLoading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50 disabled:opacity-60">
+                <RefreshCw size={14} className={schedulerLoading ? 'animate-spin' : ''} /> Tải lại trạng thái
+              </button>
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => void saveSchedulerSettings()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-60">
-              <Save size={14} /> Lưu cấu hình
-            </button>
-            <button onClick={() => void startScheduler()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60">
-              <RefreshCw size={14} /> Bật scheduler
-            </button>
-            <button onClick={() => void stopScheduler()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#d9e0ea] px-3 text-xs font-semibold text-[#475569] hover:bg-slate-50 disabled:opacity-60">
-              Dừng scheduler
-            </button>
-            <button onClick={() => void runPublishQueueOnce()} disabled={loading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60">
-              Chạy publish queue
-            </button>
+            <div className="my-4 max-w-sm">
+              <label className="space-y-2 text-sm">
+                <span className="font-bold text-slate-700">Chu kỳ kiểm tra Publish Queue (phút)</span>
+                <input type="number" min={1} max={1440} value={schedulerForm.publish_queue_interval_minutes} onChange={e => updateSchedulerField('publish_queue_interval_minutes', e.target.value)} className="w-full rounded-lg border border-[#d9e0ea] px-3 py-2 outline-none focus:border-[#3525cd]" />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => void saveSchedulerSettings()} disabled={schedulerLoading} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-60">
+                <Save size={14} /> Lưu chu kỳ
+              </button>
+              <button onClick={() => void startScheduler()} disabled={schedulerLoading || schedulerStatus?.status === 'running'} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60">
+                <Play size={14} /> Bật Publish Scheduler
+              </button>
+              <button onClick={() => void stopScheduler()} disabled={schedulerLoading || schedulerStatus?.status !== 'running'} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60">
+                <Pause size={14} /> Dừng Publish Scheduler
+              </button>
+              <button onClick={() => void runPublishQueueOnce()} disabled={schedulerLoading} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60">
+                <RefreshCw size={14} /> Chạy Publish Queue ngay
+              </button>
+            </div>
           </div>
         </div>
       )}

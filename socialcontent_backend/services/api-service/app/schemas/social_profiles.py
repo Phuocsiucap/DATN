@@ -96,8 +96,6 @@ class SocialProfileStrategyResponse(BaseModel):
 
 
 class SchedulerSettingsRequest(BaseModel):
-    vnexpress_interval_minutes: int = Field(default=30, ge=1, le=1440)
-    bilibili_interval_minutes: int = Field(default=30, ge=1, le=1440)
     publish_queue_interval_minutes: int = Field(default=1, ge=1, le=1440)
 
 

@@ -113,6 +113,7 @@ def list_my_queue(
     end_date: date | None = None,
     q: str | None = None,
     view: str | None = Query(default=None),
+    include_unscheduled: bool = Query(default=False),
     timezone_name: str = Query(default="Asia/Bangkok", alias="timezone"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -130,6 +131,7 @@ def list_my_queue(
         scheduled_from=scheduled_from,
         scheduled_to=scheduled_to,
         search=q,
+        include_unscheduled=include_unscheduled,
     )
     summary_items = service.list_user_queue(
         db,
@@ -458,6 +460,7 @@ def list_profile_queue(
     end_date: date | None = None,
     q: str | None = None,
     view: str | None = Query(default=None),
+    include_unscheduled: bool = Query(default=False),
     timezone_name: str = Query(default="Asia/Bangkok", alias="timezone"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -466,7 +469,15 @@ def list_profile_queue(
     profile = service.get_owned_profile(db, profile_id, current_user)
     tzinfo = _resolve_timezone(timezone_name)
     scheduled_from, scheduled_to = _date_range(start_date, end_date, tzinfo)
-    items = service.list_profile_queue(db, profile, queue_status or status, scheduled_from, scheduled_to, q)
+    items = service.list_profile_queue(
+        db,
+        profile,
+        queue_status or status,
+        scheduled_from,
+        scheduled_to,
+        q,
+        include_unscheduled=include_unscheduled,
+    )
     summary_items = service.list_profile_queue(db, profile, queue_status or status, search=q)
     return {
         "items": [_serialize_queue_response_item(db, service, item, view, tzinfo) for item in items],
@@ -682,6 +693,18 @@ def create_social_post(
     profile = service.get_owned_profile(db, profile_id, current_user)
     post = service.create_post(db, profile, payload)
     return service.serialize_post(post)
+
+
+@router.delete("/{profile_id}/posts/{post_id}", status_code=204)
+def delete_social_post(
+    profile_id: uuid.UUID,
+    post_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    service.delete_post(db, post_id, current_user)
+    return None
 
 
 @router.post("/{profile_id}/tiktok/qr/start")

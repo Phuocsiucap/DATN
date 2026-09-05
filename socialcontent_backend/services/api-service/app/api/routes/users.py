@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 
-from common.db.models import PromptRun, Role, User
+from common.db.models import AuditLog, PromptRun, Role, User
 from common.db.session import get_db
 from app.schemas import api as schemas
 from app.api.deps import get_current_user, require_admin, require_system_admin
@@ -152,7 +152,7 @@ def list_users(
 
 
 @router.post("", response_model=schemas.UserResponse, status_code=201)
-def create_user(payload: schemas.AdminUserCreateRequest, _: User = Depends(require_system_admin), db: Session = Depends(get_db)):
+def create_user(payload: schemas.AdminUserCreateRequest, current_user: User = Depends(require_system_admin), db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Email không được để trống")
@@ -162,6 +162,21 @@ def create_user(payload: schemas.AdminUserCreateRequest, _: User = Depends(requi
         raise HTTPException(status_code=409, detail="Email đã tồn tại")
     normalized_payload = payload.model_copy(update={"email": email})
     user = UserService().create_user_by_admin(db, normalized_payload)
+    db.add(
+        AuditLog(
+            actor_id=current_user.id,
+            action="user.created",
+            target_type="user",
+            target_id=str(user.id),
+            metadata_json={
+                "email": user.email,
+                "full_name": user.full_name,
+                "roles": [role.name for role in user.roles],
+                "is_active": user.is_active,
+            },
+        )
+    )
+    db.commit()
     return to_user_response(user)
 
 
@@ -185,7 +200,37 @@ def update_user(user_id: uuid.UUID, payload: schemas.UserUpdateRequest, current_
             raise HTTPException(status_code=400, detail="Không thể tự gỡ quyền SYSTEM_ADMIN của chính mình")
     if payload.is_active is False and user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Không thể tự khóa tài khoản đang đăng nhập")
+    before = {
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+        "roles": [role.name for role in user.roles],
+    }
     updated = UserService().update_user(db, user, payload)
+    after = {
+        "email": updated.email,
+        "full_name": updated.full_name,
+        "is_active": updated.is_active,
+        "roles": [role.name for role in updated.roles],
+    }
+    changed_fields = [key for key in before if before[key] != after[key]]
+    if payload.password:
+        changed_fields.append("password")
+    db.add(
+        AuditLog(
+            actor_id=current_user.id,
+            action="user.updated",
+            target_type="user",
+            target_id=str(updated.id),
+            metadata_json={
+                "changed_fields": changed_fields,
+                "before": before,
+                "after": after,
+                "password_changed": bool(payload.password),
+            },
+        )
+    )
+    db.commit()
     return to_user_response(updated)
 
 
@@ -196,6 +241,18 @@ def delete_user(user_id: uuid.UUID, current_user: User = Depends(require_system_
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action="user.deleted",
+        target_type="user",
+        target_id=str(user.id),
+        metadata_json={
+            "email": user.email,
+            "full_name": user.full_name,
+            "roles": [role.name for role in user.roles],
+        },
+    )
     db.delete(user)
+    db.add(audit)
     db.commit()
     return {"message": "Đã xóa user"}

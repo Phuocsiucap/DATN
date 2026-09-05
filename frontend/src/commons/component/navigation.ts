@@ -13,6 +13,8 @@ export type Tab =
   | 'settings'
   | 'profile'
   | 'openaiUsage'
+  | 'deepseekUsage'
+  | 'auditLogs'
 
 export const TAB_PATHS: Record<Tab, string> = {
   dashboard: '/',
@@ -29,6 +31,8 @@ export const TAB_PATHS: Record<Tab, string> = {
   settings: '/settings',
   profile: '/profile',
   openaiUsage: '/admin/openai-usage',
+  deepseekUsage: '/admin/deepseek-usage',
+  auditLogs: '/admin/audit-logs',
 }
 
 export const ADMIN_DASHBOARD_PATH = '/admin/dashboard'

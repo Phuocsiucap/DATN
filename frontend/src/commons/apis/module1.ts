@@ -400,22 +400,13 @@ export const deleteCrawlSourceApi = async (sourceId: string) => {
 export type SourceTypeConfig = {
   type: string
   supports: string[]
+  description?: string
   rss_feeds?: VnExpressRssFeed[]
-}
-
-export const fetchSourceTypesApi = async () => {
-  const { data } = await api.get('/source-types')
-  return data as SourceTypeConfig[]
 }
 
 // ─── Shared Crawl Source Configs ──────────────────────────────────────────
 
-export type SourceType = {
-  type: string
-  supports: string[]
-  description?: string
-  rss_feeds?: VnExpressRssFeed[]
-}
+export type SourceType = SourceTypeConfig
 
 export const fetchSourceTypesApi = async () => {
   const { data } = await api.get('/source-types')

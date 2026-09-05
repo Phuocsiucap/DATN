@@ -114,12 +114,7 @@ export const fetchSchedulerStatusApi = async () => {
   return data
 }
 
-export const startSchedulerApi = async (intervalMinutes = 30) => {
-  await api.put('/admin/settings/scheduler', {
-    vnexpress_interval_minutes: intervalMinutes,
-    bilibili_interval_minutes: intervalMinutes,
-    publish_queue_interval_minutes: intervalMinutes,
-  })
+export const startSchedulerApi = async () => {
   const { data } = await api.post('/admin/settings/scheduler/start')
   return data
 }
