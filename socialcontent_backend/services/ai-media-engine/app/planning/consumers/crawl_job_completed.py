@@ -791,7 +791,7 @@ def _create_auto_workflow_from_decision(
     story.setdefault("meta", {})
     quality = decision_meta.get("quality") if isinstance(decision_meta.get("quality"), dict) else {}
     quality_passed = quality.get("status") == "PASS"
-    source_job_id = str(job_id or content.crawl_job_id or "") or None
+    source_job_id = str(job_id or content.origin_crawl_job_id or "") or None
     metadata = {
         "selection_mode": "AUTO",
         "selection_algorithm": AUTO_SELECTION_ALGORITHM,
@@ -949,7 +949,7 @@ def _apply_series_decision(
             "created_from": "auto_planning",
             "source": "llm_series_decision",
             "source_content_id": str(content.id),
-            "crawl_job_id": str(content.crawl_job_id) if content.crawl_job_id else None,
+            "crawl_job_id": str(content.origin_crawl_job_id) if content.origin_crawl_job_id else None,
             "reason": decision.get("reason"),
             **category_payload,
         },

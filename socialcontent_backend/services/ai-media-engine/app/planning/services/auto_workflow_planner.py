@@ -923,7 +923,7 @@ class AutoWorkflowPlanner:
             "full_text": full_text,
             "content": {
                 "content_id": str(content.id),
-                "crawl_job_id": str(content.crawl_job_id) if content.crawl_job_id else None,
+                "crawl_job_id": str(content.origin_crawl_job_id) if content.origin_crawl_job_id else None,
                 "content_type": content.content_type,
                 "quality_score": float(content.quality_score or 0),
                 **content_category_payload(content),

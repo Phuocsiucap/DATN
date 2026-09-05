@@ -127,10 +127,18 @@ class ApiResponseEnvelopeMiddleware:
                     message, code, errors = _parse_http_exception(error)
                     payload = error_response(message, code=code, errors=errors)
                 else:
+                    pagination = _pagination_from_payload(payload)
+                    if pagination is not None and isinstance(payload, dict):
+                        payload.pop("total", None)
+                        payload.pop("page", None)
+                        payload.pop("limit", None)
+                        payload.pop("offset", None)
+                        payload["pagination"] = pagination
+
                     payload = success_response(
                         payload,
                         message=_success_message(scope.get("method", "GET"), status_code, payload),
-                        pagination=_pagination_from_payload(payload),
+                        pagination=None,
                     )
             encoded = json.dumps(
                 payload,

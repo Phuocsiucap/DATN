@@ -86,7 +86,7 @@ export default function CreatorDashboardPage({ onNavigate, onOpenProject }: Crea
         <CreatorActionsSkeleton />
       ) : null}
 
-      <section className="grid gap-4 xl:grid-cols-12">
+      <section className="shrink-0 grid gap-4 xl:grid-cols-12">
         <div className="xl:col-span-7">
           {projects.data ? (
             <RecentProjects data={projects.data} onOpenProject={onOpenProject} onNavigate={onNavigate} />
@@ -158,12 +158,12 @@ function useCreatorSection<T>(fetcher: () => Promise<T>): SectionState<T> {
 
 export function CreatorHero({ data, onNavigate }: { data: CreatorDashboardOverview; onNavigate: (tab: Tab) => void }) {
   return (
-    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-700 px-6 py-7 text-white shadow-lg shadow-indigo-200/60 md:px-8">
+    <section className="shrink-0 relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-700 px-6 py-7 text-white shadow-lg shadow-indigo-200/60 md:px-8">
       <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-white/10 blur-2xl" />
       <div className="absolute -bottom-20 left-1/3 h-48 w-48 rounded-full bg-cyan-300/10 blur-2xl" />
       <div className="relative grid items-center gap-7 lg:grid-cols-[1.35fr_1fr]">
         <div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-extrabold tracking-wider backdrop-blur-sm">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/30 bg-white/20 px-3 py-1.5 text-[11px] font-extrabold tracking-wider text-white shadow-sm backdrop-blur-md">
             <WandSparkles size={13} /> CREATOR WORKSPACE
           </span>
           <h2 className="mt-4 max-w-2xl text-2xl font-black tracking-tight md:text-3xl">Biến ý tưởng thành nội dung sẵn sàng xuất bản</h2>
@@ -181,29 +181,36 @@ export function CreatorHero({ data, onNavigate }: { data: CreatorDashboardOvervi
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <HeroMetric label="Kênh hoạt động" value={data.profiles.active} detail={`${data.profiles.total} kênh của bạn`} />
-          <HeroMetric label="Dự án đang làm" value={data.projects.in_progress} detail={`${data.projects.total} tổng dự án`} />
-          <HeroMetric label="Đã lên lịch" value={data.publishing.scheduled} detail="Chờ đến giờ đăng" />
-          <HeroMetric label="Đã xuất bản" value={data.publishing.published} detail="Trên các kênh của bạn" />
+          <HeroMetric label="Kênh hoạt động" value={data.profiles.active} detail={`/ ${data.profiles.total} tổng số`} icon={<CircleUserRound size={18} />} />
+          <HeroMetric label="Dự án đang làm" value={data.projects.in_progress} detail={`/ ${data.projects.total} tổng số`} icon={<Clapperboard size={18} />} />
+          <HeroMetric label="Chờ xuất bản" value={data.publishing.scheduled} detail="Đã lên lịch" icon={<CalendarDays size={18} />} />
+          <HeroMetric label="Đã hoàn thành" value={data.publishing.published} detail="Đã đăng tải" icon={<CheckCircle2 size={18} />} />
         </div>
       </div>
     </section>
   )
 }
 
-function HeroMetric({ label, value, detail }: { label: string; value: number; detail: string }) {
+function HeroMetric({ label, value, detail, icon }: { label: string; value: number; detail: string; icon?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/15 bg-white/10 p-3.5 backdrop-blur-md">
-      <div className="text-2xl font-black tabular-nums">{value}</div>
-      <div className="mt-1 text-xs font-extrabold text-white">{label}</div>
-      <div className="mt-0.5 truncate text-[10px] font-medium text-indigo-200">{detail}</div>
+    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-3 backdrop-blur-md transition-all hover:bg-white/20">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1 truncate">
+            <span className="text-xl font-black tabular-nums tracking-tight text-white">{value}</span>
+            <span className="truncate text-[10px] font-semibold text-indigo-200">{detail}</span>
+          </div>
+          <div className="mt-0.5 truncate text-[11px] font-bold text-white">{label}</div>
+        </div>
+        {icon && <div className="ml-2 shrink-0 rounded-lg bg-white/10 p-1.5 text-indigo-100 transition-transform group-hover:scale-110 group-hover:bg-white/20">{icon}</div>}
+      </div>
     </div>
   )
 }
 
 export function CreatorActions({ data, onNavigate }: { data: CreatorDashboardOverview; onNavigate: (tab: Tab) => void }) {
   return (
-    <section>
+    <section className="shrink-0">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <h2 className="text-base font-black text-slate-900">Việc cần bạn xử lý</h2>
@@ -237,11 +244,18 @@ function CreatorActionCard({ icon, value, title, description, action, tone, onCl
 }) {
   const colors = actionTones[tone]
   return (
-    <button type="button" onClick={onClick} className={cn('group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition hover:-translate-y-0.5 hover:shadow-md', colors.border)}>
-      <div className="flex items-start justify-between gap-3"><span className={cn('grid h-10 w-10 place-items-center rounded-xl', colors.icon)}>{icon}</span><span className={cn('text-3xl font-black tabular-nums', colors.value)}>{value}</span></div>
-      <h3 className="mt-4 text-sm font-black text-slate-900">{title}</h3>
-      <p className="mt-1 min-h-10 text-xs font-medium leading-5 text-slate-500">{description}</p>
-      <span className={cn('mt-3 inline-flex items-center gap-1 text-xs font-extrabold', colors.button)}>{action}<ArrowRight size={13} className="transition group-hover:translate-x-1" /></span>
+    <button type="button" onClick={onClick} className={cn('group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:shadow-md', colors.border)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', colors.icon)}>{icon}</span>
+          <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+        </div>
+        <span className={cn('text-2xl font-black tabular-nums', colors.value)}>{value}</span>
+      </div>
+      <p className="mt-3 min-h-[2rem] text-xs font-medium leading-relaxed text-slate-500">{description}</p>
+      <span className={cn('mt-3 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', colors.button)}>
+        {action}<ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
+      </span>
     </button>
   )
 }

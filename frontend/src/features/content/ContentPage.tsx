@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays,
@@ -25,14 +27,13 @@ import {
   SelectControl,
   StatusPill,
   TableRowActions,
-  TabStrip,
   Thumbnail,
 } from '@/commons/component/social-ui'
 import { ContentDetailSheet } from './components/ContentDetailSheet'
 import { CreateWorkflowModal } from './components/CreateWorkflowModal'
 import { ManualContentModal } from './components/ManualContentModal'
 
-type ContentTab = 'all' | 'fit' | 'used' | 'discarded'
+// ContentTab removed - always show all content
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-'
@@ -48,12 +49,8 @@ const formatScore = (value?: number | null) => {
   return Number.isFinite(score) ? score.toFixed(1) : '-'
 }
 
-const isUsedStatus = (status?: string | null) => /used|approved|completed|published/i.test(String(status || ''))
-const isDiscardedStatus = (status?: string | null) => /reject|discard|failed/i.test(String(status || ''))
-
 export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { isSystemUser?: boolean; onOpenModule2?: (jobId?: string) => void }) {
   const [view, setView] = useState<FinalContentView>({ normal_items: [], series_items: [] })
-  const [activeTab, setActiveTab] = useState<ContentTab>('all')
   const [selectedContent, setSelectedContent] = useState<FinalContentItem | null>(null)
   const [contentDetail, setContentDetail] = useState<ContentDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -158,11 +155,6 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase()
     return baseItems.filter((item) => {
-      const score = Number(item.quality_score || 0)
-      if (activeTab === 'fit' && score < 80) return false
-      if (activeTab === 'used' && !isUsedStatus(item.status)) return false
-      if (activeTab === 'discarded' && !isDiscardedStatus(item.status)) return false
-
       // Apply source type filter
       if (sourceTypeFilter && item.source_type !== sourceTypeFilter) return false
 
@@ -175,18 +167,11 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
         item.status,
       ].some((value) => String(value || '').toLowerCase().includes(query))
     })
-  }, [activeTab, baseItems, search, sourceTypeFilter])
+  }, [baseItems, search, sourceTypeFilter])
 
-  const tabs = [
-    { value: 'all' as const, label: 'Tất cả', count: baseItems.length },
-    { value: 'fit' as const, label: 'Phù hợp', count: baseItems.filter((item) => Number(item.quality_score || 0) >= 80).length },
-    { value: 'used' as const, label: 'Đã dùng', count: baseItems.filter((item) => isUsedStatus(item.status)).length },
-    { value: 'discarded' as const, label: 'Đổi loại', count: baseItems.filter((item) => isDiscardedStatus(item.status)).length },
-  ]
-
-  const allFilteredSelected = filteredItems.length > 0 && filteredItems.every((item) => selectedContentIds.includes(item.id))
-  const toggleVisibleSelection = () => {
-    const visibleIds = filteredItems.map((item) => item.id)
+  const toggleVisibleSelection = (visibleItems: FinalContentItem[]) => {
+    const visibleIds = visibleItems.map((item) => item.id)
+    const allFilteredSelected = visibleItems.length > 0 && visibleItems.every((item) => selectedContentIds.includes(item.id))
     setSelectedContentIds((current) => allFilteredSelected
       ? current.filter((id) => !visibleIds.includes(id))
       : [...new Set([...current, ...visibleIds])].slice(0, 20))
@@ -225,11 +210,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
       }
     >
       <div className="flex min-h-0 flex-1">
-        <AppCard className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="px-5">
-            <TabStrip value={activeTab} onChange={setActiveTab} tabs={tabs} />
-          </div>
-
+        <AppCard className="app-table-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <div className="grid gap-3 border-b border-[var(--outline-variant)] p-5 md:grid-cols-[minmax(220px,1fr)_150px_170px_130px_190px_110px_42px]">
             <SearchField value={search} onChange={setSearch} placeholder="Tìm kiếm bài viết..." />
             <SelectControl value={sourceTypeFilter} onChange={setSourceTypeFilter}>
@@ -275,42 +256,57 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
             <button className="grid h-10 w-10 place-items-center rounded-[8px] border border-[var(--outline-variant)] bg-white text-[#526179]"><Grid2X2 size={16} /></button>
           </div>
 
-          {loading ? (
+          <PaginatedList items={filteredItems} loading={loading} resetKey={JSON.stringify([search, sourceTypeFilter, categoryFilter, statusFilter, dateRangeFilter, sortBy, sortOrder])}>{(visibleItems) => (
+loading ? (
             <ContentTableSkeleton />
           ) : filteredItems.length === 0 ? (
             <div className="p-5"><EmptyBlock label="Chưa có dữ liệu bài viết." /></div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-auto">
-              <div className="min-w-[920px]">
-                <div className="app-table-header grid grid-cols-[34px_minmax(300px,1.8fr)_120px_130px_130px_120px_90px] items-center gap-3 px-5 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allFilteredSelected}
-                    onChange={toggleVisibleSelection}
-                    aria-label="Chọn tất cả nội dung đang hiển thị"
-                    className="h-4 w-4 rounded border-[#cbd5e1] accent-[#6d5dfc]"
-                  />
-                  <span>Bài viết</span>
-                  <span>Nguồn</span>
-                  <span>Ngày đăng</span>
-                  <span>Điểm phù hợp</span>
-                  <span>Trạng thái</span>
-                  <span>Thao tác</span>
-                </div>
-                {filteredItems.map((item, index) => (
-                  <ContentRow
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    active={selectedContent?.id === item.id}
-                    selected={selectedContentIds.includes(item.id)}
-                    onToggle={() => toggleContentSelection(item.id)}
-                    onClick={() => void openDetail(item)}
-                  />
-                ))}
-              </div>
+            <div className="min-h-0 flex-1">
+                  <Table className="min-w-[960px] table-fixed">
+                    <colgroup>
+                      <col style={{ width: '48px' }} />
+                      <col style={{ width: '34%' }} />
+                      <col style={{ width: '110px' }} />
+                      <col style={{ width: '130px' }} />
+                      <col style={{ width: '110px' }} />
+                      <col style={{ width: '110px' }} />
+                      <col style={{ width: '90px' }} />
+                    </colgroup>
+                    <ShadcnTableHeader>
+                      <TableRow className="bg-slate-50/80">
+                        <TableHead className="px-4 py-3 w-12"><input
+                          type="checkbox"
+                          checked={visibleItems.length > 0 && visibleItems.every((item) => selectedContentIds.includes(item.id))}
+                          onChange={() => toggleVisibleSelection(visibleItems)}
+                          aria-label="Chọn tất cả nội dung đang hiển thị"
+                          className="h-4 w-4 rounded border-[#cbd5e1] accent-[#6d5dfc]"
+                        /></TableHead>
+                        <TableHead className="px-4 py-3"><span>Bài viết</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>Nguồn</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>Ngày đăng</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>Điểm phù hợp</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>Trạng thái</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>Thao tác</span></TableHead>
+                      </TableRow>
+                    </ShadcnTableHeader>
+                    <TableBody>
+                      {visibleItems.map((item, index) => (
+                        <ContentRow
+                          key={item.id}
+                          item={item}
+                          index={index}
+                          active={selectedContent?.id === item.id}
+                          selected={selectedContentIds.includes(item.id)}
+                          onToggle={() => toggleContentSelection(item.id)}
+                          onClick={() => void openDetail(item)}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
             </div>
-          )}
+          )
+)}</PaginatedList>
         </AppCard>
       </div>
 
@@ -350,36 +346,49 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
 
 function ContentTableSkeleton() {
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[920px]">
-        <div className="app-table-header grid grid-cols-[34px_minmax(300px,1.8fr)_120px_130px_130px_120px_90px] items-center gap-3 px-5 py-3">
-          <SkeletonLine className="h-4 w-4 rounded" />
-          <span>Bài viết</span>
-          <span>Nguồn</span>
-          <span>Ngày đăng</span>
-          <span>Điểm phù hợp</span>
-          <span>Trạng thái</span>
-          <span>Thao tác</span>
-        </div>
-        {Array.from({ length: 8 }).map((_, index) => (
-          <div key={index} className="app-row grid w-full grid-cols-[34px_minmax(300px,1.8fr)_120px_130px_130px_120px_90px] items-center gap-3 px-5 py-3">
-            <SkeletonLine className="h-4 w-4 rounded" />
-            <div className="flex min-w-0 items-center gap-3">
-              <SkeletonLine className="h-[72px] w-[88px] shrink-0 rounded-[8px]" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <SkeletonLine className="h-4 w-4/5" />
-                <SkeletonLine className="h-3 w-2/3" />
-                <SkeletonLine className="h-5 w-20 rounded-[5px]" />
-              </div>
-            </div>
-            <SkeletonLine className="h-4 w-20" />
-            <SkeletonLine className="h-4 w-24" />
-            <SkeletonLine className="h-4 w-16" />
-            <SkeletonLine className="h-6 w-16 rounded-[6px]" />
-            <SkeletonLine className="h-4 w-12" />
-          </div>
-        ))}
-      </div>
+    <div>
+      <Table className="min-w-[960px] table-fixed">
+        <colgroup>
+          <col style={{ width: '48px' }} />
+          <col style={{ width: '34%' }} />
+          <col style={{ width: '110px' }} />
+          <col style={{ width: '130px' }} />
+          <col style={{ width: '110px' }} />
+          <col style={{ width: '110px' }} />
+          <col style={{ width: '90px' }} />
+        </colgroup>
+        <ShadcnTableHeader>
+          <TableRow className="bg-slate-50/80">
+            <TableHead className="px-4 py-3 w-12"><SkeletonLine className="h-4 w-4 rounded" /></TableHead>
+            <TableHead className="px-4 py-3"><span>Bài viết</span></TableHead>
+            <TableHead className="px-4 py-3"><span>Nguồn</span></TableHead>
+            <TableHead className="px-4 py-3"><span>Ngày đăng</span></TableHead>
+            <TableHead className="px-4 py-3"><span>Điểm phù hợp</span></TableHead>
+            <TableHead className="px-4 py-3"><span>Trạng thái</span></TableHead>
+            <TableHead className="px-4 py-3"><span>Thao tác</span></TableHead>
+          </TableRow>
+        </ShadcnTableHeader>
+        <TableBody>
+          {Array.from({ length: 8 }).map((_, index) => (
+            <TableRow key={index} className=" w-full ">
+              <TableCell className="px-4 py-3 w-12"><SkeletonLine className="h-4 w-4 rounded" /></TableCell>
+              <TableCell className="px-4 py-3"><div className="flex min-w-0 items-center gap-3">
+                <SkeletonLine className="h-[72px] w-[88px] shrink-0 rounded-[8px]" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <SkeletonLine className="h-4 w-4/5" />
+                  <SkeletonLine className="h-3 w-2/3" />
+                  <SkeletonLine className="h-5 w-20 rounded-[5px]" />
+                </div>
+              </div></TableCell>
+              <TableCell className="px-4 py-3"><SkeletonLine className="h-4 w-20" /></TableCell>
+              <TableCell className="px-4 py-3"><SkeletonLine className="h-4 w-24" /></TableCell>
+              <TableCell className="px-4 py-3"><SkeletonLine className="h-4 w-16" /></TableCell>
+              <TableCell className="px-4 py-3"><SkeletonLine className="h-6 w-16 rounded-[6px]" /></TableCell>
+              <TableCell className="px-4 py-3"><SkeletonLine className="h-4 w-12" /></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   )
 }
@@ -405,49 +414,48 @@ function ContentRow({
 }) {
   const score = Number(item.quality_score || 0)
   return (
-    <div
-      role="button"
+    <TableRow
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(event) => {
-        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+        if(event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault()
           onClick()
         }
       }}
-      className={`app-row grid w-full grid-cols-[34px_minmax(300px,1.8fr)_120px_130px_130px_120px_90px] items-center gap-3 px-5 py-3 text-left ${active ? 'app-row-selected' : ''}`}
+      className={` w-full text-left ${active ? 'app-row-selected' : ''}`}
     >
-      <input
+      <TableCell className="px-4 py-3 w-12"><input
         type="checkbox"
         checked={selected}
         onClick={(event) => event.stopPropagation()}
         onChange={onToggle}
         aria-label={`Chọn ${item.canonical_title} để tạo workflow`}
         className="h-4 w-4 rounded border-[#cbd5e1] accent-[#6d5dfc]"
-      />
-      <div className="flex min-w-0 items-center gap-3">
+      /></TableCell>
+      <TableCell className="px-4 py-3"><div className="flex min-w-0 items-center gap-3">
         <Thumbnail src={getMediaSrc(item)} index={index} title={item.canonical_title} className="h-[72px] w-[88px] shrink-0" fallback={false} />
         <div className="min-w-0">
           <div className="line-clamp-2 text-sm font-extrabold leading-5 text-[#111827]">{item.canonical_title}</div>
           <div className="mt-1 line-clamp-1 text-xs font-medium text-[#526179]">{item.summary || item.canonical_url}</div>
           {item.category && <span className="mt-1 inline-flex rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-xs font-bold text-[#6d5dfc]">{item.category}</span>}
         </div>
-      </div>
-      <div className="flex items-center gap-2 text-xs font-semibold text-[#526179]">
+      </div></TableCell>
+      <TableCell className="px-4 py-3"><div className="flex items-center gap-2 text-xs font-semibold text-[#526179]">
         <PlatformIcon platform={item.source_type || 'source'} size="sm" />
         {item.source_type || '-'}
-      </div>
-      <span className="text-xs font-semibold text-[#34415a]">{formatDate(item.published_at || item.created_at)}</span>
-      <span className={`text-sm font-extrabold ${score >= 80 ? 'text-[#16a34a]' : score >= 70 ? 'text-[#f59e0b]' : 'text-[#ef233c]'}`}>{formatScore(item.quality_score)}<span className="text-[#64748b]">/100</span></span>
-      <StatusPill value={item.status || '-'} />
-      <div onClick={(event) => event.stopPropagation()}>
+      </div></TableCell>
+      <TableCell className="px-4 py-3"><span className="text-xs font-semibold text-[#34415a]">{formatDate(item.published_at || item.created_at)}</span></TableCell>
+      <TableCell className="px-4 py-3"><span className={`text-sm font-extrabold ${score >= 80 ? 'text-[#16a34a]' : score >= 70 ? 'text-[#f59e0b]' : 'text-[#ef233c]'}`}>{formatScore(item.quality_score)}<span className="text-[#64748b]">/100</span></span></TableCell>
+      <TableCell className="px-4 py-3"><StatusPill value={item.status || '-'} /></TableCell>
+      <TableCell className="px-4 py-3"><div onClick={(event) => event.stopPropagation()}>
         <TableRowActions
           actions={[
             { label: 'Xem chi tiết bài viết', icon: <Eye size={14} />, onClick },
           ]}
         />
-      </div>
-    </div>
+      </div></TableCell>
+    </TableRow>
   )
 }
 

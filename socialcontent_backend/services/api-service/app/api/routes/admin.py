@@ -6,7 +6,7 @@ from sqlalchemy import Text, cast, func, or_
 from sqlalchemy.orm import Session
 
 from common.core.config import get_settings
-from common.db.models import AuditLog, User
+from common.db.models import AuditLog, ContentItem, User
 from common.db.session import get_db
 from app.schemas import api as schemas
 from app.api.deps import require_system_admin
@@ -123,10 +123,6 @@ def audit_logs(
         )
 
     total = query.count()
-    unique_actors, unique_actions = query.with_entities(
-        func.count(func.distinct(AuditLog.actor_id)),
-        func.count(func.distinct(AuditLog.action)),
-    ).one()
     rows = (
         query
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
@@ -134,44 +130,11 @@ def audit_logs(
         .limit(page_size)
         .all()
     )
-    total_pages = (total + page_size - 1) // page_size
-
-    action_options = [
-        value
-        for (value,) in db.query(AuditLog.action).distinct().order_by(AuditLog.action.asc()).all()
-        if value
-    ]
-    target_type_options = [
-        value
-        for (value,) in db.query(AuditLog.target_type).filter(AuditLog.target_type.isnot(None)).distinct().order_by(AuditLog.target_type.asc()).all()
-        if value
-    ]
-    actor_options = [
-        {"id": str(user_id), "email": email, "full_name": full_name}
-        for user_id, email, full_name in (
-            db.query(User.id, User.email, User.full_name)
-            .join(AuditLog, AuditLog.actor_id == User.id)
-            .distinct()
-            .order_by(User.email.asc())
-            .all()
-        )
-    ]
-
     return {
         "items": [_serialize_audit_log(log, actor) for log, actor in rows],
         "page": page,
-        "page_size": page_size,
+        "limit": page_size,
         "total": total,
-        "total_pages": total_pages,
-        "summary": {
-            "unique_actors": int(unique_actors or 0),
-            "unique_actions": int(unique_actions or 0),
-        },
-        "filters": {
-            "actors": actor_options,
-            "actions": action_options,
-            "target_types": target_type_options,
-        },
     }
 
 
@@ -423,7 +386,7 @@ async def get_deepseek_usage_metrics(
     settings = get_settings()
     now = int(time.time())
     if not start_time:
-        start_time = now - 30 * 24 * 3600
+        start_time = now - 7 * 24 * 3600
         
     # Get balance
     balance_info = {"is_available": False, "total_balance": 0.0}
@@ -456,6 +419,8 @@ async def get_deepseek_usage_metrics(
     total_cost = 0.0
     total_requests = 0
     total_tokens = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
     
     daily_stats = {}
     model_stats = {}
@@ -465,32 +430,43 @@ async def get_deepseek_usage_metrics(
             continue
         c_cost = float(run.cost_usd or 0)
         c_tok = run.total_tokens or 0
+        in_tok = run.input_tokens or 0
+        out_tok = run.output_tokens or 0
+
         total_cost += c_cost
         total_requests += 1
         total_tokens += c_tok
+        total_input_tokens += in_tok
+        total_output_tokens += out_tok
         
         day_str = run.created_at.strftime("%Y-%m-%d")
         ts = int(run.created_at.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
         
         if day_str not in daily_stats:
-            daily_stats[day_str] = {"cost": 0.0, "requests": 0, "tokens": 0, "timestamp": ts}
+            daily_stats[day_str] = {"cost": 0.0, "requests": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0, "timestamp": ts}
             
         daily_stats[day_str]["cost"] += c_cost
         daily_stats[day_str]["requests"] += 1
         daily_stats[day_str]["tokens"] += c_tok
+        daily_stats[day_str]["input_tokens"] += in_tok
+        daily_stats[day_str]["output_tokens"] += out_tok
         
         model = run.model_name or "unknown"
         if model not in model_stats:
-            model_stats[model] = {"total_requests": 0, "total_tokens": 0, "daily": {}}
+            model_stats[model] = {"total_requests": 0, "total_tokens": 0, "total_input_tokens": 0, "total_output_tokens": 0, "daily": {}}
             
         model_stats[model]["total_requests"] += 1
         model_stats[model]["total_tokens"] += c_tok
+        model_stats[model]["total_input_tokens"] += in_tok
+        model_stats[model]["total_output_tokens"] += out_tok
         
         if day_str not in model_stats[model]["daily"]:
-            model_stats[model]["daily"][day_str] = {"requests": 0, "tokens": 0, "timestamp": ts}
+            model_stats[model]["daily"][day_str] = {"requests": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0, "timestamp": ts}
             
         model_stats[model]["daily"][day_str]["requests"] += 1
         model_stats[model]["daily"][day_str]["tokens"] += c_tok
+        model_stats[model]["daily"][day_str]["input_tokens"] += in_tok
+        model_stats[model]["daily"][day_str]["output_tokens"] += out_tok
 
     def fill_gaps(stats_dict, st, end):
         res = []
@@ -504,7 +480,7 @@ async def get_deepseek_usage_metrics(
             if day_str in stats_dict:
                 res.append({"date": short_date, "full_date": day_str, **stats_dict[day_str]})
             else:
-                res.append({"date": short_date, "full_date": day_str, "timestamp": curr, "cost": 0.0, "requests": 0, "tokens": 0})
+                res.append({"date": short_date, "full_date": day_str, "timestamp": curr, "cost": 0.0, "requests": 0, "tokens": 0, "input_tokens": 0, "output_tokens": 0})
             curr += 86400
         return res
 
@@ -519,6 +495,8 @@ async def get_deepseek_usage_metrics(
         formatted_models[m] = {
             "total_requests": m_data["total_requests"],
             "total_tokens": m_data["total_tokens"],
+            "total_input_tokens": m_data["total_input_tokens"],
+            "total_output_tokens": m_data["total_output_tokens"],
             "series": m_series
         }
 
@@ -527,6 +505,157 @@ async def get_deepseek_usage_metrics(
         "total_cost": total_cost,
         "total_api_requests": total_requests,
         "total_tokens": total_tokens,
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
         "cost_series": cost_series,
         "models": formatted_models
+    }
+
+
+# ---------------------------------------------------------------------------
+# US-28  Admin Content Items – list + patch
+# ---------------------------------------------------------------------------
+
+CONTENT_STATUS_VALUES = {"NEEDS_REVIEW", "APPROVED", "REJECTED", "ARCHIVED", "PROCESSING"}
+
+
+@router.get("/contents")
+def admin_list_contents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None, max_length=300),
+    status: str | None = Query(None, max_length=50),
+    content_scope: str | None = Query(None, max_length=50),
+    content_type: str | None = Query(None, max_length=50),
+    source_type: str | None = Query(None, max_length=50),
+    _: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Paginated content-item list for System Admin — supports search + filters."""
+    query = db.query(ContentItem)
+
+    if status and status.strip():
+        query = query.filter(ContentItem.status == status.strip().upper())
+
+    if content_scope and content_scope.strip():
+        query = query.filter(ContentItem.content_scope == content_scope.strip().upper())
+
+    if content_type and content_type.strip():
+        query = query.filter(ContentItem.content_type == content_type.strip().upper())
+
+    if source_type and source_type.strip():
+        # source_type is stored inside sources_jsonb array elements
+        query = query.filter(
+            ContentItem.sources_jsonb.cast(Text).ilike(f"%{source_type.strip()}%")
+        )
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                ContentItem.canonical_title.ilike(pattern),
+                ContentItem.summary.ilike(pattern),
+                ContentItem.canonical_url.ilike(pattern),
+                cast(ContentItem.id, Text).ilike(pattern),
+            )
+        )
+
+    total = query.count()
+    items = (
+        query
+        .order_by(ContentItem.created_at.desc(), ContentItem.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    def _serialize(c: ContentItem) -> dict:
+        sources = c.sources_jsonb if isinstance(c.sources_jsonb, list) else []
+        primary_src = sources[0] if sources else {}
+        return {
+            "id": str(c.id),
+            "content_type": c.content_type,
+            "canonical_title": c.canonical_title,
+            "summary": c.summary,
+            "language": c.language,
+            "content_scope": c.content_scope,
+            "status": c.status,
+            "canonical_url": c.canonical_url,
+            "quality_score": float(c.quality_score) if c.quality_score is not None else 0.0,
+            "source_type": primary_src.get("source_type"),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+
+    return {
+        "items": [_serialize(item) for item in items],
+        "page": page,
+        "limit": page_size,
+        "total": total,
+    }
+
+
+@router.patch("/contents/{content_id}")
+def admin_update_content(
+    content_id: uuid.UUID,
+    payload: schemas.ContentUpdateRequest,
+    current_user: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """System Admin: edit canonical_title, summary, status and quality_score of any content item."""
+    content = db.get(ContentItem, content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content item not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "status" in updates and updates["status"]:
+        updates["status"] = updates["status"].upper()
+        if updates["status"] not in CONTENT_STATUS_VALUES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"status must be one of {sorted(CONTENT_STATUS_VALUES)}",
+            )
+
+    if "quality_score" in updates and updates["quality_score"] is not None:
+        if not (0 <= updates["quality_score"] <= 100):
+            raise HTTPException(status_code=422, detail="quality_score must be between 0 and 100")
+
+    before_snapshot = {
+        "canonical_title": content.canonical_title,
+        "summary": content.summary,
+        "status": content.status,
+        "quality_score": float(content.quality_score) if content.quality_score is not None else None,
+    }
+
+    for field, value in updates.items():
+        setattr(content, field, value)
+
+    db.add(
+        AuditLog(
+            actor_id=current_user.id,
+            action="content_item.updated",
+            target_type="content_item",
+            target_id=str(content_id),
+            metadata_json={"before": before_snapshot, "after": updates},
+        )
+    )
+    db.commit()
+    db.refresh(content)
+
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary_src = sources[0] if sources else {}
+    return {
+        "id": str(content.id),
+        "content_type": content.content_type,
+        "canonical_title": content.canonical_title,
+        "summary": content.summary,
+        "language": content.language,
+        "content_scope": content.content_scope,
+        "status": content.status,
+        "canonical_url": content.canonical_url,
+        "quality_score": float(content.quality_score) if content.quality_score is not None else 0.0,
+        "source_type": primary_src.get("source_type"),
+        "created_at": content.created_at.isoformat() if content.created_at else None,
+        "updated_at": content.updated_at.isoformat() if content.updated_at else None,
     }

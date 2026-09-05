@@ -167,7 +167,6 @@ class CanonicalWriter:
             language=normalized.get("language") or "vi",
             content_scope=scope,
             owner_user_id=owner,
-            crawl_job_id=job.id if job else None,
             created_by_type=created_by,
             status=quality.get("status", "NEEDS_REVIEW"),
             published_at=self._parse_datetime(normalized.get("published_at")),
@@ -187,11 +186,6 @@ class CanonicalWriter:
             job=job,
             content=content,
             is_duplicate=False,
-            match_type="NEW_CANONICAL",
-            source_type=source_type,
-            source_external_id=str(source_external_id),
-            processed_document_id=processed_document_id,
-            metadata={"quality_score": quality.get("score", 0)},
         )
 
         story = None
@@ -285,7 +279,6 @@ class CanonicalWriter:
             if m.get("source_url") not in existing_urls:
                 media.append(m)
         existing_content.media_jsonb = media
-        existing_content.duplicate_count = (existing_content.duplicate_count or 0) + 1
         db.add(existing_content)
 
         story = None
@@ -304,11 +297,6 @@ class CanonicalWriter:
                 job=job,
                 content=existing_content,
                 is_duplicate=True,
-                match_type=match_type,
-                source_type=source_type,
-                source_external_id=source_external_id,
-                processed_document_id=processed_document_id,
-                metadata={"reason": reason, "quality_score": quality.get("score", 0)},
             )
             job.current_stage = "GROUPING" if story else "CANONICAL"
             job.total_duplicates += 1
@@ -352,41 +340,14 @@ class CanonicalWriter:
         job: CrawlJob | None,
         content: ContentItem,
         is_duplicate: bool,
-        match_type: str | None,
-        source_type: str | None,
-        source_external_id: str | None,
-        processed_document_id: str | None,
-        metadata: dict | None = None,
     ) -> CrawlJobContent | None:
         if not job:
             return None
-
         link = db.get(CrawlJobContent, (job.id, content.id))
-        if not link:
-            link = CrawlJobContent(
-                job_id=job.id,
-                content_id=content.id,
-                is_duplicate=is_duplicate,
-                match_type=match_type,
-                source_type=source_type,
-                source_external_id=source_external_id,
-                processed_document_id=processed_document_id,
-                occurrence_count=1,
-                metadata_json=metadata or {},
-            )
-        else:
-            link.is_duplicate = bool(link.is_duplicate or is_duplicate)
-            link.match_type = match_type or link.match_type
-            link.source_type = source_type or link.source_type
-            link.source_external_id = source_external_id or link.source_external_id
-            link.processed_document_id = processed_document_id or link.processed_document_id
-            link.occurrence_count = int(link.occurrence_count or 0) + 1
-            link.metadata_json = {
-                **(link.metadata_json if isinstance(link.metadata_json, dict) else {}),
-                **(metadata or {}),
-            }
-        db.add(link)
-        db.flush()
+        if link is None:
+            link = CrawlJobContent(job_id=job.id, content_id=content.id, is_duplicate=is_duplicate)
+            db.add(link)
+            db.flush()
         return link
 
     def _lock_source_identity(self, db: Session, source_type: str, source_external_id: str) -> None:

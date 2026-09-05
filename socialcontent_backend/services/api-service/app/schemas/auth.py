@@ -7,18 +7,18 @@ class TokenResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: str = Field(pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
     password: str = Field(min_length=8)
     full_name: str | None = None
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: str = Field(pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
     password: str
 
 
 class BootstrapAdminRequest(BaseModel):
     bootstrap_token: str
-    email: str
+    email: str = Field(pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
     password: str = Field(min_length=10)
     full_name: str | None = "System Admin"

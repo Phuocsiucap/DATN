@@ -109,6 +109,13 @@ class QueueApproveScheduleRequest(BaseModel):
     timezone: str | None = None
 
 
+class QueueRescheduleRequest(BaseModel):
+    """Creator-facing reschedule / schedule request. Works for all platforms."""
+    schedule_mode: Literal["manual", "ai"] = "manual"
+    scheduled_at: datetime | None = None
+    timezone: str | None = None
+
+
 class QueueRequestChangesRequest(BaseModel):
     note: str | None = None
 

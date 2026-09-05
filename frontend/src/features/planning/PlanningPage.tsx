@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -456,10 +458,10 @@ export default function PlanningPage({
           <Loader2 className="animate-spin mr-2" size={24} /> Đang xử lý...
         </div>
       ) : (
-        <div className="min-h-0 flex-1">
+        <div className="app-list-layout">
           {activeStep === 'jobs' && (
-            <div className="space-y-4">
-              {jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào cho kênh đã chọn" /></div> : jobs.map((job) => (
+            <div className="app-list-layout">
+              <PaginatedList items={jobs} loading={loading} resetKey={selectedProfileId || ''}>{(visibleItems) => (jobs.length === 0 ? <div className="workspace-card"><Empty label="Chưa có lần Auto Planning nào cho kênh đã chọn" /></div> : visibleItems.map((job) => (
                 <div
                   key={job.id}
                   onClick={() => handleOpenRunDetail(job)}
@@ -552,12 +554,12 @@ export default function PlanningPage({
                     </span>
                   </div>
                 </div>
-              ))}
+              )))}</PaginatedList>
             </div>
           )}
 
           {activeStep === 'plans' && (
-            <div className="space-y-5">
+            <div className="app-list-layout gap-5">
               <div className="rounded-xl border border-[#d9e0ea] bg-white shadow-sm">
                 <div className="flex flex-col gap-3 border-b border-[#eef2f7] bg-[#f8fafc] px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
@@ -577,15 +579,15 @@ export default function PlanningPage({
                 </div>
               </div>
 
-              <div className="space-y-6">
-                {plansLoading ? (
+              <div className="app-list-layout gap-6">
+                <PaginatedList items={reviewSeries} loading={plansLoading} resetKey={selectedProfileId || ''}>{(visibleItems) => (plansLoading ? (
                   <div className="loading-state">
                     <Loader2 className="mr-2 animate-spin" size={18} /> Đang tải series của profile...
                   </div>
                 ) : reviewSeries.length === 0 ? (
                   <div className="workspace-card"><Empty label="Profile này chưa có series nào để duyệt" /></div>
-                ) : reviewSeries.map((item) => (
-                  <section key={item.series.id} className="rounded-xl border border-[#d9e0ea] bg-white p-5 shadow-sm">
+                ) : visibleItems.map((item) => (
+                  <section key={item.series.id} className="app-table-card border border-[#d9e0ea] bg-white p-5 shadow-sm">
                     <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -612,102 +614,115 @@ export default function PlanningPage({
                       </div>
                     </div>
 
-                    <div className="table-scroll rounded-lg border border-[#eef2f7] bg-white">
-                      <div className="data-grid-lg">
-                        <div className="grid grid-cols-[96px_2fr_0.75fr_0.85fr_0.7fr_0.8fr_1.35fr] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#64748b]">
-                          <div>Preview</div>
-                          <div>Bài báo gốc</div>
-                          <div>Nguồn</div>
-                          <div>Category ID</div>
-                          <div>Quality</div>
-                          <div>Kịch bản</div>
-                          <div className="text-right">Thao tác</div>
-                        </div>
-                      {item.articles.length === 0 ? (
-                        <div className="w-full rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Series này chưa có bài.</div>
-                      ) : item.articles.map((article, articleIndex) => (
-                        <div
-                          key={article.plan?.id || `${item.series.id}-${articleIndex}`}
-                          onClick={() => setSelectedReviewArticle({ article, seriesTitle: item.series.title })}
-                          className="grid cursor-pointer grid-cols-[96px_2fr_0.75fr_0.85fr_0.7fr_0.8fr_1.35fr] items-center gap-3 border-t border-[#eef2f7] px-4 py-3 text-sm transition-colors hover:bg-slate-50"
-                        >
-                          <ContentItemPreview media={article.source_content?.media} />
-                          <div className="min-w-0">
-                            <div className="truncate font-bold text-[#0f172a]">
-                              {article.source_content?.canonical_title || article.plan?.title || 'Bài chưa liên kết nguồn'}
-                            </div>
-                            <div className="mt-0.5 truncate text-xs text-[#64748b]">
-                              {article.source_content?.summary || article.source_content?.canonical_url || article.plan?.content_angle || shortId(article.plan?.id || item.series.id)}
-                            </div>
-                          </div>
-                          <div className="font-medium text-[#64748b]">{article.source_content?.source_type || article.source_content?.content_type || '-'}</div>
-                          <div className="truncate font-mono text-xs font-bold text-[#475569]">{sourceCategoryId(article.source_content) || '-'}</div>
-                          <div className="font-bold text-[#0f172a]">{article.source_content ? Number(article.source_content.quality_score || 0).toFixed(1) : '-'}</div>
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
-                          </div>
-                          <div className="flex justify-end">
-                            <TableRowActions
-                              actions={([
-                                article.source_content ? {
-                                  label: 'View full bài gốc',
-                                  icon: <FileText size={14} />,
-                                  onClick: () => setSelectedReviewArticle({ article, seriesTitle: item.series.title }),
-                                } : null,
-                                {
-                                  label: 'Chuyển series',
-                                  icon: <ArrowRightLeft size={14} />,
-                                  onClick: () => {
-                                    const workflowId = article.plan?.workflow_id || article.plan?.id
-                                    if (workflowId) {
-                                      setTransferringArticle({
-                                        workflowId,
-                                        title: article.plan?.title || article.source_content?.canonical_title || 'Bài viết',
-                                        currentSeriesId: item.series.id,
-                                      })
-                                    } else {
-                                      toast.error('Bài này chưa tạo workflow kịch bản để chuyển series')
-                                    }
-                                  },
-                                },
-                                article.plan ? {
-                                  label: 'Mở Studio Editor',
-                                  icon: <FileText size={14} />,
-                                  onClick: () => onOpenGenerateVideo?.(article.plan!.workflow_id || article.plan!.id),
-                                } : null,
-                                article.plan ? {
-                                  label: 'Viết lại kịch bản',
-                                  icon: <RefreshCcw size={14} />,
-                                  onClick: () => openRegenerateArticle(article.plan!),
-                                } : null,
-                                article.plan?.status === 'REJECTED' ? {
-                                  label: 'Khôi phục workflow',
-                                  icon: <RefreshCcw size={14} />,
-                                  onClick: () => void restoreRejectedPlan(article.plan!),
-                                } : null,
-                                article.plan ? {
-                                  label: 'Từ chối kịch bản',
-                                  icon: <XCircle size={14} />,
-                                  onClick: async () => {
-                                    try {
-                                      await rejectContentPlanApi(article.plan!.workflow_id || article.plan!.id, 'Không đạt yêu cầu')
-                                      toast.success('Đã từ chối kịch bản.')
-                                      if (selectedProfileId) void loadProfilePlanning(selectedProfileId)
-                                    } catch (err: any) {
-                                      toast.error(err?.response?.data?.detail || 'Lỗi từ chối!')
-                                    }
-                                  },
-                                  danger: true,
-                                } : null,
-                              ].filter(Boolean)) as TableRowActionItem[]}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      </div>
+                    <div className="app-table-card table-scroll border border-[#eef2f7] bg-white">
+                      <Table className="min-w-[960px] table-fixed">
+                        <colgroup>
+                          <col style={{ width: '120px' }} />
+                          <col style={{ width: '30%' }} />
+                          <col style={{ width: '100px' }} />
+                          <col style={{ width: '110px' }} />
+                          <col style={{ width: '90px' }} />
+                          <col style={{ width: '110px' }} />
+                          <col style={{ width: '110px' }} />
+                        </colgroup>
+                        <ShadcnTableHeader>
+                          <TableRow className=" bg-[#f8fafc] text-xs font-bold uppercase tracking-wider text-[#64748b]">
+                            <TableHead className="px-4 py-3 min-w-[160px]"><div>Preview</div></TableHead>
+                            <TableHead className="px-4 py-3"><div>Bài báo gốc</div></TableHead>
+                            <TableHead className="px-4 py-3"><div>Nguồn</div></TableHead>
+                            <TableHead className="px-4 py-3"><div>Category ID</div></TableHead>
+                            <TableHead className="px-4 py-3"><div>Quality</div></TableHead>
+                            <TableHead className="px-4 py-3"><div>Kịch bản</div></TableHead>
+                            <TableHead className="px-4 py-3"><div className="text-right">Thao tác</div></TableHead>
+                          </TableRow>
+                        </ShadcnTableHeader>
+                        <TableBody>
+                          {item.articles.length === 0 ? (
+                            <TableRow><TableCell colSpan={7}><div className="w-full rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Series này chưa có bài.</div></TableCell></TableRow>
+                          ) : item.articles.map((article, articleIndex) => (
+                            <TableRow
+                              key={article.plan?.id || `${item.series.id}-${articleIndex}`}
+                              onClick={() => setSelectedReviewArticle({ article, seriesTitle: item.series.title })}
+                              className=" cursor-pointer border-t border-[#eef2f7] text-sm transition-colors hover:bg-slate-50"
+                            >
+                              <TableCell className="px-4 py-3 min-w-[160px]"><ContentItemPreview media={article.source_content?.media} /></TableCell>
+                              <TableCell className="px-4 py-3"><div className="min-w-0">
+                                <div className="truncate font-bold text-[#0f172a]">
+                                  {article.source_content?.canonical_title || article.plan?.title || 'Bài chưa liên kết nguồn'}
+                                </div>
+                                <div className="mt-0.5 truncate text-xs text-[#64748b]">
+                                  {article.source_content?.summary || article.source_content?.canonical_url || article.plan?.content_angle || shortId(article.plan?.id || item.series.id)}
+                                </div>
+                              </div></TableCell>
+                              <TableCell className="px-4 py-3"><div className="font-medium text-[#64748b]">{article.source_content?.source_type || article.source_content?.content_type || '-'}</div></TableCell>
+                              <TableCell className="px-4 py-3"><div className="truncate font-mono text-xs font-bold text-[#475569]">{sourceCategoryId(article.source_content) || '-'}</div></TableCell>
+                              <TableCell className="px-4 py-3"><div className="font-bold text-[#0f172a]">{article.source_content ? Number(article.source_content.quality_score || 0).toFixed(1) : '-'}</div></TableCell>
+                              <TableCell className="px-4 py-3"><div className="flex items-center gap-2">
+                                <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-600">{getArticleStoryData(article).length} scene</span>
+                              </div></TableCell>
+                              <TableCell className="px-4 py-3"><div className="flex justify-end">
+                                <TableRowActions
+                                  actions={([
+                                    article.source_content ? {
+                                      label: 'View full bài gốc',
+                                      icon: <FileText size={14} />,
+                                      onClick: () => setSelectedReviewArticle({ article, seriesTitle: item.series.title }),
+                                    } : null,
+                                    {
+                                      label: 'Chuyển series',
+                                      icon: <ArrowRightLeft size={14} />,
+                                      onClick: () => {
+                                        const workflowId = article.plan?.workflow_id || article.plan?.id
+                                        if(workflowId) {
+                                          setTransferringArticle({
+                                            workflowId,
+                                            title: article.plan?.title || article.source_content?.canonical_title || 'Bài viết',
+                                            currentSeriesId: item.series.id,
+                                          })
+                                        } else {
+                                          toast.error('Bài này chưa tạo workflow kịch bản để chuyển series')
+                                        }
+                                      },
+                                    },
+                                    article.plan ? {
+                                      label: 'Mở Studio Editor',
+                                      icon: <FileText size={14} />,
+                                      onClick: () => onOpenGenerateVideo?.(article.plan!.workflow_id || article.plan!.id),
+                                    } : null,
+                                    article.plan ? {
+                                      label: 'Viết lại kịch bản',
+                                      icon: <RefreshCcw size={14} />,
+                                      onClick: () => openRegenerateArticle(article.plan!),
+                                    } : null,
+                                    article.plan?.status === 'REJECTED' ? {
+                                      label: 'Khôi phục workflow',
+                                      icon: <RefreshCcw size={14} />,
+                                      onClick: () => void restoreRejectedPlan(article.plan!),
+                                    } : null,
+                                    article.plan ? {
+                                      label: 'Từ chối kịch bản',
+                                      icon: <XCircle size={14} />,
+                                      onClick: async () => {
+                                        try {
+                                          await rejectContentPlanApi(article.plan!.workflow_id || article.plan!.id, 'Không đạt yêu cầu')
+                                          toast.success('Đã từ chối kịch bản.')
+                                          if(selectedProfileId) void loadProfilePlanning(selectedProfileId)
+                                        } catch(err: any) {
+                                          toast.error(err?.response?.data?.detail || 'Lỗi từ chối!')
+                                        }
+                                      },
+                                      danger: true,
+                                    } : null,
+                                  ].filter(Boolean)) as TableRowActionItem[]}
+                                />
+                              </div></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </div>
                   </section>
-                ))}
+                )))}</PaginatedList>
               </div>
             </div>
           )}

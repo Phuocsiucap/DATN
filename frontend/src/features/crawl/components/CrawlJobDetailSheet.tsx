@@ -11,6 +11,7 @@ import { AppButton, EmptyBlock, SelectControl, StatusPill, Thumbnail } from '@/c
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/commons/component/ui/sheet'
 import { ContentDetailSheet } from '@/features/content/components/ContentDetailSheet'
 import { normalizeClock, scheduleDaysLabel } from '../crawlSchedule'
+import { ListPagination } from '@/commons/component/ui/list-pagination'
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleString('vi-VN') : '-'
 const shortId = (value: string) => value.slice(0, 8)
@@ -29,6 +30,7 @@ export function CrawlJobDetailSheet({
   const [selectedContent, setSelectedContent] = useState<FinalContentItem | null>(null)
   const [contentDetail, setContentDetail] = useState<ContentDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [paging, setPaging] = useState({ jobId: '', page: 1, pageSize: 20 })
 
   useEffect(() => {
     if (!job || activeTab !== 'contents') return
@@ -48,6 +50,11 @@ export function CrawlJobDetailSheet({
   const contents = contentsState?.jobId === job.id ? contentsState.items : []
   const loadingContents = activeTab === 'contents' && contentsState?.jobId !== job.id
   const totalContents = contents.length || job.total_normalized || 0
+  const pageSize = paging.pageSize
+  const totalPages = Math.max(1, Math.ceil(contents.length / pageSize))
+  const page = paging.jobId === job.id ? Math.min(paging.page, totalPages) : 1
+  const pageStart = (page - 1) * pageSize
+  const visibleContents = contents.slice(pageStart, pageStart + pageSize)
   const openContentDetail = async (item: FinalContentItem) => {
     setSelectedContent(item)
     setContentDetail(null)
@@ -119,13 +126,13 @@ export function CrawlJobDetailSheet({
 
               {activeTab === 'contents' && <>
                 <div className="flex items-center justify-between border-b border-[var(--outline-variant)] px-5 py-3">
-                  <span className="text-sm text-[var(--on-surface-variant)]">Hiển thị {contents.length ? `1 đến ${Math.min(20, contents.length)} trong` : '0 trong'} {totalContents} bài</span>
+                  <span className="text-sm text-[var(--on-surface-variant)]">Hiển thị {contents.length ? `${pageStart + 1} đến ${pageStart + visibleContents.length} trong` : '0 trong'} {contents.length} bài</span>
                   <AppButton variant="secondary" className="h-9 px-3" icon={<Download size={15} />}>Xuất dữ liệu</AppButton>
                 </div>
                 <div className="p-4">
                   {loadingContents ? <div className="loading-state"><Loader2 className="animate-spin" size={16} /> Đang tải nội dung...</div>
                     : contents.length === 0 ? <EmptyBlock label="Chưa có bài nào được crawl thành công." />
-                      : <div className="space-y-3">{contents.map((item, index) => (
+                      : <div className="space-y-3">{visibleContents.map((item, index) => (
                         <button key={item.id} onClick={() => void openContentDetail(item)} className="grid w-full grid-cols-[112px_minmax(0,1fr)_58px] gap-3 rounded-lg p-2 text-left transition hover:bg-[var(--surface-container-low)]">
                           <Thumbnail src={getContentMediaSrc(item)} index={index} className="h-[76px] w-[112px]" fallback={false} />
                           <div className="min-w-0"><div className="line-clamp-2 text-sm font-extrabold leading-5 text-[var(--on-surface)]">{item.canonical_title}</div><p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--on-surface-variant)]">{item.summary || item.canonical_url || shortId(item.id)}</p></div>
@@ -136,7 +143,14 @@ export function CrawlJobDetailSheet({
               </>}
             </SheetBody>
 
-            {activeTab === 'contents' && contents.length > 0 && <div className="flex items-center justify-between border-t border-[var(--outline-variant)] p-4"><div className="flex items-center gap-2 text-sm font-semibold text-[var(--on-surface-variant)]"><button className="grid h-8 w-8 place-items-center rounded-lg">‹</button><button className="grid h-8 w-8 place-items-center rounded-lg bg-[var(--accent-strong)] text-white">1</button><button className="grid h-8 w-8 place-items-center rounded-lg">›</button></div><SelectControl className="w-28"><option>20 / trang</option></SelectControl></div>}
+            {activeTab === 'contents' && (
+              <div className="app-list-footer">
+                <ListPagination page={page} totalPages={totalPages} loading={loadingContents} onPageChange={(nextPage) => setPaging({ jobId: job.id, page: nextPage, pageSize })} />
+                <SelectControl className="w-28" value={String(pageSize)} onChange={(value) => setPaging({ jobId: job.id, page: 1, pageSize: Number(value) })}>
+                  <option value={10}>10 / trang</option><option value={20}>20 / trang</option><option value={50}>50 / trang</option>
+                </SelectControl>
+              </div>
+            )}
           </div>
         </SheetContent>
       </Sheet>

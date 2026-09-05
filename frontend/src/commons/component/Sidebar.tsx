@@ -10,6 +10,7 @@ import {
   Database,
   FileCheck2,
   LayoutDashboard,
+  LibraryBig,
   LogOut,
   Megaphone,
   Newspaper,
@@ -17,7 +18,6 @@ import {
   PanelLeftOpen,
   Send,
   ScrollText,
-  Settings,
   Sparkles,
   UserRound,
   Video,
@@ -69,7 +69,7 @@ const creatorSections: NavSection[] = [
   {
     title: 'NỘI DUNG',
     items: [
-      { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
+      { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
       { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
       { key: 'planning', label: 'Kế hoạch nội dung', icon: <Sparkles size={17} /> },
     ],
@@ -78,7 +78,7 @@ const creatorSections: NavSection[] = [
     title: 'SẢN XUẤT',
     items: [
       { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
-      { key: 'approvals', label: 'Duyệt video', icon: <FileCheck2 size={17} />, badge: 12 },
+      { key: 'approvals', label: 'Duyệt video', icon: <FileCheck2 size={17} /> },
       { key: 'publishedPosts', label: 'Video đã đăng', icon: <Send size={17} /> },
     ],
   },
@@ -106,7 +106,7 @@ const adminSections: NavSection[] = [
     title: 'QUẢN LÝ HỆ THỐNG',
     items: [
       { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
-      { key: 'settings', label: 'Cấu hình chiến lược', icon: <Settings size={17} /> },
+      { key: 'contentItems', label: 'Kho nội dung', icon: <LibraryBig size={17} /> },
       { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
       { key: 'auditLogs', label: 'Nhật ký hệ thống', icon: <ScrollText size={17} /> },
     ],
@@ -214,7 +214,7 @@ export default function Sidebar({
               </div>
 
               <div className="mt-2 text-xs font-medium text-[#64748b]">
-                Dùng: <span className="font-extrabold text-[#111827]">{aiUsage ? formatTokens(aiUsage.total_tokens) : '72'} / 200K Token</span>
+                Dùng: <span className="font-extrabold text-[#111827]">{aiUsage ? formatTokens(aiUsage.total_tokens) : '72'} </span>
               </div>
 
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
@@ -293,7 +293,7 @@ export default function Sidebar({
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex w-full items-center gap-2.5 rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2.5 shadow-xs text-left hover:bg-[#f1f5f9] transition-colors cursor-pointer"
               >
-                <UserAvatar src={null} name={displayName} size="md" />
+                <UserAvatar src={currentUser?.avatar_url ?? null} name={displayName} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-extrabold text-[#111827]">{displayName}</div>
                   <div className="truncate text-xs font-medium text-[#64748b]">{roleLabel}</div>
@@ -307,7 +307,7 @@ export default function Sidebar({
                 className="flex w-full justify-center rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2 shadow-xs hover:bg-[#f1f5f9] transition-colors cursor-pointer"
                 title={displayName}
               >
-                <UserAvatar src={null} name={displayName} size="md" />
+                <UserAvatar src={currentUser?.avatar_url ?? null} name={displayName} size="md" />
               </button>
             )}
 

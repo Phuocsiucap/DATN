@@ -1088,6 +1088,73 @@ class SocialProfileService:
     def resolve_schedule_timezone(self, timezone_name: str | None) -> ZoneInfo:
         return schedule_timezone(timezone_name)
 
+    def reschedule_queue_item(
+        self,
+        db: Session,
+        queue_item_id: uuid.UUID,
+        user: User,
+        *,
+        schedule_mode: str = "manual",
+        scheduled_at: datetime | None = None,
+        timezone_name: str | None = None,
+    ) -> PublishingQueueItem:
+        """Creator-facing schedule / reschedule that works for all platforms.
+
+        Unlike ``approve_and_schedule_queue_item`` (TikTok approval flow only),
+        this method can be called on any platform.  It does not change the item
+        status; it simply writes (or overwrites) ``scheduled_at`` so the
+        publisher worker picks it up at the right moment.
+        """
+        item = self.get_owned_queue_item(db, queue_item_id, user)
+        if item.status in {"publishing", "published", "skipped", "rejected"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Queue item này đã kết thúc, không thể thay đổi lịch đăng",
+            )
+        if not item.profile:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item thiếu thông tin profile")
+
+        mode = (schedule_mode or "manual").strip().lower()
+        if mode not in {"ai", "manual"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_mode phải là ai hoặc manual")
+
+        tzinfo = self.resolve_schedule_timezone(
+            timezone_name or getattr(item.profile.strategy, "schedule_timezone", None)
+        )
+
+        if mode == "manual":
+            lock_schedule_profile(db, item.profile_id)
+            if scheduled_at is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="scheduled_at bắt buộc khi chọn lịch thủ công",
+                )
+            publish_at = self.normalize_scheduled_datetime(scheduled_at, tzinfo)
+            reason = "Creator thay đổi thời điểm xuất bản thủ công." if item.scheduled_at else "Creator xếp lịch xuất bản thủ công."
+        else:
+            try:
+                decision = choose_publish_schedule(db, item.profile, item, timezone_name=tzinfo.key)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            publish_at = decision.scheduled_at
+            reason = f"Creator để AI chọn lịch. {decision.reason}"
+
+        now = datetime.now(timezone.utc)
+        if publish_at <= now:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Thời gian đăng phải nằm trong tương lai",
+            )
+
+        item.scheduled_at = publish_at
+        item.error = None
+        item.ai_reason = _append_human_note(item.ai_reason, reason)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+
     def normalize_scheduled_datetime(self, value: datetime, tzinfo: ZoneInfo) -> datetime:
         if value.tzinfo is None:
             value = value.replace(tzinfo=tzinfo)

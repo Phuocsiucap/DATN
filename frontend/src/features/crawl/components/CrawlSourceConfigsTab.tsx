@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Edit2, Loader2, Play, Plus, Square, Trash2 } from 'lucide-react'
@@ -57,61 +59,74 @@ export function CrawlSourceConfigsTab({ isSystemUser = false, sourceTypes, vnexp
   }
 
   return (
-    <div className="space-y-4">
+    <div className="app-list-layout gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-extrabold text-[var(--on-surface)]">Nguồn Crawl Dùng Chung</h2>
           <p className="text-xs text-[var(--on-surface-variant)]">Quản lý các nguồn dữ liệu có thể sử dụng lại cho nhiều Job.</p>
         </div>
-        <AppButton icon={<Plus size={15} />} onClick={() => { setEditingConfig(null); setShowDialog(true); }}>Tạo nguồn</AppButton>
+        {isSystemUser && <AppButton icon={<Plus size={15} />} onClick={() => { setEditingConfig(null); setShowDialog(true); }}>Tạo nguồn</AppButton>}
       </div>
 
-      <AppCard className="overflow-hidden">
-        <div className="data-grid-lg table-scroll min-w-[800px]">
-          <div className="app-table-header grid grid-cols-[1.5fr_1fr_1fr_1fr_0.5fr] gap-3 px-4 py-3">
-            <div>Tên & Mô tả</div>
-            <div>Loại Nguồn</div>
-            <div>Trạng thái</div>
-            <div>Ngày tạo</div>
-            <div>Hành động</div>
-          </div>
-          {loading ? (
-            <div className="flex justify-center p-8 text-slate-500"><Loader2 className="animate-spin" /></div>
-          ) : configs.length === 0 ? (
-            <div className="empty-state m-3">Chưa có nguồn dùng chung nào</div>
-          ) : (
-            configs.map((config) => (
-              <div key={config.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr_0.5fr] items-center gap-3 border-t border-[var(--outline-variant)] px-4 py-4 text-xs">
-                <div>
-                  <div className="font-extrabold">{config.name}</div>
-                  <div className="mt-1 text-slate-500">{config.description || '-'}</div>
-                </div>
-                <div>
-                  <div className="font-bold text-blue-600">{config.source_type}</div>
-                  <div className="mt-1 text-slate-500 truncate max-w-[150px]" title={config.source_url || ''}>{config.source_url || 'N/A'}</div>
-                </div>
-                <div>
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${config.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                    {config.status}
-                  </span>
-                </div>
-                <div>
-                  <div className="text-slate-500">{new Date(config.created_at).toLocaleString('vi-VN')}</div>
-                  <div className="mt-0.5 text-slate-400">Bởi: {config.creator_name}</div>
-                </div>
-                <div>
-                  <TableRowActions
-                    actions={[
-                      { label: 'Chỉnh sửa', icon: <Edit2 size={14} />, onClick: () => { setEditingConfig(config); setShowDialog(true); } },
-                      { label: config.status === 'ACTIVE' ? 'Tạm dừng' : 'Kích hoạt', icon: config.status === 'ACTIVE' ? <Square size={14} /> : <Play size={14} />, onClick: () => handleToggleStatus(config) },
-                      { label: 'Xoá nguồn', icon: <Trash2 size={14} />, onClick: () => handleDelete(config), danger: true },
-                    ]}
-                  />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+      <AppCard className="app-list-layout app-table-card overflow-hidden">
+        <PaginatedList items={configs} loading={loading} resetKey={configs.map(item => item.id).join()}>{(visibleItems) => (
+<Table className="min-w-[960px] table-fixed">
+          <colgroup>
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '22%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: '22%' }} />
+            <col style={{ width: '10%' }} />
+          </colgroup>
+          <ShadcnTableHeader>
+            <TableRow className="bg-slate-50/80">
+              <TableHead className="px-4 py-3 min-w-[160px]"><div>Tên & Mô tả</div></TableHead>
+              <TableHead className="px-4 py-3"><div>Loại Nguồn</div></TableHead>
+              <TableHead className="px-4 py-3"><div>Trạng thái</div></TableHead>
+              <TableHead className="px-4 py-3"><div>Ngày tạo</div></TableHead>
+              <TableHead className="px-4 py-3"><div>Hành động</div></TableHead>
+            </TableRow>
+          </ShadcnTableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow><TableCell colSpan={5}><div className="flex justify-center p-8 text-slate-500"><Loader2 className="animate-spin" /></div></TableCell></TableRow>
+            ) : configs.length === 0 ? (
+              <TableRow><TableCell colSpan={5}><div className="empty-state m-3">Chưa có nguồn dùng chung nào</div></TableCell></TableRow>
+            ) : (
+              visibleItems.map((config) => (
+                <TableRow key={config.id} className=" border-t border-[var(--outline-variant)] text-xs">
+                  <TableCell className="px-4 py-3 min-w-[160px]"><div>
+                    <div className="font-extrabold">{config.name}</div>
+                    <div className="mt-1 text-slate-500">{config.description || '-'}</div>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    <div className="font-bold text-blue-600">{config.source_type}</div>
+                    <div className="mt-1 text-slate-500 truncate max-w-[150px]" title={config.source_url || ''}>{config.source_url || 'N/A'}</div>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${config.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {config.status}
+                    </span>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    <div className="text-slate-500">{new Date(config.created_at).toLocaleString('vi-VN')}</div>
+                    <div className="mt-0.5 text-slate-400">Bởi: {config.creator_name}</div>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    {isSystemUser && <TableRowActions
+                      actions={[
+                        { label: 'Chỉnh sửa', icon: <Edit2 size={14} />, onClick: () => { setEditingConfig(config); setShowDialog(true); } },
+                        { label: config.status === 'ACTIVE' ? 'Tạm dừng' : 'Kích hoạt', icon: config.status === 'ACTIVE' ? <Square size={14} /> : <Play size={14} />, onClick: () => handleToggleStatus(config) },
+                        { label: 'Xoá nguồn', icon: <Trash2 size={14} />, onClick: () => handleDelete(config), danger: true },
+                      ]}
+                    />}
+                  </div></TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+)}</PaginatedList>
       </AppCard>
       
       {showDialog && (
@@ -135,10 +150,13 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
   const [selectedRssKeys, setSelectedRssKeys] = useState<string[]>(
     (config?.configuration?.rss_feed_keys as string[]) || (vnexpressRssFeeds.length > 0 ? ['tin-moi-nhat'] : [])
   )
+  const [keywords, setKeywords] = useState(config?.keywords.join(', ') || '')
+  const [jobOptions, setJobOptions] = useState<string[]>((config?.configuration.job_options as string[]) ?? (sourceType === 'VNEXPRESS' ? ['source_url', 'keywords', 'rss_feed_keys'] : ['source_url', 'keywords']))
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async () => {
     if (!name.trim()) return toast.error('Vui lòng nhập tên nguồn')
+    if (sourceType === 'VNEXPRESS' && !sourceUrl.trim() && !selectedRssKeys.length) return toast.error('Chọn RSS hoặc nhập URL')
     setSaving(true)
     try {
       const payload = {
@@ -146,7 +164,12 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
         description: description.trim() || null,
         source_type: sourceType,
         source_url: sourceUrl.trim() || null,
-        configuration: sourceType === 'VNEXPRESS' ? { rss_feed_keys: selectedRssKeys } : {},
+        keywords: keywords.split(',').map(k => k.trim()).filter(Boolean),
+        configuration: {
+          ...Object.fromEntries(Object.entries(config?.configuration || {}).filter(([key]) => !['max_items', 'limit', 'rss_feed_keys', 'rss_feed_urls', 'rss_feeds', 'job_options'].includes(key))),
+          ...(sourceType === 'VNEXPRESS' ? { rss_feed_keys: selectedRssKeys } : {}),
+          job_options: jobOptions.filter(key => key !== 'rss_feed_keys' || sourceType === 'VNEXPRESS'),
+        },
       }
       if (config) {
         await updateCrawlSourceConfigApi(config.id, payload)
@@ -183,7 +206,7 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
           </label>
           <label className="block text-sm font-semibold">Loại Nguồn
             <select className="mt-1 w-full rounded-md border px-3 py-2 text-sm" value={sourceType} onChange={e => setSourceType(e.target.value)} disabled={!!config}>
-              {sourceTypes.map(st => (
+              {sourceTypes.filter(st => ['VNEXPRESS', 'BILIBILI'].includes(st.type)).map(st => (
                 <option key={st.type} value={st.type}>{st.type}</option>
               ))}
             </select>
@@ -215,11 +238,17 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
               </div>
             </div>
           )}
-          {sourceType === 'BILIBILI' && (
-            <label className="block text-sm font-semibold">URL Bilibili
+          {(
+            <label className="block text-sm font-semibold">URL nguồn (tùy chọn)
               <input type="text" className="mt-1 w-full rounded-md border px-3 py-2 text-sm" placeholder="VD: https://space.bilibili.com/..." value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} />
             </label>
           )}
+          <label className="block text-sm font-semibold">Từ khóa mặc định (tùy chọn)
+            <input className="mt-1 w-full rounded-md border px-3 py-2 text-sm" value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="Phân cách bằng dấu phẩy" />
+          </label>
+          <div className="space-y-2"><p className="text-sm font-semibold">Cho phép tùy chỉnh khi tạo job</p>
+            {[['source_url', 'URL'], ['keywords', 'Từ khóa'], ...(sourceType === 'VNEXPRESS' ? [['rss_feed_keys', 'Chọn trong các chuyên mục RSS của nguồn']] : [])].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={jobOptions.includes(key)} onChange={e => setJobOptions(e.target.checked ? [...jobOptions, key] : jobOptions.filter(k => k !== key))} />{label}</label>)}
+          </div>
         </DialogBody>
         <DialogFooter>
           <button onClick={onClose} disabled={saving} className="h-9 px-4 rounded-md border text-sm font-semibold">Hủy</button>

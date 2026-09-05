@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Mail, User, Shield, Activity, Key, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { Mail, User, Shield, Activity, Key, CheckCircle2, XCircle, AlertTriangle, Power, PowerOff, Calendar } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from '@/commons/component/ui/dialog'
 import { updateAdminUserApi, deleteAdminUserApi } from '@/commons/apis/api'
+import { UserAvatar } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
 
 type AdminUser = {
   id: string | number
   email: string
   full_name?: string | null
+  avatar_url?: string | null
   roles: string[]
   is_active: boolean
+  is_system_admin?: boolean
   created_at: string
 }
 
@@ -37,6 +40,10 @@ const hasSystemRole = (roles: string[]) =>
   })
 
 const rolePayload = (role: string) => (role === 'system' ? ['SYSTEM_ADMIN'] : ['CREATOR'])
+
+const formatDate = (dateStr: string) => {
+  return new Date(dateStr).toLocaleString('vi-VN')
+}
 
 export default function EditUserDialog({ open, onOpenChange, user, currentUserId, onSuccess }: EditUserDialogProps) {
   const [form, setForm] = useState<EditUserForm>({
@@ -132,9 +139,49 @@ export default function EditUserDialog({ open, onOpenChange, user, currentUserId
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Chỉnh sửa người dùng</DialogTitle>
-          <DialogDescription>
-            Cập nhật thông tin, phân quyền và trạng thái tài khoản {user.email}
+          <div className="flex items-center gap-3">
+            <UserAvatar
+              src={user.avatar_url ?? null}
+              name={user.full_name || user.email}
+              size="lg"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <DialogTitle className="text-xl font-bold">
+                  {user.full_name || user.email}
+                </DialogTitle>
+                {user.is_system_admin && (
+                  <span className="flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-700">
+                    <Shield size={12} />
+                    SYSTEM ADMIN
+                  </span>
+                )}
+                {user.is_active ? (
+                  <span className="flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">
+                    <Power size={12} />
+                    Hoạt động
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+                    <PowerOff size={12} />
+                    Vô hiệu hóa
+                  </span>
+                )}
+              </div>
+              {user.full_name && (
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600">
+                  <Mail size={14} />
+                  {user.email}
+                </p>
+              )}
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                <Calendar size={12} />
+                {formatDate(user.created_at)}
+              </p>
+            </div>
+          </div>
+          <DialogDescription className="mt-2">
+            Cập nhật thông tin, phân quyền và trạng thái tài khoản
           </DialogDescription>
         </DialogHeader>
 
@@ -336,14 +383,14 @@ export default function EditUserDialog({ open, onOpenChange, user, currentUserId
               type="button"
               onClick={handleCancel}
               disabled={loading}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50"
+              className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50"
             >
               Hủy bỏ
             </button>
             <button
               type="submit"
               disabled={loading || !form.email}
-              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition hover:bg-blue-700 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition hover:bg-blue-700 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
             >
               {loading ? 'Đang lưu...' : 'Lưu thay đổi'}
             </button>

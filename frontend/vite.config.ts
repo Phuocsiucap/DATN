@@ -12,10 +12,6 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ['ewa-pansophical-enrico.ngrok-free.dev'],
-    hmr: {
-      protocol: 'wss',
-      clientPort: 443,
-    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

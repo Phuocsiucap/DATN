@@ -33,8 +33,10 @@ import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
 import OpenAiUsagePage from '@/features/admin/OpenAiUsagePage'
 import DeepseekUsagePage from '@/features/admin/DeepseekUsagePage'
 import AuditLogsPage from '@/features/admin/AuditLogsPage'
+import AdminContentItemsPage from '@/features/admin/AdminContentItemsPage'
 
-import AuthPage from '@/features/auth/AuthPage'
+import LoginPage from '@/features/auth/LoginPage'
+import RegisterPage from '@/features/auth/RegisterPage'
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
 import './index.css'
 
@@ -42,6 +44,7 @@ type CurrentUser = {
   id: string | number
   email: string
   full_name?: string | null
+  avatar_url?: string | null
   roles: string[]
   is_system_admin?: boolean
 }
@@ -56,7 +59,7 @@ const LEGACY_PATHS: Record<string, string> = {
   '/planningRequest': TAB_PATHS.planning,
 }
 
-const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'settings', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs'])
+const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems'])
 const CREATOR_TABS = new Set<Tab>([
   'dashboard',
   'crawl',
@@ -99,6 +102,7 @@ const getGenerateVideoProjectIdFromPath = () => {
 }
 
 function AppContent() {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname)
   const [tab, setTab] = useState<Tab>(getTabFromPath)
   const [generateVideoProjectId, setGenerateVideoProjectId] = useState(getGenerateVideoProjectIdFromPath)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
@@ -176,16 +180,28 @@ function AppContent() {
   }, [])
 
   useEffect(() => {
+    if (!authLoading && !currentUser) {
+      const path = currentPath.replace(/\/+$/, '') || '/'
+      if (path !== '/login' && path !== '/register') {
+        window.history.replaceState(null, '', '/login')
+        setCurrentPath('/login')
+      }
+    }
+  }, [authLoading, currentUser, currentPath])
+
+  useEffect(() => {
     const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
     const nextPath = LEGACY_PATHS[normalizedPath]
     if (!nextPath) return
     window.history.replaceState(window.history.state, '', `${nextPath}${window.location.search}${window.location.hash}`)
+    setCurrentPath(nextPath)
   }, [])
 
   useEffect(() => {
     const handleAuthExpired = () => {
       setCurrentUser(null)
-      window.history.replaceState(window.history.state, '', '/')
+      window.history.replaceState(window.history.state, '', '/login')
+      setCurrentPath('/login')
       setTab('dashboard')
       setAuthLoading(false)
     }
@@ -196,6 +212,7 @@ function AppContent() {
 
   useEffect(() => {
     const handlePopState = () => {
+      setCurrentPath(window.location.pathname)
       setTab(getTabFromPath())
       setGenerateVideoProjectId(getGenerateVideoProjectIdFromPath())
     }
@@ -229,7 +246,8 @@ function AppContent() {
   const handleLogout = async () => {
     await logoutApi()
     setCurrentUser(null)
-    window.history.replaceState(window.history.state, '', '/')
+    window.history.replaceState(window.history.state, '', '/login')
+    setCurrentPath('/login')
     setTab('dashboard')
   }
 
@@ -244,7 +262,11 @@ function AppContent() {
   }
 
   if (!currentUser) {
-    return <AuthPage onAuthenticated={handleAuthenticated} />
+    const path = currentPath.replace(/\/+$/, '') || '/'
+    if (path === '/register') {
+      return <RegisterPage onAuthenticated={handleAuthenticated} />
+    }
+    return <LoginPage onAuthenticated={handleAuthenticated} />
   }
 
   return (
@@ -280,6 +302,7 @@ function AppContent() {
           {activeTab === 'openaiUsage' && <OpenAiUsagePage />}
           {activeTab === 'deepseekUsage' && <DeepseekUsagePage />}
           {activeTab === 'auditLogs' && <AuditLogsPage />}
+          {activeTab === 'contentItems' && <AdminContentItemsPage />}
           {activeTab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

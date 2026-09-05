@@ -3,10 +3,11 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from common.core.crawl_source_config import effective_source_configuration
 from common.db.models import CrawlJob, CrawlJobSource, CrawlSourceConfig, User
 from common.db.session import get_db
 from common.core.vnexpress_rss import vnexpress_rss_catalog
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_system_admin
 from app.schemas import api as schemas
 
 router = APIRouter()
@@ -30,6 +31,24 @@ def vnexpress_rss_feeds(_: User = Depends(get_current_user)):
 
 # ─── US-18, US-19: Shared CrawlSourceConfig CRUD ───────────────────────────
 
+def validate_source_config(source_type: str, configuration: dict) -> None:
+    if source_type not in ("VNEXPRESS", "BILIBILI"):
+        raise HTTPException(400, "Loại nguồn chưa hỗ trợ crawl")
+    if {"max_items", "limit"} & configuration.keys():
+        raise HTTPException(400, "Số bài chỉ được cấu hình khi tạo job")
+    options = configuration.get("job_options", [])
+    supported = {"source_url", "keywords"}
+    if source_type == "VNEXPRESS":
+        supported.add("rss_feed_keys")
+    if not isinstance(options, list) or any(not isinstance(key, str) or key not in supported for key in options):
+        raise HTTPException(400, "Tùy chọn của nguồn không hợp lệ")
+    if "rss_feed_keys" in configuration:
+        keys = configuration["rss_feed_keys"]
+        catalog = {feed["key"] for feed in vnexpress_rss_catalog()}
+        if source_type != "VNEXPRESS" or not isinstance(keys, list) or any(not isinstance(key, str) or key not in catalog for key in keys):
+            raise HTTPException(400, "Chuyên mục RSS không hợp lệ")
+
+
 def _serialize_source_config(config: CrawlSourceConfig) -> dict:
     creator_name = None
     if config.creator:
@@ -40,7 +59,7 @@ def _serialize_source_config(config: CrawlSourceConfig) -> dict:
         "source_type": config.source_type,
         "source_url": config.source_url,
         "keywords": config.keywords or [],
-        "configuration": config.configuration or {},
+        "configuration": effective_source_configuration(config.source_type, config.configuration),
         "status": config.status,
         "description": config.description,
         "creator_name": creator_name,
@@ -68,9 +87,10 @@ def list_source_configs(
 @router.post("/crawl-source-configs", status_code=201)
 def create_source_config(
     payload: schemas.CrawlSourceConfigCreateRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_system_admin),
     db: Session = Depends(get_db),
 ):
+    validate_source_config(payload.source_type.strip().upper(), payload.configuration)
     config = CrawlSourceConfig(
         name=payload.name.strip(),
         source_type=payload.source_type.strip().upper(),
@@ -90,12 +110,16 @@ def create_source_config(
 def update_source_config(
     config_id: uuid.UUID,
     payload: schemas.CrawlSourceConfigUpdateRequest,
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_system_admin),
     db: Session = Depends(get_db),
 ):
     config = db.get(CrawlSourceConfig, config_id)
     if not config:
         raise HTTPException(status_code=404, detail="Nguồn crawl không tồn tại")
+    if "configuration" in payload.model_fields_set:
+        if payload.configuration is None:
+            raise HTTPException(400, "Cấu hình nguồn không được null")
+        validate_source_config(config.source_type, payload.configuration)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(config, field, value)
     db.commit()
@@ -107,7 +131,7 @@ def update_source_config(
 def toggle_source_config_status(
     config_id: uuid.UUID,
     status: str = Query(...),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_system_admin),
     db: Session = Depends(get_db),
 ):
     config = db.get(CrawlSourceConfig, config_id)
@@ -125,7 +149,7 @@ def toggle_source_config_status(
 @router.delete("/crawl-source-configs/{config_id}")
 def delete_source_config(
     config_id: uuid.UUID,
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_system_admin),
     db: Session = Depends(get_db),
 ):
     config = db.get(CrawlSourceConfig, config_id)

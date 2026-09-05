@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { CrawlJob, VnExpressRssFeed, CrawlSourceConfig } from '@/commons/apis/module1'
 import {
@@ -17,148 +17,59 @@ import {
   WEEKDAYS,
 } from '../crawlSchedule'
 
-type CreateCrawlJobDialogProps = {
+export type JobSourceDraft = {
+  id: string
+  maxItems: number
+  overrides: { source_url?: string | null; keywords?: string[]; configuration?: { rss_feed_keys: string[] } }
+}
+const inputClassName = 'mt-1 w-full rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm'
+
+export function CreateCrawlJobDialog(props: {
   sourceConfigs: CrawlSourceConfig[]
   sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[]
-  selectedSourceConfigId: string
-  setSelectedSourceConfigId: (value: string) => void
-  sourceType: string
-  setSourceType: (value: string) => void
+  sources: JobSourceDraft[]
+  setSources: (sources: JobSourceDraft[]) => void
   jobName: string
-  setJobName: (value: string) => void
-  sourceUrl: string
-  setSourceUrl: (value: string) => void
-  keywords: string
-  setKeywords: (value: string) => void
-  maxItems: number
-  setMaxItems: (value: number) => void
+  setJobName: (name: string) => void
+  saving: boolean
   vnexpressRssFeeds: VnExpressRssFeed[]
-  selectedVnexpressRssKeys: string[]
-  setSelectedVnexpressRssKeys: (value: string[]) => void
   scheduleEnabled: boolean
-  setScheduleEnabled: (value: boolean) => void
+  setScheduleEnabled: (enabled: boolean) => void
   schedule: CrawlScheduleForm
-  setSchedule: (value: CrawlScheduleForm) => void
+  setSchedule: (schedule: CrawlScheduleForm) => void
   onClose: () => void
   onSubmit: () => void
-}
-
-const inputClassName = 'mt-1 w-full rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-blue-100'
-
-export function CreateCrawlJobDialog(props: CreateCrawlJobDialogProps) {
-  const toggleRssFeed = (key: string) => {
-    props.setSelectedVnexpressRssKeys(
-      props.selectedVnexpressRssKeys.includes(key)
-        ? props.selectedVnexpressRssKeys.filter((item) => item !== key)
-        : [...props.selectedVnexpressRssKeys, key],
-    )
-  }
-
-  const isSharedSource = props.selectedSourceConfigId !== ''
-  const selectedConfig = props.sourceConfigs.find(c => c.id === props.selectedSourceConfigId)
-
-  // Sync state when a shared source is selected
-  useEffect(() => {
-    if (selectedConfig) {
-      props.setSourceType(selectedConfig.source_type)
-      props.setSourceUrl(selectedConfig.source_url || '')
-      props.setKeywords(selectedConfig.keywords.join(', '))
-      if (selectedConfig.source_type === 'VNEXPRESS' && selectedConfig.configuration?.rss_feed_keys) {
-        props.setSelectedVnexpressRssKeys(selectedConfig.configuration.rss_feed_keys as string[])
-      }
-    }
-  }, [props.selectedSourceConfigId, selectedConfig]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Tạo Crawl Job</DialogTitle>
-          <DialogDescription>Chọn nguồn, giới hạn dữ liệu và lịch crawl cho job mới.</DialogDescription>
-        </DialogHeader>
-        <DialogBody className="space-y-4">
-          <label className="block text-sm font-semibold">
-            Tên Job
-            <input type="text" className={inputClassName} value={props.jobName} onChange={(event) => props.setJobName(event.target.value)} />
-          </label>
-          <label className="block text-sm font-semibold">
-            Sử dụng Nguồn Dùng Chung
-            <select className={inputClassName} value={props.selectedSourceConfigId} onChange={(event) => props.setSelectedSourceConfigId(event.target.value)}>
-              <option value="">-- Tạo cấu hình nguồn tùy chỉnh mới --</option>
-              {props.sourceConfigs.filter(c => c.status === 'ACTIVE').map(c => (
-                <option key={c.id} value={c.id}>{c.name} ({c.source_type})</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm font-semibold">
-            Loại Nguồn
-            <select className={`${inputClassName} disabled:opacity-50`} value={props.sourceType} onChange={(event) => props.setSourceType(event.target.value)} disabled={isSharedSource}>
-              {props.sourceTypes.map(st => (
-                <option key={st.type} value={st.type}>{st.type}</option>
-              ))}
-            </select>
-          </label>
-          {props.sourceType === 'VNEXPRESS' && (
-            <>
-              <label className="block text-sm font-semibold">
-                URL VNExpress
-                <input type="url" className={`${inputClassName} disabled:opacity-50`} placeholder="https://vnexpress.net/rss/tin-moi-nhat.rss" value={props.sourceUrl} onChange={(event) => props.setSourceUrl(event.target.value)} disabled={isSharedSource} />
-              </label>
-              <div>
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm font-semibold">Chuyên mục RSS VNExpress</span>
-                  {!isSharedSource && (
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => props.setSelectedVnexpressRssKeys(props.vnexpressRssFeeds.map((feed) => feed.key))} className="h-8 rounded-md border px-3 text-xs font-bold">Chọn tất cả</button>
-                      <button type="button" onClick={() => props.setSelectedVnexpressRssKeys([])} className="h-8 rounded-md border px-3 text-xs font-bold">Bỏ chọn</button>
-                    </div>
-                  )}
-                </div>
-                <div className="grid max-h-[260px] gap-2 overflow-y-auto rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {props.vnexpressRssFeeds.length === 0 ? (
-                    <div className="col-span-full text-xs font-semibold text-[var(--on-surface-variant)]">Đang tải danh sách RSS...</div>
-                  ) : props.vnexpressRssFeeds.map((feed) => {
-                    const checked = props.selectedVnexpressRssKeys.includes(feed.key)
-                    return (
-                      <label key={feed.key} className={`flex min-h-[54px] ${isSharedSource ? 'cursor-default opacity-70' : 'cursor-pointer'} items-start gap-2 rounded-lg border p-2 text-xs transition ${checked ? 'border-[var(--accent)] bg-blue-50' : 'border-[var(--outline-variant)] bg-white hover:bg-slate-50'}`}>
-                        <input type="checkbox" className="mt-0.5" checked={checked} onChange={() => !isSharedSource && toggleRssFeed(feed.key)} disabled={isSharedSource} />
-                        <span className="min-w-0">
-                          <span className="block font-extrabold text-[var(--on-surface)]">{feed.label}</span>
-                          <span className="mt-0.5 block truncate font-mono text-xs text-[var(--on-surface-variant)]">{feed.url.replace('https://vnexpress.net/rss/', '')}</span>
-                        </span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-          <label className="block text-sm font-semibold">
-            Keywords
-            <input type="text" className={`${inputClassName} disabled:opacity-50`} value={props.keywords} onChange={(event) => props.setKeywords(event.target.value)} disabled={isSharedSource} />
-          </label>
-          <label className="block text-sm font-semibold">
-            Số lượng bài tối đa (Max Items)
-            <input type="number" className={inputClassName} value={props.maxItems} onChange={(event) => props.setMaxItems(Number(event.target.value))} />
-          </label>
-          <div className="rounded-lg border border-[var(--outline-variant)] bg-blue-50/50 p-4">
-            <label className="flex cursor-pointer items-center justify-between gap-4">
-              <span>
-                <span className="block text-sm font-extrabold text-[var(--on-surface)]">Lên lịch crawl tự động</span>
-                <span className="mt-1 block text-xs text-[var(--on-surface-variant)]">Job sẽ được lưu làm mẫu và chạy theo lịch đã chọn.</span>
-              </span>
-              <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={props.scheduleEnabled} onChange={(event) => props.setScheduleEnabled(event.target.checked)} />
-            </label>
-            {props.scheduleEnabled && <div className="mt-4 border-t border-[var(--outline-variant)] pt-4"><ScheduleFormFields value={props.schedule} onChange={props.setSchedule} /></div>}
+}) {
+  const update = (id: string, patch: Partial<JobSourceDraft>) => props.setSources(props.sources.map(s => s.id === id ? { ...s, ...patch } : s))
+  const available = props.sourceConfigs.filter(c => c.status === 'ACTIVE' && ['VNEXPRESS', 'BILIBILI'].includes(c.source_type))
+  return <Dialog open onOpenChange={open => !open && !props.saving && props.onClose()}>
+    <DialogContent className="max-w-3xl">
+      <DialogHeader><DialogTitle>Tạo Crawl Job</DialogTitle><DialogDescription>Chọn một hoặc nhiều nguồn và số bài cần thu thập từ mỗi nguồn.</DialogDescription></DialogHeader>
+      <DialogBody className="space-y-4">
+        <label className="block text-sm font-semibold">Tên job<input className={inputClassName} value={props.jobName} onChange={e => props.setJobName(e.target.value)} /></label>
+        {!available.length && <p>Chưa có nguồn đang hoạt động. System Admin cần cấu hình nguồn trước khi tạo job.</p>}
+        {available.map(config => {
+          const draft = props.sources.find(s => s.id === config.id)
+          const options = Array.isArray(config.configuration.job_options) ? config.configuration.job_options as string[] : (config.source_type === 'VNEXPRESS' ? ['source_url', 'keywords', 'rss_feed_keys'] : ['source_url', 'keywords'])
+          const patchOverride = (patch: JobSourceDraft['overrides']) => draft && update(config.id, { overrides: { ...draft.overrides, ...patch } })
+          const rssKeys = (draft?.overrides.configuration?.rss_feed_keys ?? config.configuration.rss_feed_keys ?? []) as string[]
+          return <div key={config.id} className="rounded-lg border p-4 space-y-3">
+            <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={!!draft} onChange={e => props.setSources(e.target.checked ? [...props.sources, { id: config.id, maxItems: 20, overrides: {} }] : props.sources.filter(s => s.id !== config.id))} />{config.name} ({config.source_type})</label>
+            {config.description && <p className="text-sm text-slate-500">{config.description}</p>}
+            {draft && <>
+              <label className="block text-sm">Số bài cần thu thập từ nguồn này<input type="number" min={1} max={200} className={inputClassName} value={draft.maxItems} onChange={e => update(config.id, { maxItems: Number(e.target.value) })} /></label>
+              {options.includes('source_url') ? <label className="block text-sm">URL (tùy chọn)<input type="url" className={inputClassName} value={draft.overrides.source_url !== undefined ? draft.overrides.source_url || '' : config.source_url || ''} onChange={e => patchOverride({ source_url: e.target.value || null })} /></label> : config.source_url && <p className="text-sm break-all">URL: {config.source_url}</p>}
+              {options.includes('keywords') ? <label className="block text-sm">Từ khóa (tùy chọn, phân cách bằng dấu phẩy)<input className={inputClassName} defaultValue={config.keywords.join(', ')} onChange={e => patchOverride({ keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean) })} /></label> : <p className="text-sm">Từ khóa: {config.keywords.join(', ') || 'Không có'}</p>}
+              {options.includes('rss_feed_keys') && <div className="flex flex-wrap gap-3">{props.vnexpressRssFeeds.filter(f => ((config.configuration.rss_feed_keys ?? []) as string[]).includes(f.key)).map(feed => <label key={feed.key} className="text-sm flex items-center gap-1"><input type="checkbox" checked={rssKeys.includes(feed.key)} onChange={e => patchOverride({ configuration: { rss_feed_keys: e.target.checked ? [...rssKeys, feed.key] : rssKeys.filter(k => k !== feed.key) } })} />{feed.label}</label>)}</div>}
+            </>}
           </div>
-        </DialogBody>
-        <DialogFooter>
-          <button onClick={props.onClose} className="h-9 rounded-md border border-[var(--outline-variant)] px-4 text-sm font-semibold">Hủy</button>
-          <button onClick={props.onSubmit} className="h-9 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">Tạo mới</button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
+        })}
+        <label className="flex items-center gap-2"><input type="checkbox" checked={props.scheduleEnabled} onChange={e => props.setScheduleEnabled(e.target.checked)} />Chạy định kỳ</label>
+        {props.scheduleEnabled && <ScheduleFormFields value={props.schedule} onChange={props.setSchedule} />}
+      </DialogBody>
+      <DialogFooter><button disabled={props.saving} onClick={props.onClose}>Hủy</button><button className="rounded-md bg-blue-600 text-white px-4 py-2" disabled={props.saving || !props.sources.length} onClick={props.onSubmit}>{props.saving ? 'Đang tạo...' : 'Tạo job'}</button></DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 export function ScheduleFormFields({ value, onChange }: { value: CrawlScheduleForm; onChange: (value: CrawlScheduleForm) => void }) {

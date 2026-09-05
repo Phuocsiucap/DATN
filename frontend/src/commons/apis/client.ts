@@ -120,7 +120,11 @@ api.interceptors.response.use(
     // Keep existing feature APIs focused on domain data while the wire format
     // remains the shared ApiResponse envelope.
     if (isApiResponse(response.data)) {
-      response.data = response.data.data
+      const envelope = response.data
+      const payload = envelope.data
+      response.data = envelope.pagination && payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? { ...payload, pagination: envelope.pagination }
+        : payload
     }
     return response
   },

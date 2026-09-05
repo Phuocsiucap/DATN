@@ -3,6 +3,8 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from common.db.bootstrap import ensure_roles, ensure_schema_compatibility
 from common.db.models import Base
@@ -78,3 +80,11 @@ app.include_router(generate_video.router, prefix="/api/v1/generate-video", tags=
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "api-service"}
+
+
+# Mount static files for avatars - Use absolute path
+from pathlib import Path as PathLib
+PROJECT_ROOT = PathLib(__file__).parent.parent.parent.parent
+AVATAR_DIR = PROJECT_ROOT / "runtime" / "avatars"
+AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")

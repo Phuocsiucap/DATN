@@ -337,7 +337,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         {/* Search Input */}
         <div className="relative flex-1 min-w-[240px]">
           <Search size={15} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
-          <input
+          <input data-filter-control
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Tìm theo tiêu đề, ID..."

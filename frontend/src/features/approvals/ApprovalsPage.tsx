@@ -1,3 +1,4 @@
+import { ListPagination } from '@/commons/component/ui/list-pagination'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -263,10 +264,11 @@ export default function ApprovalsPage() {
         tabs={approvalTabs.map((tab) => ({ ...tab, count: counts[tab.value] }))}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[500px_minmax(0,1fr)] 2xl:grid-cols-[520px_minmax(0,1fr)]">
-          <section className="min-w-0">
+      <div className="grid min-h-[320px] flex-1 gap-4 xl:grid-cols-[500px_minmax(0,1fr)] 2xl:grid-cols-[520px_minmax(0,1fr)]">
+          <section className="app-list-panel">
             <SearchField value={search} onChange={setSearch} placeholder="Tìm video, kênh hoặc nội dung..." className="mb-3" />
 
+            <div className="app-list-scroll">
             {loading && filteredItems.length === 0 ? (
               <LoadingBlock />
             ) : filteredItems.length === 0 ? (
@@ -287,13 +289,10 @@ export default function ApprovalsPage() {
               </div>
             )}
 
-            <div className="mt-5 flex items-center justify-between text-sm font-medium text-[#526179]">
+            </div>
+            <div className="app-list-footer text-sm font-medium text-[#526179]">
               <span>Hiển thị {visibleItems.length ? `${pageStart + 1} - ${pageStart + visibleItems.length} trong` : '0 trong'} {filteredItems.length} video</span>
-              <div className="flex items-center gap-2">
-                <button aria-label="Trang trước" disabled={loading || currentPage === 1} onClick={() => { setPage(currentPage - 1); setScheduleTargetId(null) }} className="grid h-8 w-8 place-items-center rounded-[8px] hover:bg-[#f4f6ff] disabled:opacity-40">‹</button>
-                <span>{currentPage}/{pageCount}</span>
-                <button aria-label="Trang sau" disabled={loading || currentPage === pageCount} onClick={() => { setPage(currentPage + 1); setScheduleTargetId(null) }} className="grid h-8 w-8 place-items-center rounded-[8px] hover:bg-[#f4f6ff] disabled:opacity-40">›</button>
-              </div>
+              <ListPagination page={currentPage} totalPages={pageCount} loading={loading} onPageChange={(nextPage) => { setPage(nextPage); setScheduleTargetId(null) }} />
             </div>
           </section>
 

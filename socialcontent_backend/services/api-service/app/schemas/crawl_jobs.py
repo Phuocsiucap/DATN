@@ -10,11 +10,12 @@ from common.planning.crawl_schedule import DEFAULT_TIMEZONE, validate_schedule_v
 
 
 class CrawlJobSourceInput(BaseModel):
-    source_type: str
+    source_type: str | None = None
     source_url: str | None = None
     keywords: list[str] = Field(default_factory=list)
     configuration: dict[str, Any] = Field(default_factory=dict)
-    source_config_id: uuid.UUID | None = None
+    source_config_id: uuid.UUID
+    max_items: int = Field(default=20, ge=1, le=200, strict=True)
 
 
 class CrawlJobScheduleRequest(BaseModel):

@@ -148,7 +148,7 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
 
     content_context = {
         "content_id": str(content.id),
-        "crawl_job_id": str(content.crawl_job_id) if getattr(content, "crawl_job_id", None) else None,
+        "crawl_job_id": str(content.origin_crawl_job_id) if getattr(content, "origin_crawl_job_id", None) else None,
         "content_type": content.content_type,
         "source_scope": content.content_scope,
         "quality_score": float(content.quality_score or 0),

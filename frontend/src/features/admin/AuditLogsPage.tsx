@@ -1,17 +1,13 @@
+import { ListPagination } from '@/commons/component/ui/list-pagination'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import {
-  Activity,
   CalendarDays,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
   FilterX,
   RefreshCw,
   ScrollText,
-  ShieldCheck,
-  UserRound,
 } from 'lucide-react'
 
 import {
@@ -25,18 +21,12 @@ import {
   DateInput,
   PageLayout,
   SearchField,
-  SelectControl,
 } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
 
 const EMPTY_RESULT: AuditLogList = {
   items: [],
-  page: 1,
-  page_size: 25,
-  total: 0,
-  total_pages: 0,
-  summary: { unique_actors: 0, unique_actions: 0 },
-  filters: { actors: [], actions: [], target_types: [] },
+  pagination: { page: 1, limit: 25, total: 0, totalPages: 1 },
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -119,9 +109,6 @@ export default function AuditLogsPage() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [actorId, setActorId] = useState('')
-  const [action, setAction] = useState('')
-  const [targetType, setTargetType] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [page, setPage] = useState(1)
@@ -141,9 +128,6 @@ export default function AuditLogsPage() {
         page,
         page_size: pageSize,
         search: debouncedSearch || undefined,
-        actor_id: actorId || undefined,
-        action: action || undefined,
-        target_type: targetType || undefined,
         created_from: dateBoundary(startDate),
         created_to: dateBoundary(endDate, true),
       })
@@ -158,24 +142,21 @@ export default function AuditLogsPage() {
       .finally(() => {
         if (sequence === requestSequence.current) setLoading(false)
       })
-  }, [action, actorId, debouncedSearch, endDate, page, pageSize, refreshKey, startDate, targetType])
+  }, [debouncedSearch, endDate, page, pageSize, refreshKey, startDate])
 
-  const hasFilters = Boolean(search || actorId || action || targetType || startDate || endDate)
+  const hasFilters = Boolean(search || startDate || endDate)
   const range = useMemo(() => {
-    if (!result.total) return '0 bản ghi'
-    const first = (result.page - 1) * result.page_size + 1
-    const last = Math.min(result.page * result.page_size, result.total)
-    return `${first}–${last} / ${result.total} bản ghi`
-  }, [result.page, result.page_size, result.total])
+    if (!result.pagination.total) return '0 bản ghi'
+    const first = (result.pagination.page - 1) * result.pagination.limit + 1
+    const last = Math.min(result.pagination.page * result.pagination.limit, result.pagination.total)
+    return `${first}–${last} / ${result.pagination.total} bản ghi`
+  }, [result.pagination.page, result.pagination.limit, result.pagination.total])
 
   const resetFilters = () => {
     setLoading(true)
     setError('')
     setSearch('')
     setDebouncedSearch('')
-    setActorId('')
-    setAction('')
-    setTargetType('')
     setStartDate('')
     setEndDate('')
     setPage(1)
@@ -209,76 +190,16 @@ export default function AuditLogsPage() {
         </AppButton>
       }
     >
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SummaryCard
-          icon={<ScrollText size={21} />}
-          label={hasFilters ? 'Kết quả phù hợp' : 'Tổng nhật ký'}
-          value={result.total.toLocaleString('vi-VN')}
-          caption="bản ghi bất biến"
-          tone="indigo"
-        />
-        <SummaryCard
-          icon={<UserRound size={21} />}
-          label="Người thao tác"
-          value={result.summary.unique_actors.toLocaleString('vi-VN')}
-          caption="trong kết quả hiện tại"
-          tone="blue"
-        />
-        <SummaryCard
-          icon={<Activity size={21} />}
-          label="Loại hành động"
-          value={result.summary.unique_actions.toLocaleString('vi-VN')}
-          caption="trong kết quả hiện tại"
-          tone="emerald"
-        />
-      </div>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 p-5">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+      <section className="app-list-panel app-table-card border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
             <SearchField
               value={search}
               onChange={(value) => updateFilter(setSearch, value)}
               placeholder="Tìm email, hành động, ID hoặc metadata..."
               className="min-w-0 flex-1"
             />
-            <SelectControl
-              value={actorId}
-              onChange={(value) => updateFilter(setActorId, value)}
-              icon={<UserRound size={15} />}
-              className="w-full xl:w-[220px]"
-            >
-              <option value="">Tất cả người thao tác</option>
-              {result.filters.actors.map((actor) => (
-                <option key={actor.id} value={actor.id}>{actorName(actor)}</option>
-              ))}
-            </SelectControl>
-            <SelectControl
-              value={action}
-              onChange={(value) => updateFilter(setAction, value)}
-              icon={<Activity size={15} />}
-              className="w-full xl:w-[220px]"
-            >
-              <option value="">Tất cả hành động</option>
-              {result.filters.actions.map((value) => (
-                <option key={value} value={value}>{actionLabel(value)}</option>
-              ))}
-            </SelectControl>
-            <SelectControl
-              value={targetType}
-              onChange={(value) => updateFilter(setTargetType, value)}
-              icon={<ShieldCheck size={15} />}
-              className="w-full xl:w-[205px]"
-            >
-              <option value="">Tất cả đối tượng</option>
-              {result.filters.target_types.map((value) => (
-                <option key={value} value={value}>{targetLabel(value)}</option>
-              ))}
-            </SelectControl>
-          </div>
-
-          <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-wrap items-center gap-2">
               <DateInput
                 label="Từ"
                 value={startDate}
@@ -291,15 +212,21 @@ export default function AuditLogsPage() {
                 min={startDate || undefined}
                 onChange={(value) => updateFilter(setEndDate, value)}
               />
+              {hasFilters && (
+                <AppButton 
+                  variant="ghost" 
+                  icon={<FilterX size={15} />} 
+                  onClick={resetFilters}
+                  className="h-9"
+                >
+                  Xóa lọc
+                </AppButton>
+              )}
             </div>
-            {hasFilters && (
-              <AppButton variant="ghost" icon={<FilterX size={15} />} onClick={resetFilters}>
-                Xóa bộ lọc
-              </AppButton>
-            )}
           </div>
         </div>
 
+        <div className="app-list-scroll">
         {error ? (
           <div className="px-6 py-16 text-center">
             <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
@@ -322,18 +249,17 @@ export default function AuditLogsPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-slate-50/80">
-                <tr>
-                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">Thời gian</th>
-                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">Người thao tác</th>
-                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">Hành động</th>
-                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">Đối tượng</th>
-                  <th className="w-16 px-5 py-4 text-right text-xs font-black uppercase tracking-wider text-slate-500">Chi tiết</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
+          <div>
+            <Table className="w-full min-w-[980px] text-left text-sm">
+              <TableHeader className="bg-slate-50/80">
+                <TableRow>
+                  <TableHead className="px-5 py-2.5 text-xs font-black uppercase tracking-wider text-slate-500">Thời gian</TableHead>
+                  <TableHead className="px-5 py-2.5 text-xs font-black uppercase tracking-wider text-slate-500">Người thao tác</TableHead>
+                  <TableHead className="px-5 py-2.5 text-xs font-black uppercase tracking-wider text-slate-500">Hành động</TableHead>
+                  <TableHead className="px-5 py-2.5 text-xs font-black uppercase tracking-wider text-slate-500">Đối tượng</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-slate-100">
                 {loading && result.items.length === 0 ? (
                   <LoadingRows />
                 ) : result.items.map((item) => (
@@ -344,17 +270,17 @@ export default function AuditLogsPage() {
                     onToggle={() => setExpandedId((value) => value === item.id ? null : item.id)}
                   />
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
 
-        {!error && result.total > 0 && (
-          <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        </div>
+          <div className="app-list-footer">
             <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
               <span>{range}</span>
               <label className="relative">
-                <select
+                <select data-filter-control
                   value={pageSize}
                   onChange={(event) => {
                     setLoading(true)
@@ -371,73 +297,10 @@ export default function AuditLogsPage() {
                 <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               </label>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                aria-label="Trang trước"
-                disabled={page <= 1 || loading}
-                onClick={() => {
-                  setLoading(true)
-                  setError('')
-                  setPage((value) => Math.max(1, value - 1))
-                }}
-                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-40"
-              >
-                <ChevronLeft size={17} />
-              </button>
-              <span className="min-w-24 text-center text-sm font-bold text-slate-700">
-                Trang {result.page} / {Math.max(result.total_pages, 1)}
-              </span>
-              <button
-                type="button"
-                aria-label="Trang sau"
-                disabled={page >= result.total_pages || loading}
-                onClick={() => {
-                  setLoading(true)
-                  setError('')
-                  setPage((value) => value + 1)
-                }}
-                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-40"
-              >
-                <ChevronRight size={17} />
-              </button>
-            </div>
+            <ListPagination page={page} totalPages={error ? 1 : result.pagination.totalPages} loading={loading || !!error} onPageChange={(nextPage) => { setLoading(true); setError(''); setPage(nextPage) }} />
           </div>
-        )}
       </section>
     </PageLayout>
-  )
-}
-
-function SummaryCard({
-  icon,
-  label,
-  value,
-  caption,
-  tone,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  caption: string
-  tone: 'indigo' | 'blue' | 'emerald'
-}) {
-  const tones = {
-    indigo: 'border-indigo-100 bg-indigo-50/60 text-indigo-700',
-    blue: 'border-blue-100 bg-blue-50/60 text-blue-700',
-    emerald: 'border-emerald-100 bg-emerald-50/60 text-emerald-700',
-  }
-  return (
-    <div className={cn('rounded-2xl border p-5 shadow-sm', tones[tone])}>
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs font-black uppercase tracking-wider opacity-75">{label}</div>
-          <div className="mt-2 text-3xl font-black text-slate-900">{value}</div>
-          <div className="mt-1 text-xs font-semibold opacity-70">{caption}</div>
-        </div>
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/80 shadow-sm">{icon}</div>
-      </div>
-    </div>
   )
 }
 
@@ -445,16 +308,22 @@ function AuditRow({ item, expanded, onToggle }: { item: AuditLogItem; expanded: 
   const hasMetadata = Object.keys(item.metadata || {}).length > 0
   return (
     <>
-      <tr className={cn('transition-colors hover:bg-indigo-50/30', expanded && 'bg-indigo-50/40')}>
-        <td className="whitespace-nowrap px-5 py-4 align-top font-semibold text-slate-600">
+      <TableRow 
+        onClick={onToggle}
+        className={cn(
+          'cursor-pointer transition-colors hover:bg-indigo-50/40',
+          expanded && 'bg-indigo-50/50'
+        )}
+      >
+        <TableCell className="whitespace-nowrap px-5 py-2.5 align-top font-semibold text-slate-600">
           <div className="flex items-center gap-2">
             <CalendarDays size={14} className="text-slate-400" />
             {formatDateTime(item.created_at)}
           </div>
-        </td>
-        <td className="px-5 py-4 align-top">
+        </TableCell>
+        <TableCell className="px-5 py-2.5 align-top">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-black text-white">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-black text-white">
               {actorInitials(item.actor)}
             </span>
             <span className="min-w-0">
@@ -462,34 +331,23 @@ function AuditRow({ item, expanded, onToggle }: { item: AuditLogItem; expanded: 
               {item.actor?.full_name && <span className="block max-w-[220px] truncate text-xs font-medium text-slate-500">{item.actor.email}</span>}
             </span>
           </div>
-        </td>
-        <td className="px-5 py-4 align-top">
+        </TableCell>
+        <TableCell className="px-5 py-2.5 align-top">
           <span className={cn('inline-flex rounded-lg border px-2.5 py-1 text-xs font-black', actionTone(item.action))}>
             {actionLabel(item.action)}
           </span>
-          <span className="mt-1.5 block font-mono text-[11px] text-slate-400">{item.action}</span>
-        </td>
-        <td className="px-5 py-4 align-top">
+          <span className="mt-1 block font-mono text-[11px] text-slate-400">{item.action}</span>
+        </TableCell>
+        <TableCell className="px-5 py-2.5 align-top">
           <div className="font-bold text-slate-800">{targetLabel(item.target_type)}</div>
-          <div className="mt-1 max-w-[260px] truncate font-mono text-xs text-slate-500" title={item.target_id || undefined}>
+          <div className="mt-0.5 max-w-[260px] truncate font-mono text-xs text-slate-500" title={item.target_id || undefined}>
             {item.target_id || '—'}
           </div>
-        </td>
-        <td className="px-5 py-4 text-right align-top">
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-label={expanded ? 'Ẩn chi tiết' : 'Xem chi tiết'}
-            className="inline-grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600"
-          >
-            {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-          </button>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {expanded && (
-        <tr className="bg-slate-50/70">
-          <td colSpan={5} className="px-5 py-4">
+        <TableRow className="bg-slate-50/70">
+          <TableCell colSpan={4} className="px-5 py-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="text-xs font-black uppercase tracking-wider text-slate-500">Thông tin truy vết</div>
@@ -508,8 +366,8 @@ function AuditRow({ item, expanded, onToggle }: { item: AuditLogItem; expanded: 
                 )}
               </div>
             </div>
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   )
@@ -528,13 +386,13 @@ function LoadingRows() {
   return (
     <>
       {[0, 1, 2, 3, 4].map((row) => (
-        <tr key={row} className="animate-pulse">
-          {[0, 1, 2, 3, 4].map((column) => (
-            <td key={column} className="px-5 py-5">
+        <TableRow key={row} className="animate-pulse">
+          {[0, 1, 2, 3].map((column) => (
+            <TableCell key={column} className="px-5 py-3">
               <div className="h-4 rounded bg-slate-100" />
-            </td>
+            </TableCell>
           ))}
-        </tr>
+        </TableRow>
       ))}
     </>
   )

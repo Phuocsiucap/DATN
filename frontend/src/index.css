@@ -196,6 +196,102 @@
   box-shadow: var(--shadow-card);
 }
 
+.app-table-card {
+  border-radius: var(--radius-sm);
+}
+
+[data-filter-control] {
+  border: 1px solid #000;
+}
+
+[data-slot="table-header"] {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #1e293b;
+  color: #fff;
+  box-shadow: 0 1px 0 #475569;
+}
+
+[data-slot="table-header"] > [data-slot="table-row"],
+[data-slot="table-header"] [data-slot="table-head"] {
+  background: #1e293b;
+  color: #fff;
+}
+
+[data-slot="table-header"] [data-slot="table-head"] :not(input):not(svg):not(svg *) {
+  color: inherit;
+}
+
+/* The list owns both scroll axes; nested overflow would trap sticky headers. */
+.app-list-scroll [data-slot="table-container"],
+.app-list-scroll .table-scroll {
+  overflow: visible;
+}
+
+[data-slot="table-row"] {
+  border-color: #94a3b8;
+}
+
+[data-slot="table-body"] > [data-slot="table-row"] + [data-slot="table-row"] {
+  border-top: 1px solid #94a3b8;
+}
+
+.app-list-panel {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.app-list-scroll {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app-list-panel > :not(.app-list-scroll) {
+  flex-shrink: 0;
+}
+
+.app-list-scroll > .workspace-card + .workspace-card,
+.app-list-scroll > .app-table-card + .app-table-card {
+  margin-top: 0.75rem;
+}
+
+.app-list-scroll > .workspace-card,
+.app-list-scroll > .app-table-card,
+[class~="divide-y"] > :not(:last-child) {
+  border-color: #94a3b8;
+}
+
+.app-list-footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #94a3b8;
+  background: #f8fafc;
+}
+
+.app-list-layout {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-list-layout > :not(.app-list-layout):not(.app-list-panel):not(.app-list-scroll) {
+  flex-shrink: 0;
+}
+
 .app-card-soft {
   border: 1px solid #e9eef7;
   border-radius: 8px;

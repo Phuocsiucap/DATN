@@ -35,6 +35,7 @@ from app.schemas.stories import StoryResponse
 from app.schemas.social_profiles import (
     QueueStatusRequest,
     QueueApproveScheduleRequest,
+    QueueRescheduleRequest,
     QueueRequestChangesRequest,
     SocialPostCreateRequest,
     SocialPostMetricCreateRequest,
@@ -80,6 +81,7 @@ __all__ = [
     "ContentSeriesCreateRequest",
     "QueueStatusRequest",
     "QueueApproveScheduleRequest",
+    "QueueRescheduleRequest",
     "QueueRequestChangesRequest",
     "SocialPostCreateRequest",
     "SocialPostMetricCreateRequest",

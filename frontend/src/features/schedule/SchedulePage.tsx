@@ -17,13 +17,15 @@ import {
   Send,
   SkipForward,
 } from 'lucide-react'
-import { approveAndScheduleQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { approveAndScheduleQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, rescheduleQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar, TableRowActions, type TableRowActionItem } from '@/commons/component/social-ui'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
 import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
-import { QueueScheduleDialog, type QueueScheduleTarget } from './components/QueueScheduleDialog'
+import { QueueScheduleDialog, type QueueScheduleMode, type QueueScheduleTarget } from './components/QueueScheduleDialog'
+import { SkipConfirmDialog } from './components/SkipConfirmDialog'
+
 
 type SocialProfile = {
   id: string
@@ -223,6 +225,7 @@ export default function SchedulePage() {
   const [quickItem, setQuickItem] = useState<QueueItem | null>(null)
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
   const [scheduleItem, setScheduleItem] = useState<QueueScheduleTarget | null>(null)
+  const [skipTarget, setSkipTarget] = useState<QueueItem | null>(null)
 
   const mergeQueueItem = useCallback((updated: QueueItem) => {
     const profile = profiles.find((candidate) => String(candidate.id) === String(updated.profile_id))
@@ -318,19 +321,35 @@ export default function SchedulePage() {
     }
   }
 
-  const handleSchedule = async (scheduledAtLocal: string, timezone: string) => {
+  const handleSchedule = async (scheduledAtLocal: string, timezone: string, mode: QueueScheduleMode) => {
     if (!scheduleItem) return false
     const wasScheduled = Boolean(scheduleItem.scheduled_at)
+    const isApprovalFlow = scheduleItem.status === 'needs_approval'
     setLoading(true)
     try {
-      const updated = await approveAndScheduleQueueItemApi(scheduleItem.id, {
-        schedule_mode: 'manual',
-        scheduled_at: scheduledAtLocal,
-        timezone,
-      })
+      let updated: QueueItem
+      if (isApprovalFlow) {
+        // TikTok approval flow: keeps the approve-schedule endpoint
+        updated = await approveAndScheduleQueueItemApi(scheduleItem.id, {
+          schedule_mode: mode,
+          scheduled_at: mode === 'manual' ? scheduledAtLocal : undefined,
+          timezone,
+        })
+      } else {
+        // Creator reschedule flow: works for all platforms
+        updated = await rescheduleQueueItemApi(scheduleItem.id, {
+          schedule_mode: mode,
+          scheduled_at: mode === 'manual' ? scheduledAtLocal : undefined,
+          timezone,
+        })
+      }
       mergeQueueItem(updated)
       await loadData()
-      toast.success(wasScheduled ? 'Đã thay đổi thời điểm xuất bản.' : 'Đã xếp lịch xuất bản cho queue item.')
+      if (mode === 'ai') {
+        toast.success('AI đã chọn khung giờ xuất bản tối ưu.')
+      } else {
+        toast.success(wasScheduled ? 'Đã thay đổi thời điểm xuất bản.' : 'Đã xếp lịch xuất bản cho queue item.')
+      }
       return true
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể lưu lịch xuất bản')
@@ -340,12 +359,15 @@ export default function SchedulePage() {
     }
   }
 
-  const handleSkip = async (queueItemId: string) => {
+  const handleSkip = (queueItemId: string) => {
     const item = items.find((candidate) => candidate.id === queueItemId)
       || (modalItem?.id === queueItemId ? modalItem : null)
       || (quickItem?.id === queueItemId ? quickItem : null)
-    if (!window.confirm(`Bỏ qua queue item “${item?.article_title || queueItemId}”? Thời điểm đã giữ sẽ được giải phóng.`)) return
+    setSkipTarget(item ?? ({ id: queueItemId, article_title: queueItemId } as QueueItem))
+  }
 
+  const confirmSkip = async (queueItemId: string) => {
+    setSkipTarget(null)
     setLoading(true)
     try {
       await updatePublishingQueueItemApi(queueItemId, 'skipped')
@@ -687,6 +709,13 @@ export default function SchedulePage() {
         loading={loading}
         onClose={() => setScheduleItem(null)}
         onSubmit={handleSchedule}
+      />
+
+      <SkipConfirmDialog
+        item={skipTarget}
+        loading={loading}
+        onClose={() => setSkipTarget(null)}
+        onConfirm={(id: string) => void confirmSkip(id)}
       />
     </PageLayout>
   )

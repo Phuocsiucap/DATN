@@ -29,6 +29,7 @@ export type ApiUser = {
   id: string | number
   email: string
   full_name?: string | null
+  avatar_url?: string | null
   roles?: string[]
   is_system_admin?: boolean
 }
@@ -243,6 +244,7 @@ export function SearchField({
     <label className={cn('relative block', className)}>
       <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#718096]" />
       <input
+        data-filter-control
         value={value}
         onChange={(event) => onChange?.(event.target.value)}
         placeholder={placeholder}
@@ -269,6 +271,7 @@ export function SelectControl({
     <label className={cn('relative block', className)}>
       {icon && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#718096]">{icon}</span>}
       <select
+        data-filter-control
         value={value}
         onChange={(event) => onChange?.(event.target.value)}
         className={cn('h-10 w-full appearance-none rounded-[8px] border border-[var(--outline-variant)] bg-white pr-8 text-sm font-semibold text-[#172033] outline-none transition focus:border-[#6d5dfc] focus:ring-2 focus:ring-[#6d5dfc]/15', icon ? 'pl-9' : 'pl-3')}
@@ -301,6 +304,7 @@ export function DateInput({
 }) {
   return (
     <label
+      data-filter-control
       className={cn(
         'relative flex h-10 min-w-[160px] items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white px-3 transition focus-within:border-[#6d5dfc] focus-within:ring-2 focus-within:ring-[#6d5dfc]/15 hover:border-[#b8c2d4]',
         disabled && 'cursor-not-allowed opacity-60',

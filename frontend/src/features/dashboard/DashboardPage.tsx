@@ -1,3 +1,4 @@
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Activity,
@@ -509,7 +510,7 @@ function PipelineSkeleton() {
 
 function RunningTasksSkeleton() {
   return (
-    <div data-testid="tasks-skeleton" aria-label="Đang tải danh sách task" className="min-h-[420px] overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs">
+    <div data-testid="tasks-skeleton" aria-label="Đang tải danh sách task" className="app-table-card min-h-[420px] overflow-hidden border border-slate-200/90 bg-white shadow-xs">
       <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
         <SkeletonBlock className="h-8 w-8" />
         <div className="space-y-2">
@@ -611,7 +612,7 @@ function PipelineCard({
 
 function RunningTasksTable({ tasks }: { tasks: AdminDashboardTask[] }) {
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs">
+    <div className="app-table-card flex h-full min-w-0 flex-col overflow-hidden border border-slate-200/90 bg-white shadow-xs">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 bg-slate-50/50">
         <div className="flex items-center gap-2.5">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-blue-50 text-blue-600">
@@ -638,23 +639,23 @@ function RunningTasksTable({ tasks }: { tasks: AdminDashboardTask[] }) {
           </div>
         </div>
       ) : (
-        <div className="max-h-[440px] flex-1 overflow-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 z-10 bg-slate-50/90 backdrop-blur-xs border-b border-slate-100">
-              <tr className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                <th className="px-4 py-3">Công việc</th>
-                <th className="px-4 py-3">Trạng thái</th>
-                <th className="px-4 py-3">Giai đoạn</th>
-                <th className="px-4 py-3">Tiến độ</th>
-                <th className="px-4 py-3">Worker / Thời gian</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+        <div className="min-h-0 flex-1">
+          <Table containerClassName="max-h-[440px]" className="w-full text-left border-collapse">
+            <TableHeader className="sticky top-0 z-10 bg-slate-50/90 backdrop-blur-xs border-b border-slate-100">
+              <TableRow className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                <TableHead className="px-4 py-3">Công việc</TableHead>
+                <TableHead className="px-4 py-3">Trạng thái</TableHead>
+                <TableHead className="px-4 py-3">Giai đoạn</TableHead>
+                <TableHead className="px-4 py-3">Tiến độ</TableHead>
+                <TableHead className="px-4 py-3">Worker / Thời gian</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="divide-y divide-slate-100 text-xs">
               {tasks.map((task) => (
                 <TaskRow key={`${task.task_type}-${task.id}`} task={task} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
@@ -664,35 +665,35 @@ function RunningTasksTable({ tasks }: { tasks: AdminDashboardTask[] }) {
 function TaskRow({ task }: { task: AdminDashboardTask }) {
   const progress = Math.min(100, Math.max(0, Number(task.progress_percent || 0)))
   return (
-    <tr className="align-middle transition hover:bg-slate-50/80">
-      <td className="max-w-[240px] px-4 py-3">
+    <TableRow className="align-middle transition hover:bg-slate-50/80">
+      <TableCell className="max-w-[240px] px-4 py-3">
         <div className="truncate font-extrabold text-slate-900">{task.label}</div>
         <div className="mt-0.5 truncate text-[11px] font-medium text-slate-400" title={task.reference_title || task.reference_id || task.id}>
           {task.reference_title || task.reference_id || task.id}
         </div>
-      </td>
-      <td className="px-4 py-3">
+      </TableCell>
+      <TableCell className="px-4 py-3">
         <TaskStatus status={task.status} />
-      </td>
-      <td className="px-4 py-3 text-[11px] font-bold text-slate-600">
+      </TableCell>
+      <TableCell className="px-4 py-3 text-[11px] font-bold text-slate-600">
         <span className="rounded-md bg-slate-100 px-2 py-1">{formatStage(task.stage)}</span>
-      </td>
-      <td className="px-4 py-3">
+      </TableCell>
+      <TableCell className="px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
             <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
           <span className="w-8 text-right text-[11px] font-bold tabular-nums text-slate-600">{Math.round(progress)}%</span>
         </div>
-      </td>
-      <td className="px-4 py-3">
+      </TableCell>
+      <TableCell className="px-4 py-3">
         <div className="font-bold text-slate-700">{task.worker || 'Chờ worker'}</div>
         <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-400">
           <Clock3 size={11} />
           {formatRelativeTime(task.started_at || task.created_at)}
         </div>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   )
 }
 

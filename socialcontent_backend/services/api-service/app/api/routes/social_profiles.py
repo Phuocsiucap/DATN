@@ -205,6 +205,27 @@ def approve_and_schedule_queue_item(
     return _serialize_queue_response_item(db, service, item, "approval", _resolve_timezone(timezone_name))
 
 
+@router.post("/queue/items/{queue_item_id}/reschedule")
+def reschedule_queue_item(
+    queue_item_id: uuid.UUID,
+    payload: schemas.QueueRescheduleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Creator-facing endpoint: schedule, reschedule, or pick AI slot for any platform."""
+    service = SocialProfileService()
+    item = service.reschedule_queue_item(
+        db,
+        queue_item_id,
+        current_user,
+        schedule_mode=payload.schedule_mode,
+        scheduled_at=payload.scheduled_at,
+        timezone_name=payload.timezone,
+    )
+    timezone_name = payload.timezone or getattr(item.profile.strategy, "schedule_timezone", None)
+    return _serialize_queue_response_item(db, service, item, "schedule", _resolve_timezone(timezone_name))
+
+
 @router.post("/queue/items/{queue_item_id}/request-changes")
 def request_queue_item_changes(
     queue_item_id: uuid.UUID,
@@ -551,6 +572,9 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
     scheduled_at = item.scheduled_at
     scheduled_at_local = _ensure_aware(scheduled_at).astimezone(tzinfo).isoformat() if scheduled_at else None
     profile_scopes = data["profile_scopes"] or []
+    profile = item.profile
+    strategy = getattr(profile, "strategy", None) if profile else None
+    schedule_timezone = getattr(strategy, "schedule_timezone", None) or tzinfo.key
     return {
         "id": data["id"],
         "profile_id": data["profile_id"],
@@ -565,6 +589,7 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
         "publish_status": data.get("publish_status") or {},
         "scheduled_at": data["scheduled_at"],
         "scheduled_at_local": scheduled_at_local,
+        "schedule_timezone": schedule_timezone,
         "published_at": data["published_at"],
         "error": data["error"],
         "created_at": data["created_at"],

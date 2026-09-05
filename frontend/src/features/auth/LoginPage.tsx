@@ -9,18 +9,14 @@ import {
   Lock,
   Mail,
   ShieldCheck,
-  UserPlus,
 } from 'lucide-react'
-import { loginApi, registerApi } from '@/commons/apis/api'
+import { loginApi } from '@/commons/apis/api'
 
-type AuthMode = 'login' | 'register'
-
-type AuthPageProps = {
+type LoginPageProps = {
   onAuthenticated: () => Promise<void> | void
 }
 
 const emptyLoginForm = { email: '', password: '' }
-const emptyRegisterForm = { email: '', password: '', roles: 'user' }
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error === 'object' && error !== null && 'response' in error) {
@@ -32,12 +28,18 @@ const getApiErrorMessage = (error: unknown, fallback: string) => {
   return fallback
 }
 
-export default function AuthPage({ onAuthenticated }: AuthPageProps) {
-  const [mode, setMode] = useState<AuthMode>('login')
-  const [loginForm, setLoginForm] = useState(emptyLoginForm)
-  const [registerForm, setRegisterForm] = useState(emptyRegisterForm)
+export default function LoginPage({ onAuthenticated }: LoginPageProps) {
+  const [loginForm, setLoginForm] = useState({
+    email: window.history.state?.email || '',
+    password: window.history.state?.password || ''
+  })
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+
+  const navigateTo = (path: string) => {
+    window.history.pushState(null, '', path)
+    window.dispatchEvent(new Event('popstate'))
+  }
 
   const handleLogin = async () => {
     setLoading(true)
@@ -51,38 +53,10 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
     }
   }
 
-  const handleRegister = async () => {
-    setLoading(true)
-    try {
-      const roles = registerForm.roles
-        .split(',')
-        .map((role) => role.trim())
-        .filter(Boolean)
-      await registerApi({
-        email: registerForm.email,
-        password: registerForm.password,
-        roles,
-      })
-      toast.success('Tạo tài khoản thành công! Vui lòng đăng nhập.')
-      setRegisterForm(emptyRegisterForm)
-      setMode('login')
-    } catch (error: unknown) {
-      toast.error(getApiErrorMessage(error, 'Tạo tài khoản thất bại'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (mode === 'login') {
-      void handleLogin()
-      return
-    }
-    void handleRegister()
+    void handleLogin()
   }
-
-  const passwordValue = mode === 'login' ? loginForm.password : registerForm.password
 
   return (
     <div className="flex h-full min-h-0 w-full overflow-auto bg-slate-50 font-sans text-slate-900">
@@ -139,41 +113,11 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
         {/* Right Side: Simple Modern Form */}
         <div className="flex flex-col justify-center bg-white p-8 sm:p-10 lg:col-span-7">
           <div className="mx-auto w-full max-w-md">
-            {/* Tab Switcher */}
-            <div className="mb-5 flex rounded-xl border border-slate-200/60 bg-slate-100 p-1">
-              <button
-                type="button"
-                onClick={() => setMode('login')}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
-                  mode === 'login'
-                    ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Đăng nhập
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('register')}
-                className={`flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all ${
-                  mode === 'register'
-                    ? 'border border-slate-200/50 bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Tạo tài khoản
-              </button>
-            </div>
-
             {/* Header */}
             <div className="mb-6">
-              <h2 className="text-xl font-bold text-slate-900">
-                {mode === 'login' ? 'Chào mừng trở lại' : 'Tạo tài khoản mới'}
-              </h2>
+              <h2 className="text-xl font-bold text-slate-900">Chào mừng trở lại</h2>
               <p className="mt-1 text-xs text-slate-500">
-                {mode === 'login'
-                  ? 'Nhập thông tin đăng nhập để truy cập vào hệ thống'
-                  : 'Điền thông tin bên dưới để đăng ký tài khoản'}
+                Nhập thông tin đăng nhập để truy cập vào hệ thống
               </p>
             </div>
 
@@ -186,16 +130,9 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                   <input
                     type="email"
                     required
-                    autoComplete={mode === 'login' ? 'email' : 'username'}
-                    value={mode === 'login' ? loginForm.email : registerForm.email}
-                    onChange={(e) => {
-                      const email = e.target.value
-                      if (mode === 'login') {
-                        setLoginForm((prev) => ({ ...prev, email }))
-                        return
-                      }
-                      setRegisterForm((prev) => ({ ...prev, email }))
-                    }}
+                    autoComplete="email"
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
                     placeholder="name@company.com"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -203,22 +140,17 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-semibold text-slate-700">Mật khẩu</label>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-700">Mật khẩu</label>
+                </div>
                 <div className="relative">
                   <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    value={passwordValue}
-                    onChange={(e) => {
-                      const password = e.target.value
-                      if (mode === 'login') {
-                        setLoginForm((prev) => ({ ...prev, password }))
-                        return
-                      }
-                      setRegisterForm((prev) => ({ ...prev, password }))
-                    }}
+                    autoComplete="current-password"
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
                     placeholder="••••••••"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -233,38 +165,32 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                 </div>
               </div>
 
-              {mode === 'register' && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">Vai trò (Roles)</label>
-                  <input
-                    type="text"
-                    required
-                    value={registerForm.roles}
-                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, roles: e.target.value }))}
-                    placeholder="user"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
-                  />
-                  <span className="mt-1 block text-xs text-slate-400">
-                    Phân tách bằng dấu phẩy nếu có nhiều role (vd: user, admin)
-                  </span>
-                </div>
-              )}
-
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 disabled:opacity-60"
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-blue-500/20 transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 disabled:opacity-60"
               >
                 {loading ? (
                   <span>Đang xử lý...</span>
                 ) : (
                   <>
-                    <span>{mode === 'login' ? 'Đăng nhập' : 'Đăng ký tài khoản'}</span>
-                    {mode === 'login' ? <ArrowRight className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                    <span>Đăng nhập</span>
+                    <ArrowRight className="h-4 w-4" />
                   </>
                 )}
               </button>
             </form>
+
+            <div className="mt-6 text-center text-sm text-slate-600">
+              Chưa có tài khoản?{' '}
+              <button
+                type="button"
+                onClick={() => navigateTo('/register')}
+                className="font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                Đăng ký ngay
+              </button>
+            </div>
 
             <div className="mt-8 border-t border-slate-100 pt-6 text-center text-xs text-slate-400">
               SocialContent Studio &copy; {new Date().getFullYear()}

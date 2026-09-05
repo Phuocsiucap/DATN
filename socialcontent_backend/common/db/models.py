@@ -52,6 +52,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     is_system_admin = Column(Boolean, default=False, nullable=False)
     created_at = now_col()
@@ -121,7 +122,6 @@ class CrawlJob(Base):
     requester = relationship("User", back_populates="crawl_jobs")
     sources = relationship("CrawlJobSource", back_populates="job", cascade="all, delete-orphan")
     schedule = relationship("CrawlJobSchedule", back_populates="job", cascade="all, delete-orphan", uselist=False)
-    content_items = relationship("ContentItem", back_populates="crawl_job")
     content_results = relationship("CrawlJobContent", back_populates="job", cascade="all, delete-orphan")
 
     @property
@@ -249,12 +249,6 @@ class ContentItem(Base):
     language = Column(String(12), default="vi", nullable=False)
     content_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    crawl_job_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("crawl_jobs.id", name="fk_content_item_crawl_job_id", ondelete="SET NULL", use_alter=True),
-        nullable=True,
-        index=True,
-    )
     created_by_type = Column(String(40), default="SYSTEM", nullable=False)
     status = Column(String(40), default="NEEDS_REVIEW", nullable=False, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
@@ -264,19 +258,22 @@ class ContentItem(Base):
     transcript_hash = Column(String(128), nullable=True, index=True)
     quality_score = Column(Numeric(5, 2), default=0, nullable=False)
 
-    mongo_raw_id = Column(String(64), nullable=True, index=True)
     mongo_normalized_id = Column(String(64), nullable=True, index=True)
     sources_jsonb = Column(JSONB, nullable=False, default=list)
     media_jsonb = Column(JSONB, nullable=False, default=list)
-    duplicate_count = Column(Integer, default=0, nullable=False)
     story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL", use_alter=True, name="fk_content_item_story_id"), nullable=True, index=True)
     episode_order = Column(Integer, nullable=True)
 
     created_at = now_col()
     updated_at = updated_col()
 
-    crawl_job = relationship("CrawlJob", back_populates="content_items")
     crawl_job_results = relationship("CrawlJobContent", back_populates="content", cascade="all, delete-orphan")
+
+    @property
+    def origin_crawl_job_id(self):
+        """Creation job, derived from the association rather than stored twice."""
+        origins = [link for link in self.crawl_job_results if not link.is_duplicate]
+        return min(origins, key=lambda link: (link.created_at, str(link.job_id))).job_id if origins else None
 
 
 class CrawlJobContent(Base):
@@ -287,14 +284,7 @@ class CrawlJobContent(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="CASCADE"), primary_key=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), primary_key=True)
     is_duplicate = Column(Boolean, default=False, nullable=False, index=True)
-    match_type = Column(String(60), nullable=True, index=True)
-    source_type = Column(String(40), nullable=True, index=True)
-    source_external_id = Column(Text, nullable=True)
-    processed_document_id = Column(String(64), nullable=True, index=True)
-    occurrence_count = Column(Integer, default=1, nullable=False)
-    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     created_at = now_col()
-    updated_at = updated_col()
 
     job = relationship("CrawlJob", back_populates="content_results")
     content = relationship("ContentItem", back_populates="crawl_job_results")

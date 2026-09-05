@@ -165,6 +165,18 @@ export const approveAndScheduleQueueItemApi = async (
   return data
 }
 
+export const rescheduleQueueItemApi = async (
+  queueItemId: string | number,
+  payload: {
+    schedule_mode: 'ai' | 'manual'
+    scheduled_at?: string | null
+    timezone?: string
+  },
+) => {
+  const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/reschedule`, payload, { timeout: 60000 })
+  return data
+}
+
 export const requestPublishingQueueItemChangesApi = async (queueItemId: string | number, note?: string | null) => {
   const { data } = await api.post(`/social-profiles/queue/items/${queueItemId}/request-changes`, { note })
   return data

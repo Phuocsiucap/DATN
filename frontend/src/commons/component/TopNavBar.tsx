@@ -91,7 +91,7 @@ export default function TopNavBar({
         <TopBarIconGroup />
 
         <button className="flex items-center gap-3" title={currentUser?.email || displayName}>
-          <UserAvatar src={null} name={displayName} />
+          <UserAvatar src={currentUser?.avatar_url ?? null} name={displayName} />
           <div className="hidden text-left sm:block">
             <div className="text-sm font-extrabold leading-tight text-[#111827]">
               {displayName}

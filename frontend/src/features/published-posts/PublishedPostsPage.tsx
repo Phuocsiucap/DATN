@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
@@ -266,7 +268,7 @@ export default function PublishedPostsPage() {
         <MetricCard icon={<TrendingUp size={18} />} label="Đăng 7 ngày qua" value={plainNumberFormatter.format(totals.last7d)} tint="#f59e0b" />
       </section>
 
-      <section className="app-card p-4">
+      <section className="app-list-layout app-card app-table-card p-4">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <SearchField
@@ -299,7 +301,8 @@ export default function PublishedPostsPage() {
           </div>
         </div>
 
-        {loadingPosts ? (
+        <PaginatedList items={filteredPosts} loading={loadingPosts} resetKey={filteredPosts.map(item => item.id).join()}>{(visibleItems) => (
+loadingPosts ? (
           <div className="loading-state">
             <Loader2 size={16} className="animate-spin" />
             Đang tải bài đã đăng...
@@ -309,26 +312,39 @@ export default function PublishedPostsPage() {
         ) : (
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="table-scroll">
-              <div className="data-grid">
-                <div className="app-table-header grid grid-cols-[minmax(280px,1.4fr)_140px_repeat(4,88px)_84px] items-center px-3 py-2">
-                  <div>Bài đăng</div>
-                  <div>Ngày đăng</div>
-                  <div className="text-right">Views</div>
-                  <div className="text-right">Likes</div>
-                  <div className="text-right">Bình luận</div>
-                  <div className="text-right">Chia sẻ</div>
-                  <div className="text-right">Mở</div>
-                </div>
-                {filteredPosts.map((post) => (
-                  <PostRow
-                    key={post.id}
-                    post={post}
-                    active={selectedPost?.id === post.id}
-                    onSelect={() => setSelectedPostId(post.id)}
-                    onDelete={() => void handleDeletePost(post.id)}
-                  />
-                ))}
-              </div>
+                  <Table className="min-w-[960px] table-fixed">
+                    <colgroup>
+                      <col style={{ width: '32%' }} />
+                      <col style={{ width: '160px' }} />
+                      <col style={{ width: '88px' }} />
+                      <col style={{ width: '88px' }} />
+                      <col style={{ width: '88px' }} />
+                      <col style={{ width: '88px' }} />
+                      <col style={{ width: '84px' }} />
+                    </colgroup>
+                    <ShadcnTableHeader>
+                      <TableRow className="bg-slate-50/80">
+                        <TableHead className="px-4 py-3 min-w-[160px]"><div>Bài đăng</div></TableHead>
+                        <TableHead className="px-4 py-3"><div>Ngày đăng</div></TableHead>
+                        <TableHead className="px-4 py-3"><div className="text-right">Views</div></TableHead>
+                        <TableHead className="px-4 py-3"><div className="text-right">Likes</div></TableHead>
+                        <TableHead className="px-4 py-3"><div className="text-right">Bình luận</div></TableHead>
+                        <TableHead className="px-4 py-3"><div className="text-right">Chia sẻ</div></TableHead>
+                        <TableHead className="px-4 py-3"><div className="text-right">Mở</div></TableHead>
+                      </TableRow>
+                    </ShadcnTableHeader>
+                    <TableBody>
+                      {visibleItems.map((post) => (
+                        <PostRow
+                          key={post.id}
+                          post={post}
+                          active={selectedPost?.id === post.id}
+                          onSelect={() => setSelectedPostId(post.id)}
+                          onDelete={() => void handleDeletePost(post.id)}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
             </div>
 
             <aside className="space-y-3">
@@ -336,7 +352,8 @@ export default function PublishedPostsPage() {
               <TopPostsCard posts={topPosts} onSelect={setSelectedPostId} selectedPostId={selectedPost?.id || null} />
             </aside>
           </div>
-        )}
+        )
+)}</PaginatedList>
       </section>
     </PageLayout>
   )
@@ -449,25 +466,27 @@ function ProfileStatBox({ label, value, icon, tint, bgTint }: { label: string; v
 
 function PostRow({ post, active, onSelect, onDelete }: { post: SocialPost; active: boolean; onSelect: () => void; onDelete: () => void }) {
   return (
-    <div
-      role="button"
+    <TableRow
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') onSelect()
+        if(event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault()
+          onSelect()
+        }
       }}
-      className={cn('app-row grid grid-cols-[minmax(280px,1.4fr)_140px_repeat(4,88px)_84px] items-center px-3 py-2', active && 'app-row-selected')}
+      className={cn('cursor-pointer', active && 'app-row-selected')}
     >
-      <div className="min-w-0 pr-3">
+      <TableCell className="px-4 py-3 min-w-[160px]"><div className="min-w-0 pr-3">
         <div className="line-clamp-1 text-sm font-bold text-[#111827]" title={post.title}>{post.title || 'Untitled post'}</div>
         <div className="mt-0.5 line-clamp-1 text-xs font-medium text-[#64748b]">{post.caption || post.platform_post_id || 'Không có caption'}</div>
-      </div>
-      <div className="text-xs font-semibold text-[#526179]">{formatDateTime(post.published_at)}</div>
-      <MetricCell icon={<Eye size={13} />} value={metricValue(post, 'views')} />
-      <MetricCell icon={<Heart size={13} />} value={metricValue(post, 'likes')} />
-      <MetricCell icon={<MessageCircle size={13} />} value={metricValue(post, 'comments')} />
-      <MetricCell icon={<Share2 size={13} />} value={metricValue(post, 'shares')} />
-      <div className="flex justify-end">
+      </div></TableCell>
+      <TableCell className="px-4 py-3"><div className="text-xs font-semibold text-[#526179]">{formatDateTime(post.published_at)}</div></TableCell>
+      <TableCell className="px-4 py-3"><MetricCell icon={<Eye size={13} />} value={metricValue(post, 'views')} /></TableCell>
+      <TableCell className="px-4 py-3"><MetricCell icon={<Heart size={13} />} value={metricValue(post, 'likes')} /></TableCell>
+      <TableCell className="px-4 py-3"><MetricCell icon={<MessageCircle size={13} />} value={metricValue(post, 'comments')} /></TableCell>
+      <TableCell className="px-4 py-3"><MetricCell icon={<Share2 size={13} />} value={metricValue(post, 'shares')} /></TableCell>
+      <TableCell className="px-4 py-3"><div className="flex justify-end">
         <TableRowActions
           actions={([
             { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: onSelect },
@@ -479,8 +498,8 @@ function PostRow({ post, active, onSelect, onDelete }: { post: SocialPost; activ
             { label: 'Xóa bài đăng', icon: <Trash2 size={14} className="text-red-500" />, onClick: onDelete, danger: true },
           ].filter(Boolean)) as TableRowActionItem[]}
         />
-      </div>
-    </div>
+      </div></TableCell>
+    </TableRow>
   )
 }
 

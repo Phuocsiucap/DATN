@@ -78,8 +78,21 @@ def auth_me(user: User = Depends(get_current_user)):
 
 @router.patch("/me", response_model=schemas.UserResponse)
 def update_my_profile(payload: schemas.MyProfileUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if payload.password and len(payload.password) < 6:
-        raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 6 ký tự")
+    if payload.email:
+        email = payload.email.strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Email không được để trống")
+        # Check if email is already taken by another user
+        duplicate = db.query(User).filter(User.email == email, User.id != user.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Email đã được sử dụng bởi tài khoản khác")
+    
+    if payload.password:
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 6 ký tự")
+        if not payload.old_password or not verify_password(payload.old_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Mật khẩu cũ không chính xác")
+    
     updated_user = UserService().update_my_profile(db, user, payload)
     return to_user_response(updated_user)
 

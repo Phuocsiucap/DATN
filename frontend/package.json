@@ -10,6 +10,7 @@
     "test:draft-links": "node --test tests/draft-media-links.test.mjs",
     "test:video-list": "node --test tests/video-workspace-list.test.mjs",
     "test:api-cache": "node --test scripts/api-cache-policy.test.mjs",
+    "test:pagination": "node --test scripts/list-pagination.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

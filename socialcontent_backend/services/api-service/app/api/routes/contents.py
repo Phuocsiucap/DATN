@@ -863,7 +863,6 @@ def create_content(
         quality_score=quality_score,
         sources_jsonb=sources_jsonb,
         media_jsonb=media_jsonb,
-        duplicate_count=0,
     )
     
     db.add(content)

@@ -12,6 +12,7 @@ def to_user_response(user: User) -> schemas.UserResponse:
         id=user.id,
         email=user.email,
         full_name=user.full_name,
+        avatar_url=user.avatar_url,
         is_active=user.is_active,
         is_system_admin=user.is_system_admin,
         created_at=user.created_at,
@@ -36,7 +37,7 @@ class UserService:
         return user
 
     def create_standard_user(self, db: Session, payload: schemas.RegisterRequest) -> User:
-        role = db.query(Role).filter(Role.name.in_(["CREATOR", "USER"])).first()
+        role = db.query(Role).filter(Role.name == "CREATOR").first()
         user = User(email=payload.email, full_name=payload.full_name, hashed_password=hash_password(payload.password))
         if role:
             user.roles.append(role)
@@ -67,6 +68,8 @@ class UserService:
             user.hashed_password = hash_password(payload.password)
         if payload.full_name is not None:
             user.full_name = payload.full_name
+        if payload.avatar_url is not None:
+            user.avatar_url = payload.avatar_url
         if payload.is_active is not None:
             user.is_active = payload.is_active
         if payload.roles is not None:
@@ -82,6 +85,10 @@ class UserService:
             user.hashed_password = hash_password(payload.password)
         if payload.full_name is not None:
             user.full_name = payload.full_name
+        if payload.email is not None:
+            user.email = payload.email.strip().lower()
+        if payload.avatar_url is not None:
+            user.avatar_url = payload.avatar_url
         db.commit()
         db.refresh(user)
         return user

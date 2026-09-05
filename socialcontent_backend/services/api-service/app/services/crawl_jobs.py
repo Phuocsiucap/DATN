@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 import logging
 
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from common.core.vnexpress_rss import resolve_vnexpress_rss_feeds
-from common.db.models import AuditLog, CrawlJob, CrawlJobSchedule, CrawlJobSource, KafkaTask, User
+from common.core.crawl_source_config import effective_source_configuration
+from common.db.models import AuditLog, CrawlJob, CrawlJobSchedule, CrawlJobSource, CrawlSourceConfig, KafkaTask, User
 from common.events.envelope import build_event
 from common.events.kafka import publish
 from common.events.topics import CRAWL_JOB_CREATED
@@ -19,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 class CrawlJobService:
     def create(self, db: Session, payload: schemas.CrawlJobCreateRequest, user: User) -> CrawlJob:
+        role_names = {role.name for role in user.roles}
+        if not user.is_system_admin and not role_names.intersection({"SYSTEM_ADMIN", "CREATOR", "USER"}):
+            raise HTTPException(403, "Chỉ Creator hoặc System Admin được tạo crawl job")
+        if len({source.source_config_id for source in payload.sources}) != len(payload.sources):
+            raise HTTPException(400, "Không chọn trùng nguồn trong cùng job")
         # If user is not system admin, force PRIVATE scope and USER created_by_type
         scope = payload.content_scope if user.is_system_admin else "PRIVATE"
         created_by = payload.created_by_type if user.is_system_admin else "USER"
@@ -34,9 +41,33 @@ class CrawlJobService:
             current_stage="SCHEDULING" if is_scheduled else "DISCOVERING",
         )
         for source in payload.sources:
-            source_type = source.source_type.upper()
-            source_url = source.source_url
-            configuration = dict(source.configuration or {})
+            config = db.get(CrawlSourceConfig, source.source_config_id)
+            if not config or config.status != "ACTIVE":
+                raise HTTPException(400, "Nguồn crawl không tồn tại hoặc đã tạm dừng")
+            source_type = config.source_type
+            if source_type not in ("VNEXPRESS", "BILIBILI"):
+                raise HTTPException(400, "Loại nguồn chưa hỗ trợ crawl")
+            if source.source_type and source.source_type.upper() != source_type:
+                raise HTTPException(400, "Loại nguồn không khớp cấu hình")
+            configuration = effective_source_configuration(source_type, config.configuration)
+            allowed = configuration.pop("job_options", [])
+            for key in source.model_fields_set & {"source_url", "keywords"}:
+                if key not in allowed:
+                    raise HTTPException(400, f"Nguồn không cho phép tùy chỉnh {key}")
+            if set(source.configuration) - (set(allowed) & {"rss_feed_keys"}):
+                raise HTTPException(400, "Tùy chọn crawl không được nguồn hỗ trợ")
+            if "rss_feed_keys" in source.configuration:
+                keys = source.configuration["rss_feed_keys"]
+                supported = configuration.get("rss_feed_keys", [])
+                if not isinstance(keys, list) or not keys or any(key not in supported for key in keys):
+                    raise HTTPException(400, "Chuyên mục không được nguồn hỗ trợ")
+                configuration.pop("rss_feed_urls", None)
+                configuration.pop("rss_feeds", None)
+            configuration.update(source.configuration)
+            configuration.pop("limit", None)
+            configuration["max_items"] = source.max_items
+            source_url = source.source_url if "source_url" in source.model_fields_set else config.source_url
+            keywords = source.keywords if "keywords" in source.model_fields_set else config.keywords
             if source_type == "VNEXPRESS":
                 selected_feeds = resolve_vnexpress_rss_feeds(configuration)
                 if selected_feeds:
@@ -49,7 +80,7 @@ class CrawlJobService:
                 CrawlJobSource(
                     source_type=source_type,
                     source_url=source_url,
-                    keywords=source.keywords,
+                    keywords=list(keywords or []),
                     configuration=configuration,
                     source_config_id=source.source_config_id,
                 )

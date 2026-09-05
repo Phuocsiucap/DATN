@@ -59,7 +59,7 @@ def ensure_content_embeddings(db: Session, contents: list[ContentItem]) -> dict[
             result = embed_texts(
                 texts,
                 user_id=str(first_content.owner_user_id) if first_content.owner_user_id else None,
-                reference_id=str(first_content.crawl_job_id or first_content.id),
+                reference_id=str(first_content.origin_crawl_job_id or first_content.id),
                 run_type="CREATE_EMBEDDING",
                 step_name="content_embedding_batch",
             )

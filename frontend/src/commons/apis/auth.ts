@@ -7,7 +7,6 @@ type LoginPayload = {
 
 type RegisterPayload = LoginPayload & {
   full_name?: string
-  roles?: string[]
 }
 
 export const loginApi = async (payload: LoginPayload) => {
@@ -37,7 +36,18 @@ export const getMyAiUsageApi = async () => {
   return data
 }
 
-export const updateMyProfileApi = async (payload: { full_name?: string, password?: string }) => {
+export const updateMyProfileApi = async (payload: { full_name?: string, email?: string, avatar_url?: string, password?: string, old_password?: string }) => {
   const { data } = await api.patch('/auth/me', payload)
+  return data
+}
+
+export const uploadAvatarApi = async (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await api.post('/users/me/avatar', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
   return data
 }

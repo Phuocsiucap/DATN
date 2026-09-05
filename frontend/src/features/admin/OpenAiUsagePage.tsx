@@ -208,7 +208,7 @@ export default function OpenAiUsagePage() {
       title="Sử dụng OpenAI API"
       description="Theo dõi lưu lượng token, chi phí và tỷ lệ cache hit của OpenAI API."
       actions={
-        <select
+        <select data-filter-control
           value={timeRange}
           onChange={(e) => setTimeRange(Number(e.target.value))}
           className="rounded-md border border-[var(--outline-variant)] bg-white px-3 py-1.5 text-sm text-[#111827] shadow-sm outline-none focus:border-[#8b5cf6]"

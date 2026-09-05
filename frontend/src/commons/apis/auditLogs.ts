@@ -1,5 +1,4 @@
-import { api } from './client'
-
+import { api, type ApiPagination } from './client'
 export type AuditActor = {
   id: string
   email: string
@@ -17,23 +16,9 @@ export type AuditLogItem = {
   created_at?: string | null
 }
 
-export type AuditLogFilters = {
-  actors: AuditActor[]
-  actions: string[]
-  target_types: string[]
-}
-
 export type AuditLogList = {
   items: AuditLogItem[]
-  page: number
-  page_size: number
-  total: number
-  total_pages: number
-  summary: {
-    unique_actors: number
-    unique_actions: number
-  }
-  filters: AuditLogFilters
+  pagination: ApiPagination
 }
 
 export type AuditLogQuery = {
@@ -48,9 +33,26 @@ export type AuditLogQuery = {
 }
 
 export const fetchAdminAuditLogsApi = async (params: AuditLogQuery = {}) => {
-  const { data } = await api.get<AuditLogList>('/admin/system/audit-logs', {
+  const { data } = await api.get<AuditLogList & {
+    page?: number
+    limit?: number
+    page_size?: number
+    total?: number
+    total_pages?: number
+  }>('/admin/system/audit-logs', {
     params,
     forceRefresh: true,
   })
-  return data
+  // Older API processes return flat paging fields; newer ones nest pagination.
+  const page = data?.pagination?.page ?? data?.page ?? params.page ?? 1
+  const limit = data?.pagination?.limit ?? data?.limit ?? data?.page_size ?? params.page_size ?? 25
+  const total = data?.pagination?.total ?? data?.total
+  if (!Array.isArray(data?.items) || !Number.isInteger(page) || page < 1 ||
+      !Number.isInteger(limit) || limit < 1 || typeof total !== 'number' || !Number.isInteger(total) || total < 0) {
+    throw new Error('Dữ liệu nhật ký hệ thống không đúng định dạng')
+  }
+  return {
+    ...data,
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+  }
 }

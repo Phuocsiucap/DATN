@@ -47,34 +47,34 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  api-service:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/api-service/Dockerfile
-    working_dir: /app/services/api-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    depends_on:
-      - postgres
-      - mongodb
-      - kafka
-      - embedding-service
-      - ai-media-planning-worker
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EMBEDDING_SERVICE_URL: http://embedding-service:8075
-      DATA_INGESTION_SERVICE_URL: http://data-ingestion-worker:8010
-      PLANNING_SERVICE_URL: http://ai-media-planning-worker:8050
-      AI_MEDIA_WORKER_URL: http://ai-media-worker:8060
-      REMOTION_WORKER_URL: http://remotion-worker:8090
-      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./runtime/video-generation:/app/runtime/video-generation
+  # api-service:
+  #   build:
+  #     context: ..
+  #     dockerfile: socialcontent_backend/services/api-service/Dockerfile
+  #   working_dir: /app/services/api-service
+  #   command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  #   depends_on:
+  #     - postgres
+  #     - mongodb
+  #     - kafka
+  #     - embedding-service
+  #     - ai-media-planning-worker
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+  #     MONGO_URI: mongodb://mongodb:27017
+  #     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  #     EMBEDDING_SERVICE_URL: http://embedding-service:8075
+  #     DATA_INGESTION_SERVICE_URL: http://data-ingestion-worker:8010
+  #     PLANNING_SERVICE_URL: http://ai-media-planning-worker:8050
+  #     AI_MEDIA_WORKER_URL: http://ai-media-worker:8060
+  #     REMOTION_WORKER_URL: http://remotion-worker:8090
+  #     VIDEO_STORAGE_ROOT: /app/runtime/video-generation
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./runtime/video-generation:/app/runtime/video-generation
 
   data-ingestion-worker:
     build:

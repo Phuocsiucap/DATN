@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CalendarClock, CalendarDays, Eye, Loader2, MoreHorizontal, Plus, RefreshCcw, RotateCcw, Square } from 'lucide-react'
@@ -26,7 +28,7 @@ import {
 } from '@/commons/component/social-ui'
 import { CrawlJobDetailSheet } from './components/CrawlJobDetailSheet'
 import { CrawlSourceConfigsTab } from './components/CrawlSourceConfigsTab'
-import { CreateCrawlJobDialog, CrawlScheduleDialog } from './components/CrawlJobDialogs'
+import { CreateCrawlJobDialog, CrawlScheduleDialog, type JobSourceDraft } from './components/CrawlJobDialogs'
 import {
   type CrawlScheduleForm,
   DEFAULT_SCHEDULE,
@@ -73,27 +75,10 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   
   // Create Form State
   const [sourceConfigs, setSourceConfigs] = useState<CrawlSourceConfig[]>([])
-  const [selectedSourceConfigId, setSelectedSourceConfigId] = useState<string>('')
   const [sourceTypes, setSourceTypes] = useState<SourceTypeConfig[]>([])
-  const [sourceType, setSourceType] = useState<string>('VNEXPRESS')
-  const [jobName, setJobName] = useState(isSystemUser ? 'Global VNExpress Crawl' : 'Private VNExpress Crawl')
-  const [sourceUrl, setSourceUrl] = useState('')
-  const [keywords, setKeywords] = useState('')
-  const [maxItems, setMaxItems] = useState(20)
+  const [jobName, setJobName] = useState('Thu thập dữ liệu')
+  const [jobSources, setJobSources] = useState<JobSourceDraft[]>([])
   const [vnexpressRssFeeds, setVnexpressRssFeeds] = useState<VnExpressRssFeed[]>([])
-  const [selectedVnexpressRssKeys, setSelectedVnexpressRssKeys] = useState<string[]>(['tin-moi-nhat'])
-
-  const updateSourceType = (nextSourceType: string) => {
-    setSourceType(nextSourceType)
-    setJobName(isSystemUser
-      ? `Global ${nextSourceType} Crawl`
-      : `Private ${nextSourceType} Crawl`)
-    setSourceUrl('')
-    setKeywords(nextSourceType === 'VNEXPRESS' ? '' : 'truyen ma, short drama')
-    if (nextSourceType === 'VNEXPRESS' && selectedVnexpressRssKeys.length === 0) {
-      setSelectedVnexpressRssKeys(['tin-moi-nhat'])
-    }
-  }
 
   const loadCrawlData = async () => {
     setLoading(true)
@@ -126,10 +111,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         if (vnexpress && vnexpress.rss_feeds) {
           const feeds = vnexpress.rss_feeds
           setVnexpressRssFeeds(feeds)
-          setSelectedVnexpressRssKeys((current) => {
-            if (current.length) return current
-            return feeds.some((feed) => feed.key === 'tin-moi-nhat') ? ['tin-moi-nhat'] : feeds.slice(0, 1).map((feed) => feed.key)
-          })
         }
       })
       .catch(() => toast.error('Không tải được cấu hình Source Types'))
@@ -137,11 +118,30 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   useEffect(() => {
     if (showCreate) {
+      setSourceConfigs([])
       fetchCrawlSourceConfigsApi()
         .then((data) => setSourceConfigs(data))
-        .catch(() => console.error('Failed to load source configs'))
+        .catch(() => toast.error('Không tải được danh sách nguồn crawl'))
     }
   }, [showCreate])
+
+  useEffect(() => {
+    if (activeTab !== 'JOBS') return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout>
+    const refresh = async () => {
+      try {
+        const data = await fetchCrawlJobsApi({ q: debouncedQuery, source_type: filterSource, status: filterStatus })
+        if (!disposed) {
+          setJobs(data)
+          setSelectedJob(current => current ? data.find(job => job.id === current.id) ?? current : null)
+        }
+      } catch { /* Keep the last result while the connection recovers. */ }
+      if (!disposed) timer = setTimeout(refresh, 3000)
+    }
+    timer = setTimeout(refresh, 3000)
+    return () => { disposed = true; clearTimeout(timer) }
+  }, [activeTab, debouncedQuery, filterSource, filterStatus])
 
   const metrics = useMemo(() => {
     const running = jobs.filter((job) => ['RUNNING', 'QUEUED', 'PENDING'].includes(job.status)).length
@@ -156,16 +156,12 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       toast.error('Vui lòng nhập tên job')
       return
     }
+    if (!jobSources.length) return toast.error('Vui lòng chọn ít nhất một nguồn')
+    if (jobSources.some(s => !Number.isInteger(s.maxItems) || s.maxItems < 1 || s.maxItems > 200)) return toast.error('Số bài mỗi nguồn phải từ 1 đến 200')
     const scheduleError = scheduleEnabled ? scheduleValidationMessage(scheduleForm) : null
     if (scheduleError) return toast.error(scheduleError)
     setLoading(true)
     try {
-      const selectedVnexpressFeeds = sourceType === 'VNEXPRESS'
-        ? vnexpressRssFeeds.filter((feed) => selectedVnexpressRssKeys.includes(feed.key))
-        : []
-      const rssFeedUrls = selectedVnexpressFeeds.map((feed) => feed.url)
-      const rssFeedKeys = selectedVnexpressFeeds.map((feed) => feed.key)
-      const trimmedSourceUrl = sourceUrl.trim()
       await createCrawlJobApi({
         name: jobName,
         crawl_mode: 'ONE_TIME',
@@ -173,27 +169,17 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         created_by_type: isSystemUser ? 'SYSTEM' : 'USER',
         priority: 5,
         schedule: scheduleEnabled ? scheduleForm : null,
-        sources: [{
-          source_type: sourceType,
-          source_url: trimmedSourceUrl || null,
-          keywords: keywords.split(',').map((item) => item.trim()).filter(Boolean),
-          source_config_id: selectedSourceConfigId || null,
-          configuration: {
-            max_items: maxItems,
-            metadata_only: sourceType === 'BILIBILI',
-            ...(sourceType === 'VNEXPRESS' ? {
-              rss_feed_keys: rssFeedKeys,
-              rss_feed_urls: rssFeedUrls,
-              rss_feeds: selectedVnexpressFeeds,
-            } : {}),
-          },
-        }],
+        sources: jobSources.map(source => ({
+          source_config_id: source.id,
+          max_items: source.maxItems,
+          ...source.overrides,
+        })),
       })
       toast.success('Đã tạo crawl job thành công!')
       setShowCreate(false)
       setScheduleEnabled(false)
       setScheduleForm(DEFAULT_SCHEDULE)
-      setSelectedSourceConfigId('')
+      setJobSources([])
       await loadCrawlData()
     } catch (error: unknown) {
       toast.error(apiErrorMessage(error, 'Không thể tạo crawl job'))
@@ -233,11 +219,11 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   return (
     <PageLayout
-      title="Thu thập dữ liệu"
-      description="Tạo và quản lý các job crawl dữ liệu từ nhiều nguồn khác nhau."
+      title={isSystemUser ? "Quản lý crawl" : "Thu thập dữ liệu của tôi"}
+      description={isSystemUser ? "Cấu hình nguồn dùng chung và quản lý các job thu thập." : "Tạo job từ các nguồn hệ thống hỗ trợ, chọn số bài và theo dõi kết quả thu thập."}
       actions={
         <>
-          <div className="flex rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-1 mr-4">
+          {isSystemUser && <div className="flex rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-1 mr-4">
             <button
               type="button"
               onClick={() => setActiveTab('JOBS')}
@@ -250,10 +236,10 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
               onClick={() => setActiveTab('SOURCES')}
               className={`px-4 py-1.5 text-xs font-bold rounded-sm transition ${activeTab === 'SOURCES' ? 'bg-[var(--accent)] text-white shadow-sm' : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]'}`}
             >
-              Nguồn chung
+              Cấu hình nguồn
             </button>
-          </div>
-          {activeTab === 'JOBS' && (
+          </div>}
+          {(!isSystemUser || activeTab === 'JOBS') && (
             <>
               <AppButton variant="secondary" icon={<RefreshCcw size={15} />} disabled={loading} onClick={() => void loadCrawlData()}>Tải lại</AppButton>
               <AppButton icon={<Plus size={15} />} onClick={() => setShowCreate(true)}>Tạo job crawl</AppButton>
@@ -263,8 +249,8 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       }
     >
 
-      <section className="min-w-0">
-        {activeTab === 'SOURCES' ? (
+      <section className="app-list-layout">
+        {isSystemUser && activeTab === 'SOURCES' ? (
           <CrawlSourceConfigsTab isSystemUser={isSystemUser} sourceTypes={sourceTypes} vnexpressRssFeeds={vnexpressRssFeeds} />
         ) : (
           <>
@@ -274,7 +260,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
               </div>
             )}
 
-            <div className="space-y-4">
+            <div className="app-list-layout gap-4">
               <MetricGrid items={[
                 ['Đang chạy', metrics.running, 'bg-blue-500'],
                 ['Thành công', metrics.succeeded, 'bg-emerald-500'],
@@ -282,15 +268,15 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
                 ['Lỗi', metrics.failed, 'bg-red-500'],
               ]} />
 
-              <div className="min-w-0">
+              <div className="app-list-layout gap-3">
                 <AppCard className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_150px_150px_150px_190px]">
-                  <SearchField placeholder="Tìm kiếm job..." value={searchQuery} onChange={(e: any) => setSearchQuery(e.target.value)} />
-                  <SelectControl value={filterSource} onChange={(e: any) => setFilterSource(e.target.value)}>
+                  <SearchField placeholder="Tìm kiếm job..." value={searchQuery} onChange={setSearchQuery} />
+                  <SelectControl value={filterSource} onChange={setFilterSource}>
                     <option value="">Tất cả nguồn</option>
                     <option value="VNEXPRESS">VNExpress</option>
                     <option value="BILIBILI">Bilibili</option>
                   </SelectControl>
-                  <SelectControl value={filterStatus} onChange={(e: any) => setFilterStatus(e.target.value)}>
+                  <SelectControl value={filterStatus} onChange={setFilterStatus}>
                     <option value="">Tất cả trạng thái</option>
                     <option value="PENDING">Pending</option>
                     <option value="RUNNING">Running</option>
@@ -305,6 +291,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
                 <JobsTable
                   jobs={jobs}
+                  loading={loading}
                   selectedJob={selectedJob}
                   onOpenDetail={(job) => setSelectedJob(job)}
                   onAction={jobAction}
@@ -320,21 +307,12 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
         <CreateCrawlJobDialog
           sourceConfigs={sourceConfigs}
           sourceTypes={sourceTypes}
-          selectedSourceConfigId={selectedSourceConfigId}
-          setSelectedSourceConfigId={setSelectedSourceConfigId}
-          sourceType={sourceType}
-          setSourceType={updateSourceType}
           jobName={jobName}
           setJobName={setJobName}
-          sourceUrl={sourceUrl}
-          setSourceUrl={setSourceUrl}
-          keywords={keywords}
-          setKeywords={setKeywords}
-          maxItems={maxItems}
-          setMaxItems={setMaxItems}
+          sources={jobSources}
+          setSources={setJobSources}
+          saving={loading}
           vnexpressRssFeeds={vnexpressRssFeeds}
-          selectedVnexpressRssKeys={selectedVnexpressRssKeys}
-          setSelectedVnexpressRssKeys={setSelectedVnexpressRssKeys}
           scheduleEnabled={scheduleEnabled}
           setScheduleEnabled={setScheduleEnabled}
           schedule={scheduleForm}
@@ -407,71 +385,85 @@ function JobsTable({
   onEditSchedule: (job: CrawlJob) => void
 }) {
   return (
-    <div className="app-card table-scroll overflow-hidden">
-      <div className="data-grid-lg">
-        <TableHeader columns={['Job', 'Nguồn', 'Trạng thái', 'Tiến độ', 'Kết quả', 'Thời gian', 'Người tạo', 'Hành động']} />
-        {loading && jobs.length === 0 ? (
-          <div className="p-4 space-y-3">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="flex items-center gap-4">
-                <div className="skeleton-loader h-5 w-48" />
-                <div className="skeleton-loader h-5 w-24" />
-                <div className="skeleton-loader h-5 w-20" />
-                <div className="skeleton-loader h-5 w-16" />
-              </div>
-            ))}
-          </div>
-        ) : jobs.length === 0 ? (
-          <EmptyState label="Chưa có crawl jobs nào" />
-        ) : (
-          jobs.map((job) => {
-            const canEditSchedule = job.crawl_mode !== 'SCHEDULED_RUN' && !['PENDING', 'QUEUED', 'RUNNING'].includes(job.status)
-            return (
-            <div key={job.id} onClick={() => onOpenDetail(job)} className={`grid cursor-pointer grid-cols-[1.6fr_0.9fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr] items-center gap-3 border-t border-[var(--outline-variant)] px-4 py-4 text-xs transition-colors ${selectedJob?.id === job.id ? 'app-row-selected' : 'hover:bg-[var(--surface-container-low)]'}`}>
-              <div>
-                <div className="font-extrabold text-[var(--on-surface)]">{job.name}</div>
-                <div className="mt-1 truncate text-xs font-mono text-[var(--on-surface-variant)]">ID: {shortId(job.id)}-...</div>
-                {job.schedule && (
-                  <div className={`mt-1 text-xs font-bold ${job.schedule.enabled ? 'text-[#2556ea]' : 'text-[#94a3b8]'}`}>
-                    {job.schedule.enabled ? `${job.schedule.runs_per_day} lần/ngày · ${scheduleDaysLabel(job.schedule.weekdays)}` : 'Lịch đang tạm dừng'}
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">◎</span>
-                <span className="rounded-[5px] bg-emerald-100 px-1.5 py-0.5 text-xs font-black text-emerald-700">D</span>
-              </div>
-              <Badge value={job.status} />
-              <div>
-                <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
-                  <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
+    <div className="app-list-layout app-card app-table-card overflow-hidden">
+      <PaginatedList items={jobs} loading={loading} resetKey={jobs.map(item => item.id).join()}>{(visibleItems) => (
+<Table className="min-w-[960px] table-fixed">
+        <colgroup>
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '8%' }} />
+        </colgroup>
+        <TableHeader columns={['Job', 'Nguồn', 'Trạng thái', 'Tiến độ', 'Kết quả', 'Thời gian', 'Người tạo', 'Hành động']} /><TableBody>
+          {loading && jobs.length === 0 ? (
+            <TableRow><TableCell colSpan={8}><div className="p-4 space-y-3">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="flex items-center gap-4">
+                  <div className="skeleton-loader h-5 w-48" />
+                  <div className="skeleton-loader h-5 w-24" />
+                  <div className="skeleton-loader h-5 w-20" />
+                  <div className="skeleton-loader h-5 w-16" />
                 </div>
-              </div>
-              <div className="font-bold text-[#34415a]">{job.total_normalized || job.total_discovered} bài</div>
-              <div className="text-[var(--on-surface-variant)] font-medium">
-                {job.schedule?.enabled ? (
-                  <><span className="block text-xs font-bold text-[#2556ea]">Lần kế tiếp</span>{formatDate(job.schedule.next_run_at || undefined)}</>
-                ) : formatDate(job.created_at)}
-              </div>
-              <div className="flex items-center gap-2">
-                <Thumbnail index={2} className="h-6 w-6 rounded-full" />
-                <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
-              </div>
-              <div>
-                <TableRowActions
-                  actions={([
-                    { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: () => onOpenDetail(job) },
-                    canEditSchedule ? { label: 'Thiết lập lịch', icon: <CalendarClock size={14} />, onClick: () => onEditSchedule(job) } : null,
-                    job.crawl_mode !== 'SOURCE_CONFIG' ? { label: 'Chạy lại job', icon: <RotateCcw size={14} />, onClick: () => onAction('retry', job) } : null,
-                    { label: 'Dừng job', icon: <Square size={14} />, onClick: () => onAction('cancel', job), danger: true },
-                  ].filter(Boolean)) as TableRowActionItem[]}
-                />
-              </div>
-            </div>
-          )})
-        )}
-      </div>
+              ))}
+            </div></TableCell></TableRow>
+          ) : jobs.length === 0 ? (
+            <TableRow><TableCell colSpan={8}><EmptyState label="Chưa có crawl jobs nào" /></TableCell></TableRow>
+          ) : (
+            visibleItems.map((job) => {
+              const canEditSchedule = job.crawl_mode !== 'SCHEDULED_RUN' && !['PENDING', 'QUEUED', 'RUNNING'].includes(job.status)
+              return (
+                <TableRow key={job.id} onClick={() => onOpenDetail(job)} className={` cursor-pointer border-t border-[var(--outline-variant)] text-xs transition-colors ${selectedJob?.id === job.id ? 'app-row-selected' : 'hover:bg-[var(--surface-container-low)]'}`}>
+                  <TableCell className="px-4 py-3 min-w-[160px]"><div>
+                    <div className="font-extrabold text-[var(--on-surface)]">{job.name}</div>
+                    <div className="mt-1 truncate text-xs font-mono text-[var(--on-surface-variant)]">ID: {shortId(job.id)}-...</div>
+                    {job.schedule && (
+                      <div className={`mt-1 text-xs font-bold ${job.schedule.enabled ? 'text-[#2556ea]' : 'text-[#94a3b8]'}`}>
+                        {job.schedule.enabled ? `${job.schedule.runs_per_day} lần/ngày · ${scheduleDaysLabel(job.schedule.weekdays)}` : 'Lịch đang tạm dừng'}
+                      </div>
+                    )}
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
+                    <span className="grid h-6 w-6 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">◎</span>
+                    <span className="rounded-[5px] bg-emerald-100 px-1.5 py-0.5 text-xs font-black text-emerald-700">D</span>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div><Badge value={job.status} /><div className="mt-1 text-slate-500">{job.current_stage}</div></div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
+                      <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
+                    </div>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div className="font-bold text-[#34415a]"><div>{job.total_normalized} thành công</div><div>{job.total_duplicates} trùng · {job.total_failed} lỗi</div></div></TableCell>
+                  <TableCell className="px-4 py-3"><div className="text-[var(--on-surface-variant)] font-medium">
+                    {job.schedule?.enabled ? (
+                      <><span className="block text-xs font-bold text-[#2556ea]">Lần kế tiếp</span>{formatDate(job.schedule.next_run_at || undefined)}</>
+                    ) : formatDate(job.created_at)}
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div className="flex items-center gap-2">
+                    <Thumbnail index={2} className="h-6 w-6 rounded-full" />
+                    <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
+                  </div></TableCell>
+                  <TableCell className="px-4 py-3"><div>
+                    <TableRowActions
+                      actions={([
+                        { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: () => onOpenDetail(job) },
+                        canEditSchedule ? { label: 'Thiết lập lịch', icon: <CalendarClock size={14} />, onClick: () => onEditSchedule(job) } : null,
+                        job.crawl_mode !== 'SOURCE_CONFIG' ? { label: 'Chạy lại job', icon: <RotateCcw size={14} />, onClick: () => onAction('retry', job) } : null,
+                        { label: 'Dừng job', icon: <Square size={14} />, onClick: () => onAction('cancel', job), danger: true },
+                      ].filter(Boolean)) as TableRowActionItem[]}
+                    />
+                  </div></TableCell>
+                </TableRow>
+              )
+})
+          )}
+        </TableBody>
+      </Table>
+)}</PaginatedList>
     </div>
   )
 }
@@ -488,9 +480,10 @@ function Badge({ value }: { value: string }) {
 
 function TableHeader({ columns }: { columns: string[] }) {
   return (
-    <div className="app-table-header grid grid-cols-[1.6fr_0.9fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr] gap-3 px-4 py-3">
-      {columns.map(c => <div key={c}>{c}</div>)}
-    </div>
+    <ShadcnTableHeader>
+      <TableRow className="bg-slate-50/80">
+        {columns.map(c => <TableHead key={c}>{c}</TableHead>)}
+      </TableRow></ShadcnTableHeader>
   )
 }
 

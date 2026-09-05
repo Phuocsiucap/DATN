@@ -1,3 +1,5 @@
+import { PaginatedList } from '@/commons/component/ui/paginated-list'
+import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { RefreshCcw, Loader2, Eye, Play, Pause, Trash2, AlertTriangle } from 'lucide-react'
@@ -75,7 +77,7 @@ export default function CrawlSourcesPage() {
         </AppButton>
       }
     >
-      <section className="min-w-0 space-y-4">
+      <section className="app-list-layout gap-4">
         {loading && sources.length === 0 && (
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <Loader2 className="animate-spin" size={16} /> Đang tải...
@@ -104,161 +106,6 @@ export default function CrawlSourcesPage() {
           </AppCard>
         </div>
 
-        {/* Sources Table */}
-        <div className="app-card overflow-hidden">
-          <div className="data-grid-lg">
-            <div className="app-table-header grid grid-cols-[1.2fr_0.8fr_1fr_0.8fr_1fr_0.8fr] gap-3 px-4 py-3">
-              <div>Nguồn</div>
-              <div>Loại</div>
-              <div>Cấu hình</div>
-              <div>Trạng thái</div>
-              <div>Ngày tạo</div>
-              <div>Thao tác</div>
-            </div>
-
-            {sources.length === 0 && !loading ? (
-              <div className="empty-state m-3">Chưa có nguồn crawl nào</div>
-            ) : (
-              sources.map((source) => (
-                <div
-                  key={source.id}
-                  className={cn(
-                    'grid grid-cols-[1.2fr_0.8fr_1fr_0.8fr_1fr_0.8fr] items-center gap-3 border-t border-slate-200 px-4 py-4 text-xs transition-colors',
-                    selectedSource?.id === source.id
-                      ? 'bg-blue-50'
-                      : 'hover:bg-slate-50',
-                  )}
-                >
-                  {/* Source Info */}
-                  <div>
-                    <div className="font-extrabold text-slate-900">
-                      {source.source_type}
-                    </div>
-                    <div className="mt-1 font-mono text-xs text-slate-500">
-                      ID: {shortId(source.id)}...
-                    </div>
-                    {source.source_url && (
-                      <div className="mt-1 truncate text-xs text-blue-600">
-                        {source.source_url}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Type Badge */}
-                  <div>
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-lg px-2 py-1 text-xs font-bold uppercase',
-                        source.source_type === 'BILIBILI'
-                          ? 'bg-pink-100 text-pink-700'
-                          : 'bg-red-100 text-red-700',
-                      )}
-                    >
-                      {source.source_type}
-                    </span>
-                  </div>
-
-                  {/* Configuration */}
-                  <div className="space-y-1">
-                    {source.keywords.length > 0 && (
-                      <div className="text-xs text-slate-600">
-                        <span className="font-semibold">Keywords:</span>{' '}
-                        {source.keywords.slice(0, 2).join(', ')}
-                        {source.keywords.length > 2 && ` +${source.keywords.length - 2}`}
-                      </div>
-                    )}
-                    {typeof source.configuration?.max_items === 'number' ? (
-                      <div className="text-xs text-slate-600">
-                        <span className="font-semibold">Max:</span>{' '}
-                        {source.configuration.max_items} items
-                      </div>
-                    ) : null}
-                    {Object.keys(source.configuration || {}).length === 0 && (
-                      <div className="text-xs text-slate-400">Không có cấu hình</div>
-                    )}
-                  </div>
-
-                  {/* Status */}
-                  <div>
-                    <button
-                      onClick={() => handleToggleStatus(source)}
-                      disabled={loading}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50',
-                        source.status === 'ACTIVE'
-                          ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200/50 hover:bg-emerald-200'
-                          : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/50 hover:bg-slate-200',
-                      )}
-                    >
-                      {source.status === 'ACTIVE' ? (
-                        <>
-                          <Play size={12} /> Active
-                        </>
-                      ) : (
-                        <>
-                          <Pause size={12} /> Inactive
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Created At */}
-                  <div className="text-slate-600">{formatDate(source.created_at)}</div>
-
-                  {/* Actions */}
-                  <div>
-                    {showDeleteConfirm === source.id ? (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setShowDeleteConfirm(null)}
-                          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                        >
-                          Hủy
-                        </button>
-                        <button
-                          onClick={() => handleDelete(source.id)}
-                          className="rounded bg-red-600 px-2 py-1 text-xs font-bold text-white hover:bg-red-700"
-                        >
-                          Xác nhận xóa
-                        </button>
-                      </div>
-                    ) : (
-                      <TableRowActions
-                        actions={[
-                          {
-                            label: 'Xem chi tiết',
-                            icon: <Eye size={14} />,
-                            onClick: () => setSelectedSource(source),
-                          },
-                          {
-                            label:
-                              source.status === 'ACTIVE'
-                                ? 'Dừng nguồn'
-                                : 'Kích hoạt nguồn',
-                            icon:
-                              source.status === 'ACTIVE' ? (
-                                <Pause size={14} />
-                              ) : (
-                                <Play size={14} />
-                              ),
-                            onClick: () => handleToggleStatus(source),
-                          },
-                          {
-                            label: 'Xóa nguồn',
-                            icon: <Trash2 size={14} />,
-                            onClick: () => setShowDeleteConfirm(source.id),
-                            danger: true,
-                          },
-                        ]}
-                      />
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
         {/* Info notice */}
         <AppCard className="flex items-start gap-3 border-blue-200 bg-blue-50 p-4">
           <AlertTriangle size={20} className="shrink-0 text-blue-600" />
@@ -272,6 +119,175 @@ export default function CrawlSourcesPage() {
             </p>
           </div>
         </AppCard>
+
+        {/* Sources Table */}
+        <div className="app-list-layout app-card app-table-card overflow-hidden">
+          <PaginatedList items={sources} loading={loading} resetKey={sources.map(item => item.id).join()}>{(visibleItems) => (
+<Table className="min-w-[960px] table-fixed">
+            <colgroup>
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
+            <ShadcnTableHeader>
+              <TableRow className="bg-slate-50/80">
+                <TableHead className="px-4 py-3 min-w-[160px]"><div>Nguồn</div></TableHead>
+                <TableHead className="px-4 py-3"><div>Loại</div></TableHead>
+                <TableHead className="px-4 py-3"><div>Cấu hình</div></TableHead>
+                <TableHead className="px-4 py-3"><div>Trạng thái</div></TableHead>
+                <TableHead className="px-4 py-3"><div>Ngày tạo</div></TableHead>
+                <TableHead className="px-4 py-3"><div>Thao tác</div></TableHead>
+              </TableRow>
+            </ShadcnTableHeader>
+            <TableBody>
+
+              {sources.length === 0 && !loading ? (
+                <TableRow><TableCell colSpan={6}><div className="empty-state m-3">Chưa có nguồn crawl nào</div></TableCell></TableRow>
+              ) : (
+                visibleItems.map((source) => (
+                  <TableRow
+                    key={source.id}
+                    className={cn(
+                      ' border-t border-slate-200 text-xs transition-colors',
+                      selectedSource?.id === source.id
+                        ? 'bg-blue-50'
+                        : 'hover:bg-slate-50',
+                    )}
+                  >
+                    {/* Source Info */}
+                    <TableCell className="px-4 py-3 min-w-[160px]"><div>
+                      <div className="font-extrabold text-slate-900">
+                        {source.source_type}
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-slate-500">
+                        ID: {shortId(source.id)}...
+                      </div>
+                      {source.source_url && (
+                        <div className="mt-1 truncate text-xs text-blue-600">
+                          {source.source_url}
+                        </div>
+                      )}
+                    </div></TableCell>
+
+                    {/* Type Badge */}
+                    <TableCell className="px-4 py-3"><div>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-lg px-2 py-1 text-xs font-bold uppercase',
+                          source.source_type === 'BILIBILI'
+                            ? 'bg-pink-100 text-pink-700'
+                            : 'bg-red-100 text-red-700',
+                        )}
+                      >
+                        {source.source_type}
+                      </span>
+                    </div></TableCell>
+
+                    {/* Configuration */}
+                    <TableCell className="px-4 py-3"><div className="space-y-1">
+                      {source.keywords.length > 0 && (
+                        <div className="text-xs text-slate-600">
+                          <span className="font-semibold">Keywords:</span>{' '}
+                          {source.keywords.slice(0, 2).join(', ')}
+                          {source.keywords.length > 2 && ` +${source.keywords.length - 2}`}
+                        </div>
+                      )}
+                      {typeof source.configuration?.max_items === 'number' ? (
+                        <div className="text-xs text-slate-600">
+                          <span className="font-semibold">Max:</span>{' '}
+                          {source.configuration.max_items} items
+                        </div>
+                      ) : null}
+                      {Object.keys(source.configuration || {}).length === 0 && (
+                        <div className="text-xs text-slate-400">Không có cấu hình</div>
+                      )}
+                    </div></TableCell>
+
+                    {/* Status */}
+                    <TableCell className="px-4 py-3"><div>
+                      <button
+                        onClick={() => handleToggleStatus(source)}
+                        disabled={loading}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50',
+                          source.status === 'ACTIVE'
+                            ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200/50 hover:bg-emerald-200'
+                            : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/50 hover:bg-slate-200',
+                        )}
+                      >
+                        {source.status === 'ACTIVE' ? (
+                          <>
+                            <Play size={12} /> Active
+                          </>
+                        ) : (
+                          <>
+                            <Pause size={12} /> Inactive
+                          </>
+                        )}
+                      </button>
+                    </div></TableCell>
+
+                    {/* Created At */}
+                    <TableCell className="px-4 py-3"><div className="text-slate-600">{formatDate(source.created_at)}</div></TableCell>
+
+                    {/* Actions */}
+                    <TableCell className="px-4 py-3"><div>
+                      {showDeleteConfirm === source.id ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowDeleteConfirm(null)}
+                            className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            Hủy
+                          </button>
+                          <button
+                            onClick={() => handleDelete(source.id)}
+                            className="rounded bg-red-600 px-2 py-1 text-xs font-bold text-white hover:bg-red-700"
+                          >
+                            Xác nhận xóa
+                          </button>
+                        </div>
+                      ) : (
+                        <TableRowActions
+                          actions={[
+                            {
+                              label: 'Xem chi tiết',
+                              icon: <Eye size={14} />,
+                              onClick: () => setSelectedSource(source),
+                            },
+                            {
+                              label:
+                                source.status === 'ACTIVE'
+                                  ? 'Dừng nguồn'
+                                  : 'Kích hoạt nguồn',
+                              icon:
+                                source.status === 'ACTIVE' ? (
+                                  <Pause size={14} />
+                                ) : (
+                                  <Play size={14} />
+                                ),
+                              onClick: () => handleToggleStatus(source),
+                            },
+                            {
+                              label: 'Xóa nguồn',
+                              icon: <Trash2 size={14} />,
+                              onClick: () => setShowDeleteConfirm(source.id),
+                              danger: true,
+                            },
+                          ]}
+                        />
+                      )}
+                    </div></TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+)}</PaginatedList>
+        </div>
 
         {/* Detail Sheet */}
         {selectedSource && (
