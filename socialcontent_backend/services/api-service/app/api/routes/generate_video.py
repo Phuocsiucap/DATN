@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.services import generate_video as pipeline
+from app.services.social_profiles import SocialProfileService
 from common.db.content_series import (
     find_active_series_by_title,
     lock_active_series,
@@ -21,6 +22,8 @@ from common.db.media_workflows import content_category_payload
 from common.db.models import (
     ContentItem,
     ContentSeries,
+    CrawlJob,
+    CrawlJobContent,
     MediaWorkflow,
     KafkaTask,
     PublishingQueueItem,
@@ -118,7 +121,7 @@ def create_story_from_project(
         if not project.primary_content_id:
             raise HTTPException(status_code=400, detail="Workflow chưa có ContentItem chính để sinh kịch bản")
         content = db.get(ContentItem, project.primary_content_id)
-        if not content or not _can_use_content(content, user):
+        if not content or not _can_use_content(db, content, user):
             raise HTTPException(status_code=404, detail="ContentItem chính không tồn tại hoặc không thuộc quyền truy cập")
 
         project_meta = project.metadata_json if isinstance(project.metadata_json, dict) else {}
@@ -175,8 +178,11 @@ def _public_story(story: dict) -> dict:
 
 
 def _get_owned_project(db: Session, workflow_id: uuid.UUID, user: User) -> MediaWorkflow:
-    project = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
-    if not project or (not user.is_system_admin and project.user_id != user.id):
+    query = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update()
+    if not user.is_system_admin:
+        query = query.join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id).filter(SocialProfile.user_id == user.id)
+    project = query.first()
+    if not project:
         raise HTTPException(status_code=404, detail="Content project not found")
     return project
 
@@ -191,7 +197,7 @@ def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, sta
     public_story = _public_story(next_story)
     public_story.setdefault("meta", {})
     public_story["meta"]["workflow_id"] = str(project.id)
-    public_story["meta"]["user_id"] = str(project.user_id)
+    public_story["meta"]["user_id"] = str(project.profile.user_id)
     public_story["project_status"] = _project_status(public_story)
 
     metadata = dict(project.metadata_json or {})
@@ -371,11 +377,20 @@ def _active_pre_render_task(db: Session, project: MediaWorkflow) -> KafkaTask | 
     )
 
 
-def _can_use_content(content: ContentItem, user: User) -> bool:
-    return (
-        user.is_system_admin
-        or content.content_scope == "GLOBAL"
-        or (content.content_scope == "PRIVATE" and content.owner_user_id == user.id)
+def _can_use_content(db: Session, content: ContentItem, user: User) -> bool:
+    if user.is_system_admin or content.content_scope == "GLOBAL":
+        return True
+    if content.content_scope != "PRIVATE":
+        return False
+    return bool(
+        db.query(CrawlJobContent.job_id)
+        .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+        .filter(
+            CrawlJobContent.content_id == content.id,
+            CrawlJob.requested_by == user.id,
+            CrawlJob.content_scope == "PRIVATE",
+        )
+        .first()
     )
 
 
@@ -422,7 +437,6 @@ def _apply_pending_series_decision(db: Session, project: MediaWorkflow, story: d
                 category = content_category_payload(content) if content else {}
                 description = str(decision.get("series_description") or decision.get("reason") or "").strip()[:1000]
                 series = ContentSeries(
-                    user_id=project.user_id,
                     profile_id=project.profile_id,
                     title=title,
                     description=description or None,
@@ -623,7 +637,7 @@ def approve_project_video(
         "workflow_id": project.id,
         "status": project.status,
         "rendered_video": rendered_video,
-        "queue_item": _serialize_queue_item(queue_item, profile) if queue_item and profile else None,
+        "queue_item": _serialize_queue_item(queue_item, profile, project) if queue_item and profile else None,
     }
 
 
@@ -672,7 +686,7 @@ def queue_project_video_for_posting(
         "workflow_id": project.id,
         "status": project.status,
         "queue_item": {
-            **_serialize_queue_item(item, profile),
+            **_serialize_queue_item(item, profile, project),
         },
     }
 
@@ -725,16 +739,20 @@ def _queue_project_video(
         item = None
     if item is None:
         item = PublishingQueueItem(
-            user_id=project.user_id,
             profile_id=profile.id,
-            content_id=project.primary_content_id,
+            workflow_id=project.id,
             platform=profile.platform,
         )
         db.add(item)
 
+    content = db.get(ContentItem, project.primary_content_id) if project.primary_content_id else None
+    raw_caption = caption or item.generated_content or _default_video_caption(project, story)
+    publish_caption = SocialProfileService().caption_with_hashtags(raw_caption, profile=profile, content=content, story=story)
+
+    item.workflow_id = project.id
     item.article_link = rendered_video
     item.article_title = project.title
-    item.generated_content = caption or item.generated_content or _default_video_caption(project, story)
+    item.generated_content = publish_caption
     item.status = requested_status
     if scheduled_at is not None:
         tzinfo = schedule_timezone(getattr(profile.strategy, "schedule_timezone", None))
@@ -766,13 +784,13 @@ def _queue_project_video(
     return item
 
 
-def _serialize_queue_item(item: PublishingQueueItem, profile: SocialProfile) -> dict:
+def _serialize_queue_item(item: PublishingQueueItem, profile: SocialProfile, project: MediaWorkflow | None = None) -> dict:
     return {
         "id": item.id,
         "profile_id": item.profile_id,
         "profile_name": profile.profile_name,
         "profile_scopes": getattr(profile, "scopes_jsonb", None) or [],
-        "content_id": item.content_id,
+        "content_id": project.primary_content_id if project else None,
         "article_link": item.article_link,
         "article_title": item.article_title,
         "platform": item.platform,
@@ -993,8 +1011,11 @@ def get_render_job(
     }:
         raise HTTPException(status_code=404, detail="Render job not found")
 
-    project = db.get(MediaWorkflow, job.reference_id)
-    if not project or (not user.is_system_admin and project.user_id != user.id):
+    project_query = db.query(MediaWorkflow).filter(MediaWorkflow.id == job.reference_id)
+    if not user.is_system_admin:
+        project_query = project_query.join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id).filter(SocialProfile.user_id == user.id)
+    project = project_query.first()
+    if not project:
         raise HTTPException(status_code=404, detail="Render job not found")
 
     job.project = project
@@ -1099,13 +1120,12 @@ def create_direct_script(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     content = db.get(ContentItem, payload.content_id)
-    if not content or not _can_use_content(content, user):
+    if not content or not _can_use_content(db, content, user):
         raise HTTPException(status_code=404, detail="ContentItem không tồn tại hoặc không thuộc quyền truy cập")
 
     existing_workflow = (
         db.query(MediaWorkflow)
         .filter(
-            MediaWorkflow.user_id == user.id,
             MediaWorkflow.profile_id == profile.id,
             MediaWorkflow.primary_content_id == content.id,
         )
@@ -1143,7 +1163,6 @@ def create_direct_script(
     # Tạo MediaWorkflow
     category_payload = content_category_payload(content)
     workflow = MediaWorkflow(
-        user_id=user.id,
         profile_id=profile.id,
         title=title,
         status="SCRIPTING",

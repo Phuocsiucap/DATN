@@ -22,8 +22,6 @@ import VideoProductionWorkspace from '@/features/generate-video/VideoProductionW
 import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
 import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
-import AccountAnalyticsPage from '@/features/analytics/AccountAnalyticsPage'
-import PostAnalyticsPage from '@/features/analytics/PostAnalyticsPage'
 import UsersPage from '@/features/users/UsersPage'
 import ProfilePage from '@/features/users/ProfilePage'
 import SettingsPage from '@/features/settings/SettingsPage'
@@ -57,6 +55,7 @@ PATH_TABS[CREATOR_DASHBOARD_PATH] = 'dashboard'
 
 const LEGACY_PATHS: Record<string, string> = {
   '/planningRequest': TAB_PATHS.planning,
+  '/analytics/accounts': TAB_PATHS.settings,
 }
 
 const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems'])
@@ -69,8 +68,6 @@ const CREATOR_TABS = new Set<Tab>([
   'approvals',
   'schedule',
   'publishedPosts',
-  'analyticsAccounts',
-  'analyticsPosts',
   'settings',
   'profile',
 ])
@@ -83,6 +80,7 @@ const getNormalizedPath = () => {
 const getTabFromPath = (): Tab => {
   const normalizedPath = getNormalizedPath()
   if (normalizedPath.startsWith('/generate-video')) return 'generateVideo'
+  if (getSocialAccountProfileIdFromPath()) return 'settings'
   return PATH_TABS[normalizedPath] ?? 'dashboard'
 }
 
@@ -101,8 +99,15 @@ const getGenerateVideoProjectIdFromPath = () => {
   return ''
 }
 
+const getSocialAccountProfileIdFromPath = () => {
+  const normalizedPath = getNormalizedPath()
+  const match = normalizedPath.match(/^\/social-account\/([^/?#]+)/)
+  if (match?.[1]) return decodeURIComponent(match[1])
+  return ''
+}
+
 function AppContent() {
-  const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`)
   const [tab, setTab] = useState<Tab>(getTabFromPath)
   const [generateVideoProjectId, setGenerateVideoProjectId] = useState(getGenerateVideoProjectIdFromPath)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
@@ -116,6 +121,8 @@ function AppContent() {
     })
   )
   const activeTab = isTabAllowed(tab, isSystemUser) ? tab : 'dashboard'
+  const socialAccountProfileId = getSocialAccountProfileIdFromPath()
+  const isPublishedPostsSubpage = Boolean(socialAccountProfileId)
 
   const handleTabChange = useCallback((nextTab: Tab, replace = false) => {
     const nextPath = nextTab === 'dashboard' ? dashboardPathForRole(isSystemUser) : TAB_PATHS[nextTab]
@@ -181,7 +188,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!authLoading && !currentUser) {
-      const path = currentPath.replace(/\/+$/, '') || '/'
+      const path = (currentPath.split('?')[0] || '/').replace(/\/+$/, '') || '/'
       if (path !== '/login' && path !== '/register') {
         window.history.replaceState(null, '', '/login')
         setCurrentPath('/login')
@@ -194,7 +201,7 @@ function AppContent() {
     const nextPath = LEGACY_PATHS[normalizedPath]
     if (!nextPath) return
     window.history.replaceState(window.history.state, '', `${nextPath}${window.location.search}${window.location.hash}`)
-    setCurrentPath(nextPath)
+    setCurrentPath(`${nextPath}${window.location.search}`)
   }, [])
 
   useEffect(() => {
@@ -212,7 +219,7 @@ function AppContent() {
 
   useEffect(() => {
     const handlePopState = () => {
-      setCurrentPath(window.location.pathname)
+      setCurrentPath(`${window.location.pathname}${window.location.search}`)
       setTab(getTabFromPath())
       setGenerateVideoProjectId(getGenerateVideoProjectIdFromPath())
     }
@@ -262,7 +269,7 @@ function AppContent() {
   }
 
   if (!currentUser) {
-    const path = currentPath.replace(/\/+$/, '') || '/'
+    const path = (currentPath.split('?')[0] || '/').replace(/\/+$/, '') || '/'
     if (path === '/register') {
       return <RegisterPage onAuthenticated={handleAuthenticated} />
     }
@@ -294,16 +301,15 @@ function AppContent() {
           ))}
           {activeTab === 'approvals' && <ApprovalsPage />}
           {activeTab === 'schedule' && <SchedulePage />}
-          {activeTab === 'publishedPosts' && <PublishedPostsPage />}
-          {activeTab === 'analyticsAccounts' && <AccountAnalyticsPage />}
-          {activeTab === 'analyticsPosts' && <PostAnalyticsPage />}
+          {isPublishedPostsSubpage && <PublishedPostsPage scopedProfileId={socialAccountProfileId} />}
+          {!isPublishedPostsSubpage && activeTab === 'publishedPosts' && <PublishedPostsPage />}
           {activeTab === 'users' && <UsersPage currentUser={currentUser} />}
           {activeTab === 'profile' && <ProfilePage currentUser={currentUser} onProfileUpdated={() => void loadCurrentUser()} />}
           {activeTab === 'openaiUsage' && <OpenAiUsagePage />}
           {activeTab === 'deepseekUsage' && <DeepseekUsagePage />}
           {activeTab === 'auditLogs' && <AuditLogsPage />}
           {activeTab === 'contentItems' && <AdminContentItemsPage />}
-          {activeTab === 'settings' && <SettingsPage currentUser={currentUser} />}
+          {!isPublishedPostsSubpage && activeTab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>
     </div>

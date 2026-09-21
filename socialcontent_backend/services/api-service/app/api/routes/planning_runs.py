@@ -3,7 +3,7 @@ from typing import Any
 import html
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -38,7 +38,8 @@ def get_candidate_source(run_id: uuid.UUID, candidate_id: uuid.UUID,
                          user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     run, candidate = owned_candidate(db, user, run_id, candidate_id)
     content = db.get(ContentItem, candidate.content_id) if candidate.content_id else None
-    if not content_available_to_profile(content, run.user_id):
+    owner_id = run.profile.user_id if run.profile else None
+    if not content_available_to_profile(db, content, owner_id):
         raise HTTPException(404, "Nội dung nguồn không còn khả dụng cho profile này.")
     full_text = _load_content_full_text(content.mongo_normalized_id) or ""
     return {"id": str(content.id), "title": content.canonical_title, "summary": content.summary,
@@ -56,13 +57,18 @@ def list_planning_runs(
 ):
     filters = []
     if not user.is_system_admin:
-        filters.append(PlanningRun.user_id == user.id)
+        filters.append(SocialProfile.user_id == user.id)
     if profile_id:
         filters.append(PlanningRun.profile_id == profile_id)
     if run_status:
         filters.append(PlanningRun.status == run_status.strip().upper())
 
-    total = db.query(PlanningRun.id).filter(*filters).count()
+    total = (
+        db.query(PlanningRun.id)
+        .join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+        .filter(*filters)
+        .count()
+    )
     rows = (
         db.query(
             PlanningRun.id,
@@ -101,8 +107,11 @@ def list_planning_runs(
 
 
 def _owned_run(db: Session, run_id: uuid.UUID, user: User):
-    run = db.get(PlanningRun, run_id)
-    if not run or (not user.is_system_admin and run.user_id != user.id):
+    query = db.query(PlanningRun).join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+    if not user.is_system_admin:
+        query = query.filter(SocialProfile.user_id == user.id)
+    run = query.filter(PlanningRun.id == run_id).first()
+    if not run:
         raise HTTPException(status_code=404, detail="Planning run not found")
     return run
 
@@ -149,7 +158,6 @@ def _candidate_rows(db: Session, run, candidate_id: uuid.UUID | None = None):
         db.query(
             PlanningCandidate.id,
             PlanningCandidate.content_id,
-            PlanningCandidate.workflow_id,
             PlanningCandidate.rank_order,
             PlanningCandidate.score,
             PlanningCandidate.selected,
@@ -173,9 +181,7 @@ def _workflow_rows(db: Session, run, candidates):
         for value in (output.get("workflows_created") or [])
         if value
     }
-    if run.workflow_id:
-        workflow_ids.add(str(run.workflow_id))
-    workflow_ids.update(str(row.workflow_id) for row in candidates if row.workflow_id)
+    candidate_ids = [row.id for row in candidates]
     for row in candidates:
         decision_workflow_id = stored_decision(row, output).get("workflow_id")
         if decision_workflow_id:
@@ -187,18 +193,19 @@ def _workflow_rows(db: Session, run, candidates):
         db.query(
             MediaWorkflow.id, MediaWorkflow.title, MediaWorkflow.primary_content_id,
             MediaWorkflow.status, MediaWorkflow.current_stage, MediaWorkflow.updated_at,
-            MediaWorkflow.series_id, MediaWorkflow.metadata_json,
+            MediaWorkflow.series_id, MediaWorkflow.planning_candidate_id, MediaWorkflow.metadata_json,
             ContentSeries.title.label("series_title"),
         )
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
         .filter(
-            MediaWorkflow.id.in_(ids),
-            MediaWorkflow.user_id == run.user_id,
+            or_(MediaWorkflow.id.in_(ids), MediaWorkflow.planning_candidate_id.in_(candidate_ids)),
+            SocialProfile.user_id == run.profile.user_id,
             MediaWorkflow.profile_id == run.profile_id,
         )
         .order_by(MediaWorkflow.created_at, MediaWorkflow.id)
         .all()
-    ) if ids else []
+    ) if ids or candidate_ids else []
     return workflows
 
 

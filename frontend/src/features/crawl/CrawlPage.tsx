@@ -158,6 +158,12 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
     }
     if (!jobSources.length) return toast.error('Vui lòng chọn ít nhất một nguồn')
     if (jobSources.some(s => !Number.isInteger(s.maxItems) || s.maxItems < 1 || s.maxItems > 200)) return toast.error('Số bài mỗi nguồn phải từ 1 đến 200')
+    const missingRssSelection = jobSources.some((source) => {
+      const config = sourceConfigs.find(item => item.id === source.id)
+      const options = Array.isArray(config?.configuration.job_options) ? config.configuration.job_options as string[] : []
+      return options.includes('rss_feed_keys') && !source.overrides.configuration?.rss_feed_keys.length
+    })
+    if (missingRssSelection) return toast.error('Vui lòng chọn ít nhất một chuyên mục RSS cho nguồn cho phép tùy chỉnh RSS')
     const scheduleError = scheduleEnabled ? scheduleValidationMessage(scheduleForm) : null
     if (scheduleError) return toast.error(scheduleError)
     setLoading(true)
@@ -285,7 +291,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
                     <option value="PAUSED">Paused</option>
                     <option value="CANCELLED">Cancelled</option>
                   </SelectControl>
-                  <SelectControl><option>Người tạo</option></SelectControl>
+                  {isSystemUser && <SelectControl><option>Người tạo</option></SelectControl>}
                   <SelectControl icon={<CalendarDays size={15} />}><option>Chọn khoảng thời gian</option></SelectControl>
                 </AppCard>
 
@@ -387,88 +393,122 @@ function JobsTable({
   return (
     <div className="app-list-layout app-card app-table-card overflow-hidden">
       <PaginatedList items={jobs} loading={loading} resetKey={jobs.map(item => item.id).join()}>{(visibleItems) => (
-<Table className="min-w-[960px] table-fixed">
-        <colgroup>
-          <col style={{ width: '20%' }} />
-          <col style={{ width: '9%' }} />
-          <col style={{ width: '14%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '12%' }} />
-          <col style={{ width: '14%' }} />
-          <col style={{ width: '12%' }} />
-          <col style={{ width: '8%' }} />
-        </colgroup>
-        <TableHeader columns={['Job', 'Nguồn', 'Trạng thái', 'Tiến độ', 'Kết quả', 'Thời gian', 'Người tạo', 'Hành động']} /><TableBody>
-          {loading && jobs.length === 0 ? (
-            <TableRow><TableCell colSpan={8}><div className="p-4 space-y-3">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="flex items-center gap-4">
-                  <div className="skeleton-loader h-5 w-48" />
-                  <div className="skeleton-loader h-5 w-24" />
-                  <div className="skeleton-loader h-5 w-20" />
-                  <div className="skeleton-loader h-5 w-16" />
-                </div>
-              ))}
-            </div></TableCell></TableRow>
-          ) : jobs.length === 0 ? (
-            <TableRow><TableCell colSpan={8}><EmptyState label="Chưa có crawl jobs nào" /></TableCell></TableRow>
-          ) : (
-            visibleItems.map((job) => {
-              const canEditSchedule = job.crawl_mode !== 'SCHEDULED_RUN' && !['PENDING', 'QUEUED', 'RUNNING'].includes(job.status)
-              return (
-                <TableRow key={job.id} onClick={() => onOpenDetail(job)} className={` cursor-pointer border-t border-[var(--outline-variant)] text-xs transition-colors ${selectedJob?.id === job.id ? 'app-row-selected' : 'hover:bg-[var(--surface-container-low)]'}`}>
-                  <TableCell className="px-4 py-3 min-w-[160px]"><div>
-                    <div className="font-extrabold text-[var(--on-surface)]">{job.name}</div>
-                    <div className="mt-1 truncate text-xs font-mono text-[var(--on-surface-variant)]">ID: {shortId(job.id)}-...</div>
-                    {job.schedule && (
-                      <div className={`mt-1 text-xs font-bold ${job.schedule.enabled ? 'text-[#2556ea]' : 'text-[#94a3b8]'}`}>
-                        {job.schedule.enabled ? `${job.schedule.runs_per_day} lần/ngày · ${scheduleDaysLabel(job.schedule.weekdays)}` : 'Lịch đang tạm dừng'}
+        <Table className="min-w-[960px] table-fixed">
+          <colgroup>
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '8%' }} />
+          </colgroup>
+          <TableHeader columns={['Job', 'Nguồn', 'Trạng thái', 'Tiến độ', 'Kết quả', 'Thời gian', 'Người tạo', 'Hành động']} />
+          <TableBody>
+            {loading && jobs.length === 0 ? (
+              <TableRow><TableCell colSpan={8}><div className="p-4 space-y-3">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="flex items-center gap-4">
+                    <div className="skeleton-loader h-5 w-48" />
+                    <div className="skeleton-loader h-5 w-24" />
+                    <div className="skeleton-loader h-5 w-20" />
+                    <div className="skeleton-loader h-5 w-16" />
+                  </div>
+                ))}
+              </div></TableCell></TableRow>
+            ) : jobs.length === 0 ? (
+              <TableRow><TableCell colSpan={8}><EmptyState label="Chưa có crawl jobs nào" /></TableCell></TableRow>
+            ) : (
+              visibleItems.map((job) => {
+                const canEditSchedule = job.crawl_mode !== 'SCHEDULED_RUN' && !['PENDING', 'QUEUED', 'RUNNING'].includes(job.status)
+                return (
+                  <TableRow key={job.id} onClick={() => onOpenDetail(job)} className={`cursor-pointer border-t border-[var(--outline-variant)] text-xs transition-colors ${selectedJob?.id === job.id ? 'app-row-selected' : 'hover:bg-[var(--surface-container-low)]'}`}>
+                    <TableCell className="px-4 py-3 min-w-[160px]"><div>
+                      <div className="font-extrabold text-[var(--on-surface)]">{job.name}</div>
+                      <div className="mt-1 truncate text-xs font-mono text-[var(--on-surface-variant)]">ID: {shortId(job.id)}-...</div>
+                      {job.schedule && (
+                        <div className={`mt-1 text-xs font-bold ${job.schedule.enabled ? 'text-[#2556ea]' : 'text-[#94a3b8]'}`}>
+                          {job.schedule.enabled ? `${job.schedule.runs_per_day} lần/ngày · ${scheduleDaysLabel(job.schedule.weekdays)}` : 'Lịch đang tạm dừng'}
+                        </div>
+                      )}
+                    </div></TableCell>
+                    <TableCell className="px-4 py-3">
+                      <SourceBadges sourceTypes={job.source_types ?? []} />
+                    </TableCell>
+                    <TableCell className="px-4 py-3"><div><Badge value={job.status} /><div className="mt-1 text-slate-500">{job.current_stage}</div></div></TableCell>
+                    <TableCell className="px-4 py-3"><div>
+                      <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
+                        <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
                       </div>
-                    )}
-                  </div></TableCell>
-                  <TableCell className="px-4 py-3"><div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
-                    <span className="grid h-6 w-6 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">◎</span>
-                    <span className="rounded-[5px] bg-emerald-100 px-1.5 py-0.5 text-xs font-black text-emerald-700">D</span>
-                  </div></TableCell>
-                  <TableCell className="px-4 py-3"><div><Badge value={job.status} /><div className="mt-1 text-slate-500">{job.current_stage}</div></div></TableCell>
-                  <TableCell className="px-4 py-3"><div>
-                    <div className="text-[var(--on-surface)] font-bold">{Number(job.progress_percent).toFixed(0)}%</div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
-                      <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%` }} />
-                    </div>
-                  </div></TableCell>
-                  <TableCell className="px-4 py-3"><div className="font-bold text-[#34415a]"><div>{job.total_normalized} thành công</div><div>{job.total_duplicates} trùng · {job.total_failed} lỗi</div></div></TableCell>
-                  <TableCell className="px-4 py-3"><div className="text-[var(--on-surface-variant)] font-medium">
-                    {job.schedule?.enabled ? (
-                      <><span className="block text-xs font-bold text-[#2556ea]">Lần kế tiếp</span>{formatDate(job.schedule.next_run_at || undefined)}</>
-                    ) : formatDate(job.created_at)}
-                  </div></TableCell>
-                  <TableCell className="px-4 py-3"><div className="flex items-center gap-2">
-                    <Thumbnail index={2} className="h-6 w-6 rounded-full" />
-                    <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
-                  </div></TableCell>
-                  <TableCell className="px-4 py-3"><div>
-                    <TableRowActions
-                      actions={([
-                        { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: () => onOpenDetail(job) },
-                        canEditSchedule ? { label: 'Thiết lập lịch', icon: <CalendarClock size={14} />, onClick: () => onEditSchedule(job) } : null,
-                        job.crawl_mode !== 'SOURCE_CONFIG' ? { label: 'Chạy lại job', icon: <RotateCcw size={14} />, onClick: () => onAction('retry', job) } : null,
-                        { label: 'Dừng job', icon: <Square size={14} />, onClick: () => onAction('cancel', job), danger: true },
-                      ].filter(Boolean)) as TableRowActionItem[]}
-                    />
-                  </div></TableCell>
-                </TableRow>
-              )
-})
-          )}
-        </TableBody>
-      </Table>
-)}</PaginatedList>
+                    </div></TableCell>
+                    <TableCell className="px-4 py-3"><div className="font-bold text-[#34415a]"><div>{job.total_normalized} thành công</div><div>{job.total_duplicates} trùng · {job.total_failed} lỗi</div></div></TableCell>
+                    <TableCell className="px-4 py-3"><div className="text-[var(--on-surface-variant)] font-medium">
+                      {job.schedule?.enabled ? (
+                        <><span className="block text-xs font-bold text-[#2556ea]">Lần kế tiếp</span>{formatDate(job.schedule.next_run_at || undefined)}</>
+                      ) : formatDate(job.created_at)}
+                    </div></TableCell>
+                    <TableCell className="px-4 py-3"><div className="flex items-center gap-2">
+                      <Thumbnail index={2} className="h-6 w-6 rounded-full" />
+                      <span className="truncate">{job.creator_name || (job.created_by_type === 'SYSTEM' ? 'Hệ thống' : 'Người dùng')}</span>
+                    </div></TableCell>
+                    <TableCell className="px-4 py-3"><div>
+                      <TableRowActions
+                        actions={([
+                          { label: 'Xem chi tiết', icon: <Eye size={14} />, onClick: () => onOpenDetail(job) },
+                          canEditSchedule ? { label: 'Thiết lập lịch', icon: <CalendarClock size={14} />, onClick: () => onEditSchedule(job) } : null,
+                          job.crawl_mode !== 'SOURCE_CONFIG' ? { label: 'Chạy lại job', icon: <RotateCcw size={14} />, onClick: () => onAction('retry', job) } : null,
+                          { label: 'Dừng job', icon: <Square size={14} />, onClick: () => onAction('cancel', job), danger: true },
+                        ].filter(Boolean)) as TableRowActionItem[]}
+                      />
+                    </div></TableCell>
+                  </TableRow>
+                )
+              })
+            )}
+          </TableBody>
+        </Table>
+      )}</PaginatedList>
     </div>
   )
 }
 
-// Helpers
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const SOURCE_META: Record<string, { label: string; logo: string; color: string }> = {
+  VNEXPRESS: { label: 'VNExpress', logo: 'https://vnexpress.net/favicon.ico', color: '#1a6dc2' },
+  BILIBILI:  { label: 'Bilibili',  logo: 'https://www.bilibili.com/favicon.ico', color: '#fb7299' },
+}
+
+function SourceBadges({ sourceTypes }: { sourceTypes: string[] }) {
+  if (sourceTypes.length === 0) {
+    return <span className="text-xs text-[#94a3b8]">—</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {sourceTypes.map((st) => {
+        const meta = SOURCE_META[st.toUpperCase()]
+        return (
+          <div key={st} className="flex items-center gap-1 rounded-[6px] border border-[var(--outline-variant)] bg-[#f8fafc] px-1.5 py-0.5">
+            {meta?.logo ? (
+              <img
+                src={meta.logo}
+                alt={meta.label ?? st}
+                className="h-3.5 w-3.5 rounded-sm object-contain"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+              />
+            ) : null}
+            <span className="text-[11px] font-bold" style={{ color: meta?.color ?? '#475569' }}>
+              {meta?.label ?? st}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function Badge({ value }: { value: string }) {
   let color = 'bg-slate-100 text-slate-700'
   if (['SUCCEEDED', 'COMPLETED', 'APPROVED'].includes(value)) color = 'bg-emerald-100 text-emerald-800'
@@ -483,7 +523,8 @@ function TableHeader({ columns }: { columns: string[] }) {
     <ShadcnTableHeader>
       <TableRow className="bg-slate-50/80">
         {columns.map(c => <TableHead key={c}>{c}</TableHead>)}
-      </TableRow></ShadcnTableHeader>
+      </TableRow>
+    </ShadcnTableHeader>
   )
 }
 

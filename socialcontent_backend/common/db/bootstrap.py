@@ -221,6 +221,9 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                 IF to_regclass('profile_content_links') IS NOT NULL THEN
                     ALTER TABLE profile_content_links
+                    ALTER COLUMN user_id DROP NOT NULL;
+
+                    ALTER TABLE profile_content_links
                     ADD COLUMN IF NOT EXISTS recommended_at TIMESTAMPTZ;
 
                     UPDATE profile_content_links
@@ -284,10 +287,38 @@ def ensure_schema_compatibility(db: Session) -> None:
                     ADD COLUMN IF NOT EXISTS platform_publish_id VARCHAR(255);
 
                     ALTER TABLE publishing_queue_items
+                    ADD COLUMN IF NOT EXISTS workflow_id UUID REFERENCES media_workflow(id) ON DELETE SET NULL;
+
+                    ALTER TABLE publishing_queue_items
                     ADD COLUMN IF NOT EXISTS publish_status JSONB DEFAULT '{}'::jsonb NOT NULL;
 
                     CREATE INDEX IF NOT EXISTS ix_publishing_queue_items_platform_publish_id
                     ON publishing_queue_items (platform_publish_id);
+
+                    CREATE INDEX IF NOT EXISTS ix_publishing_queue_items_workflow_id
+                    ON publishing_queue_items (workflow_id);
+
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'publishing_queue_items'
+                          AND column_name = 'content_id'
+                    ) THEN
+                        ALTER TABLE publishing_queue_items
+                        DROP CONSTRAINT IF EXISTS publishing_queue_items_content_id_fkey;
+                        DROP INDEX IF EXISTS ix_publishing_queue_items_content_id;
+                        ALTER TABLE publishing_queue_items DROP COLUMN content_id;
+                    END IF;
+
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'publishing_queue_items'
+                          AND column_name = 'user_id'
+                    ) THEN
+                        ALTER TABLE publishing_queue_items
+                        DROP CONSTRAINT IF EXISTS publishing_queue_items_user_id_fkey;
+                        DROP INDEX IF EXISTS ix_publishing_queue_items_user_id;
+                        ALTER TABLE publishing_queue_items DROP COLUMN user_id;
+                    END IF;
 
                     CREATE INDEX IF NOT EXISTS ix_publishing_queue_due_auto
                     ON publishing_queue_items (scheduled_at, created_at)
@@ -312,14 +343,28 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     CREATE INDEX IF NOT EXISTS ix_social_posts_platform_publish_id
                     ON social_posts (platform_publish_id);
+
+                    IF to_regclass('publishing_queue_items') IS NOT NULL THEN
+                        ALTER TABLE social_posts
+                        ADD COLUMN IF NOT EXISTS queue_item_id UUID REFERENCES publishing_queue_items(id) ON DELETE SET NULL;
+
+                        CREATE UNIQUE INDEX IF NOT EXISTS ix_social_posts_queue_item_id
+                        ON social_posts (queue_item_id);
+
+                        ALTER TABLE publishing_queue_items
+                        DROP CONSTRAINT IF EXISTS publishing_queue_items_social_post_id_fkey;
+
+                        DROP INDEX IF EXISTS ix_publishing_queue_items_social_post_id;
+
+                        ALTER TABLE publishing_queue_items
+                        DROP COLUMN IF EXISTS social_post_id;
+                    END IF;
                 END IF;
 
                 IF to_regclass('media_workflow') IS NOT NULL THEN
                     CREATE TABLE IF NOT EXISTS planning_runs (
                         id UUID PRIMARY KEY,
-                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                         profile_id UUID NOT NULL REFERENCES social_profiles(id) ON DELETE CASCADE,
-                        workflow_id UUID NOT NULL REFERENCES media_workflow(id) ON DELETE CASCADE,
                         crawl_job_id UUID NULL REFERENCES crawl_jobs(id) ON DELETE SET NULL,
                         planning_mode VARCHAR(40) NOT NULL DEFAULT 'AUTO',
                         status VARCHAR(40) NOT NULL DEFAULT 'PENDING',
@@ -332,9 +377,7 @@ def ensure_schema_compatibility(db: Session) -> None:
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     );
-                    CREATE INDEX IF NOT EXISTS ix_planning_runs_user_id ON planning_runs (user_id);
                     CREATE INDEX IF NOT EXISTS ix_planning_runs_profile_id ON planning_runs (profile_id);
-                    CREATE INDEX IF NOT EXISTS ix_planning_runs_workflow_id ON planning_runs (workflow_id);
                     CREATE INDEX IF NOT EXISTS ix_planning_runs_crawl_job_id ON planning_runs (crawl_job_id);
                     CREATE INDEX IF NOT EXISTS ix_planning_runs_planning_mode ON planning_runs (planning_mode);
                     CREATE INDEX IF NOT EXISTS ix_planning_runs_status ON planning_runs (status);
@@ -342,7 +385,6 @@ def ensure_schema_compatibility(db: Session) -> None:
                     CREATE TABLE IF NOT EXISTS planning_candidates (
                         id UUID PRIMARY KEY,
                         planning_run_id UUID NOT NULL REFERENCES planning_runs(id) ON DELETE CASCADE,
-                        workflow_id UUID NOT NULL REFERENCES media_workflow(id) ON DELETE CASCADE,
                         content_id UUID NULL REFERENCES content_items(id) ON DELETE SET NULL,
                         rank_order INTEGER NULL,
                         score NUMERIC(5, 2) NOT NULL DEFAULT 0,
@@ -353,9 +395,25 @@ def ensure_schema_compatibility(db: Session) -> None:
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     );
                     CREATE INDEX IF NOT EXISTS ix_planning_candidates_planning_run_id ON planning_candidates (planning_run_id);
-                    CREATE INDEX IF NOT EXISTS ix_planning_candidates_workflow_id ON planning_candidates (workflow_id);
                     CREATE INDEX IF NOT EXISTS ix_planning_candidates_content_id ON planning_candidates (content_id);
                     CREATE INDEX IF NOT EXISTS ix_planning_candidates_selected ON planning_candidates (selected);
+
+                    ALTER TABLE media_workflow
+                    ADD COLUMN IF NOT EXISTS planning_candidate_id UUID NULL;
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ix_media_workflow_planning_candidate_id
+                    ON media_workflow (planning_candidate_id);
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'media_workflow_planning_candidate_id_fkey'
+                    ) THEN
+                        ALTER TABLE media_workflow
+                        ADD CONSTRAINT media_workflow_planning_candidate_id_fkey
+                        FOREIGN KEY (planning_candidate_id)
+                        REFERENCES planning_candidates(id)
+                        ON DELETE SET NULL;
+                    END IF;
                 END IF;
 
                 IF to_regclass('content_embeddings') IS NOT NULL THEN

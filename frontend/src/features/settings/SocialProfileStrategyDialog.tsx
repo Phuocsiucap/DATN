@@ -247,6 +247,13 @@ export function SocialProfileStrategyDialog({
                     }}
                   />
 
+                  <SwitchRow
+                    label="Yêu cầu video nguồn"
+                    description="Chỉ chọn nội dung nguồn có video khi đối sánh với strategy. Tắt để cho phép cả nội dung không có video."
+                    checked={strategyForm.require_video ?? false}
+                    onChange={(checked) => onChange('require_video', checked)}
+                  />
+
                   <Field label="Primary Tone" description="Giọng điệu chủ đạo khi viết caption, hook và kịch bản video.">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {[
@@ -329,9 +336,21 @@ export function SocialProfileStrategyDialog({
 
                   <div className="space-y-3">
                     <SwitchRow
+                      label="Nhận đề xuất từ nguồn chung (GLOBAL)"
+                      description="Cho phép chấm điểm và nhận đề xuất các video/bài viết từ kho tài nguyên chung của hệ thống."
+                      checked={strategyForm.receive_system_content ?? true}
+                      onChange={(checked) => onChange('receive_system_content', checked)}
+                    />
+
+                    <SwitchRow
                       label="Auto chấm điểm, tạo kịch bản và voice"
-                      description="Tự động tạo workflow, kịch bản và voice sau khi bài viết đạt điểm và draft vượt kiểm tra chất lượng."
+                      description={
+                        !strategyForm.content_topics?.trim()
+                          ? <span className="text-red-500 font-medium">Bạn cần cấu hình ít nhất 1 Preferred Topic (Nội dung & Topic Hệ thống) để bật Planning Run (tự động chọn bài).</span>
+                          : "Tự động tạo workflow, kịch bản và voice sau khi bài viết đạt điểm và draft vượt kiểm tra chất lượng."
+                      }
                       checked={strategyForm.auto_project_queue_enabled || false}
+                      disabled={!strategyForm.content_topics?.trim()}
                       onChange={(checked) => onChange('auto_project_queue_enabled', checked)}
                     />
 
@@ -603,22 +622,24 @@ function SwitchRow({
   label,
   description,
   checked,
+  disabled,
   onChange,
 }: {
   label: string
-  description: string
+  description: React.ReactNode
   checked: boolean
+  disabled?: boolean
   onChange: (checked: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3">
+    <div className={cn("flex items-center justify-between gap-3 rounded-lg border border-[var(--outline-variant)] bg-white px-4 py-3", disabled && "opacity-60")}>
       <div className="min-w-0">
         <div className="text-xs font-bold text-[var(--on-surface)]">{label}</div>
         <div className="truncate text-xs text-[var(--on-surface-variant)]">{description}</div>
       </div>
       <label className="relative inline-flex shrink-0 cursor-pointer items-center">
-        <input type="checkbox" className="peer sr-only" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-        <span className="h-5 w-9 rounded-full bg-slate-200 transition peer-checked:bg-[var(--accent)]" />
+        <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+        <span className={cn("h-5 w-9 rounded-full bg-slate-200 transition peer-checked:bg-[var(--accent)]", disabled && "cursor-not-allowed")} />
         <span className="absolute left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition peer-checked:translate-x-4" />
       </label>
     </div>

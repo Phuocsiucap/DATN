@@ -149,7 +149,9 @@ def _redacted_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _log_tiktok_response(label: str, response: httpx.Response, payload: dict[str, Any]) -> None:
-    logger.info("TikTok %s response status=%s payload=%s", label, response.status_code, _redacted_payload(payload))
+    error = payload.get("error", {})
+    err_code = error.get("code", "") if isinstance(error, dict) else ""
+    logger.info("TikTok %s → %s%s", label, response.status_code, f" err={err_code}" if err_code and err_code != "ok" else "")
 
 
 def _with_client_ticket(scan_qrcode_url: str, client_ticket: str) -> str:

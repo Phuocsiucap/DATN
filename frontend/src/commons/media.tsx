@@ -91,6 +91,8 @@ export function MediaAssetPreview({
       <a href={playbackUrl || previewUrl} target="_blank" rel="noreferrer" className={`relative block ${shellClass}`}>
         {previewUrl ? (
           <img src={previewUrl} alt={label} className="h-full w-full object-cover opacity-90" loading="lazy" />
+        ) : playbackUrl ? (
+          <video src={`${playbackUrl}#t=0.1`} preload="metadata" className="h-full w-full object-cover opacity-90" muted playsInline />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-slate-950 text-xs font-bold text-white/70">Video</div>
         )}

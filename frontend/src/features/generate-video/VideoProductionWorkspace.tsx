@@ -73,6 +73,7 @@ import {
   type WorkflowSourceInput,
 } from '@/commons/apis/generateVideo'
 import { fetchAllContentSeriesApi, fetchContentSeriesApi, type ContentSeries } from '@/commons/apis/planning'
+import { isVideoWorkflowWaitingForReview } from '@/commons/apis/videoWorkspaceList'
 import { TransferSeriesModal } from './components/SeriesModal'
 import { EditStoryWithAiDialog } from './components/EditStoryWithAiDialog'
 import WorkflowProgress from './WorkflowProgress'
@@ -342,6 +343,7 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
   useEffect(() => {
     if (!workflowId) return
     let disposed = false
+    let timer: number | null = null
     const poll = async () => {
       try {
         const next = await fetchVideoWorkflowProgressApi(workflowId)
@@ -353,15 +355,17 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           refreshedTaskRef.current = latest.id
           await loadProjectById(workflowId, { openSavedStory: true, quiet: true })
         }
+        if (!disposed && shouldPollWorkflowProgress(next)) {
+          timer = window.setTimeout(() => void poll(), 2000)
+        }
       } catch {
         // The main workspace request owns user-facing errors.
       }
     }
     void poll()
-    const timer = window.setInterval(() => void poll(), 2000)
     return () => {
       disposed = true
-      window.clearInterval(timer)
+      if (timer) window.clearTimeout(timer)
     }
   }, [workflowId])
 
@@ -1700,7 +1704,7 @@ function StoryVisualPreview({
     </div>
   )
   return (
-    <div className="grid gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <RemotionLikeEditor
         draftReviewRequired={draftReviewRequired}
         key={version}
@@ -5788,7 +5792,22 @@ function workflowProgressFromDetail(workflow: VideoWorkspaceDetail): VideoWorkfl
 }
 
 function activeProgressTask(progress: VideoWorkflowProgress | null) {
+  if (isProgressWaitingForReview(progress)) return null
   return progress?.tasks.find((task) => ['PENDING', 'RUNNING', 'PROCESSING'].includes(task.status)) || null
+}
+
+function shouldPollWorkflowProgress(progress: VideoWorkflowProgress | null) {
+  return Boolean(activeProgressTask(progress))
+}
+
+function isProgressWaitingForReview(progress: VideoWorkflowProgress | null) {
+  if (!progress) return false
+  const latest = progress.tasks[0]
+  return isVideoWorkflowWaitingForReview({
+    status: progress.status,
+    current_stage: latest?.current_stage || progress.current_stage,
+    task_status: latest?.status,
+  })
 }
 
 function workflowStory(workflow: VideoWorkspaceDetail | null): GenerateVideoStory | null {

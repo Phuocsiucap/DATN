@@ -26,19 +26,19 @@ export default function TikTokCallbackPage() {
           <div className="space-y-3 rounded-md border border-[#eef2f7] bg-slate-50 p-4 text-sm text-[#475569]">
             {hasSuccess ? (
               <>
-                <p>Authorization was received. You can return to SocialContentHub settings to finish account connection.</p>
+                <p>Authorization was received. You can return to Social account to finish account connection.</p>
                 {scopes && <p className="break-words text-xs">Granted scopes: {scopes}</p>}
               </>
             ) : (
               <>
-                <p>{params.get('error_description') || 'Please try connecting TikTok again from SocialContentHub settings.'}</p>
+                <p>{params.get('error_description') || 'Please try connecting TikTok again from Social account.'}</p>
                 {error && <p className="break-words text-xs">Error: {error}</p>}
               </>
             )}
           </div>
 
-          <a href="/settings" className="mt-5 inline-flex h-9 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">
-            Back to settings
+          <a href="/social-account" className="mt-5 inline-flex h-9 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]">
+            Back to Social account
           </a>
         </section>
       </div>

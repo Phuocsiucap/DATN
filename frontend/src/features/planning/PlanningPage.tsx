@@ -784,6 +784,7 @@ export default function PlanningPage({
         run={selectedRun}
         detail={runDetail}
         loading={runDetailLoading}
+        isSystemUser={isSystemUser}
         onClose={() => {
           runDetailRequest.current += 1
           setSelectedRun(null)

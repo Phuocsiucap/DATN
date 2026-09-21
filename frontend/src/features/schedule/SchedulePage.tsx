@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import {
   Activity,
@@ -16,6 +16,8 @@ import {
   Rocket,
   Send,
   SkipForward,
+  Play,
+  Pause,
 } from 'lucide-react'
 import { approveAndScheduleQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, rescheduleQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar, TableRowActions, type TableRowActionItem } from '@/commons/component/social-ui'
@@ -222,7 +224,6 @@ export default function SchedulePage() {
   const [weekStart, setWeekStart] = useState(() => startOfDay(new Date()))
   const [totalScheduledCount, setTotalScheduledCount] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [quickItem, setQuickItem] = useState<QueueItem | null>(null)
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
   const [scheduleItem, setScheduleItem] = useState<QueueScheduleTarget | null>(null)
   const [skipTarget, setSkipTarget] = useState<QueueItem | null>(null)
@@ -231,7 +232,6 @@ export default function SchedulePage() {
     const profile = profiles.find((candidate) => String(candidate.id) === String(updated.profile_id))
     const normalized = decorateQueueItem(updated, profile)
     setItems((current) => current.map((item) => item.id === normalized.id ? { ...item, ...normalized } : item))
-    setQuickItem((current) => current?.id === normalized.id ? { ...current, ...normalized } : current)
     setModalItem((current) => current?.id === normalized.id ? { ...current, ...normalized } : current)
   }, [profiles])
 
@@ -258,7 +258,6 @@ export default function SchedulePage() {
       setProfiles(nextProfiles)
       setItems(nextItems)
       setTotalScheduledCount(Number(queueData.summary?.total_scheduled || 0))
-      setQuickItem((current) => current ? (nextItems.find((item: QueueItem) => item.id === current.id) || current) : null)
       setModalItem((current) => {
         if (!current) return null
         const nextItem = nextItems.find((item: QueueItem) => item.id === current.id)
@@ -280,10 +279,9 @@ export default function SchedulePage() {
     for (const item of items) {
       if (normalizePlatform(item.platform) === 'tiktok' && item.status === 'publishing') ids.add(item.id)
     }
-    if (quickItem && normalizePlatform(quickItem.platform) === 'tiktok' && quickItem.status === 'publishing') ids.add(quickItem.id)
     if (modalItem && normalizePlatform(modalItem.platform) === 'tiktok' && modalItem.status === 'publishing') ids.add(modalItem.id)
     return Array.from(ids).sort().join(',')
-  }, [items, quickItem, modalItem])
+  }, [items, modalItem])
 
   useEffect(() => {
     if (!publishingItemIds) return
@@ -362,7 +360,6 @@ export default function SchedulePage() {
   const handleSkip = (queueItemId: string) => {
     const item = items.find((candidate) => candidate.id === queueItemId)
       || (modalItem?.id === queueItemId ? modalItem : null)
-      || (quickItem?.id === queueItemId ? quickItem : null)
     setSkipTarget(item ?? ({ id: queueItemId, article_title: queueItemId } as QueueItem))
   }
 
@@ -372,7 +369,6 @@ export default function SchedulePage() {
     try {
       await updatePublishingQueueItemApi(queueItemId, 'skipped')
       if (modalItem?.id === queueItemId) setModalItem(null)
-      if (quickItem?.id === queueItemId) setQuickItem(null)
       if (scheduleItem?.id === queueItemId) setScheduleItem(null)
       await loadData()
       toast.success('Đã bỏ qua queue item và giải phóng thời điểm xuất bản.')
@@ -475,7 +471,7 @@ export default function SchedulePage() {
   }, [todayKey, weekItems])
 
   const calendarSlots = useMemo(() => {
-    const slots = new Set(baseTimeSlots)
+    const slots = new Set([14])
     weekItems.forEach((item) => {
       const value = scheduledValue(item)
       if (!value) return
@@ -486,16 +482,8 @@ export default function SchedulePage() {
     return Array.from(slots).sort((a, b) => a - b)
   }, [weekItems])
 
-  useEffect(() => {
-    setQuickItem((current) => {
-      if (current && weekItems.some((item) => item.id === current.id)) return current
-      return todayItems[0] || weekItems[0] || null
-    })
-  }, [todayItems, weekItems])
 
-  const unscheduledItems = useMemo(() => filteredItems.filter((item) => (
-    !scheduledValue(item) && ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status)
-  )), [filteredItems])
+
 
   const scheduledItems = useMemo(() => filteredItems.filter((item) => (
     Boolean(scheduledValue(item)) && item.status !== 'skipped'
@@ -600,7 +588,7 @@ export default function SchedulePage() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm ring-1 ring-slate-900/5">
+          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm ring-1 ring-slate-900/5" style={{ zoom: 0.75 }}>
             <div className="flex items-center justify-center gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-3">
               <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 bg-white text-slate-500 shadow-xs transition hover:bg-slate-50 hover:text-slate-800">
                 <ChevronLeft size={16} />
@@ -646,8 +634,8 @@ export default function SchedulePage() {
                                 key={item.id}
                                 item={item}
                                 profile={profilesById.get(String(item.profile_id))}
-                                active={quickItem?.id === item.id}
-                                onSelect={() => setQuickItem(item)}
+                                active={modalItem?.id === item.id}
+                                onSelect={() => void handleOpenDetail(item)}
                                 onOpen={() => void handleOpenDetail(item)}
                                 onApprove={() => void handleApprove(item.id)}
                                 onSchedule={() => setScheduleItem(item)}
@@ -675,23 +663,7 @@ export default function SchedulePage() {
           </div>
         </main>
 
-        <aside className="w-full shrink-0 space-y-3 xl:w-[320px]">
 
-          <QuickDetailCard
-            item={quickItem}
-            profile={quickItem ? profilesById.get(String(quickItem.profile_id)) : undefined}
-            onClose={() => setQuickItem(null)}
-            onOpen={() => quickItem && void handleOpenDetail(quickItem)}
-          />
-          <UnscheduledQueueList
-            items={unscheduledItems}
-            profilesById={profilesById}
-            loading={loading}
-            onSchedule={(item) => setScheduleItem(item)}
-            onSkip={(item) => void handleSkip(item.id)}
-            onOpen={(item) => void handleOpenDetail(item)}
-          />
-        </aside>
       </div>
 
       <PublishingQueueDetailDialog
@@ -777,7 +749,39 @@ function ScheduleEventCard({
   loading: boolean
 }) {
   const platform = getPlatformMeta(item.platform)
-  const status = statusMeta[item.status] || statusMeta.queued
+  const bgColors: Record<string, string> = {
+    needs_approval: '#ffedd5', // orange-50
+    approved: '#f0fdf4', // green-50
+    publishing: '#f3e8ff', // purple-50
+    published: '#ffffff', // white
+    failed: '#fef2f2', // red-50
+    queued: '#ffffff', // white
+  }
+  const borderColors: Record<string, string> = {
+    needs_approval: '#fdba74', // orange-300
+    approved: '#bbf7d0', // green-300
+    publishing: '#d8b4fe', // purple-300
+    published: '#e2e8f0', // slate-200
+    failed: '#fca5a5', // red-300
+    queued: '#e2e8f0', // slate-200
+  }
+  const bgColor = bgColors[item.status] || '#ffffff'
+  const borderColor = active ? platform.color : (borderColors[item.status] || '#e2e8f0')
+
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+
+  const handleToggleVideo = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) {
+      video.play().catch(console.error)
+    } else {
+      video.pause()
+    }
+  }
+
   return (
     <div
       role="button"
@@ -786,210 +790,116 @@ function ScheduleEventCard({
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') onSelect()
       }}
-      className="group rounded-md border p-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-      style={{ borderColor: active ? platform.color : platform.border, backgroundColor: platform.bg }}
+      className="group relative z-0 hover:z-50 focus-within:z-50 flex flex-col min-h-[64px] gap-2 rounded-lg border p-2 text-left shadow-sm transition-all hover:-translate-y-[1px] hover:shadow-md"
+      style={{ borderColor, backgroundColor: bgColor }}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-xs font-black" style={{ color: platform.color }}>
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full text-xs text-white" style={{ backgroundColor: platform.color }}>{platform.short}</span>
-          {formatTime(scheduledValue(item))}
-        </div>
-        <TableRowActions
-          actions={([
-            { label: 'Xem chi tiết', icon: <Eye size={13} />, onClick: onOpen },
-            item.status === 'needs_approval' ? {
-              label: 'Duyệt bài',
-              icon: <CheckCircle2 size={13} />,
-              onClick: onApprove,
-              disabled: loading,
-            } : null,
-            ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) ? {
-              label: item.scheduled_at ? 'Đổi thời điểm đăng' : 'Xếp lịch đăng',
-              icon: <CalendarClock size={13} />,
-              onClick: onSchedule,
-              disabled: loading,
-            } : null,
-            !['published', 'skipped', 'publishing'].includes(item.status) ? {
-              label: 'Bỏ qua queue item',
-              icon: <SkipForward size={13} />,
-              onClick: onSkip,
-              disabled: loading,
-            } : null,
-            ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (hasTikTokScope(item, 'video.publish') || hasTikTokScope(item, 'video.upload')) ? {
-              label: hasTikTokScope(item, 'video.publish') ? 'Đăng TikTok ngay' : 'Gửi vào Inbox TikTok',
-              icon: hasTikTokScope(item, 'video.publish') ? <Rocket size={13} /> : <Send size={13} />,
-              onClick: onPublish,
-              disabled: loading,
-            } : null,
-          ].filter(Boolean)) as TableRowActionItem[]}
-        />
-      </div>
-      <div className="relative mb-2 aspect-video w-full overflow-hidden rounded-lg bg-slate-950 ring-1 ring-black/5 transition-shadow group-hover:shadow-md">
-        {item.article_link ? (
-          <MediaAssetPreview
-            item={{
-              media_type: 'VIDEO',
-              source_url: generateVideoOutputUrl(item.article_link),
-              title: item.article_title,
-            }}
-            compact
-            className="h-full w-full"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-xl font-black text-white opacity-80" style={{ backgroundColor: platform.color }}>{platform.short}</div>
-        )}
-      </div>
-      <div className="line-clamp-2 text-xs font-bold leading-relaxed text-slate-800">{item.article_title}</div>
-      <div className="mt-2 flex items-center gap-1.5 truncate text-[11px] font-semibold text-slate-500">
-        <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
-        <span className="truncate">{profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}</span>
-      </div>
-      <div className="mt-2 mb-1 border-t border-slate-100 pt-2 flex items-center gap-1.5 text-xs font-bold" style={{ color: status.color }}>
-        <span className="h-2 w-2 rounded-full shadow-xs" style={{ backgroundColor: status.dot }} />
-        {status.label}
-      </div>
-    </div>
-  )
-}
-
-function QuickDetailCard({ item, profile, onClose, onOpen }: { item: QueueItem | null; profile?: SocialProfile; onClose: () => void; onOpen: () => void }) {
-  if (!item) {
-    return (
-      <div className="rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-        <div className="empty-state">Chọn một bài trong lịch để xem chi tiết nhanh.</div>
-      </div>
-    )
-  }
-
-  const platform = getPlatformMeta(item.platform)
-  const status = statusMeta[item.status] || statusMeta.queued
-  const videoUrl = item.article_link ? generateVideoOutputUrl(item.article_link) : ''
-
-  return (
-    <div className="rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-base font-bold" style={{ color: 'var(--on-surface)' }}>Chi tiết bài đăng</h3>
-        <button onClick={onClose} className="icon-button" style={{ color: 'var(--on-surface-variant)' }}>×</button>
-      </div>
-      <div className="mb-3 flex items-center gap-2.5 text-sm font-semibold leading-snug" style={{ color: 'var(--on-surface)' }}>
-        <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="md" />
-        <span className="line-clamp-2">{item.article_title}</span>
-      </div>
-      <div className="mb-3 flex justify-center overflow-hidden rounded-lg border bg-slate-950 p-2" style={{ borderColor: 'var(--outline-variant)' }}>
-        {videoUrl ? (
-          <MediaAssetPreview
-            item={{ media_type: 'VIDEO', source_url: videoUrl, title: item.article_title }}
-            controls
-            className="aspect-[9/16] h-[360px] max-h-[44vh] w-auto max-w-full"
-          />
-        ) : (
-          <div className="flex h-[220px] w-full items-center justify-center text-xs font-semibold text-white/70">
-            Chưa có video
+      <div className="flex flex-1 flex-col min-w-0 h-full w-full">
+        <div className="mb-2 flex items-start justify-between gap-1">
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            {item.status !== 'skipped' && scheduledValue(item) && (
+              <div className="flex items-center text-[11px] font-extrabold text-slate-600">
+                <Clock3 size={11} className="mr-1" />
+                {formatTime(scheduledValue(item))}
+              </div>
+            )}
+            {item.status === 'needs_approval' && (
+              <span className="inline-block rounded-full bg-orange-500 px-2 py-[2px] text-[10px] font-black text-white shadow-xs">
+                Chờ duyệt
+              </span>
+            )}
+            {item.status === 'approved' && (
+              <span className="inline-block rounded-full bg-green-500 px-2 py-[2px] text-[10px] font-black text-white shadow-xs">
+                Đã duyệt
+              </span>
+            )}
+            {item.status === 'published' && (
+              <span className="inline-block rounded-full bg-slate-500 px-2 py-[2px] text-[10px] font-black text-white shadow-xs">
+                Đã đăng
+              </span>
+            )}
+            {item.status === 'publishing' && (
+              <span className="inline-block rounded-full bg-purple-500 px-2 py-[2px] text-[10px] font-black text-white shadow-xs">
+                Đang gửi
+              </span>
+            )}
+            {item.status === 'failed' && (
+              <span className="inline-block rounded-full bg-red-500 px-2 py-[2px] text-[10px] font-black text-white shadow-xs">
+                Lỗi
+              </span>
+            )}
           </div>
-        )}
-      </div>
-      <div className="space-y-2 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
-        <div>
-          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Thời gian đăng</div>
-          {formatDateTime(scheduledValue(item))}
-          <div className="mt-0.5 font-semibold text-[#64748b]">{item.schedule_timezone || 'Asia/Bangkok'}</div>
+          
+          <div className="-mr-1 -mt-1 shrink-0 z-10">
+            <TableRowActions
+              actions={([
+                { label: 'Xem chi tiết', icon: <Eye size={13} />, onClick: onOpen },
+                item.status === 'needs_approval' ? {
+                  label: 'Duyệt bài',
+                  icon: <CheckCircle2 size={13} />,
+                  onClick: onApprove,
+                  disabled: loading,
+                } : null,
+                ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) ? {
+                  label: item.scheduled_at ? 'Đổi thời điểm đăng' : 'Xếp lịch đăng',
+                  icon: <CalendarClock size={13} />,
+                  onClick: onSchedule,
+                  disabled: loading,
+                } : null,
+                !['published', 'skipped', 'publishing'].includes(item.status) ? {
+                  label: 'Bỏ qua queue item',
+                  icon: <SkipForward size={13} />,
+                  onClick: onSkip,
+                  disabled: loading,
+                } : null,
+                ['queued', 'needs_approval', 'approved', 'failed'].includes(item.status) && item.platform === 'tiktok' && (hasTikTokScope(item, 'video.publish') || hasTikTokScope(item, 'video.upload')) ? {
+                  label: hasTikTokScope(item, 'video.publish') ? 'Đăng TikTok ngay' : 'Gửi vào Inbox TikTok',
+                  icon: hasTikTokScope(item, 'video.publish') ? <Rocket size={13} /> : <Send size={13} />,
+                  onClick: onPublish,
+                  disabled: loading,
+                } : null,
+              ].filter(Boolean)) as TableRowActionItem[]}
+            />
+          </div>
         </div>
-        <div>
-          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Kênh social</div>
-          {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
-        </div>
-        <div>
-          <div className="font-bold" style={{ color: 'var(--on-surface)' }}>Nội dung</div>
-          <p className="line-clamp-4">{item.generated_content || item.ai_reason || 'Chưa có caption.'}</p>
-        </div>
-        <div className="flex items-center gap-1 font-semibold" style={{ color: status.color }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.dot }} />
-          {status.label}
-        </div>
-      </div>
-      <button
-        onClick={onOpen}
-        className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md px-3 text-sm font-bold text-white"
-        style={{ backgroundColor: '#635bff' }}
-      >
-        <Eye size={15} />
-        Xem chi tiết bài viết
-      </button>
-    </div>
-  )
-}
 
-function UnscheduledQueueList({
-  items,
-  profilesById,
-  loading,
-  onSchedule,
-  onSkip,
-  onOpen,
-}: {
-  items: QueueItem[]
-  profilesById: Map<string, SocialProfile>
-  loading: boolean
-  onSchedule: (item: QueueItem) => void
-  onSkip: (item: QueueItem) => void
-  onOpen: (item: QueueItem) => void
-}) {
-  return (
-    <section className="rounded-lg border bg-white p-4 shadow-sm" style={{ borderColor: 'var(--outline-variant)' }}>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-black text-[#172033]">Chưa xếp lịch</h3>
-          <p className="mt-1 text-xs text-[#64748b]">Queue item đang chờ chọn thời điểm theo múi giờ của kênh.</p>
+        <div className="mb-2 line-clamp-2 text-xs font-bold leading-snug text-slate-800">
+          {item.article_title}
         </div>
-        <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-xs font-black text-[#4f46e5]">{items.length}</span>
-      </div>
-
-      {items.length === 0 ? (
-        <div className="rounded-[8px] border border-dashed border-[#dbe2ea] px-3 py-5 text-center text-xs font-semibold text-[#64748b]">
-          Không có queue item nào đang chờ xếp lịch.
-        </div>
-      ) : (
-        <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-          {items.slice(0, 12).map((item) => {
-            const profile = profilesById.get(String(item.profile_id))
-            const status = statusMeta[item.status] || statusMeta.approved
-            return (
-              <article key={item.id} className="rounded-[8px] border border-[#e2e8f0] p-3">
-                <button type="button" onClick={() => onOpen(item)} className="flex w-full items-start gap-2.5 text-left">
-                  <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
-                  <span className="min-w-0 flex-1">
-                    <span className="line-clamp-2 text-xs font-extrabold leading-5 text-[#172033]">{item.article_title}</span>
-                    <span className="mt-1 block truncate text-[11px] font-semibold text-[#64748b]">
-                      {profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}
-                    </span>
-                    <span className="mt-1 block text-[11px] font-bold" style={{ color: status.color }}>{status.label}</span>
-                  </span>
-                </button>
-                <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => onSchedule(item)}
-                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-[#4f46e5] px-3 text-xs font-extrabold text-white disabled:opacity-50"
-                  >
-                    <CalendarClock size={13} /> Xếp lịch
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Bỏ qua ${item.article_title}`}
-                    title="Bỏ qua queue item"
-                    disabled={loading}
-                    onClick={() => onSkip(item)}
-                    className="grid h-8 w-8 place-items-center rounded-[8px] border border-[#e2e8f0] text-[#64748b] hover:bg-[#f8fafc] disabled:opacity-50"
-                  >
-                    <SkipForward size={14} />
-                  </button>
+        
+        <div 
+          className="group/video relative mb-2 w-full h-[120px] shrink-0 cursor-pointer overflow-hidden rounded-[6px] bg-slate-900 shadow-inner ring-1 ring-black/10"
+          onClick={handleToggleVideo}
+        >
+          {item.article_link ? (
+            <>
+              <video
+                ref={videoRef}
+                src={`${generateVideoOutputUrl(item.article_link)}#t=0.1`}
+                preload="metadata"
+                loop
+                playsInline
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                className="h-full w-full object-cover"
+              />
+              {!isPlaying && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 transition-all group-hover/video:bg-black/30">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-slate-800 shadow-sm backdrop-blur-sm transition-transform group-hover/video:scale-110">
+                    <Play size={18} fill="currentColor" className="ml-1" />
+                  </div>
                 </div>
-              </article>
-            )
-          })}
+              )}
+            </>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-xs font-black text-white opacity-80" style={{ backgroundColor: platform.color }}>{platform.short}</div>
+          )}
         </div>
-      )}
-    </section>
+
+        <div className="mt-auto flex items-center gap-2 pt-0.5">
+          <SocialProfileAvatar avatarUrl={profile?.avatar_url} name={profile?.profile_name || item.profile_name} platform={item.platform} size="sm" />
+          <span className="truncate text-[11px] font-bold text-slate-600">{profile?.profile_name || item.profile_name || `Profile #${item.profile_id}`}</span>
+        </div>
+      </div>
+    </div>
   )
 }

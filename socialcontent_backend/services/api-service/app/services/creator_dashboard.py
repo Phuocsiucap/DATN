@@ -43,18 +43,24 @@ def creator_dashboard_overview(db: Session, user_id: UUID) -> dict[str, Any]:
     queue_counts = _creator_queue_counts(db, user_id)
 
     recommendations_ready = _count(
-        db.query(func.count(ProfileContentLink.id)).filter(
-            ProfileContentLink.user_id == user_id,
+        db.query(func.count(ProfileContentLink.id))
+        .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
+        .filter(
+            SocialProfile.user_id == user_id,
             ProfileContentLink.status == "ACTIVE",
             ProfileContentLink.recommendation_status.in_(READY_RECOMMENDATION_STATUSES),
         )
     )
     projects_total = _count(
-        db.query(func.count(MediaWorkflow.id)).filter(MediaWorkflow.user_id == user_id)
+        db.query(func.count(MediaWorkflow.id))
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(SocialProfile.user_id == user_id)
     )
     projects_in_progress = _count(
-        db.query(func.count(MediaWorkflow.id)).filter(
-            MediaWorkflow.user_id == user_id,
+        db.query(func.count(MediaWorkflow.id))
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(
+            SocialProfile.user_id == user_id,
             MediaWorkflow.status.in_(ACTIVE_PROJECT_STATUSES),
         )
     )
@@ -102,7 +108,7 @@ def creator_dashboard_publishing(db: Session, user_id: UUID) -> dict[str, Any]:
         )
         .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
         .filter(
-            PublishingQueueItem.user_id == user_id,
+            SocialProfile.user_id == user_id,
             PublishingQueueItem.status.in_(("approved", "queued", "publishing")),
             PublishingQueueItem.scheduled_at.is_not(None),
             PublishingQueueItem.scheduled_at >= now,
@@ -132,7 +138,8 @@ def creator_dashboard_publishing(db: Session, user_id: UUID) -> dict[str, Any]:
 def creator_dashboard_projects(db: Session, user_id: UUID) -> dict[str, Any]:
     counts = _grouped_counts(
         db.query(MediaWorkflow.status, func.count(MediaWorkflow.id))
-        .filter(MediaWorkflow.user_id == user_id)
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(SocialProfile.user_id == user_id)
         .group_by(MediaWorkflow.status)
         .all()
     )
@@ -148,7 +155,7 @@ def creator_dashboard_projects(db: Session, user_id: UUID) -> dict[str, Any]:
             SocialProfile.platform,
         )
         .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
-        .filter(MediaWorkflow.user_id == user_id)
+        .filter(SocialProfile.user_id == user_id)
         .order_by(MediaWorkflow.updated_at.desc())
         .limit(6)
         .all()
@@ -176,7 +183,8 @@ def creator_dashboard_projects(db: Session, user_id: UUID) -> dict[str, Any]:
 def _creator_queue_counts(db: Session, user_id: UUID) -> dict[str, int]:
     return _grouped_counts(
         db.query(func.lower(PublishingQueueItem.status), func.count(PublishingQueueItem.id))
-        .filter(PublishingQueueItem.user_id == user_id)
+        .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+        .filter(SocialProfile.user_id == user_id)
         .group_by(func.lower(PublishingQueueItem.status))
         .all()
     )
@@ -184,8 +192,10 @@ def _creator_queue_counts(db: Session, user_id: UUID) -> dict[str, int]:
 
 def _creator_scheduled_count(db: Session, user_id: UUID) -> int:
     return _count(
-        db.query(func.count(PublishingQueueItem.id)).filter(
-            PublishingQueueItem.user_id == user_id,
+        db.query(func.count(PublishingQueueItem.id))
+        .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+        .filter(
+            SocialProfile.user_id == user_id,
             PublishingQueueItem.status.in_(("approved", "queued")),
             PublishingQueueItem.scheduled_at.is_not(None),
             PublishingQueueItem.scheduled_at >= datetime.now(timezone.utc),

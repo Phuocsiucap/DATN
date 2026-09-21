@@ -166,7 +166,7 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
     source = {
         "id": str(project.id),
         "workflow_id": str(project.id),
-        "user_id": str(project.user_id),
+        "user_id": str(project.profile.user_id),
         "title": content.canonical_title or content.normalized_title or project.title,
         "summary": content.summary or project_meta.get("note") or "",
         "full_text": full_text,
@@ -419,7 +419,6 @@ def _apply_story_series_decision(db: Any, project: Any, story: dict[str, Any], s
                     total_parts = 0
 
                 series = ContentSeries(
-                    user_id=project.user_id,
                     profile_id=project.profile_id,
                     title=title,
                     description=str(desc)[:1000] if desc else None,
@@ -756,7 +755,7 @@ def process_generate_video_edit_run(task_id: uuid.UUID | str) -> None:
             raise RuntimeError("Missing story payload for generate-video edit run")
 
         story.setdefault("meta", {})
-        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["user_id"] = str(project.profile.user_id)
         story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
@@ -820,7 +819,7 @@ def process_generate_video_review_run(task_id: uuid.UUID | str) -> None:
             raise RuntimeError("Missing story payload for generate-video review run")
 
         story.setdefault("meta", {})
-        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["user_id"] = str(project.profile.user_id)
         story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
@@ -906,7 +905,7 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
             raise RuntimeError("Missing story payload for generate-video voice run")
 
         story.setdefault("meta", {})
-        story["meta"]["user_id"] = str(project.user_id)
+        story["meta"]["user_id"] = str(project.profile.user_id)
         story["meta"]["workflow_id"] = str(project.id)
 
         task.status = "RUNNING"
@@ -1271,9 +1270,8 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             item = None
     if item is None:
         item = PublishingQueueItem(
-            user_id=project.user_id,
             profile_id=project.profile_id,
-            content_id=project.primary_content_id,
+            workflow_id=project.id,
             article_link=rendered_video,
             article_title=project.title,
             platform=profile.platform if profile else "tiktok",
@@ -1282,6 +1280,7 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             status=queued_status,
         )
     else:
+        item.workflow_id = project.id
         item.article_link = rendered_video
         item.article_title = project.title
         item.generated_content = item.generated_content or _default_module4_caption(project, story)

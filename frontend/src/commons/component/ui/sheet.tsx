@@ -124,9 +124,9 @@ function SheetHeader({ className, children }: { className?: string; children: Re
   return <header className={cn('border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-5 py-4 pr-14', className)}>{children}</header>
 }
 
-function SheetTitle({ className, children }: { className?: string; children: React.ReactNode }) {
+function SheetTitle({ className, children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   const { titleId } = useSheet()
-  return <h2 id={titleId} className={cn('text-xl font-extrabold leading-7 text-[var(--on-surface)]', className)}>{children}</h2>
+  return <h2 {...props} id={titleId} className={cn('text-xl font-extrabold leading-7 text-[var(--on-surface)]', className)}>{children}</h2>
 }
 
 function SheetDescription({ className, children }: { className?: string; children: React.ReactNode }) {

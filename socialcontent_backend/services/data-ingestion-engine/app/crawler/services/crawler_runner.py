@@ -157,6 +157,13 @@ class CrawlerRunner:
             if finalized:
                 self.producer.job_completed(job_id=job.id, status=job.status)
         except Exception as exc:
+            db.rollback()
+            task = db.get(KafkaTask, task_id)
+            job = db.get(CrawlJob, job_id)
+            if not task or not job:
+                logger.exception("[CrawlerRunner] Failed task disappeared after rollback")
+                return
+            task.attempt_count += 1
             task.error_message = str(exc)
             if task.attempt_count < task.max_attempts:
                 task.status = "RETRYING"

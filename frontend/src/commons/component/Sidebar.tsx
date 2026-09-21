@@ -16,11 +16,9 @@ import {
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
-  Send,
   ScrollText,
   Sparkles,
   UserRound,
-  Video,
   X,
 } from 'lucide-react'
 import type { Tab } from './navigation'
@@ -79,16 +77,13 @@ const creatorSections: NavSection[] = [
     items: [
       { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
       { key: 'approvals', label: 'Duyệt video', icon: <FileCheck2 size={17} /> },
-      { key: 'publishedPosts', label: 'Video đã đăng', icon: <Send size={17} /> },
     ],
   },
   {
     title: 'QUẢN LÝ & PHÂN TÍCH',
     items: [
-      { key: 'settings', label: 'Kênh social', icon: <Megaphone size={17} /> },
+      { key: 'settings', label: 'Social account', icon: <Megaphone size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
-      { key: 'analyticsAccounts', label: 'Phân tích theo tài khoản', icon: <BarChart3 size={17} /> },
-      { key: 'analyticsPosts', label: 'Phân tích theo bài đăng', icon: <Video size={17} /> },
     ],
   },
 ]
@@ -178,16 +173,22 @@ export default function Sidebar({
           </button>
         </div>
 
-        <nav className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="divide-y divide-[#f1f5f9] border-y border-[#f1f5f9]">
-            {allItems.map((item) => (
-              <NavButton
-                key={item.key}
-                item={item}
-                active={activeTab === item.key}
-                onClick={() => onTabChange(item.key)}
-                isCollapsed={isCollapsed}
-              />
+        <nav className="mt-3 min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-0.5">
+            {sections.map((section) => (
+              <div key={section.title} className="mb-1">
+                <div className="flex flex-col gap-0.5">
+                  {section.items.map((item) => (
+                    <NavButton
+                      key={item.key}
+                      item={item}
+                      active={activeTab === item.key}
+                      onClick={() => onTabChange(item.key)}
+                      isCollapsed={isCollapsed}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </nav>
@@ -388,7 +389,7 @@ function NavButton({
       onClick={onClick}
       title={isCollapsed ? item.label : undefined}
       className={cn(
-        'group relative m-0 flex h-[38px] w-full items-center transition-colors cursor-pointer select-none overflow-hidden',
+        'group relative m-0 flex h-[36px] w-full items-center rounded-lg transition-colors cursor-pointer select-none',
         isCollapsed ? 'justify-center px-0' : 'justify-between px-2.5',
         active
           ? 'bg-[#eff4ff] text-[#2556ea] font-extrabold'
@@ -396,7 +397,7 @@ function NavButton({
       )}
     >
       {active && !isCollapsed && (
-        <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#2556ea]" />
+        <span className="absolute left-1 top-1/2 -translate-y-1/2 h-3.5 w-[3px] rounded-full bg-[#2556ea]" />
       )}
       <span className={cn('flex items-center gap-2.5', isCollapsed && 'justify-center')}>
         <span

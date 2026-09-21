@@ -3,9 +3,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from common.db.models import CrawlJob, User
+from common.db.models import CrawlJob, CrawlJobSource, User
 from common.db.session import SessionLocal, get_db
 from app.api.deps import get_current_user
 from app.schemas import api as schemas
@@ -14,9 +14,24 @@ from app.services.crawl_jobs import CrawlJobService
 router = APIRouter()
 
 
+def _serialize_job(job: CrawlJob) -> schemas.CrawlJobResponse:
+    """Serialize a CrawlJob ORM object, populating source_types from its sources."""
+    obj = schemas.CrawlJobResponse.model_validate(job)
+    if job.sources:
+        seen: list[str] = []
+        for s in job.sources:
+            st = getattr(s, "source_type", None)
+            if st and st not in seen:
+                seen.append(st)
+        obj.source_types = seen
+    return obj
+
+
 @router.post("", response_model=schemas.CrawlJobResponse, status_code=201)
 def create_crawl_job(payload: schemas.CrawlJobCreateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return CrawlJobService().create(db, payload, user)
+    job = CrawlJobService().create(db, payload, user)
+    db.refresh(job)
+    return _serialize_job(job)
 
 
 @router.get("", response_model=list[schemas.CrawlJobResponse])
@@ -30,7 +45,7 @@ def list_crawl_jobs(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(CrawlJob)
+    query = db.query(CrawlJob).options(joinedload(CrawlJob.sources))
     if not user.is_system_admin:
         query = query.filter(CrawlJob.requested_by == user.id)
     elif content_scope:
@@ -39,7 +54,6 @@ def list_crawl_jobs(
     if status:
         query = query.filter(CrawlJob.status == status.upper())
     if source_type:
-        from common.db.models import CrawlJobSource
         query = query.filter(CrawlJob.sources.any(CrawlJobSource.source_type == source_type.upper()))
     if date_from:
         from datetime import datetime as dt
@@ -56,18 +70,19 @@ def list_crawl_jobs(
     if q:
         query = query.filter(CrawlJob.name.ilike(f"%{q}%"))
 
-    return query.order_by(CrawlJob.created_at.desc()).limit(200).all()
+    jobs = query.order_by(CrawlJob.created_at.desc()).limit(200).all()
+    return [_serialize_job(j) for j in jobs]
 
 
 @router.get("/{job_id}", response_model=schemas.CrawlJobResponse)
 def get_crawl_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _get_owned_job(db, job_id, user)
+    return _serialize_job(_get_owned_job(db, job_id, user))
 
 
 @router.post("/{job_id}/cancel", response_model=schemas.CrawlJobResponse)
 def cancel_crawl_job(job_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     job = _get_owned_job(db, job_id, user)
-    return CrawlJobService().cancel(db, job, user)
+    return _serialize_job(CrawlJobService().cancel(db, job, user))
 
 
 @router.put("/{job_id}/schedule", response_model=schemas.CrawlJobResponse)

@@ -33,14 +33,25 @@ export type AuditLogQuery = {
 }
 
 export const fetchAdminAuditLogsApi = async (params: AuditLogQuery = {}) => {
+  const query = new URLSearchParams()
+  if (params.page !== undefined) query.append('page', params.page.toString())
+  if (params.page_size !== undefined) query.append('page_size', params.page_size.toString())
+  if (params.search) query.append('search', params.search)
+  if (params.actor_id) query.append('actor_id', params.actor_id)
+  if (params.action) query.append('action', params.action)
+  if (params.target_type) query.append('target_type', params.target_type)
+  if (params.created_from) query.append('created_from', params.created_from)
+  if (params.created_to) query.append('created_to', params.created_to)
+
+  const url = `/admin/system/audit-logs${query.toString() ? `?${query.toString()}` : ''}`
+
   const { data } = await api.get<AuditLogList & {
     page?: number
     limit?: number
     page_size?: number
     total?: number
     total_pages?: number
-  }>('/admin/system/audit-logs', {
-    params,
+  }>(url, {
     forceRefresh: true,
   })
   // Older API processes return flat paging fields; newer ones nest pagination.

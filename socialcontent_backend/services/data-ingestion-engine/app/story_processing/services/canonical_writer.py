@@ -126,7 +126,7 @@ class CanonicalWriter:
         existing_content, match_type, reason = find_duplicate_content(
             db=db,
             scope=scope,
-            owner_user_id=owner,
+            requested_by=owner,
             canonical_url=canonical_url,
             content_hash=content_hash,
             transcript_hash=transcript_hash,
@@ -166,7 +166,6 @@ class CanonicalWriter:
             summary=_clean_text(normalized.get("description")),
             language=normalized.get("language") or "vi",
             content_scope=scope,
-            owner_user_id=owner,
             created_by_type=created_by,
             status=quality.get("status", "NEEDS_REVIEW"),
             published_at=self._parse_datetime(normalized.get("published_at")),

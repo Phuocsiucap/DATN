@@ -28,7 +28,7 @@ def candidate_decision(candidate: Any, output: dict | None = None) -> dict:
 def needs_production_review(candidate: Any, decision: dict) -> bool:
     return bool(
         candidate.eligible and not candidate.selected
-        and not candidate.workflow_id and not decision.get("workflow_id")
+        and not decision.get("workflow_id")
         and not decision.get("should_create_workflow") and not decision.get("quality")
         and as_dict(decision.get("production_gate")).get("status") == "REVIEW_REQUIRED"
     )
@@ -49,11 +49,26 @@ def review_state(candidate: Any, decision: dict, *, auto: bool = True) -> dict:
     }
 
 
-def content_available_to_profile(content: Any, owner_id: Any) -> bool:
-    return bool(content and (
-        content.content_scope == "GLOBAL"
-        or (content.content_scope == "PRIVATE" and content.owner_user_id == owner_id)
-    ))
+def content_available_to_profile(db: Any, content: Any, owner_id: Any) -> bool:
+    if not content:
+        return False
+    if content.content_scope == "GLOBAL":
+        return True
+    if content.content_scope != "PRIVATE" or not owner_id:
+        return False
+
+    from common.db.models import CrawlJob, CrawlJobContent
+
+    return bool(
+        db.query(CrawlJobContent.job_id)
+        .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+        .filter(
+            CrawlJobContent.content_id == content.id,
+            CrawlJob.requested_by == owner_id,
+            CrawlJob.content_scope == "PRIVATE",
+        )
+        .first()
+    )
 
 
 def sync_review_recommendation(db, candidate, run, review):
@@ -62,7 +77,7 @@ def sync_review_recommendation(db, candidate, run, review):
     if not candidate.content_id:
         return
     link = db.query(ProfileContentLink).filter(
-        ProfileContentLink.user_id == run.user_id, ProfileContentLink.profile_id == run.profile_id,
+        ProfileContentLink.profile_id == run.profile_id,
         ProfileContentLink.content_id == candidate.content_id,
         ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
     ).first()

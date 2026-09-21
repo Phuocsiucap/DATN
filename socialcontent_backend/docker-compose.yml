@@ -27,6 +27,20 @@ services:
     volumes:
       - socialcontent_mongo:/data/db
 
+  mongo-express:
+    image: mongo-express:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mongodb
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: "27017"
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH: "false"
+      ME_CONFIG_MONGODB_AUTH_DATABASE: socialcontent
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     environment:
@@ -82,6 +96,8 @@ services:
       dockerfile: socialcontent_backend/services/data-ingestion-engine/Dockerfile
     working_dir: /app/services/data-ingestion-engine
     command: uvicorn app.main:app --host 0.0.0.0 --port 8010
+    ports:
+      - "127.0.0.1:8010:8010"
     depends_on:
       - postgres
       - mongodb
@@ -124,6 +140,8 @@ services:
       dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
     working_dir: /app/services/ai-media-engine
     command: uvicorn app.planning.main:app --host 0.0.0.0 --port 8050
+    ports:
+      - "127.0.0.1:8050:8050"
     depends_on:
       - postgres
       - mongodb
@@ -148,6 +166,8 @@ services:
       dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
     working_dir: /app/services/ai-media-engine
     command: python -m app.video.workers.generate_video_worker
+    ports:
+      - "127.0.0.1:8060:8060"
     depends_on:
       - postgres
       - mongodb
@@ -176,6 +196,8 @@ services:
     mem_limit: 1536m
     shm_size: '1gb'
     command: node src/worker.mjs
+    ports:
+      - "127.0.0.1:8090:8090"
     depends_on:
       - postgres
       - kafka

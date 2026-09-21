@@ -121,11 +121,13 @@ class CrawlContractTests(unittest.TestCase):
             with self.subTest(config=config), self.assertRaises(HTTPException):
                 validate("VNEXPRESS", config)
 
-    def test_legacy_source_keeps_options_but_explicit_empty_disables_them(self):
+    def test_missing_or_empty_job_options_disables_overrides(self):
         del self.config.configuration["job_options"]
-        source = self.create(keywords=["news"], configuration={"rss_feed_keys": ["thoi-su"]}).sources[0]
-        self.assertEqual(source.keywords, ["news"])
+        source = self.create().sources[0]
+        self.assertEqual(source.keywords, ["default"])
         self.assertNotIn("job_options", self.config.configuration)
+        with self.assertRaises(HTTPException): self.create(keywords=["news"])
+        with self.assertRaises(HTTPException): self.create(configuration={"rss_feed_keys": ["thoi-su"]})
         self.config.configuration["job_options"] = []
         with self.assertRaises(HTTPException): self.create(keywords=["news"])
 

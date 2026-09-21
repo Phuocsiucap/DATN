@@ -7,8 +7,6 @@ export type Tab =
   | 'approvals'
   | 'schedule'
   | 'publishedPosts'
-  | 'analyticsAccounts'
-  | 'analyticsPosts'
   | 'users'
   | 'settings'
   | 'profile'
@@ -26,10 +24,8 @@ export const TAB_PATHS: Record<Tab, string> = {
   approvals: '/approvals',
   schedule: '/schedule',
   publishedPosts: '/published-posts',
-  analyticsAccounts: '/analytics/accounts',
-  analyticsPosts: '/analytics/posts',
   users: '/users',
-  settings: '/settings',
+  settings: '/social-account',
   profile: '/profile',
   openaiUsage: '/admin/openai-usage',
   deepseekUsage: '/admin/deepseek-usage',

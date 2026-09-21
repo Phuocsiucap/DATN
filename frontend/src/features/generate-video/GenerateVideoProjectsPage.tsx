@@ -94,7 +94,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
         ready += 1
       } else if (item.status === 'RENDERED') {
         pendingVideoReview += 1
-      } else if (hasActiveTask(item) || ['SCRIPTING', 'EDITING', 'REVIEWING', 'VOICE_READY', 'RENDERING'].includes(item.status)) {
+      } else if (hasActiveTask(item) || ['SCRIPTING', 'EDITING', 'VOICE_READY', 'RENDERING'].includes(item.status)) {
         inProd += 1
       }
     })
@@ -256,7 +256,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       actions={
         <>
           <span className="inline-flex items-center rounded-full border border-blue-200/80 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
-            {total} workflow
+            {total} video
           </span>
           {activeTasksCount > 0 && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
@@ -266,9 +266,6 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
           )}
           <AppButton variant="secondary" icon={<ArrowUpRight size={15} />} onClick={() => { window.location.href = approvalsUrl }}>
             Duyệt video
-          </AppButton>
-          <AppButton icon={<Plus size={15} />} onClick={() => { setEditingSeries(null); setSeriesModalOpen(true) }}>
-            Tạo series
           </AppButton>
           <AppButton variant="secondary" icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />} onClick={() => void loadWorkspaces()}>
             Tải lại
@@ -288,7 +285,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
       <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <div className="flex items-center justify-between rounded-xl border border-slate-200/90 bg-white p-3 shadow-xs">
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng Workflow</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng video</div>
             <div className="mt-1 text-xl font-black text-slate-900">{total}</div>
           </div>
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
@@ -452,6 +449,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
             {Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
+
                 className="h-[520px] animate-pulse rounded-2xl border border-slate-200/60 bg-white p-4 shadow-xs"
               />
             ))}
@@ -462,10 +460,10 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
               <Clapperboard size={28} />
             </div>
             <strong className="mt-3 text-sm font-extrabold text-slate-800">
-              Chưa có video workflow phù hợp
+              Chưa có video phù hợp
             </strong>
             <p className="mt-1 max-w-sm text-xs text-slate-500">
-              Thử thay đổi bộ lọc hoặc tạo bài viết mới từ trang Kế hoạch Content để khởi chạy workflow sản xuất.
+              Thử thay đổi bộ lọc hoặc tạo bài viết mới từ trang Kế hoạch Content để khởi chạy sản xuất.
             </p>
           </div>
         ) : (
@@ -637,7 +635,7 @@ export function VideoKanbanCard({
         </div>
 
         {['RENDERED', 'VIDEO_APPROVED', 'QUEUED_FOR_PUBLISHING', 'PUBLISHED'].includes(item.status) && (
-          <a href={`${item.status === 'PUBLISHED' ? '/published-posts' : item.status === 'QUEUED_FOR_PUBLISHING' ? '/schedule' : '/approvals'}?profile_id=${encodeURIComponent(item.profile?.id || item.profile_id || '')}`} className="block rounded-md bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-100">{item.status === 'PUBLISHED' ? 'Xem video đã đăng' : item.status === 'QUEUED_FOR_PUBLISHING' ? 'Xem lịch đăng' : 'Mở Approvals để duyệt và chọn lịch'} ↗</a>
+          <a href={item.status === 'PUBLISHED' ? `/social-account/${encodeURIComponent(item.profile?.id || item.profile_id || '')}` : `${item.status === 'QUEUED_FOR_PUBLISHING' ? '/schedule' : '/approvals'}?profile_id=${encodeURIComponent(item.profile?.id || item.profile_id || '')}`} className="block rounded-md bg-emerald-50 px-2 py-1.5 text-center text-xs font-bold text-emerald-700 hover:bg-emerald-100">{item.status === 'PUBLISHED' ? 'Xem video đã đăng' : item.status === 'QUEUED_FOR_PUBLISHING' ? 'Xem lịch đăng' : 'Mở Approvals để duyệt và chọn lịch'} ↗</a>
         )}
 
         <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-xs font-semibold text-slate-500">

@@ -83,3 +83,9 @@ class CrawlJobResponse(BaseModel):
     schedule: CrawlJobScheduleResponse | None = None
     created_at: datetime
     updated_at: datetime
+    source_types: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def populate_source_types_from_orm(self) -> "CrawlJobResponse":
+        # source_types is populated by the route; this is a no-op if already set
+        return self

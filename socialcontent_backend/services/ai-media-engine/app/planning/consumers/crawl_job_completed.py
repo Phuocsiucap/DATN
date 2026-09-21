@@ -106,7 +106,6 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
         db,
         job_uuid,
         source_scope=source_scope,
-        owner_user_id=job.requested_by if source_scope == "PRIVATE" else None,
     )
     if not items:
         print(f"[planning-orchestrator] No READY content found for crawl job {job_id}; recording 0-candidate planning run")
@@ -128,7 +127,8 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
 
     for profile in profiles:
         strategy = profile.strategy
-        if not strategy:
+        if not strategy or not str(getattr(strategy, "content_topics", "")).strip():
+            print(f"[planning-orchestrator] Skipping planning for profile {profile.id} because content_topics is not configured")
             continue
         if _has_completed_job_plan(db, profile.id, job_uuid, items):
             print(
@@ -187,6 +187,9 @@ def _handle_profile_strategy_updated(db: Session, message: dict[str, Any]) -> No
     profile = profile[0] if profile else None
     if not profile or not profile.strategy:
         print(f"[planning-orchestrator] Profile {profile_id} is not enabled to receive GLOBAL content")
+        return
+    if not str(getattr(profile.strategy, "content_topics", "")).strip():
+        print(f"[planning-orchestrator] Skipping strategy update for profile {profile_id} because content_topics is not configured")
         return
 
     items = _recent_global_content(db, limit=500)
@@ -301,7 +304,6 @@ def _content_items_for_crawl_job(
     crawl_job_id: uuid.UUID,
     *,
     source_scope: str,
-    owner_user_id: uuid.UUID | None = None,
 ) -> list[ContentItem]:
     filters = [
         CrawlJobContent.job_id == crawl_job_id,
@@ -310,20 +312,10 @@ def _content_items_for_crawl_job(
     if source_scope == "GLOBAL":
         filters.append(ContentItem.content_scope == "GLOBAL")
     elif source_scope == "PRIVATE":
-        if not owner_user_id:
-            return []
-        # A creator's PRIVATE crawl may resolve to a canonical GLOBAL item that
-        # an admin imported earlier. It is still a valid result of this job and
-        # must remain available to that creator's strategy planner.
-        filters.append(
-            or_(
-                ContentItem.content_scope == "GLOBAL",
-                and_(
-                    ContentItem.content_scope == "PRIVATE",
-                    ContentItem.owner_user_id == owner_user_id,
-                ),
-            )
-        )
+        # The current crawl job is the ownership boundary. A PRIVATE job may
+        # point to either a PRIVATE canonical item or a GLOBAL item reused by
+        # deduplication, and both remain valid for the creator who ran the job.
+        filters.append(ContentItem.content_scope.in_(["GLOBAL", "PRIVATE"]))
     else:
         return []
     return (
@@ -513,10 +505,6 @@ def _process_profile_auto_workflows(
     source_scope: str = "GLOBAL",
 ) -> None:
     source_scope = str(source_scope or "GLOBAL").upper()
-    ranked = matcher.rank_candidates(db, items, strategy, limit=len(items))
-    db.commit()
-
-    eligible = [score for score in ranked if score.eligible]
     daily_limit: int | None = None
     received_today: int | None = None
     remaining_quota: int | None = None
@@ -525,6 +513,33 @@ def _process_profile_auto_workflows(
         daily_limit = _daily_recommendation_limit(strategy)
         received_today = _daily_recommendation_count(db, profile.id, strategy)
         remaining_quota = max(0, daily_limit - received_today)
+        if remaining_quota <= 0:
+            print(
+                f"[planning-orchestrator] Skipping GLOBAL planning for profile {profile.id}; "
+                f"daily recommendation quota exhausted ({received_today}/{daily_limit}); "
+                f"trigger={trigger}; crawl_job={job_id}"
+            )
+            db.commit()
+            return
+        db.commit()
+
+    ranked = matcher.rank_candidates(db, items, strategy, limit=len(items))
+    db.commit()
+
+    eligible = [score for score in ranked if score.eligible]
+    if source_scope == "GLOBAL":
+        _lock_profile_recommendation_quota(db, profile.id)
+        daily_limit = _daily_recommendation_limit(strategy)
+        received_today = _daily_recommendation_count(db, profile.id, strategy)
+        remaining_quota = max(0, daily_limit - received_today)
+        if remaining_quota <= 0:
+            print(
+                f"[planning-orchestrator] Skipping GLOBAL planning run for profile {profile.id}; "
+                f"daily recommendation quota exhausted after scoring ({received_today}/{daily_limit}); "
+                f"trigger={trigger}; crawl_job={job_id}"
+            )
+            db.commit()
+            return
         existing_content_ids = _existing_recommendation_content_ids(
             db,
             profile.id,
@@ -606,9 +621,7 @@ def _process_profile_auto_workflows(
         )
 
     planning_run = PlanningRun(
-        user_id=profile.user_id,
         profile_id=profile.id,
-        workflow_id=None,
         crawl_job_id=_as_uuid(job_id),
         planning_mode="AUTO",
         status="RUNNING",
@@ -633,7 +646,6 @@ def _process_profile_auto_workflows(
     for rank_idx, score in enumerate(ranked, start=1):
         cand = PlanningCandidate(
             planning_run_id=planning_run.id,
-            workflow_id=None,
             content_id=score.content.id,
             rank_order=rank_idx,
             score=Decimal(str(score.score)),
@@ -681,7 +693,8 @@ def _process_profile_auto_workflows(
             decision_payload = _workflow_ai_decision_payload(existing, score.content.id)
             if cand:
                 cand.selected = True
-                cand.workflow_id = existing.id
+                if not existing.planning_candidate_id:
+                    existing.planning_candidate_id = cand.id
                 _record_candidate_ai_decision(cand, decision_payload)
             created_workflows.append(str(existing.id))
             selected_content_ids.append(str(score.content.id))
@@ -717,9 +730,6 @@ def _process_profile_auto_workflows(
             continue
 
         workflow = _create_auto_workflow_from_decision(db, profile, strategy, score, decision, job_id)
-        if not planning_run.workflow_id:
-            planning_run.workflow_id = workflow.id
-
         created_workflows.append(str(workflow.id))
         selected_content_ids.append(str(score.content.id))
         decision_payload["workflow_id"] = str(workflow.id)
@@ -727,7 +737,7 @@ def _process_profile_auto_workflows(
 
         if cand:
             cand.selected = True
-            cand.workflow_id = workflow.id
+            workflow.planning_candidate_id = cand.id
             _record_candidate_ai_decision(cand, decision_payload)
 
         db.commit()
@@ -828,7 +838,6 @@ def _create_auto_workflow_from_decision(
         **content_category_payload(content),
     }
     workflow = MediaWorkflow(
-        user_id=profile.user_id,
         profile_id=profile.id,
         title=plan_title,
         status="EDITING",
@@ -931,7 +940,6 @@ def _apply_series_decision(
         total_parts = 0
 
     series = ContentSeries(
-        user_id=workflow.user_id,
         profile_id=workflow.profile_id,
         title=title,
         description=str(desc)[:1000] if desc else None,
@@ -973,7 +981,6 @@ def _upsert_profile_content_link(
     link = (
         db.query(ProfileContentLink)
         .filter(
-            ProfileContentLink.user_id == profile.user_id,
             ProfileContentLink.profile_id == profile.id,
             ProfileContentLink.content_id == score.content.id,
             ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
@@ -982,7 +989,6 @@ def _upsert_profile_content_link(
     )
     if not link:
         link = ProfileContentLink(
-            user_id=profile.user_id,
             profile_id=profile.id,
             content_id=score.content.id,
             relation_type="CONTENT_RECOMMENDATION",

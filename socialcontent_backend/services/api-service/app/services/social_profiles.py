@@ -115,7 +115,7 @@ class SocialProfileService:
         return title[:255]
 
     def list_profiles(self, db: Session, user: User, platform: str | None = None) -> list[SocialProfile]:
-        query = db.query(SocialProfile)
+        query = db.query(SocialProfile).filter(SocialProfile.status != "deleted")
         if not self.is_system_user(user):
             query = query.filter(SocialProfile.user_id == user.id)
         if platform:
@@ -141,7 +141,7 @@ class SocialProfileService:
         return profile
 
     def get_owned_profile(self, db: Session, profile_id: uuid.UUID, user: User) -> SocialProfile:
-        query = db.query(SocialProfile).filter(SocialProfile.id == profile_id)
+        query = db.query(SocialProfile).filter(SocialProfile.id == profile_id, SocialProfile.status != "deleted")
         if not self.is_system_user(user):
             query = query.filter(SocialProfile.user_id == user.id)
         profile = query.first()
@@ -151,7 +151,9 @@ class SocialProfileService:
 
     async def delete_profile(self, db: Session, profile: SocialProfile) -> None:
         await stop_tiktok_oauth_qr_session(str(profile.id), profile.user_id)
-        db.delete(profile)
+        profile.status = "deleted"
+        profile.access_token = None
+        profile.refresh_token = None
         db.commit()
 
     async def start_pending_tiktok_qr_login(self, user: User, payload: schemas.TikTokQrStartRequest) -> dict:
@@ -312,6 +314,7 @@ class SocialProfileService:
                     SocialProfile.user_id == user.id,
                     SocialProfile.platform == "tiktok",
                     SocialProfile.external_id == open_id,
+                    SocialProfile.status != "deleted",
                 )
                 .first()
             )
@@ -383,9 +386,48 @@ class SocialProfileService:
     def create_profile_snapshot_if_changed(self, db: Session, profile: SocialProfile, captured_at: datetime | None = None) -> bool:
         stats = self.current_profile_stats(profile)
         latest = self.latest_profile_snapshot(db, profile)
+        target_time = captured_at or datetime.now(timezone.utc)
+        
+        if latest and latest.captured_at:
+            if (latest.captured_at.year == target_time.year and
+                latest.captured_at.month == target_time.month and
+                latest.captured_at.day == target_time.day and
+                latest.captured_at.hour == target_time.hour):
+                return False
+
         if not self.has_account_stats_changed(latest, stats):
             return False
-        db.add(SocialProfileSnapshot(profile_id=profile.id, captured_at=captured_at or datetime.now(timezone.utc), **stats))
+        db.add(SocialProfileSnapshot(profile_id=profile.id, captured_at=target_time, **stats))
+        return True
+
+    def latest_post_metric(self, db: Session, post_id: uuid.UUID) -> SocialPostMetric | None:
+        return (
+            db.query(SocialPostMetric)
+            .filter(SocialPostMetric.post_id == post_id)
+            .order_by(SocialPostMetric.captured_at.desc())
+            .first()
+        )
+
+    def create_post_metric_if_changed(self, db: Session, post_id: uuid.UUID, views: int, likes: int, comments: int, shares: int, captured_at: datetime | None = None) -> bool:
+        latest = self.latest_post_metric(db, post_id)
+        target_time = captured_at or datetime.now(timezone.utc)
+        
+        if latest and latest.captured_at:
+            if (latest.captured_at.year == target_time.year and
+                latest.captured_at.month == target_time.month and
+                latest.captured_at.day == target_time.day and
+                latest.captured_at.hour == target_time.hour):
+                return False
+                
+        metric = SocialPostMetric(
+            post_id=post_id,
+            views=views,
+            likes=likes,
+            comments=comments,
+            shares=shares,
+            captured_at=target_time,
+        )
+        db.add(metric)
         return True
 
     async def sync_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
@@ -451,7 +493,8 @@ class SocialProfileService:
                         if v_caption:
                             post.caption = v_caption
 
-                    metric = SocialPostMetric(
+                    metric_created = self.create_post_metric_if_changed(
+                        db,
                         post_id=post.id,
                         views=int(v.get("view_count") or 0),
                         likes=int(v.get("like_count") or 0),
@@ -459,8 +502,8 @@ class SocialProfileService:
                         shares=int(v.get("share_count") or 0),
                         captured_at=now,
                     )
-                    db.add(metric)
-                    synced_videos_count += 1
+                    if metric_created:
+                        synced_videos_count += 1
         except SQLAlchemyError as exc:
             db.rollback()
             logger.warning("Không thể đồng bộ danh sách video TikTok cho profile %s: %s", profile_id, exc)
@@ -516,7 +559,6 @@ class SocialProfileService:
             (
                 db.query(ProfileContentLink)
                 .filter(
-                    ProfileContentLink.user_id == profile.user_id,
                     ProfileContentLink.profile_id == profile.id,
                     ProfileContentLink.source_scope == "GLOBAL",
                 )
@@ -634,7 +676,7 @@ class SocialProfileService:
             MediaWorkflow.status.in_(["RENDERED", "VIDEO_APPROVED", "QUEUED_FOR_PUBLISHING"])
         )
         if not self.is_system_user(user):
-            query = query.filter(MediaWorkflow.user_id == user.id)
+            query = query.join(SocialProfile, MediaWorkflow.profile_id == SocialProfile.id).filter(SocialProfile.user_id == user.id)
         workflows = query.all()
         if not workflows:
             return
@@ -654,7 +696,6 @@ class SocialProfileService:
                         # records; never activate an existing reserved slot.
                         if (
                             metadata.get("video_approved")
-                            and existing.user_id == wf.user_id
                             and existing.profile_id == wf.profile_id
                             and existing.status == "needs_approval"
                             and existing.scheduled_at is None
@@ -861,20 +902,21 @@ class SocialProfileService:
     ) -> MediaWorkflow | None:
         query = db.query(MediaWorkflow).filter(MediaWorkflow.metadata_json["queued_post_id"].astext == str(item.id))
         if not self.is_system_user(user):
-            query = query.filter(MediaWorkflow.user_id == user.id)
+            query = query.join(SocialProfile, MediaWorkflow.profile_id == SocialProfile.id).filter(SocialProfile.user_id == user.id)
         workflow = query.order_by(MediaWorkflow.updated_at.desc()).first()
         if workflow:
             return workflow
 
-        if not item.content_id:
+        content_id = item.workflow.primary_content_id if item.workflow else None
+        if not content_id:
             return None
         fallback_query = db.query(MediaWorkflow).filter(
             MediaWorkflow.profile_id == item.profile_id,
-            MediaWorkflow.primary_content_id == item.content_id,
+            MediaWorkflow.primary_content_id == content_id,
             MediaWorkflow.status.in_(["RENDERED", "VIDEO_APPROVED", "QUEUED_FOR_PUBLISHING", "PUBLISHED"]),
         )
         if not self.is_system_user(user):
-            fallback_query = fallback_query.filter(MediaWorkflow.user_id == user.id)
+            fallback_query = fallback_query.join(SocialProfile, MediaWorkflow.profile_id == SocialProfile.id).filter(SocialProfile.user_id == user.id)
         return fallback_query.order_by(MediaWorkflow.updated_at.desc()).first()
 
     def mark_queue_workflow_changes_requested(
@@ -1448,17 +1490,18 @@ class SocialProfileService:
                         if video.get("title") or video.get("video_description"):
                             post.title = self._social_post_title(video.get("title") or video.get("video_description"), post.title)
                             post.caption = video.get("video_description") or post.caption
-                        metric = SocialPostMetric(
+                        metric_created = self.create_post_metric_if_changed(
+                            db,
                             post_id=post.id,
                             views=int(video.get("view_count") or 0),
                             likes=int(video.get("like_count") or 0),
                             comments=int(video.get("comment_count") or 0),
                             shares=int(video.get("share_count") or 0),
-                            captured_at=datetime.now(timezone.utc),
                         )
-                        db.add_all([post, metric])
+                        db.add(post)
                         result["videos"] += 1
-                        result["metrics"] += 1
+                        if metric_created:
+                            result["metrics"] += 1
                     db.commit()
             except Exception as exc:
                 db.rollback()
@@ -1870,7 +1913,7 @@ class SocialProfileService:
             "profile_id": item.profile_id,
             "profile_name": item.profile.profile_name if item.profile else None,
             "profile_scopes": _scope_list(getattr(item.profile, "scopes_jsonb", None)) if item.profile else [],
-            "content_id": item.content_id,
+            "content_id": item.workflow.primary_content_id if item.workflow else None,
             "article_link": item.article_link,
             "article_title": item.article_title,
             "platform": item.platform,
@@ -2019,11 +2062,22 @@ class SocialProfileService:
             item = item.strip()
             if not item:
                 continue
-            try:
-                parsed = datetime.strptime(item, "%H:%M")
-            except ValueError:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_times phải theo định dạng HH:MM")
-            normalized = parsed.strftime("%H:%M")
+            if "-" in item:
+                parts = item.split("-", 1)
+                try:
+                    start_parsed = datetime.strptime(parts[0].strip(), "%H:%M")
+                    end_parsed = datetime.strptime(parts[1].strip(), "%H:%M")
+                    if start_parsed >= end_parsed:
+                        raise ValueError("start time must be before end time")
+                except ValueError:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_times phải theo định dạng HH:MM hoặc HH:MM-HH:MM (bắt đầu < kết thúc)")
+                normalized = f"{start_parsed.strftime('%H:%M')}-{end_parsed.strftime('%H:%M')}"
+            else:
+                try:
+                    parsed = datetime.strptime(item, "%H:%M")
+                except ValueError:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_times phải theo định dạng HH:MM hoặc HH:MM-HH:MM (bắt đầu < kết thúc)")
+                normalized = parsed.strftime("%H:%M")
             if normalized not in times:
                 times.append(normalized)
         return ",".join(times)

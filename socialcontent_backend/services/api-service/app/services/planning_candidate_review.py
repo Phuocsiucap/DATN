@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import HTTPException
 
-from common.db.models import ContentItem, KafkaTask, PlanningCandidate, PlanningRun, SocialProfile
+from common.db.models import ContentItem, KafkaTask, MediaWorkflow, PlanningCandidate, PlanningRun, SocialProfile
 from common.planning.candidate_review import (
     REVIEW_TASK_TYPE, as_dict, candidate_decision, content_available_to_profile, review_state,
     sync_review_recommendation,
@@ -11,8 +11,11 @@ from common.planning.candidate_review import (
 
 
 def owned_candidate(db, user, run_id, candidate_id, *, lock=False):
-    run = db.get(PlanningRun, run_id)
-    if not run or (not user.is_system_admin and run.user_id != user.id):
+    query = db.query(PlanningRun).join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+    if not user.is_system_admin:
+        query = query.filter(SocialProfile.user_id == user.id)
+    run = query.filter(PlanningRun.id == run_id).first()
+    if not run:
         raise HTTPException(404, "Planning run not found")
     query = db.query(PlanningCandidate).filter(
         PlanningCandidate.id == candidate_id, PlanningCandidate.planning_run_id == run.id,
@@ -23,6 +26,13 @@ def owned_candidate(db, user, run_id, candidate_id, *, lock=False):
     return run, candidate
 
 
+def _candidate_workflow_id(db, candidate, decision=None):
+    workflow = db.query(MediaWorkflow.id).filter(MediaWorkflow.planning_candidate_id == candidate.id).first()
+    if workflow:
+        return str(workflow.id)
+    return str(as_dict(decision).get("workflow_id")) if as_dict(decision).get("workflow_id") else None
+
+
 def review_candidate(db, user, run_id, candidate_id, action, reason):
     run, candidate = owned_candidate(db, user, run_id, candidate_id, lock=True)
     decision = candidate_decision(candidate, run.output_jsonb)
@@ -31,9 +41,9 @@ def review_candidate(db, user, run_id, candidate_id, action, reason):
     previous = as_dict(metadata.get("production_review"))
     # Network retries/double-clicks return the previous operation, never enqueue again.
     if action == previous.get("action") and previous.get("status"):
-        return {"candidate_id": str(candidate.id), "workflow_id": str(candidate.workflow_id) if candidate.workflow_id else None, "review": state}
+        return {"candidate_id": str(candidate.id), "workflow_id": _candidate_workflow_id(db, candidate, decision), "review": state}
     if action == "RETRY" and previous.get("status") in {"QUEUED", "COMPLETED"} and previous.get("action") == "APPROVE":
-        return {"candidate_id": str(candidate.id), "workflow_id": str(candidate.workflow_id) if candidate.workflow_id else None, "review": state}
+        return {"candidate_id": str(candidate.id), "workflow_id": _candidate_workflow_id(db, candidate, decision), "review": state}
     if not state.get({"APPROVE": "can_approve", "REJECT": "can_reject", "RETRY": "can_retry"}[action]):
         raise HTTPException(409, "Bài không còn chờ duyệt sản xuất, đang xử lý hoặc đã có workflow. Hãy tải lại plan.")
 
@@ -47,9 +57,9 @@ def review_candidate(db, user, run_id, candidate_id, action, reason):
     if action != "REJECT":
         profile = db.get(SocialProfile, run.profile_id)
         content = db.get(ContentItem, candidate.content_id)
-        if not profile or profile.user_id != run.user_id or profile.status != "active" or not profile.strategy:
+        if not profile or (not user.is_system_admin and profile.user_id != user.id) or profile.status != "active" or not profile.strategy:
             raise HTTPException(409, "Profile không còn hoạt động hoặc chưa có chiến lược.")
-        if not content_available_to_profile(content, run.user_id):
+        if not content_available_to_profile(db, content, profile.user_id):
             raise HTTPException(404, "Nội dung nguồn không còn khả dụng cho profile này.")
         if content.status not in {"READY", "USABLE_WITH_WARNING"}:
             raise HTTPException(409, "Nội dung nguồn không còn sẵn sàng để sinh draft.")

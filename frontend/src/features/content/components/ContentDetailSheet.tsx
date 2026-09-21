@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ChevronDown, ExternalLink, FileText, Loader2, Play, Wand2 } from 'lucide-react'
+import { ChevronDown, ExternalLink, FileText, Loader2, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createDirectScriptApi } from '@/commons/apis/generateVideo'
 import type { ContentDetail, FinalContentItem, ProfileContentMatch } from '@/commons/apis/module1'
 import { AppButton, EmptyBlock, PlatformIcon, SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
 import { SocialPostPreview } from '@/commons/component/social-previews'
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/commons/component/ui/sheet'
+import { MediaAssetPreview } from '@/commons/media'
 
 const formatDate = (value?: string | null) => {
   if (!value) return '-'
@@ -219,27 +220,25 @@ export function ContentDetailSheet({
             {videoItems.length > 0 && (
               <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
                 <div className="mb-3 text-sm font-extrabold text-[#111827]">Video đính kèm ({videoItems.length})</div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3">
                   {videoItems.slice(0, 4).map((media, index) => (
-                    <a
+                    <div
                       key={`${media.source_url || index}`}
-                      href={media.source_url || sourceUrl || '#'}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group relative block h-[110px] overflow-hidden rounded-lg bg-slate-100 ring-1 ring-[var(--outline-variant)]"
+                      className="overflow-hidden rounded-lg border border-[var(--outline-variant)] bg-black shadow-sm"
                     >
-                      <Thumbnail
-                        src={media.thumbnail_url || media.source_url || ''}
-                        title={media.title || item.canonical_title}
-                        className="h-full w-full opacity-90 transition-opacity group-hover:opacity-100"
-                        fallback={false}
+                      <MediaAssetPreview
+                        item={media}
+                        index={index}
+                        controls
+                        className="aspect-video w-full"
                       />
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
-                        <div className="grid h-8 w-8 place-items-center rounded-full bg-white text-[#2556ea] shadow-sm">
-                          <Play size={14} className="ml-0.5" />
+                      {(media.title || media.description) && (
+                        <div className="border-t border-white/10 bg-slate-950 px-3 py-2">
+                          {media.title && <div className="line-clamp-1 text-xs font-bold text-white">{media.title}</div>}
+                          {media.description && <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-white/65">{media.description}</div>}
                         </div>
-                      </div>
-                    </a>
+                      )}
+                    </div>
                   ))}
                 </div>
               </section>

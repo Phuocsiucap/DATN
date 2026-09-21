@@ -19,6 +19,7 @@ export type CrawlJob = {
   schedule?: CrawlJobSchedule | null
   created_at: string
   updated_at: string
+  source_types?: string[]
 }
 
 export type CrawlJobSchedule = {

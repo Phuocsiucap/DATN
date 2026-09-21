@@ -222,7 +222,7 @@ class KafkaTask(Base):
     reference_type      = Column(String(40), nullable=True)
     # "crawl_job" | "media_workflow"
 
-    profile_id          = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id"), nullable=True)
+    profile_id          = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=True)
 
     # Payload
     payload_jsonb       = Column(JSONB, nullable=False, default=dict)
@@ -248,7 +248,6 @@ class ContentItem(Base):
     summary = Column(Text, nullable=True)
     language = Column(String(12), default="vi", nullable=False)
     content_scope = Column(String(40), default="GLOBAL", nullable=False, index=True)
-    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by_type = Column(String(40), default="SYSTEM", nullable=False)
     status = Column(String(40), default="NEEDS_REVIEW", nullable=False, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
@@ -350,7 +349,6 @@ class SocialProfile(Base):
     following_count = Column(Integer, nullable=True)
     likes_count = Column(Integer, nullable=True)
     video_count = Column(Integer, nullable=True)
-    folder_path = Column(String(500), unique=True, nullable=False)
     status = Column(String(40), default="active", nullable=False, index=True)
     access_token = Column(Text, nullable=True)
     refresh_token = Column(Text, nullable=True)
@@ -388,7 +386,6 @@ class SocialProfileStrategy(Base):
     __tablename__ = "social_profile_strategies"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     content_topics = Column(Text, default="", nullable=False)
     content_topic_descriptions = Column(JSONB, nullable=False, default=dict)
@@ -424,9 +421,8 @@ class PublishingQueueItem(Base):
     __tablename__ = "publishing_queue_items"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="SET NULL"), nullable=True, index=True)
     article_link = Column(Text, nullable=True)
     article_title = Column(Text, nullable=False)
     platform = Column(String(40), nullable=False)
@@ -442,6 +438,7 @@ class PublishingQueueItem(Base):
     updated_at = updated_col()
 
     profile = relationship("SocialProfile", back_populates="queue_items")
+    workflow = relationship("MediaWorkflow")
 
 
 class SocialPost(Base):
@@ -449,6 +446,7 @@ class SocialPost(Base):
 
     id = uuid_pk()
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    queue_item_id = Column(UUID(as_uuid=True), ForeignKey("publishing_queue_items.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     title = Column(String(255), nullable=False)
     post_url = Column(Text, nullable=True)
     platform_post_id = Column(String(255), nullable=True)
@@ -459,6 +457,7 @@ class SocialPost(Base):
     created_at = now_col()
 
     profile = relationship("SocialProfile", back_populates="posts")
+    queue_item = relationship("PublishingQueueItem")
     metrics = relationship("SocialPostMetric", back_populates="post", cascade="all, delete-orphan")
 
 
@@ -480,7 +479,6 @@ class ProfileContentLink(Base):
     __tablename__ = "profile_content_links"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True, index=True)
     story_id = Column(UUID(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=True, index=True)
@@ -542,7 +540,6 @@ class ContentSeries(Base):
     __tablename__ = "content_series"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
@@ -562,9 +559,9 @@ class MediaWorkflow(Base):
     __tablename__ = "media_workflow"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     series_id = Column(UUID(as_uuid=True), ForeignKey("content_series.id", ondelete="SET NULL"), nullable=True, index=True)
+    planning_candidate_id = Column(UUID(as_uuid=True), ForeignKey("planning_candidates.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
     title = Column(Text, nullable=False)
     status = Column(String(40), default="DRAFT", nullable=False, index=True)
     planning_mode = Column(String(40), nullable=True, index=True)
@@ -579,18 +576,16 @@ class MediaWorkflow(Base):
     updated_at = updated_col()
 
     profile = relationship("SocialProfile", back_populates="content_plans")
-    user = relationship("User")
     feedback = relationship("PlanningFeedback", back_populates="media_workflow", cascade="all, delete-orphan")
     series = relationship("ContentSeries", back_populates="projects")
+    planning_candidate = relationship("PlanningCandidate", back_populates="workflow", foreign_keys=[planning_candidate_id])
 
 
 class PlanningRun(Base):
     __tablename__ = "planning_runs"
 
     id = uuid_pk()
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=True, index=True)
     crawl_job_id = Column(UUID(as_uuid=True), ForeignKey("crawl_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     planning_mode = Column(String(40), default="AUTO", nullable=False, index=True)
     status = Column(String(40), default="PENDING", nullable=False, index=True)
@@ -603,7 +598,6 @@ class PlanningRun(Base):
     created_at = now_col()
     updated_at = updated_col()
 
-    workflow = relationship("MediaWorkflow")
     profile = relationship("SocialProfile")
     candidates = relationship("PlanningCandidate", back_populates="planning_run", cascade="all, delete-orphan")
 
@@ -649,7 +643,6 @@ class PlanningCandidate(Base):
 
     id = uuid_pk()
     planning_run_id = Column(UUID(as_uuid=True), ForeignKey("planning_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    workflow_id = Column(UUID(as_uuid=True), ForeignKey("media_workflow.id", ondelete="CASCADE"), nullable=True, index=True)
     content_id = Column(UUID(as_uuid=True), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
     rank_order = Column(Integer, nullable=True)
     score = Column(Numeric(5, 2), default=0, nullable=False)
@@ -660,7 +653,7 @@ class PlanningCandidate(Base):
     created_at = now_col()
 
     planning_run = relationship("PlanningRun", back_populates="candidates")
-    workflow = relationship("MediaWorkflow")
+    workflow = relationship("MediaWorkflow", back_populates="planning_candidate", uselist=False, foreign_keys="MediaWorkflow.planning_candidate_id")
     content = relationship("ContentItem")
 
     @property

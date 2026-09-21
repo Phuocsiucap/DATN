@@ -292,6 +292,30 @@
   flex-shrink: 0;
 }
 
+.published-posts-table-section {
+  min-height: calc(100vh - 5rem);
+  scroll-margin-top: 0.75rem;
+}
+
+.published-posts-table-section .app-list-panel {
+  height: calc(100vh - 12rem);
+  min-height: 420px;
+}
+
+.published-posts-table-section .app-list-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.published-posts-grid {
+  min-height: 100%;
+}
+
+.published-posts-grid > aside {
+  min-height: 0;
+}
+
 .app-card-soft {
   border: 1px solid #e9eef7;
   border-radius: 8px;
@@ -795,12 +819,14 @@
 }
 
 .generate-video-workspace-density--studio {
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .studio-editor-work-area {
-  min-height: 0;
-  flex: 1 1 0%;
+  height: calc(100vh - 160px);
+  min-height: 500px;
+  flex: none;
 }
 
 .studio-inspector-top-content > section {

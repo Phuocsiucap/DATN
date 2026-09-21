@@ -10,13 +10,14 @@ export type AnalyticsMetric = {
 export type AccountAnalyticsOverview = {
   profile: SocialProfile
   profile_id: string
-  period: { start_date: string; end_date: string }
+  period: { start_date: string | null; end_date: string | null }
   metrics: Record<string, AnalyticsMetric>
 }
 
 export type AccountAnalyticsCharts = {
   profile_id: string
   views_by_day: Array<{ date: string; views: number; avg_views: number; videos: number }>
+  posts_by_day?: Array<{ date: string; published_videos: number }>
   account_snapshots: Array<{ date: string; followers: number; following: number; likes: number; videos: number }>
   content_mix: Array<{ name: string; value: number; color: string }>
 }

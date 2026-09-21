@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from common.core.config import get_settings
 from common.core.openai_embeddings import create_embeddings as create_openai_embeddings
 from common.db.media_workflows import _load_content_full_text
-from common.db.models import ContentEmbedding, ContentItem
+from common.db.models import ContentEmbedding, ContentItem, CrawlJob
 
 
 def embed_texts(
@@ -56,10 +56,12 @@ def ensure_content_embeddings(db: Session, contents: list[ContentItem]) -> dict[
         texts = [text for _, text in batch]
         first_content = batch[0][0]
         try:
+            origin_job_id = first_content.origin_crawl_job_id
+            origin_job = db.get(CrawlJob, origin_job_id) if origin_job_id else None
             result = embed_texts(
                 texts,
-                user_id=str(first_content.owner_user_id) if first_content.owner_user_id else None,
-                reference_id=str(first_content.origin_crawl_job_id or first_content.id),
+                user_id=str(origin_job.requested_by) if origin_job and origin_job.requested_by else None,
+                reference_id=str(origin_job_id or first_content.id),
                 run_type="CREATE_EMBEDDING",
                 step_name="content_embedding_batch",
             )

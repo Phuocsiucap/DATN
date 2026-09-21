@@ -61,7 +61,21 @@ export function normalizeVideoWorkspaceList(data: VideoWorkspaceListResponse | L
   return { items, total: data.total, limit: data.limit, offset: data.offset }
 }
 
-export function hasActiveVideoTask(item: Pick<VideoWorkspaceSummary, 'task_status'>) {
+export function isVideoWorkflowWaitingForReview(
+  item: Pick<VideoWorkspaceSummary, 'status' | 'task_status' | 'current_stage'>,
+) {
+  const status = String(item.status || '').toUpperCase()
+  const taskStatus = String(item.task_status || '').toUpperCase()
+  const stage = String(item.current_stage || '').toUpperCase()
+  return (
+    stage === 'QUEUED_REVIEW'
+    || stage === 'DRAFT_REVIEW_REQUIRED'
+    || (status === 'REVIEWING' && taskStatus === 'PENDING' && stage.includes('REVIEW'))
+  )
+}
+
+export function hasActiveVideoTask(item: Pick<VideoWorkspaceSummary, 'status' | 'task_status' | 'current_stage'>) {
+  if (isVideoWorkflowWaitingForReview(item)) return false
   return ['PENDING', 'RUNNING', 'PROCESSING'].includes(item.task_status || '')
 }
 

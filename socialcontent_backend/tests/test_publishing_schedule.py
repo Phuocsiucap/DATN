@@ -53,6 +53,18 @@ class ScheduleSlotTests(unittest.TestCase):
     def test_sorts_and_deduplicates_unsorted_hours(self):
         self.assertEqual(self.slots(schedule_times="20:30,08:30,08:30")[0], local("2026-08-31T08:30:00"))
 
+    def test_keeps_schedule_time_ranges_as_windows(self):
+        windows = scheduling.available_schedule_windows(
+            strategy(schedule_times="08:30-09:30,16h-17:00"),
+            now=local("2026-08-31T07:00:00"),
+            tzinfo=TZ,
+            queue_items=[],
+        )
+        self.assertEqual(
+            [(window.start.astimezone(TZ).strftime("%H:%M"), window.end.astimezone(TZ).strftime("%H:%M")) for window in windows[:2]],
+            [("08:30", "09:30"), ("16:00", "17:00")],
+        )
+
     def test_skips_past_hours_and_rolls_over_to_next_day(self):
         self.assertEqual(self.slots(now="2026-08-31T21:00:00")[0], local("2026-09-01T08:30:00"))
 
@@ -101,7 +113,7 @@ class ScheduleSlotTests(unittest.TestCase):
         self.assertEqual(first, datetime(2026, 8, 30, 17, 30, tzinfo=timezone.utc))
 
     def test_skips_invalid_clock_values_without_crashing(self):
-        self.assertEqual(self.slots(schedule_times="99:99,-1:30,oops,08:30,12:00:00")[0], local("2026-08-31T08:30:00"))
+        self.assertEqual(self.slots(schedule_times="99:99,-1:30,oops,08:30,12:00:00,20:00-19:00")[0], local("2026-08-31T08:30:00"))
 
     def test_without_configured_times_still_respects_days_capacity_and_queue(self):
         rows = [queued(local("2026-08-31T09:00:00"))]
@@ -152,7 +164,10 @@ class DeepSeekScheduleTests(unittest.TestCase):
         self.settings = self.enterContext(patch.object(scheduling, "get_settings"))
         self.settings.return_value = SimpleNamespace(deepseek_api_key="test-key", deepseek_base_url="https://api.deepseek.com", openai_api_key="unused")
         self.llm = self.enterContext(patch.object(scheduling, "deepseek_chat_completion"))
-        self.llm.return_value.parsed_json.return_value = {"slot_id": "slot_1", "reason": "Tránh dồn nội dung cùng chủ đề."}
+        self.llm.return_value.parsed_json.return_value = {
+            "scheduled_at_local": "2026-08-31T20:30:00+07:00",
+            "reason": "Tránh dồn nội dung cùng chủ đề.",
+        }
         self.log = self.enterContext(patch.object(scheduling, "log_prompt_run"))
 
     def choose(self, **kwargs):
@@ -168,15 +183,29 @@ class DeepSeekScheduleTests(unittest.TestCase):
         self.assertEqual(context["current_post"]["id"], str(self.item.id))
         self.assertEqual(context["queue"][0]["id"], str(self.rows[0].id))
         self.assertEqual(context["queue"][0]["title"], self.rows[0].article_title)
-        self.assertEqual(context["candidate_slots"][0]["local"], "2026-08-31T20:30:00+07:00")
+        self.assertEqual(context["candidate_windows"][0]["start_local"], "2026-08-31T20:30:00+07:00")
         self.assertIsNone(context["strategy"]["post_frequency_per_day"])
         self.assertEqual(request["api_key"], "test-key")
         self.assertEqual(request["model"], "deepseek-v4-flash")
         self.assertEqual(decision.provider, "deepseek")
-        self.assertEqual(decision.scheduled_at, datetime.fromisoformat(context["candidate_slots"][1]["utc"]))
+        self.assertEqual(decision.scheduled_at, datetime.fromisoformat(context["candidate_windows"][0]["start_utc"]))
         self.query.with_for_update.assert_called_once()
         self.db.commit.assert_not_called()
         self.log.assert_called_once()
+
+    def test_ai_can_choose_any_valid_time_inside_configured_window(self):
+        self.profile.strategy.schedule_times = "08:30-12:30,16:00-21:30"
+        self.rows.clear()
+        self.llm.return_value.parsed_json.return_value = {
+            "scheduled_at_local": "2026-08-31T09:17:00+07:00",
+            "reason": "Chọn giờ nằm trong khung sáng.",
+        }
+        decision = self.choose()
+        context = json.loads(self.llm.call_args.kwargs["messages"][1]["content"])
+        self.assertEqual(context["candidate_windows"][0]["start_local"], "2026-08-31T08:30:00+07:00")
+        self.assertEqual(context["candidate_windows"][0]["end_local"], "2026-08-31T12:30:00+07:00")
+        self.assertEqual(decision.provider, "deepseek")
+        self.assertEqual(decision.scheduled_at, local("2026-08-31T09:17:00"))
 
     def test_query_is_scoped_to_profile_and_excludes_current_item(self):
         self.choose()
@@ -199,7 +228,12 @@ class DeepSeekScheduleTests(unittest.TestCase):
         self.llm.assert_not_called()
 
     def test_invalid_model_output_cannot_bypass_slot_validation(self):
-        for answer in ({"slot_id": "yesterday"}, {"slot_id": []}, [], {"scheduled_at": "2020-01-01T00:00:00Z"}):
+        for answer in (
+            {"scheduled_at_local": "2020-01-01T00:00:00+07:00"},
+            {"scheduled_at_local": []},
+            [],
+            {"slot_id": "window_0"},
+        ):
             with self.subTest(answer=answer):
                 self.llm.return_value.parsed_json.return_value = answer
                 decision = self.choose()
@@ -213,7 +247,7 @@ class DeepSeekScheduleTests(unittest.TestCase):
     def test_rechecks_clock_after_model_response(self):
         self.rows.clear()
         self.clock.now.side_effect = [local("2026-08-31T08:24:55"), local("2026-08-31T08:25:10")]
-        self.llm.return_value.parsed_json.return_value = {"slot_id": "slot_0"}
+        self.llm.return_value.parsed_json.return_value = {"scheduled_at_local": "2026-08-31T08:30:00+07:00"}
         decision = self.choose()
         self.assertEqual(decision.scheduled_at, local("2026-08-31T20:30:00"))
         self.assertEqual(decision.provider, "rules")
@@ -225,7 +259,7 @@ class DeepSeekScheduleTests(unittest.TestCase):
         self.assertEqual(context["queue_total"], 102)
         self.assertTrue(context["queue_truncated"])
         self.assertEqual(len(context["queue"]), 100)
-        self.assertEqual(context["candidate_slots"][0]["local"], "2026-08-31T20:30:00+07:00")
+        self.assertEqual(context["candidate_windows"][0]["start_local"], "2026-08-31T20:30:00+07:00")
 
     def test_no_valid_slot_stops_before_calling_ai(self):
         self.profile.strategy.post_frequency_per_day = 1

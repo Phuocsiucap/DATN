@@ -7,6 +7,25 @@ from typing import Any
 from app.schemas.planning_run_detail import CandidateDetail, PlanningRunCompactResponse, PlanningRunDetailResponse
 from common.planning.candidate_review import candidate_decision, review_state
 
+REASON_CODE_LABELS: dict[str, str] = {
+    "HIGH_CONFIDENCE_MATCH": "Bài phù hợp rõ ràng với chủ đề kênh, đủ dữ kiện và chất lượng để sản xuất tự động.",
+    "BORDERLINE_MATCH": "Bài nằm ở ranh giới phù hợp; hệ thống cần thêm đánh giá.",
+    "BELOW_SIMILARITY_THRESHOLD": "Nội dung bài không đủ liên quan đến chủ đề kênh.",
+    "AVOID_TOPIC": "Bài chứa chủ đề bị cấm hoặc cần tránh theo cấu hình kênh.",
+    "LOW_TOPIC_SIMILARITY": "Nội dung bài không khớp với bất kỳ chủ đề nào của kênh.",
+    "VIDEO_REQUIRED": "Kênh yêu cầu bài có video nguồn, nhưng bài này không có.",
+    "CONTENT_NOT_READY": "Bài nguồn chưa sẵn sàng để sử dụng (đang chờ xử lý hoặc có lỗi).",
+    "INSUFFICIENT_SOURCE": "Bài nguồn có ít hơn 3 dữ kiện xác minh được, chưa đủ cơ sở để tự động sản xuất.",
+    "FIT_JUDGE_ERROR": "Hệ thống gặp lỗi khi đánh giá bài; cần người dùng xem lại.",
+    "FIT_JUDGE_UNCERTAIN": "Hệ thống chưa đủ chắc chắn để tự quyết định; cần người dùng xem lại.",
+    "CONFLICTING_INFO": "Bài chứa thông tin mâu thuẫn giữa các nguồn; cần người dùng kiểm tra tính xác thực.",
+    "CONFLICTING_CONTENT": "Nội dung bài có các thông tin đối lập nhau; cần người dùng xác minh trước khi sản xuất.",
+    "SENSITIVE_CONTENT": "Bài chứa nội dung nhạy cảm (y tế, pháp luật, tài chính...); cần người dùng duyệt.",
+    "HUMAN_APPROVED": "Người dùng đã cho phép sản xuất bài này.",
+    "HUMAN_REJECTED": "Người dùng đã quyết định không sản xuất bài này.",
+    "MISSING_REQUIRED_VIDEO": "Bài nguồn thiếu video bắt buộc theo cấu hình kênh.",
+}
+
 
 def as_dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
@@ -163,6 +182,7 @@ def build_planning_run_detail(run: Any, profile: Any, crawl_job: Any, candidates
     inputs = as_dict(run.input_jsonb)
     catalog = TopicCatalog()
     by_id = {str(item.id): item for item in workflows}
+    by_candidate_id = {str(item.planning_candidate_id): item for item in workflows if getattr(item, "planning_candidate_id", None)}
     # Only unique content-to-workflow mappings are safe as a legacy fallback.
     by_content: dict[str, list] = {}
     for workflow in workflows:
@@ -171,8 +191,9 @@ def build_planning_run_detail(run: Any, profile: Any, crawl_job: Any, candidates
     items = []
     for row in candidates:
         raw = stored_decision(row, output)
-        workflow_id = str(row.workflow_id) if row.workflow_id else raw.get("workflow_id")
-        workflow = by_id.get(str(workflow_id)) if workflow_id else None
+        workflow = by_candidate_id.get(str(row.id))
+        workflow_id = str(workflow.id) if workflow else raw.get("workflow_id")
+        workflow = workflow or (by_id.get(str(workflow_id)) if workflow_id else None)
         if not workflow_id and row.content_id:
             matches = by_content.get(str(row.content_id), [])
             if len(matches) == 1:
@@ -266,8 +287,11 @@ def _brief_reason(candidate: CandidateDetail, topics: dict[str, str]) -> tuple[s
             score = f" ({quality.score:g}/100)" if quality.score is not None else ""
             retry = f"; đã sửa {quality.retry_count:g} lần" if quality.retry_count is not None else ""
             return f"Draft đạt kiểm tra{score}{retry}. Trạng thái sản xuất xem ở workflow.", "DRAFT_PASSED"
-        if decision.production and decision.production.reason:
-            return decision.production.reason, decision.production.reason_code
+        if decision.production:
+            code = decision.production.reason_code
+            human_reason = REASON_CODE_LABELS.get(code or "") or decision.production.reason
+            if human_reason:
+                return human_reason, code
         if decision.legacy_reason:
             return decision.legacy_reason, decision.status
     return "Qua bộ lọc đầu vào; chưa có kết quả quyết định sản xuất được lưu.", None
@@ -284,7 +308,8 @@ def compact_planning_run_detail(detail: PlanningRunDetailResponse) -> PlanningRu
         candidates.append({
             "id": item.id, "content_id": item.content_id, "title": item.title, "rank": item.rank,
             "status": status, "reason": reason[:397] + "..." if len(reason) > 400 else reason,
-            "reason_code": reason_code, "similarity": item.matching.similarity, "workflow_id": item.workflow_id,
+            "reason_code": reason_code, "reason_code_label": REASON_CODE_LABELS.get(reason_code or "", None),
+            "similarity": item.matching.similarity, "workflow_id": item.workflow_id,
             "review": review if review.status or review.can_approve or review.can_reject or review.can_retry else None,
         })
     return PlanningRunCompactResponse.model_validate({

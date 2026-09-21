@@ -578,6 +578,7 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
     return {
         "id": data["id"],
         "profile_id": data["profile_id"],
+        "workflow_id": data.get("workflow_id"),
         "profile_name": data["profile_name"],
         "platform": data["platform"],
         "article_title": data["article_title"],
@@ -603,28 +604,29 @@ def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneIn
     profile = item.profile
     strategy = getattr(profile, "strategy", None) if profile else None
     profile_scopes = data["profile_scopes"] or []
-    content = db.get(ContentItem, item.content_id) if item.content_id else None
+    workflow = db.get(MediaWorkflow, item.workflow_id) if item.workflow_id else None
+    content = db.get(ContentItem, workflow.primary_content_id) if workflow and workflow.primary_content_id else None
     content_metadata = _content_metadata(content)
     tags = content_metadata.get("tags") if isinstance(content_metadata.get("tags"), list) else []
     scheduled_at = item.scheduled_at
     scheduled_at_local = _ensure_aware(scheduled_at).astimezone(tzinfo).isoformat() if scheduled_at else None
     video_url = _queue_video_url(item.article_link)
-    if not video_url and item.content_id:
-        wf = db.query(MediaWorkflow).filter(MediaWorkflow.primary_content_id == item.content_id).first()
-        if wf:
-            metadata = wf.metadata_json if isinstance(wf.metadata_json, dict) else {}
-            artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
-            final_uri = next((it.get("uri") for it in artifacts if isinstance(it, dict) and it.get("uri") and it.get("type") == "FINAL_VIDEO"), None)
-            if not final_uri:
-                final_uri = metadata.get("rendered_video") or metadata.get("final_video")
-            if not final_uri and isinstance(wf.draft_json, dict):
-                story_artifacts = wf.draft_json.get("video_artifacts") if isinstance(wf.draft_json.get("video_artifacts"), dict) else {}
-                final_uri = story_artifacts.get("final")
-            if final_uri:
-                video_url = _queue_video_url(final_uri)
+    if not video_url and workflow:
+        wf = workflow
+        metadata = wf.metadata_json if isinstance(wf.metadata_json, dict) else {}
+        artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
+        final_uri = next((it.get("uri") for it in artifacts if isinstance(it, dict) and it.get("uri") and it.get("type") == "FINAL_VIDEO"), None)
+        if not final_uri:
+            final_uri = metadata.get("rendered_video") or metadata.get("final_video")
+        if not final_uri and isinstance(wf.draft_json, dict):
+            story_artifacts = wf.draft_json.get("video_artifacts") if isinstance(wf.draft_json.get("video_artifacts"), dict) else {}
+            final_uri = story_artifacts.get("final")
+        if final_uri:
+            video_url = _queue_video_url(final_uri)
     return {
         "id": data["id"],
         "profile_id": data["profile_id"],
+        "workflow_id": data.get("workflow_id"),
         "profile_name": data["profile_name"],
         "profile_username": profile.username if profile else None,
         "profile_avatar_url": profile.avatar_url if profile else None,

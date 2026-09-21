@@ -250,8 +250,8 @@ def _serialize_publishing_tasks(db: Session) -> list[dict[str, Any]]:
         "status": "RUNNING",
         "stage": "PUBLISHING",
         "progress_percent": 50.0,
-        "reference_id": str(item.content_id) if item.content_id else None,
-        "reference_type": "content",
+        "reference_id": str(item.workflow_id) if item.workflow_id else None,
+        "reference_type": "media_workflow",
         "reference_title": item.article_title,
         "worker": item.platform,
         "attempt_count": 1,
@@ -322,10 +322,16 @@ async def _probe_kafka() -> dict[str, Any]:
         return _health_item("kafka", "Kafka", "message-broker", "degraded", started, "Kafka đang bị tắt bởi cấu hình")
 
     def ping() -> None:
+        # kafka-python renamed this setting in newer releases.
+        timeout_key = (
+            "bootstrap_timeout_ms"
+            if "bootstrap_timeout_ms" in KafkaAdminClient.DEFAULT_CONFIG
+            else "api_version_auto_timeout_ms"
+        )
         admin = KafkaAdminClient(
             bootstrap_servers=[value.strip() for value in settings.kafka_bootstrap_servers.split(",") if value.strip()],
             request_timeout_ms=1500,
-            api_version_auto_timeout_ms=1500,
+            **{timeout_key: 1500},
         )
         try:
             admin.list_topics()

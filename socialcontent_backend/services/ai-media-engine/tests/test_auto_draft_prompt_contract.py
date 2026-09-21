@@ -197,7 +197,7 @@ class ValidatorContractTests(unittest.TestCase):
             codes = {issue.code for issue in evaluate_compact_draft(compact, []).issues}
             self.assertEqual("MISSING_EVIDENCE" in codes, role not in optional)
 
-    def test_evidence_errors_identify_exact_scene_name_number_and_citations(self):
+    def test_evidence_errors_identify_exact_scene_number_and_citations(self):
         facts = [
             {"id": "F1", "text": "Các công trình đang được khảo sát."},
             {"id": "F2", "text": "Quảng Trị có 10 công trình được khảo sát."},
@@ -205,17 +205,28 @@ class ValidatorContractTests(unittest.TestCase):
         compact = self.make_draft(25)
         compact["scenes"][0].update(voice_text="Quảng Trị có 10 công trình được khảo sát.", evidence_ids=["F1"])
         issues = {issue.code: issue for issue in evaluate_compact_draft(compact, facts).issues}
-        entity = issues["UNSUPPORTED_ENTITY"].to_dict()
         number = issues["UNSUPPORTED_NUMBER"].to_dict()
-        self.assertEqual(entity["severity"], "CRITICAL")
-        self.assertEqual(entity["scene_indexes"], [0])
-        self.assertIn("Quảng Trị", entity["details"]["scenes"][0]["unsupported_entities"])
-        self.assertEqual(entity["details"]["scenes"][0]["evidence_ids"], ["F1"])
+        self.assertNotIn("UNSUPPORTED_ENTITY", issues)
         self.assertEqual(number["details"]["scenes"][0]["unsupported_numbers"], ["10"])
         compact["scenes"][0]["evidence_ids"] = ["F2"]
         codes = {issue.code for issue in evaluate_compact_draft(compact, facts).issues}
         self.assertNotIn("UNSUPPORTED_ENTITY", codes)
         self.assertNotIn("UNSUPPORTED_NUMBER", codes)
+
+    def test_named_entity_mismatch_does_not_block_quality_gate(self):
+        facts = [
+            {
+                "id": "F1",
+                "text": "Các công trình đang được khảo sát.",
+            },
+        ]
+        compact = self.make_draft(25)
+        compact["scenes"][0].update(
+            voice_text="OpenAI và Google đang được nhắc tới trong lời thoại.",
+            evidence_ids=["F1"],
+        )
+        codes = {issue.code for issue in evaluate_compact_draft(compact, facts).issues}
+        self.assertNotIn("UNSUPPORTED_ENTITY", codes)
 
 
 if __name__ == "__main__":

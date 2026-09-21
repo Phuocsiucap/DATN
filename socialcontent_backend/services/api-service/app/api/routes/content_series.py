@@ -18,7 +18,8 @@ router = APIRouter()
 def list_content_series(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = (
         db.query(ContentSeries)
-        .filter(ContentSeries.user_id == user.id)
+        .join(SocialProfile, SocialProfile.id == ContentSeries.profile_id)
+        .filter(SocialProfile.user_id == user.id)
         .order_by(ContentSeries.updated_at.desc())
         .limit(100)
         .all()
@@ -51,7 +52,6 @@ def create_content_series(
     if str(payload.status or "ACTIVE").upper() == "ACTIVE" and find_active_series_by_title(db, profile_id, payload.title):
         raise HTTPException(status_code=409, detail="Profile đã có series active cùng tên")
     series = ContentSeries(
-        user_id=user.id,
         profile_id=profile_id,
         title=payload.title,
         description=payload.description,
@@ -165,8 +165,13 @@ def consistency_check(series_id: uuid.UUID, user: User = Depends(get_current_use
 
 
 def _get_owned_series(db: Session, series_id: uuid.UUID, user: User) -> ContentSeries:
-    series = db.get(ContentSeries, series_id)
-    if not series or series.user_id != user.id:
+    series = (
+        db.query(ContentSeries)
+        .join(SocialProfile, SocialProfile.id == ContentSeries.profile_id)
+        .filter(ContentSeries.id == series_id, SocialProfile.user_id == user.id)
+        .first()
+    )
+    if not series:
         raise HTTPException(status_code=404, detail="Project series not found")
     return series
 

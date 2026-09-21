@@ -302,7 +302,15 @@ async function claimRenderTask(taskId) {
       return null;
     }
 
-    const projectResult = await client.query('SELECT * FROM media_workflow WHERE id = $1 FOR UPDATE', [task.reference_id]);
+    const projectResult = await client.query(
+      `
+        SELECT mw.*
+        FROM media_workflow mw
+        WHERE mw.id = $1
+        FOR UPDATE OF mw
+      `,
+      [task.reference_id],
+    );
     const project = projectResult.rows[0];
     if (!project) {
       await client.query('ROLLBACK');
@@ -1087,9 +1095,8 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
       `
         INSERT INTO publishing_queue_items (
           id,
-          user_id,
           profile_id,
-          content_id,
+          workflow_id,
           article_link,
           article_title,
           platform,
@@ -1100,14 +1107,13 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
           created_at,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'approved', $10, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved', $9, NOW(), NOW())
         RETURNING *
       `,
       [
         randomUUID(),
-        project.user_id,
         project.profile_id,
-        project.primary_content_id,
+        project.id,
         renderedVideo,
         project.title,
         profile.platform || 'tiktok',
@@ -1121,18 +1127,19 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
     const updated = await client.query(
       `
         UPDATE publishing_queue_items
-        SET article_link = $2,
-            article_title = $3,
-            generated_content = COALESCE(NULLIF(generated_content, ''), $4),
-            ai_reason = $5,
+        SET workflow_id = $2,
+            article_link = $3,
+            article_title = $4,
+            generated_content = COALESCE(NULLIF(generated_content, ''), $5),
+            ai_reason = $6,
             status = 'approved',
-            scheduled_at = COALESCE(scheduled_at, $6),
+            scheduled_at = COALESCE(scheduled_at, $7),
             error = NULL,
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
       `,
-      [queueItem.id, renderedVideo, project.title, generatedContent, queuedReason, scheduledAt],
+      [queueItem.id, project.id, renderedVideo, project.title, generatedContent, queuedReason, scheduledAt],
     );
     queueItem = updated.rows[0];
   }

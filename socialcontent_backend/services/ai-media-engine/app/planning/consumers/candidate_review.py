@@ -29,14 +29,19 @@ def _save_review(candidate, **changes):
     candidate.metadata_json = metadata
 
 
+def _linked_workflow(db, candidate_id, *, lock=False):
+    query = db.query(MediaWorkflow).filter(MediaWorkflow.planning_candidate_id == candidate_id)
+    return (query.with_for_update() if lock else query).first()
+
+
 def _generate_reviewed_draft(db, task, candidate):
     run = db.get(PlanningRun, candidate.planning_run_id)
     profile = db.get(SocialProfile, run.profile_id) if run else None
     content = db.get(ContentItem, candidate.content_id) if candidate.content_id else None
     review = as_dict(as_dict(candidate.metadata_json).get("production_review"))
-    if not run or run.planning_mode != "AUTO" or not profile or profile.user_id != run.user_id or profile.status != "active" or not profile.strategy:
+    if not run or run.planning_mode != "AUTO" or not profile or profile.status != "active" or not profile.strategy:
         raise ValueError("Profile hoặc planning run không còn khả dụng.")
-    if not content_available_to_profile(content, run.user_id):
+    if not content_available_to_profile(db, content, profile.user_id):
         raise ValueError("Nội dung nguồn không còn khả dụng cho profile này.")
     if review.get("action") != "APPROVE" or review.get("status") != "QUEUED" or review.get("task_id") != str(task.id):
         raise ValueError("Quyết định duyệt không khớp job hiện tại.")
@@ -46,7 +51,7 @@ def _generate_reviewed_draft(db, task, candidate):
     if not score.eligible:
         raise ValueError("Nguồn không còn vượt bộ lọc chủ đề/video hiện tại. Hãy kiểm tra lại cấu hình và nguồn.")
     source_job_id = str(run.crawl_job_id) if run.crawl_job_id else None
-    workflow = db.get(MediaWorkflow, candidate.workflow_id) if candidate.workflow_id else _existing_auto_workflow(db, profile.id, content.id, source_job_id)
+    workflow = _linked_workflow(db, candidate.id) or _existing_auto_workflow(db, profile.id, content.id, source_job_id)
     decision = None
     if not workflow:
         decision = AutoWorkflowPlanner().decide_and_build_draft(
@@ -60,11 +65,13 @@ def _generate_reviewed_draft(db, task, candidate):
         workflow = _existing_auto_workflow(db, profile.id, content.id, source_job_id)
         if not workflow:
             workflow = _create_auto_workflow_from_decision(db, profile, profile.strategy, score, decision, source_job_id)
+            workflow.planning_candidate_id = candidate.id
             workflow.metadata_json = {**as_dict(workflow.metadata_json), "production_review": review,
                                       "planning_candidate_id": str(candidate.id)}
-    if workflow.user_id != run.user_id or workflow.profile_id != run.profile_id or workflow.primary_content_id != content.id:
+    if workflow.profile.user_id != profile.user_id or workflow.profile_id != run.profile_id or workflow.primary_content_id != content.id:
         raise ValueError("Workflow liên kết không thuộc ứng viên này.")
-    candidate.workflow_id = workflow.id
+    if not workflow.planning_candidate_id:
+        workflow.planning_candidate_id = candidate.id
     candidate.selected = True
     metadata = dict(candidate.metadata_json or {})
     metadata["review_decision"] = _workflow_ai_decision_payload(workflow, content.id)
@@ -73,8 +80,6 @@ def _generate_reviewed_draft(db, task, candidate):
     link = _mark_existing_auto_workflow_link(db, profile, score, workflow)
     link.metadata_json = {**as_dict(link.metadata_json), "ai_decision": metadata["review_decision"], "production_review": as_dict(candidate.metadata_json).get("production_review")}
     locked_run = db.query(PlanningRun).filter(PlanningRun.id == run.id).with_for_update().first()
-    if not locked_run.workflow_id:
-        locked_run.workflow_id = workflow.id
     locked_run.updated_at = datetime.now(timezone.utc)
     # Keep the original planning decision/output intact; the read API joins the
     # candidate's current workflow and exposes the separate human review.
@@ -95,7 +100,7 @@ def process_next_candidate_review(db) -> bool:
         if not candidate:
             raise ValueError("Ứng viên không còn tồn tại.")
         if task.current_stage == "DRAFT_SAVED":
-            workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == candidate.workflow_id).with_for_update().first()
+            workflow = _linked_workflow(db, candidate.id, lock=True)
             if not workflow:
                 raise ValueError("Workflow vừa sinh không còn khả dụng.")
             task.status, task.current_stage = "COMPLETED", "COMPLETED"
@@ -121,7 +126,7 @@ def process_next_candidate_review(db) -> bool:
         task.error_message = message
         task.completed_at = datetime.now(timezone.utc)
         if candidate:
-            _save_review(candidate, status="COMPLETED" if candidate.workflow_id else "FAILED", error_message=message)
+            _save_review(candidate, status="COMPLETED" if _linked_workflow(db, candidate.id) else "FAILED", error_message=message)
             run = db.get(PlanningRun, candidate.planning_run_id)
             if run:
                 sync_review_recommendation(db, candidate, run, as_dict(candidate.metadata_json).get("production_review", {}))

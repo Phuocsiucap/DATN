@@ -25,3 +25,6 @@ docs/
 tests/
 outputs/
 db_backups/
+tools/
+scripts/
+.trash/

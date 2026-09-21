@@ -151,7 +151,7 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
     (config?.configuration?.rss_feed_keys as string[]) || (vnexpressRssFeeds.length > 0 ? ['tin-moi-nhat'] : [])
   )
   const [keywords, setKeywords] = useState(config?.keywords.join(', ') || '')
-  const [jobOptions, setJobOptions] = useState<string[]>((config?.configuration.job_options as string[]) ?? (sourceType === 'VNEXPRESS' ? ['source_url', 'keywords', 'rss_feed_keys'] : ['source_url', 'keywords']))
+  const [jobOptions, setJobOptions] = useState<string[]>((config?.configuration.job_options as string[]) ?? [])
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async () => {

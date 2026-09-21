@@ -203,6 +203,7 @@ class CandidateSummary(BaseModel):
     status: str
     reason: str
     reason_code: str | None = None
+    reason_code_label: str | None = None
     similarity: float | None = None
     workflow_id: str | None = None
     review: CandidateReview | None = None

@@ -252,7 +252,7 @@ export default function ApprovalsPage() {
       actions={
         <>
           <AppButton variant="secondary" icon={<CalendarDays size={16} />} onClick={() => { window.location.href = '/schedule' }}>Xem lịch đăng</AppButton>
-          <AppButton variant="ghost" icon={<Send size={16} />} onClick={() => { window.location.href = '/published-posts' }}>Video đã đăng</AppButton>
+          <AppButton variant="ghost" icon={<Send size={16} />} onClick={() => { window.location.href = '/social-account' }}>Video đã đăng</AppButton>
         </>
       }
     >

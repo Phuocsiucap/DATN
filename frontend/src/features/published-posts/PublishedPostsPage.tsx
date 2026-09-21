@@ -1,9 +1,11 @@
 import { PaginatedList } from '@/commons/component/ui/paginated-list'
 import { Table, TableHeader as ShadcnTableHeader, TableBody, TableRow, TableHead, TableCell } from '@/commons/component/ui/table'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent } from 'react'
 import { toast } from 'sonner'
 import {
+  ArrowLeft,
   BarChart3,
+  Bookmark,
   ExternalLink,
   Eye,
   Heart,
@@ -12,16 +14,38 @@ import {
   RefreshCw,
   Send,
   Share2,
-  TrendingUp,
+  SlidersHorizontal,
   UsersRound,
   Video,
   Trash2,
 } from 'lucide-react'
 import {
+  Bar,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import {
+  fetchAccountAnalyticsChartsApi,
+  fetchAccountAnalyticsOverviewApi,
+  fetchAccountAnalyticsTopTopicsApi,
   fetchSocialPostsApi,
   fetchSocialProfilesApi,
+  fetchSocialProfileStrategyApi,
   syncSocialProfileApi,
   deleteSocialPostApi,
+  updateSocialProfileStrategyApi,
+  type AccountAnalyticsCharts,
+  type AccountAnalyticsOverview,
+  type AccountTopTopics,
+  type AnalyticsMetric,
   type SocialPost,
   type SocialProfile,
 } from '@/commons/apis/api'
@@ -30,7 +54,6 @@ import {
   AppButton,
   DateInput,
   EmptyBlock,
-  MetricCard,
   PageLayout,
   SearchField,
   SelectControl,
@@ -41,7 +64,8 @@ import {
   platformLabel,
 } from '@/commons/component/social-ui'
 import { cn } from '@/commons/lib/utils'
-import { PostDetailCard } from './components/PostDetailCard'
+import { PostDetailSheet } from './components/PostDetailSheet'
+import { SocialProfileStrategyDialog } from '@/features/settings/SocialProfileStrategyDialog'
 
 type PostStatusFilter = 'all' | 'published' | 'draft' | 'failed' | 'deleted'
 
@@ -82,32 +106,58 @@ const formatDateTime = (value?: string | null) => {
   })
 }
 
-const formatDateInput = (date: Date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+const DEFAULT_STRATEGY_FORM = {
+  content_topics: '',
+  content_topic_descriptions: {},
+  avoid_topics: '',
+  avoid_topic_descriptions: {},
+  tone: 'Professional & Authoritative',
+  target_audience: '',
+  post_frequency_per_day: null,
+  approval_mode: 'manual',
+  schedule_days: '0,1,2,3,4,5,6',
+  schedule_times: '08:30,20:30',
+  schedule_timezone: 'Asia/Bangkok',
+  min_similarity: 0.62,
+  avoid_similarity_threshold: 0.72,
+  max_system_recommendations: 20,
+  require_video: false,
+  auto_project_queue_enabled: false,
+  video_render_mode: 'manual',
+  auto_queue_enabled: true,
+  auto_publish_enabled: false,
+  receive_system_content: true,
 }
 
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
-  return next
-}
+const ACCOUNT_ANALYTICS_TABS = ['Tổng quan', 'Hiệu quả nội dung', 'Chủ đề', 'Thời gian đăng', 'Đối tượng'] as const
+type AccountAnalyticsTab = typeof ACCOUNT_ANALYTICS_TABS[number]
 
-export default function PublishedPostsPage() {
+export default function PublishedPostsPage({ scopedProfileId = '' }: { scopedProfileId?: string } = {}) {
   const [profiles, setProfiles] = useState<SocialProfile[]>([])
   const [posts, setPosts] = useState<SocialPost[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [selectedProfileId, setSelectedProfileId] = useState(scopedProfileId)
   const [selectedStatus, setSelectedStatus] = useState<PostStatusFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [startDate, setStartDate] = useState(() => formatDateInput(addDays(new Date(), -30)))
-  const [endDate, setEndDate] = useState(() => formatDateInput(new Date()))
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [loadingProfiles, setLoadingProfiles] = useState(true)
   const [loadingPosts, setLoadingPosts] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null)
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [strategyDialogOpen, setStrategyDialogOpen] = useState(false)
+  const [strategyLoading, setStrategyLoading] = useState(false)
+  const [savingStrategy, setSavingStrategy] = useState(false)
+  const [strategyForm, setStrategyForm] = useState<any>(DEFAULT_STRATEGY_FORM)
+  const [analyticsStartDate, setAnalyticsStartDate] = useState('')
+  const [analyticsEndDate, setAnalyticsEndDate] = useState('')
+  const [analyticsOverview, setAnalyticsOverview] = useState<AccountAnalyticsOverview | null>(null)
+  const [analyticsCharts, setAnalyticsCharts] = useState<AccountAnalyticsCharts | null>(null)
+  const [analyticsTopics, setAnalyticsTopics] = useState<AccountTopTopics | null>(null)
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const [activeAnalyticsTab, setActiveAnalyticsTab] = useState<AccountAnalyticsTab>('Tổng quan')
+  const postsSectionRef = useRef<HTMLElement | null>(null)
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => String(profile.id) === selectedProfileId) || null,
@@ -121,6 +171,7 @@ export default function PublishedPostsPage() {
       const nextProfiles = data.items || []
       setProfiles(nextProfiles)
       setSelectedProfileId((current) => {
+        if (scopedProfileId && nextProfiles.some((profile) => String(profile.id) === scopedProfileId)) return scopedProfileId
         if (current && nextProfiles.some((profile) => String(profile.id) === current)) return current
         return nextProfiles[0] ? String(nextProfiles[0].id) : ''
       })
@@ -154,13 +205,53 @@ export default function PublishedPostsPage() {
     }
   }
 
+  const loadAccountAnalytics = async (profileId = selectedProfileId) => {
+    if (!profileId) {
+      setAnalyticsOverview(null)
+      setAnalyticsCharts(null)
+      setAnalyticsTopics(null)
+      return
+    }
+    setLoadingAnalytics(true)
+    try {
+      const params = {
+        profile_id: profileId,
+        ...(analyticsStartDate ? { start_date: analyticsStartDate } : {}),
+        ...(analyticsEndDate ? { end_date: analyticsEndDate } : {}),
+      }
+      const [overviewData, chartsData, topicsData] = await Promise.all([
+        fetchAccountAnalyticsOverviewApi(params),
+        fetchAccountAnalyticsChartsApi(params),
+        fetchAccountAnalyticsTopTopicsApi({ ...params, limit: 8 }),
+      ])
+      setAnalyticsOverview(overviewData)
+      setAnalyticsCharts(chartsData)
+      setAnalyticsTopics(topicsData)
+    } catch (error: any) {
+      setAnalyticsOverview(null)
+      setAnalyticsCharts(null)
+      setAnalyticsTopics(null)
+      toast.error(error?.response?.data?.detail || 'Không tải được phân tích tài khoản')
+    } finally {
+      setLoadingAnalytics(false)
+    }
+  }
+
   useEffect(() => {
     void loadProfiles()
   }, [])
 
   useEffect(() => {
+    if (scopedProfileId) setSelectedProfileId(scopedProfileId)
+  }, [scopedProfileId])
+
+  useEffect(() => {
     void loadPosts(selectedProfileId)
   }, [selectedProfileId])
+
+  useEffect(() => {
+    void loadAccountAnalytics(selectedProfileId)
+  }, [analyticsEndDate, analyticsStartDate, selectedProfileId])
 
   const filteredPosts = useMemo(() => {
     const query = normalizeText(searchQuery)
@@ -186,29 +277,6 @@ export default function PublishedPostsPage() {
     [filteredPosts, selectedPostId],
   )
 
-  const totals = useMemo(() => {
-    const last7d = Date.now() - 7 * 24 * 60 * 60 * 1000
-    return filteredPosts.reduce(
-      (acc, post) => {
-        acc.views += metricValue(post, 'views')
-        acc.likes += metricValue(post, 'likes')
-        acc.comments += metricValue(post, 'comments')
-        acc.shares += metricValue(post, 'shares')
-        const views24h = post.growth?.views_24h
-        if (Number.isFinite(Number(views24h))) acc.views24h += Number(views24h)
-        const publishedTime = post.published_at ? new Date(post.published_at).getTime() : 0
-        if (publishedTime >= last7d) acc.last7d += 1
-        return acc
-      },
-      { views: 0, likes: 0, comments: 0, shares: 0, views24h: 0, last7d: 0 },
-    )
-  }, [filteredPosts])
-
-  const topPosts = useMemo(() => {
-    return [...filteredPosts]
-      .sort((left, right) => metricValue(right, 'views') - metricValue(left, 'views'))
-      .slice(0, 5)
-  }, [filteredPosts])
 
   const handleSync = async () => {
     if (!selectedProfileId) return
@@ -244,31 +312,150 @@ export default function PublishedPostsPage() {
     }
   }
 
+  const openStrategyDialog = async () => {
+    if (!selectedProfile) return
+    setStrategyDialogOpen(true)
+    setStrategyLoading(true)
+    try {
+      const data = await fetchSocialProfileStrategyApi(selectedProfile.id)
+      setStrategyForm(data || DEFAULT_STRATEGY_FORM)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể tải cấu hình chiến lược')
+    } finally {
+      setStrategyLoading(false)
+    }
+  }
+
+  const handleUpdateStrategyField = (key: string, value: any) => {
+    setStrategyForm((prev: any) => ({ ...prev, [key]: value }))
+  }
+
+  const handleSaveStrategy = async () => {
+    if (!selectedProfile) return
+    setSavingStrategy(true)
+    try {
+      const data = await updateSocialProfileStrategyApi(selectedProfile.id, strategyForm)
+      setStrategyForm(data)
+      toast.success('Đã lưu cấu hình chiến lược')
+      setStrategyDialogOpen(false)
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể lưu cấu hình chiến lược')
+    } finally {
+      setSavingStrategy(false)
+    }
+  }
+
+  const handlePostsSectionWheel = (event: WheelEvent<HTMLElement>) => {
+    const section = postsSectionRef.current
+    const pageScroller = section?.closest('.app-page-content') as HTMLElement | null
+    const listScroller = section?.querySelector('.app-list-scroll') as HTMLElement | null
+    if (!section || !pageScroller || !listScroller || event.deltaY === 0) return
+
+    const sectionTop = section.getBoundingClientRect().top
+    const pageTop = pageScroller.getBoundingClientRect().top
+    const distanceToStick = Math.max(0, sectionTop - pageTop)
+
+    if (event.deltaY > 0) {
+      event.preventDefault()
+      if (distanceToStick > 1) {
+        const pageDelta = Math.min(event.deltaY, distanceToStick)
+        pageScroller.scrollTop += pageDelta
+        const remaining = event.deltaY - pageDelta
+        if (remaining > 0) listScroller.scrollTop += remaining
+        return
+      }
+
+      const maxListScroll = listScroller.scrollHeight - listScroller.clientHeight
+      if (listScroller.scrollTop < maxListScroll - 1) {
+        listScroller.scrollTop += event.deltaY
+      } else {
+        pageScroller.scrollTop += event.deltaY
+      }
+      return
+    }
+
+    event.preventDefault()
+    if (listScroller.scrollTop > 0) {
+      const listDelta = Math.max(event.deltaY, -listScroller.scrollTop)
+      listScroller.scrollTop += listDelta
+      const remaining = event.deltaY - listDelta
+      if (remaining < 0) pageScroller.scrollTop += remaining
+      return
+    }
+
+    pageScroller.scrollTop += event.deltaY
+  }
+
   const busy = loadingProfiles || loadingPosts || isDeleting
+  const isProfileScoped = Boolean(scopedProfileId)
 
   return (
     <PageLayout
-      title="Bài đã đăng"
-      description="Theo dõi các bài đã xuất bản theo từng tài khoản social cùng chỉ số mới nhất."
+      title={isProfileScoped ? undefined : 'Bài đã đăng'}
+      description={isProfileScoped ? undefined : 'Theo dõi các bài đã xuất bản theo từng tài khoản social cùng chỉ số mới nhất.'}
+      header={isProfileScoped ? (
+        <div className="app-page-header flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                window.history.pushState(null, '', '/social-account')
+                window.dispatchEvent(new Event('popstate'))
+              }}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[var(--outline-variant)] bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+              title="Quay lại Social account"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="min-w-0">
+              <h1 className="app-title truncate">Thông tin kênh</h1>
+              <p className="mt-1 text-sm font-medium text-[var(--on-surface-variant)]">
+                Tổng quan kênh, phân tích hiệu suất và các bài đã đăng.
+              </p>
+            </div>
+          </div>
+          <SelectedProfilePanel
+            profile={selectedProfile}
+            totalPosts={posts.length}
+            loading={loadingProfiles}
+            syncing={syncing}
+            onSync={() => void handleSync()}
+            onConfigure={() => void openStrategyDialog()}
+          />
+        </div>
+      ) : undefined}
     >
-      <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} loading={loadingProfiles} emptyLabel="Chưa có tài khoản social để theo dõi bài đã đăng." />
+      {!isProfileScoped && (
+        <SocialProfileFilter profiles={profiles} value={selectedProfileId} onChange={setSelectedProfileId} loading={loadingProfiles} emptyLabel="Chưa có tài khoản social để theo dõi bài đã đăng." />
+      )}
 
-      <SelectedProfilePanel
+      {!isProfileScoped && (
+        <SelectedProfilePanel
+          profile={selectedProfile}
+          totalPosts={posts.length}
+          loading={loadingProfiles}
+          syncing={syncing}
+          onSync={() => void handleSync()}
+          onConfigure={() => void openStrategyDialog()}
+        />
+      )}
+
+      <AccountAnalyticsSection
+        overview={analyticsOverview}
+        charts={analyticsCharts}
+        topics={analyticsTopics}
+        loading={loadingAnalytics}
         profile={selectedProfile}
-        totalPosts={posts.length}
-        loading={loadingProfiles}
-        syncing={syncing}
-        onSync={() => void handleSync()}
+        startDate={analyticsStartDate}
+        endDate={analyticsEndDate}
+        activeTab={activeAnalyticsTab}
+        onStartDateChange={setAnalyticsStartDate}
+        onEndDateChange={setAnalyticsEndDate}
+        onTabChange={setActiveAnalyticsTab}
+        onRefresh={() => void loadAccountAnalytics(selectedProfileId)}
       />
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={<Send size={18} />} label="Bài trong bộ lọc" value={plainNumberFormatter.format(filteredPosts.length)} tint="#2556ea" />
-        <MetricCard icon={<Eye size={18} />} label="Tổng lượt xem" value={formatMetric(totals.views)} trend={`+${formatMetric(totals.views24h)} / 24h`} tint="#16a34a" />
-        <MetricCard icon={<Heart size={18} />} label="Tương tác" value={formatMetric(totals.likes + totals.comments + totals.shares)} tint="#db2777" />
-        <MetricCard icon={<TrendingUp size={18} />} label="Đăng 7 ngày qua" value={plainNumberFormatter.format(totals.last7d)} tint="#f59e0b" />
-      </section>
-
-      <section className="app-list-layout app-card app-table-card p-4">
+      <section ref={postsSectionRef} onWheel={handlePostsSectionWheel} className="published-posts-table-section app-list-layout app-card app-table-card p-4">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <SearchField
@@ -310,52 +497,253 @@ loadingPosts ? (
         ) : filteredPosts.length === 0 ? (
           <EmptyBlock label="Không tìm thấy bài đã đăng phù hợp với bộ lọc hiện tại." />
         ) : (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="table-scroll">
-                  <Table className="min-w-[960px] table-fixed">
-                    <colgroup>
-                      <col style={{ width: '32%' }} />
-                      <col style={{ width: '160px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '84px' }} />
-                    </colgroup>
-                    <ShadcnTableHeader>
-                      <TableRow className="bg-slate-50/80">
-                        <TableHead className="px-4 py-3 min-w-[160px]"><div>Bài đăng</div></TableHead>
-                        <TableHead className="px-4 py-3"><div>Ngày đăng</div></TableHead>
-                        <TableHead className="px-4 py-3"><div className="text-right">Views</div></TableHead>
-                        <TableHead className="px-4 py-3"><div className="text-right">Likes</div></TableHead>
-                        <TableHead className="px-4 py-3"><div className="text-right">Bình luận</div></TableHead>
-                        <TableHead className="px-4 py-3"><div className="text-right">Chia sẻ</div></TableHead>
-                        <TableHead className="px-4 py-3"><div className="text-right">Mở</div></TableHead>
-                      </TableRow>
-                    </ShadcnTableHeader>
-                    <TableBody>
-                      {visibleItems.map((post) => (
-                        <PostRow
-                          key={post.id}
-                          post={post}
-                          active={selectedPost?.id === post.id}
-                          onSelect={() => setSelectedPostId(post.id)}
-                          onDelete={() => void handleDeletePost(post.id)}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-            </div>
-
-            <aside className="space-y-3">
-              <PostDetailCard post={selectedPost} />
-              <TopPostsCard posts={topPosts} onSelect={setSelectedPostId} selectedPostId={selectedPost?.id || null} />
-            </aside>
+          <div className="table-scroll">
+                <Table className="min-w-[760px] table-fixed">
+                  <colgroup>
+                    <col style={{ width: '35%' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '80px' }} />
+                  </colgroup>
+                  <ShadcnTableHeader>
+                    <TableRow className="bg-slate-50/80">
+                      <TableHead className="px-4 py-3 min-w-[160px]"><div>Bài đăng</div></TableHead>
+                      <TableHead className="px-4 py-3"><div>Ngày đăng</div></TableHead>
+                      <TableHead className="px-4 py-3"><div className="text-right">Views</div></TableHead>
+                      <TableHead className="px-4 py-3"><div className="text-right">Likes</div></TableHead>
+                      <TableHead className="px-4 py-3"><div className="text-right">Bình luận</div></TableHead>
+                      <TableHead className="px-4 py-3"><div className="text-right">Chia sẻ</div></TableHead>
+                      <TableHead className="px-4 py-3"><div className="text-right">Mở</div></TableHead>
+                    </TableRow>
+                  </ShadcnTableHeader>
+                  <TableBody>
+                    {visibleItems.map((post) => (
+                      <PostRow
+                        key={post.id}
+                        post={post}
+                        active={selectedPost?.id === post.id}
+                        onSelect={() => { setSelectedPostId(post.id); setDetailSheetOpen(true) }}
+                        onDelete={() => void handleDeletePost(post.id)}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
           </div>
         )
-)}</PaginatedList>
+        )}</PaginatedList>
       </section>
+
+      <PostDetailSheet
+        post={selectedPost}
+        selectedPostId={selectedPost?.id || null}
+        open={detailSheetOpen}
+        onOpenChange={setDetailSheetOpen}
+        onSelectPost={(postId) => setSelectedPostId(postId)}
+      />
+
+      <SocialProfileStrategyDialog
+        open={strategyDialogOpen}
+        profile={selectedProfile}
+        strategyForm={strategyForm}
+        strategyLoading={strategyLoading}
+        saving={savingStrategy}
+        onClose={() => setStrategyDialogOpen(false)}
+        onChange={handleUpdateStrategyField}
+        onSave={() => void handleSaveStrategy()}
+      />
     </PageLayout>
+  )
+}
+
+function formatAccountMetric(metric?: AnalyticsMetric) {
+  return formatMetric(Number(metric?.value || 0))
+}
+
+function formatAccountChange(metric?: AnalyticsMetric) {
+  if (!metric) return 'Không có kỳ trước'
+  if (metric.change_count !== null && metric.change_count !== undefined) {
+    return `${metric.change_count >= 0 ? '+' : ''}${plainNumberFormatter.format(metric.change_count)}`
+  }
+  if (metric.change_pct !== null && metric.change_pct !== undefined) {
+    return `${metric.change_pct >= 0 ? '+' : ''}${metric.change_pct}%`
+  }
+  return 'Không có kỳ trước'
+}
+
+function AccountAnalyticsSection({
+  overview,
+  charts,
+  topics,
+  loading,
+  profile,
+  startDate,
+  endDate,
+  activeTab,
+  onStartDateChange,
+  onEndDateChange,
+  onTabChange,
+  onRefresh,
+}: {
+  overview: AccountAnalyticsOverview | null
+  charts: AccountAnalyticsCharts | null
+  topics: AccountTopTopics | null
+  loading: boolean
+  profile: SocialProfile | null
+  startDate: string
+  endDate: string
+  activeTab: AccountAnalyticsTab
+  onStartDateChange: (value: string) => void
+  onEndDateChange: (value: string) => void
+  onTabChange: (value: AccountAnalyticsTab) => void
+  onRefresh: () => void
+}) {
+  const metrics = overview?.metrics || {}
+  const renderMetrics = activeTab === 'Tổng quan' || activeTab === 'Hiệu quả nội dung'
+  const renderViewsChart = activeTab === 'Tổng quan' || activeTab === 'Thời gian đăng'
+  const renderContentMix = activeTab === 'Tổng quan' || activeTab === 'Hiệu quả nội dung'
+  const renderTopics = activeTab === 'Tổng quan' || activeTab === 'Chủ đề'
+  const renderAudience = activeTab === 'Đối tượng'
+
+  return (
+    <section className="space-y-4 rounded-[8px] border border-[var(--outline-variant)] bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex gap-6 overflow-x-auto border-b border-[var(--outline-variant)]">
+          {ACCOUNT_ANALYTICS_TABS.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => onTabChange(tab)}
+              className={cn('relative h-11 whitespace-nowrap text-sm font-bold text-[#718096]', activeTab === tab && 'text-[#2556ea]')}
+            >
+              {tab}
+              {activeTab === tab && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-[#2556ea]" />}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <DateInput label="Từ" value={startDate} onChange={onStartDateChange} className="w-full sm:w-[165px]" />
+          <DateInput label="Đến" value={endDate} onChange={onEndDateChange} className="w-full sm:w-[165px]" />
+          <AppButton variant="secondary" icon={<RefreshCw size={15} className={loading ? 'animate-spin' : ''} />} onClick={onRefresh} disabled={loading || !profile}>
+            Tải lại
+          </AppButton>
+        </div>
+      </div>
+
+      {renderMetrics && (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <AccountMetricTile icon={<Eye size={18} />} label="Tổng lượt xem" metric={metrics.views} tint="#2556ea" />
+          <AccountMetricTile icon={<Heart size={18} />} label="Tổng lượt thích" metric={metrics.likes} tint="#db2777" />
+          <AccountMetricTile icon={<MessageCircle size={18} />} label="Bình luận" metric={metrics.comments} tint="#f59e0b" />
+          <AccountMetricTile icon={<Share2 size={18} />} label="Chia sẻ" metric={metrics.shares} tint="#16a34a" />
+          <AccountMetricTile icon={<Bookmark size={18} />} label="Lượt lưu" metric={metrics.saves} tint="#7c3aed" />
+          <AccountMetricTile icon={<Video size={18} />} label="Video" metric={metrics.videos_count} tint="#0f766e" />
+        </div>
+      )}
+
+      <div className={cn('grid gap-4', activeTab === 'Tổng quan' ? 'xl:grid-cols-[minmax(0,1.5fr)_320px_360px]' : 'xl:grid-cols-1')}>
+        {renderViewsChart && (
+          <div className="flex flex-col gap-4 min-w-0">
+            <AnalyticsChartCard title="Lượt xem tăng theo ngày" loading={loading}>
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={charts?.views_by_day || []}>
+                  <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickFormatter={(value) => String(value).slice(5)} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 8, borderColor: '#dbe2ee', fontSize: 12 }} />
+                  <Bar dataKey="views" name="Views tăng" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  <Line dataKey="avg_views" name="TB views tăng/video" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </AnalyticsChartCard>
+
+            <AnalyticsChartCard title="Số bài đăng theo ngày" loading={loading}>
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={charts?.posts_by_day || []}>
+                  <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickFormatter={(value) => String(value).slice(5)} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ borderRadius: 8, borderColor: '#dbe2ee', fontSize: 12 }} />
+                  <Bar dataKey="published_videos" name="Số bài đăng" fill="#14b8a6" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </AnalyticsChartCard>
+          </div>
+        )}
+
+        {renderContentMix && <AnalyticsChartCard title="Hiệu suất theo loại" loading={loading}>
+          <ResponsiveContainer width="100%" height={activeTab === 'Tổng quan' ? 200 : 320}>
+            <PieChart>
+              <Pie data={charts?.content_mix || []} dataKey="value" nameKey="name" innerRadius={48} outerRadius={76} paddingAngle={3}>
+                {(charts?.content_mix || []).map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+              </Pie>
+              <Tooltip contentStyle={{ borderRadius: 8, borderColor: '#dbe2ee', fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="grid gap-2">
+            {(charts?.content_mix || []).map((item) => (
+              <div key={item.name} className="flex items-center justify-between text-xs font-semibold text-[#64748b]">
+                <span className="flex min-w-0 items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /><span className="truncate">{item.name}</span></span>
+                <span className="text-[#111827]">{plainNumberFormatter.format(item.value)}</span>
+              </div>
+            ))}
+            {!loading && (charts?.content_mix || []).length === 0 && <div className="empty-state min-h-[80px]">Chưa có dữ liệu loại nội dung.</div>}
+          </div>
+        </AnalyticsChartCard>}
+
+        {renderTopics && <AnalyticsChartCard title="Top chủ đề hiệu quả" loading={loading}>
+          <div className="space-y-2">
+            {!loading && (topics?.items || []).length === 0 && <div className="empty-state min-h-[120px]">Chưa có chủ đề đủ dữ liệu.</div>}
+            {(topics?.items || []).map((topic, index) => (
+              <div key={topic.topic} className="grid grid-cols-[28px_minmax(0,1fr)_72px_64px] items-center gap-2 rounded-[8px] border border-[var(--outline-variant)] bg-white p-2">
+                <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-[#eef2ff] text-xs font-black text-[#4f46e5]">{index + 1}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-extrabold text-[#111827]">#{topic.topic}</span>
+                  <span className="text-xs font-semibold text-[#64748b]">{topic.posts} bài</span>
+                </span>
+                <span className="text-right text-xs font-extrabold text-[#111827]">{formatMetric(topic.views)}</span>
+                <span className="text-right text-xs font-bold text-[#16a34a]">{topic.avg_engagement_pct}%</span>
+              </div>
+            ))}
+          </div>
+        </AnalyticsChartCard>}
+
+        {renderAudience && (
+          <AnalyticsChartCard title="Đối tượng" loading={loading}>
+            <EmptyBlock label="Chưa có dữ liệu đối tượng." />
+          </AnalyticsChartCard>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AccountMetricTile({ icon, label, metric, tint }: { icon: ReactNode; label: string; metric?: AnalyticsMetric; tint: string }) {
+  return (
+    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-white p-4">
+      <div className="flex items-center justify-between">
+        <div className="grid h-9 w-9 place-items-center rounded-[8px]" style={{ color: tint, backgroundColor: `${tint}16` }}>{icon}</div>
+        <span className={cn('text-xs font-extrabold', (metric?.change_pct ?? metric?.change_count ?? 0) >= 0 ? 'text-[#16a34a]' : 'text-[#ef233c]')}>
+          {formatAccountChange(metric)}
+        </span>
+      </div>
+      <div className="mt-3 text-xs font-bold text-[#64748b]">{label}</div>
+      <div className="mt-1 text-2xl font-extrabold text-[#111827]">{formatAccountMetric(metric)}</div>
+    </div>
+  )
+}
+
+function AnalyticsChartCard({ title, loading, children }: { title: string; loading: boolean; children: ReactNode }) {
+  return (
+    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-slate-50/40 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-extrabold text-[#111827]">{title}</h3>
+        {loading && <Loader2 size={16} className="animate-spin text-[#2556ea]" />}
+      </div>
+      {children}
+    </div>
   )
 }
 
@@ -365,12 +753,14 @@ function SelectedProfilePanel({
   loading,
   syncing,
   onSync,
+  onConfigure,
 }: {
   profile: SocialProfile | null
   totalPosts: number
   loading: boolean
   syncing: boolean
   onSync: () => void
+  onConfigure: () => void
 }) {
   if (loading) {
     return (
@@ -442,6 +832,13 @@ function SelectedProfilePanel({
             <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
             <span className="relative">Đồng bộ</span>
           </button>
+          <button
+            onClick={onConfigure}
+            className="group relative flex h-10 w-full shrink-0 sm:w-auto items-center justify-center gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white px-5 font-bold text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+          >
+            <SlidersHorizontal size={15} />
+            <span className="relative">Cấu hình</span>
+          </button>
         </div>
       </div>
     </div>
@@ -508,33 +905,6 @@ function MetricCell({ icon, value }: { icon: ReactNode; value: number }) {
     <div className="flex items-center justify-end gap-1.5 text-xs font-extrabold text-[#172033]">
       <span className="text-[#94a3b8]">{icon}</span>
       {formatMetric(value)}
-    </div>
-  )
-}
-
-function TopPostsCard({ posts, selectedPostId, onSelect }: { posts: SocialPost[]; selectedPostId: string | null; onSelect: (postId: string) => void }) {
-  return (
-    <div className="rounded-[8px] border border-[var(--outline-variant)] bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center gap-2">
-        <BarChart3 size={16} className="text-[#2556ea]" />
-        <h3 className="text-sm font-extrabold text-[#111827]">Top lượt xem</h3>
-      </div>
-      <div className="space-y-2">
-        {posts.length === 0 && <div className="empty-state min-h-[96px]">Chưa có dữ liệu top bài.</div>}
-        {posts.map((post, index) => (
-          <button
-            key={post.id}
-            onClick={() => onSelect(post.id)}
-            className={cn('flex w-full items-center gap-3 rounded-[8px] border p-2 text-left transition hover:bg-[#f8faff]', selectedPostId === post.id ? 'border-[#818cf8] bg-[#f8f7ff]' : 'border-[var(--outline-variant)] bg-white')}
-          >
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] bg-[#eef2ff] text-xs font-black text-[#4f46e5]">{index + 1}</span>
-            <span className="min-w-0 flex-1">
-              <span className="line-clamp-1 text-xs font-bold text-[#111827]">{post.title || 'Untitled post'}</span>
-              <span className="text-xs font-semibold text-[#64748b]">{formatMetric(metricValue(post, 'views'))} views</span>
-            </span>
-          </button>
-        ))}
-      </div>
     </div>
   )
 }

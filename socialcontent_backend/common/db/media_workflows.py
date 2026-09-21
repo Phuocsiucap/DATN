@@ -42,9 +42,9 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
 
     return {
         "id": str(workflow.id),
-        "user_id": str(workflow.user_id),
         "profile_id": str(workflow.profile_id),
         "series_id": str(workflow.series_id) if workflow.series_id else None,
+        "planning_candidate_id": str(workflow.planning_candidate_id) if workflow.planning_candidate_id else None,
         "title": workflow.title,
         "status": workflow.status,
         "planning_mode": workflow.planning_mode or "SINGLE",
@@ -275,7 +275,6 @@ def serialize_content_series(series: ContentSeries) -> dict[str, Any]:
     category_id = metadata.get("category_id") or metadata.get("categoryId")
     return {
         "id": str(series.id),
-        "user_id": str(series.user_id),
         "profile_id": str(series.profile_id),
         "title": series.title,
         "description": series.description,

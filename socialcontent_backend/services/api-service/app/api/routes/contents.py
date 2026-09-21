@@ -15,30 +15,39 @@ from app.schemas import api as schemas
 router = APIRouter()
 
 
+def _private_content_ids_for_user(user_id: uuid.UUID):
+    return (
+        select(CrawlJobContent.content_id)
+        .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+        .where(
+            CrawlJob.requested_by == user_id,
+            CrawlJob.content_scope == "PRIVATE",
+        )
+    )
+
+
 def _visible_content_query(query, user: User, content_scope: str | None):
     requested_scope = str(content_scope or "").strip().upper()
     if user.is_system_admin:
         return query.filter(ContentItem.content_scope == requested_scope) if requested_scope else query
 
-    own_private = and_(ContentItem.content_scope == "PRIVATE", ContentItem.owner_user_id == user.id)
+    own_private_ids = _private_content_ids_for_user(user.id)
+    own_private = and_(ContentItem.content_scope == "PRIVATE", ContentItem.id.in_(own_private_ids))
     if requested_scope == "PRIVATE":
         return query.filter(own_private)
     if requested_scope == "GLOBAL":
         return query.filter(ContentItem.content_scope == "GLOBAL")
     if requested_scope in {"INBOX", "CREATOR"}:
-        assigned_global_ids = select(ProfileContentLink.content_id).where(
-            ProfileContentLink.user_id == user.id,
-            ProfileContentLink.status == "ACTIVE",
-            ProfileContentLink.source_scope == "GLOBAL",
-        )
-        creator_crawled_ids = (
-            select(CrawlJobContent.content_id)
-            .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+        assigned_global_ids = (
+            select(ProfileContentLink.content_id)
+            .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
             .where(
-                CrawlJob.requested_by == user.id,
-                CrawlJob.content_scope == "PRIVATE",
+                SocialProfile.user_id == user.id,
+                ProfileContentLink.status == "ACTIVE",
+                ProfileContentLink.source_scope == "GLOBAL",
             )
         )
+        creator_crawled_ids = _private_content_ids_for_user(user.id)
         return query.filter(
             or_(
                 own_private,
@@ -72,9 +81,10 @@ def _content_order(content_scope: str | None, crawl_job_id: uuid.UUID | None, us
         )
         last_recommendation = (
             select(func.max(ProfileContentLink.recommended_at))
+            .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
             .where(
                 ProfileContentLink.content_id == ContentItem.id,
-                ProfileContentLink.user_id == user.id,
+                SocialProfile.user_id == user.id,
                 ProfileContentLink.status == "ACTIVE",
             )
             .correlate(ContentItem)
@@ -266,8 +276,14 @@ def _get_visible_content(db: Session, content_id: uuid.UUID, user: User) -> Cont
         return content
     if content.content_scope == "GLOBAL":
         return content
-    if content.content_scope == "PRIVATE" and content.owner_user_id == user.id:
-        return content
+    if content.content_scope == "PRIVATE":
+        owner_link = db.query(CrawlJobContent.job_id).join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id).filter(
+            CrawlJobContent.content_id == content.id,
+            CrawlJob.requested_by == user.id,
+            CrawlJob.content_scope == "PRIVATE",
+        ).first()
+        if owner_link:
+            return content
     raise HTTPException(status_code=404, detail="Content not found")
 
 
@@ -340,14 +356,16 @@ def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, u
     profiles = db.query(SocialProfile).filter(SocialProfile.user_id == user.id).order_by(SocialProfile.created_at.desc()).all()
     links = (
         db.query(ProfileContentLink)
-        .filter(ProfileContentLink.user_id == user.id, ProfileContentLink.content_id == content.id)
+        .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
+        .filter(SocialProfile.user_id == user.id, ProfileContentLink.content_id == content.id)
         .all()
     )
     link_by_profile = {link.profile_id: link for link in links}
     workflows = (
         db.query(MediaWorkflow)
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .filter(
-            MediaWorkflow.user_id == user.id,
+            SocialProfile.user_id == user.id,
             MediaWorkflow.primary_content_id == content.id,
         )
         .order_by(MediaWorkflow.created_at.desc())
@@ -825,10 +843,10 @@ def create_content(
     content_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
     
     # Check for duplicates
-    existing = db.query(ContentItem).filter(
-        ContentItem.content_hash == content_hash,
-        ContentItem.owner_user_id == user.id if requested_scope == "PRIVATE" else True
-    ).first()
+    duplicate_query = db.query(ContentItem).filter(ContentItem.content_hash == content_hash)
+    if requested_scope == "PRIVATE":
+        duplicate_query = duplicate_query.filter(ContentItem.id.in_(_private_content_ids_for_user(user.id)))
+    existing = duplicate_query.first()
     
     if existing:
         raise HTTPException(
@@ -854,7 +872,6 @@ def create_content(
         summary=payload.summary,
         language=payload.language,
         content_scope=requested_scope,
-        owner_user_id=user.id if requested_scope == "PRIVATE" else None,
         created_by_type="MANUAL",
         status="AVAILABLE",  # Manual content is immediately available
         published_at=payload.published_at,
@@ -866,6 +883,26 @@ def create_content(
     )
     
     db.add(content)
+    db.flush()
+
+    if requested_scope == "PRIVATE":
+        manual_job = CrawlJob(
+            name=f"Manual content import - {content.canonical_title[:80]}",
+            crawl_mode="MANUAL_IMPORT",
+            content_scope="PRIVATE",
+            created_by_type="CREATOR",
+            status="SUCCEEDED",
+            current_stage="COMPLETED",
+            total_discovered=1,
+            total_crawled=1,
+            total_normalized=1,
+            progress_percent=100,
+            requested_by=user.id,
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(manual_job)
+        db.flush()
+        db.add(CrawlJobContent(job_id=manual_job.id, content_id=content.id, is_duplicate=False))
     
     # Store full_text in MongoDB if provided
     if payload.full_text:

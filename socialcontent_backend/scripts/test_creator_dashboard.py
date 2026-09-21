@@ -1,11 +1,34 @@
 import unittest
 from types import SimpleNamespace
+from uuid import uuid4
 
 from fastapi import HTTPException
 
 from app.api.deps import require_creator
 from app.api.routes import creator_dashboard as creator_routes
-from app.services.creator_dashboard import QUEUE_STATUSES, _grouped_counts
+from app.services.creator_dashboard import QUEUE_STATUSES, creator_dashboard_overview, _grouped_counts
+
+
+class QueryChain:
+    def filter(self, *args, **kwargs):
+        return self
+
+    def group_by(self, *args, **kwargs):
+        return self
+
+    def join(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return []
+
+    def scalar(self):
+        return 0
+
+
+class FakeDb:
+    def query(self, *args, **kwargs):
+        return QueryChain()
 
 
 class CreatorDashboardAuthorizationTests(unittest.TestCase):
@@ -40,6 +63,13 @@ class CreatorDashboardContractTests(unittest.TestCase):
             QUEUE_STATUSES,
             ("needs_approval", "approved", "queued", "publishing", "published", "failed"),
         )
+
+    def test_overview_query_uses_current_model_contract(self):
+        result = creator_dashboard_overview(FakeDb(), uuid4())
+
+        self.assertEqual(result["recommendations_ready"], 0)
+        self.assertEqual(result["profiles"]["total"], 0)
+        self.assertEqual(result["projects"]["total"], 0)
 
 
 if __name__ == "__main__":

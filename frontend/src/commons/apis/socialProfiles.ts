@@ -267,11 +267,6 @@ export type SocialPost = {
   published_at: string
   created_at: string
   latest_metric?: SocialPostMetric | null
-  growth?: {
-    views_1h?: number | null
-    views_24h?: number | null
-    views_7d?: number | null
-  } | null
   metrics?: SocialPostMetric[]
 }
 

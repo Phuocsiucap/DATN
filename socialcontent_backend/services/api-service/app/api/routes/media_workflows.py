@@ -81,6 +81,35 @@ def _visible_in_video_workspace_filter():
     return MediaWorkflow.status.in_(VIDEO_WORKSPACE_STATUSES)
 
 
+def _owned_workflow_query(db: Session, user: User, *, for_update: bool = False):
+    query = (
+        db.query(MediaWorkflow)
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(SocialProfile.user_id == user.id)
+    )
+    return query.with_for_update() if for_update else query
+
+
+def _get_owned_workflow(
+    db: Session,
+    workflow_id: uuid.UUID,
+    user: User,
+    *,
+    for_update: bool = False,
+    allow_admin: bool = False,
+) -> MediaWorkflow:
+    if allow_admin and user.is_system_admin:
+        query = db.query(MediaWorkflow)
+        if for_update:
+            query = query.with_for_update()
+        workflow = query.filter(MediaWorkflow.id == workflow_id).first()
+    else:
+        workflow = _owned_workflow_query(db, user, for_update=for_update).filter(MediaWorkflow.id == workflow_id).first()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return workflow
+
+
 class MediaWorkflowSourceRef(BaseModel):
     type: Literal["content", "story"]
     id: uuid.UUID
@@ -119,7 +148,7 @@ def list_media_workflows(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(MediaWorkflow).filter(MediaWorkflow.user_id == user.id)
+    query = _owned_workflow_query(db, user)
     if video_workspace_only:
         query = query.filter(_visible_in_video_workspace_filter())
     workflows = query.order_by(MediaWorkflow.updated_at.desc()).limit(200).all()
@@ -138,7 +167,7 @@ def list_video_workspace(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    filters = [MediaWorkflow.user_id == user.id, _visible_in_video_workspace_filter()]
+    filters = [SocialProfile.user_id == user.id, _visible_in_video_workspace_filter()]
     if profile_id:
         filters.append(MediaWorkflow.profile_id == profile_id)
     if series_id:
@@ -152,7 +181,12 @@ def list_video_workspace(
     if search and search.strip():
         filters.append(MediaWorkflow.title.ilike(f"%{search.strip()}%"))
 
-    total = db.query(MediaWorkflow.id).filter(*filters).count()
+    total = (
+        db.query(MediaWorkflow.id)
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(*filters)
+        .count()
+    )
     rows = (
         db.query(
             MediaWorkflow.id,
@@ -188,9 +222,7 @@ def list_video_workspace(
 
 @router.get("/{workflow_id:uuid}")
 def get_media_workflow(workflow_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.get(MediaWorkflow, workflow_id)
-    if not workflow or workflow.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Content workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user)
     return serialize_workflow(workflow, db)
 
 
@@ -200,9 +232,7 @@ def get_video_workspace(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    workflow = db.get(MediaWorkflow, workflow_id)
-    if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
-        raise HTTPException(status_code=404, detail="Video workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user, allow_admin=True)
 
     profile = (
         db.query(SocialProfile.id, SocialProfile.profile_name, SocialProfile.platform)
@@ -279,17 +309,18 @@ def get_video_workflow_progress(
     workflow = (
         db.query(
             MediaWorkflow.id,
-            MediaWorkflow.user_id,
+            SocialProfile.user_id.label("profile_user_id"),
             MediaWorkflow.status,
             MediaWorkflow.current_stage,
             MediaWorkflow.progress_percent,
             MediaWorkflow.updated_at,
             MediaWorkflow.artifacts_jsonb,
         )
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
         .filter(MediaWorkflow.id == workflow_id)
         .first()
     )
-    if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
+    if not workflow or (not user.is_system_admin and workflow.profile_user_id != user.id):
         raise HTTPException(status_code=404, detail="Video workflow not found")
     tasks = _workflow_tasks(db, workflow.id, limit=12)
     active_task = _select_active_task(tasks)
@@ -322,7 +353,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
     accessible_stories: dict[uuid.UUID, Story] = {}
     for content_id in dict.fromkeys(payload.content_ids):
         content = db.get(ContentItem, content_id)
-        if not content or not _can_use_content(content, user):
+        if not content or not _can_use_content(db, content, user):
             raise HTTPException(status_code=404, detail=f"ContentItem not found or inaccessible: {content_id}")
         accessible_contents[content_id] = content
     for story_id in dict.fromkeys(payload.story_ids):
@@ -341,7 +372,6 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
 
     primary_category_payload = content_category_payload(primary_content)
     workflow = MediaWorkflow(
-        user_id=user.id,
         profile_id=profile.id,
         title=title,
         status="READY",
@@ -398,9 +428,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
 
 @router.post("/{workflow_id:uuid}/approve")
 def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
-    if not workflow or workflow.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user, for_update=True)
     from app.api.routes.generate_video import _ensure_no_active_video_task
     _ensure_no_active_video_task(db, workflow, allow_rejected=True)
     was_rejected = workflow.status == "REJECTED"
@@ -435,9 +463,7 @@ def approve_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = D
 
 @router.post("/{workflow_id:uuid}/reject")
 def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
-    if not workflow or workflow.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user, for_update=True)
     from app.api.routes.generate_video import _ensure_no_active_video_task
     _ensure_no_active_video_task(db, workflow, allow_rejected=True)
     was_rejected = workflow.status == "REJECTED"
@@ -465,9 +491,7 @@ def reject_media_workflow(workflow_id: uuid.UUID, payload: dict, user: User = De
 
 @router.patch("/{workflow_id:uuid}")
 def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    workflow = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update().first()
-    if not workflow or workflow.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user, for_update=True)
 
     data = payload.model_dump(exclude_unset=True)
     title = data.pop("title", None)
@@ -485,7 +509,7 @@ def update_media_workflow(workflow_id: uuid.UUID, payload: MediaWorkflowUpdateRe
     if has_series_id:
         if series_id:
             series = db.get(ContentSeries, series_id) if series_id == old_series_id else lock_active_series(db, series_id, profile_id=workflow.profile_id)
-            if not series or series.user_id != user.id:
+            if not series or series.profile_id != workflow.profile_id:
                 raise HTTPException(status_code=409, detail="Content series không tồn tại, không active hoặc đã đủ số part")
             workflow.series_id = series_id
         else:
@@ -567,9 +591,7 @@ def delete_media_workflow(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    workflow = db.get(MediaWorkflow, workflow_id)
-    if not workflow or (not user.is_system_admin and workflow.user_id != user.id):
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    workflow = _get_owned_workflow(db, workflow_id, user, allow_admin=True)
 
     old_series_id = workflow.series_id
     db.query(KafkaTask).filter(
@@ -627,14 +649,27 @@ def _source_ref_title(
     return story.canonical_name if story else None
 
 
-def _can_use_content(content: ContentItem, user: User) -> bool:
-    return user.is_system_admin or content.content_scope == "GLOBAL" or (content.content_scope == "PRIVATE" and content.owner_user_id == user.id)
+def _can_use_content(db: Session, content: ContentItem, user: User) -> bool:
+    if user.is_system_admin or content.content_scope == "GLOBAL":
+        return True
+    if content.content_scope != "PRIVATE":
+        return False
+    return bool(
+        db.query(CrawlJobContent.job_id)
+        .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
+        .filter(
+            CrawlJobContent.content_id == content.id,
+            CrawlJob.requested_by == user.id,
+            CrawlJob.content_scope == "PRIVATE",
+        )
+        .first()
+    )
 
 
 def _can_use_story(db: Session, story: Story, user: User) -> bool:
     if story.content_id:
         content = db.get(ContentItem, story.content_id)
-        return bool(content and _can_use_content(content, user))
+        return bool(content and _can_use_content(db, content, user))
     return user.is_system_admin
 
 

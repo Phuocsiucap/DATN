@@ -140,6 +140,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     min_similarity: 0.62,
     avoid_similarity_threshold: 0.72,
     max_system_recommendations: 20,
+    require_video: false,
     auto_project_queue_enabled: false,
     video_render_mode: 'manual',
     auto_queue_enabled: true,
@@ -454,6 +455,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
+  const handleOpenPublishedPosts = (profileId: string) => {
+    window.history.pushState(null, '', `/social-account/${encodeURIComponent(profileId)}`)
+    window.dispatchEvent(new Event('popstate'))
+  }
+
   const updateSchedulerField = (key: keyof SchedulerSettings, value: string) => {
     const num = Number(value)
     setSchedulerForm(prev => ({
@@ -543,7 +549,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 
   return (
     <PageLayout
-      title="Quản lý kênh social"
+      title="Social account"
       description="Kết nối các kênh mạng xã hội, quản lý thông tin profile và cấu hình chiến lược hệ thống tự động hóa."
       actions={
         <div className="flex flex-wrap items-center gap-2">
@@ -601,6 +607,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   qrActive={activeProfileId === profile.id}
                   syncing={syncingProfileId === profile.id}
                   onOpenStrategy={() => void openProfileStrategyDialog(profile)}
+                  onOpenPublishedPosts={() => handleOpenPublishedPosts(profile.id)}
                   onSync={() => void handleSyncProfile(profile.id)}
                   onQr={() => void handleStartQr(profile.id)}
                   onStopQr={() => void handleStopQr(profile.id)}
@@ -801,6 +808,7 @@ function SocialProfileCard({
   qrActive,
   syncing,
   onOpenStrategy,
+  onOpenPublishedPosts,
   onSync,
   onQr,
   onStopQr,
@@ -810,6 +818,7 @@ function SocialProfileCard({
   qrActive: boolean
   syncing: boolean
   onOpenStrategy: () => void
+  onOpenPublishedPosts: () => void
   onSync: () => void
   onQr: () => void
   onStopQr: () => void
@@ -822,7 +831,18 @@ function SocialProfileCard({
   ].filter((item) => item.value !== null)
 
   return (
-    <div className="rounded-xl border border-[var(--outline-variant)] bg-white p-5 shadow-sm transition hover:shadow-md hover:border-slate-300 flex flex-col justify-between space-y-4">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenPublishedPosts}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onOpenPublishedPosts()
+      }}
+      className="rounded-xl border border-[var(--outline-variant)] bg-white p-5 shadow-sm transition hover:shadow-md hover:border-slate-300 flex flex-col justify-between space-y-4 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      title="Mở video đã đăng của tài khoản này"
+    >
       <div>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -847,7 +867,10 @@ function SocialProfileCard({
 
           <button
             type="button"
-            onClick={onDelete}
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete()
+            }}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
             title="Xóa kênh social"
           >
@@ -871,7 +894,10 @@ function SocialProfileCard({
         <AppButton
           className="w-full justify-center text-xs font-bold"
           icon={<SlidersHorizontal size={15} />}
-          onClick={onOpenStrategy}
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenStrategy()
+          }}
         >
           Cấu hình chiến lược hệ thống
         </AppButton>
@@ -882,7 +908,10 @@ function SocialProfileCard({
             className="w-full justify-center text-xs"
             icon={<RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />}
             disabled={syncing}
-            onClick={onSync}
+            onClick={(event) => {
+              event.stopPropagation()
+              onSync()
+            }}
           >
             {syncing ? 'Đang sync' : 'Đồng bộ'}
           </AppButton>
@@ -892,7 +921,11 @@ function SocialProfileCard({
               variant="secondary"
               className="w-full justify-center text-xs"
               icon={<QrCode size={13} />}
-              onClick={qrActive ? onStopQr : onQr}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (qrActive) onStopQr()
+                else onQr()
+              }}
             >
               {qrActive ? 'Dừng QR' : 'Mở QR'}
             </AppButton>

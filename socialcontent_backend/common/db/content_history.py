@@ -14,6 +14,7 @@ from common.db.models import (
     PlanningRun,
     ProfileContentLink,
     PublishingQueueItem,
+    SocialProfile,
 )
 
 
@@ -37,16 +38,28 @@ def processed_content_ids_for_user(
     candidate_query = (
         db.query(PlanningCandidate.content_id)
         .join(PlanningRun, PlanningRun.id == PlanningCandidate.planning_run_id)
-        .filter(PlanningRun.user_id == user_id)
+        .join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+        .filter(SocialProfile.user_id == user_id)
     )
-    workflow_query = db.query(MediaWorkflow.primary_content_id).filter(MediaWorkflow.user_id == user_id)
-    recommendation_query = db.query(ProfileContentLink.content_id).filter(
-        ProfileContentLink.user_id == user_id,
-        ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
-        ProfileContentLink.recommended_at.is_not(None),
+    workflow_query = (
+        db.query(MediaWorkflow.primary_content_id)
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .filter(SocialProfile.user_id == user_id)
     )
-    publishing_query = db.query(PublishingQueueItem.content_id).filter(
-        PublishingQueueItem.user_id == user_id,
+    recommendation_query = (
+        db.query(ProfileContentLink.content_id)
+        .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
+        .filter(
+            SocialProfile.user_id == user_id,
+            ProfileContentLink.relation_type == "CONTENT_RECOMMENDATION",
+            ProfileContentLink.recommended_at.is_not(None),
+        )
+    )
+    publishing_query = (
+        db.query(MediaWorkflow.primary_content_id)
+        .join(PublishingQueueItem, PublishingQueueItem.workflow_id == MediaWorkflow.id)
+        .join(SocialProfile, SocialProfile.id == PublishingQueueItem.profile_id)
+        .filter(SocialProfile.user_id == user_id)
     )
 
     if current_crawl_job_id:
@@ -58,7 +71,7 @@ def processed_content_ids_for_user(
         candidate_query = candidate_query.filter(PlanningCandidate.content_id.in_(requested_ids))
         workflow_query = workflow_query.filter(MediaWorkflow.primary_content_id.in_(requested_ids))
         recommendation_query = recommendation_query.filter(ProfileContentLink.content_id.in_(requested_ids))
-        publishing_query = publishing_query.filter(PublishingQueueItem.content_id.in_(requested_ids))
+        publishing_query = publishing_query.filter(MediaWorkflow.primary_content_id.in_(requested_ids))
 
     rows = (
         *previous_crawl_query.all(),

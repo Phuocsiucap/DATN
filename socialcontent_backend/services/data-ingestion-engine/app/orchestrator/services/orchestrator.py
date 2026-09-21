@@ -79,16 +79,22 @@ class CrawlOrchestrator:
         )
 
         for source in job.sources:
+            task_payload = {
+                "job_id": str(job.id),
+                "job_source_id": str(source.id),
+                "source_type": source.source_type,
+                "source_url": source.source_url,
+                "keywords": source.keywords,
+                "configuration": source.configuration,
+                "external_reference": source.source_url or ",".join(source.keywords),
+            }
             task = KafkaTask(
                 reference_id=job.id,
                 reference_type="crawl_job",
                 task_type="CRAWL_URL",
                 status="QUEUED",
                 max_attempts=max(int((source.configuration or {}).get("max_attempts", 4)), 1),
-                payload_jsonb={
-                    "job_source_id": str(source.id),
-                    "external_reference": source.source_url or ",".join(source.keywords)
-                }
+                payload_jsonb=task_payload,
             )
             db.add(task)
             db.flush()
@@ -104,12 +110,7 @@ class CrawlOrchestrator:
             task_messages.append(
                 {
                     "task_id": str(task.id),
-                    "job_id": str(job.id),
-                    "job_source_id": str(source.id),
-                    "source_type": source.source_type,
-                    "source_url": source.source_url,
-                    "keywords": source.keywords,
-                    "configuration": source.configuration,
+                    **task_payload,
                 }
             )
 

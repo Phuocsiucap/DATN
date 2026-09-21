@@ -70,10 +70,15 @@ def log_prompt_run(
 
         if not parsed_user_id and parsed_ref_id:
             try:
-                from common.db.models import MediaWorkflow
-                workflow = db.get(MediaWorkflow, parsed_ref_id)
-                if workflow and workflow.user_id:
-                    parsed_user_id = workflow.user_id
+                from common.db.models import MediaWorkflow, SocialProfile
+                row = (
+                    db.query(SocialProfile.user_id)
+                    .join(MediaWorkflow, MediaWorkflow.profile_id == SocialProfile.id)
+                    .filter(MediaWorkflow.id == parsed_ref_id)
+                    .first()
+                )
+                if row and row[0]:
+                    parsed_user_id = row[0]
             except Exception:
                 pass
 

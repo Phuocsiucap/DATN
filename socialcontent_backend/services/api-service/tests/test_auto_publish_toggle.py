@@ -85,6 +85,14 @@ class AutoPublishStrategyTests(unittest.TestCase):
         self.service.update_strategy(self.db, self.profile, SocialProfileStrategyRequest(schedule_times=""))
         self.assertEqual(self.strategy.schedule_times, "")
 
+    def test_schedule_times_accepts_ranges_and_vietnamese_hour_notation(self):
+        self.service.update_strategy(
+            self.db,
+            self.profile,
+            SocialProfileStrategyRequest(schedule_times="08:30-12:30,16h-21:30,20h15"),
+        )
+        self.assertEqual(self.strategy.schedule_times, "08:30-12:30,16:00-21:30,20:15")
+
 
 class AutoPublishSchedulerTests(unittest.TestCase):
     def setUp(self):

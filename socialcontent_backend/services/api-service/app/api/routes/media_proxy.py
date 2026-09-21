@@ -1,4 +1,5 @@
 from typing import AsyncIterator
+import re
 from urllib.parse import quote, urljoin
 
 import httpx
@@ -8,6 +9,7 @@ from fastapi.responses import Response, StreamingResponse
 router = APIRouter()
 
 TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+HLS_URI_ATTR_RE = re.compile(r'URI=(["\'])(?P<uri>[^"\']+)\1', re.IGNORECASE)
 
 
 def _build_headers(request: Request) -> dict[str, str]:
@@ -39,6 +41,35 @@ async def _stream_response(client: httpx.AsyncClient, res: httpx.Response) -> As
         await client.aclose()
 
 
+def _proxied_media_url(base_proxy_url: str, media_url: str) -> str:
+    return f"{base_proxy_url}{quote(media_url, safe='')}"
+
+
+def _rewrite_hls_tag_uris(line: str, playlist_url: str, base_proxy_url: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        uri = match.group("uri").strip()
+        if not uri or uri.startswith("data:"):
+            return match.group(0)
+        absolute_uri = urljoin(playlist_url, uri)
+        return f'URI={match.group(1)}{_proxied_media_url(base_proxy_url, absolute_uri)}{match.group(1)}'
+
+    return HLS_URI_ATTR_RE.sub(replace, line)
+
+
+def _rewrite_hls_playlist(body: str, playlist_url: str, base_proxy_url: str) -> str:
+    rewritten_lines = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            absolute_uri = urljoin(playlist_url, stripped)
+            rewritten_lines.append(_proxied_media_url(base_proxy_url, absolute_uri))
+        elif stripped.startswith("#"):
+            rewritten_lines.append(_rewrite_hls_tag_uris(line, playlist_url, base_proxy_url))
+        else:
+            rewritten_lines.append(line)
+    return "\n".join(rewritten_lines)
+
+
 @router.get("")
 async def media_proxy(request: Request, url: str = Query(..., description="Media URL to proxy")):
     if not url.startswith("http"):
@@ -57,15 +88,7 @@ async def media_proxy(request: Request, url: str = Query(..., description="Media
         if res.status_code >= 400:
             raise HTTPException(status_code=res.status_code, detail="Proxy failed")
 
-        rewritten_lines = []
-        for line in res.text.splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                absolute_uri = urljoin(url, stripped)
-                rewritten_lines.append(f"{base_proxy_url}{quote(absolute_uri, safe='')}")
-            else:
-                rewritten_lines.append(line)
-        return Response(content="\n".join(rewritten_lines), media_type="application/vnd.apple.mpegurl")
+        return Response(content=_rewrite_hls_playlist(res.text, url, base_proxy_url), media_type="application/vnd.apple.mpegurl")
 
     client = httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True)
     try:

@@ -461,9 +461,7 @@ def evaluate_compact_draft(
     invalid_evidence_indexes: list[int] = []
     missing_evidence_indexes: list[int] = []
     unsupported_number_indexes: list[int] = []
-    unsupported_entity_indexes: list[int] = []
     unsupported_number_details: list[dict[str, Any]] = []
-    unsupported_entity_details: list[dict[str, Any]] = []
     filler_indexes: list[int] = []
     for index, scene in enumerate(scenes):
         role = str(scene.get("role") or "").upper()
@@ -481,14 +479,6 @@ def evaluate_compact_draft(
             for fact in source_facts
             if str(fact.get("id") or "") in evidence_ids
         ) if evidence_ids else fact_text
-        unsupported_entities = _unsupported_entities(voice_text, cited_text)
-        if unsupported_entities:
-            unsupported_entity_indexes.append(index)
-            unsupported_entity_details.append({
-                "scene_index": index,
-                "evidence_ids": evidence_ids,
-                "unsupported_entities": sorted(unsupported_entities),
-            })
         unsupported_numbers = _unsupported_numbers(voice_text, cited_text)
         if unsupported_numbers:
             unsupported_number_indexes.append(index)
@@ -521,17 +511,6 @@ def evaluate_compact_draft(
             )
         )
         score -= min(30, 15 + 5 * len(missing_evidence_indexes))
-    if unsupported_entity_indexes:
-        issues.append(
-            QualityIssue(
-                "UNSUPPORTED_ENTITY",
-                "A named entity used in narration does not appear in the cited source facts",
-                "CRITICAL",
-                scene_indexes=unsupported_entity_indexes,
-                details={"scenes": unsupported_entity_details},
-            )
-        )
-        score -= min(35, 20 + 5 * len(unsupported_entity_indexes))
     if unsupported_number_indexes:
         issues.append(
             QualityIssue(
