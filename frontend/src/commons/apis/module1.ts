@@ -278,6 +278,97 @@ export type ContentStory = {
   created_at: string
 }
 
+export type StoryEpisodePublishStatus = {
+  content_id: string
+  title: string
+  summary?: string | null
+  episode_order?: number | null
+  content_status?: string | null
+  source_type?: string | null
+  source_url?: string | null
+  thumbnail_url?: string | null
+  publish_status: 'PUBLISHED' | 'QUEUED' | 'WORKFLOW_READY' | 'NOT_PUBLISHED' | string
+  workflow_id?: string | null
+  workflow_status?: string | null
+  queue_item_id?: string | null
+  queue_status?: string | null
+  scheduled_at?: string | null
+  published_at?: string | null
+  post_id?: string | null
+  post_url?: string | null
+  platform?: string | null
+  profile_name?: string | null
+}
+
+export type StoryPublishStatus = {
+  id: string
+  canonical_name: string
+  normalized_name: string
+  language: string
+  completion_status: string
+  grouping_confidence: number
+  total_episodes: number
+  published_count: number
+  in_progress_count: number
+  unpublished_count: number
+  source_type?: string | null
+  created_at: string
+  updated_at?: string
+  episodes: StoryEpisodePublishStatus[]
+}
+
+export type BilibiliOcrSegment = {
+  index: number
+  start?: number | null
+  end?: number | null
+  raw_text?: string | null
+  translated_text?: string | null
+  confidence?: number | null
+}
+
+export type BilibiliOcrEpisodeProgress = {
+  id: string
+  content_id?: string | null
+  workflow_id?: string | null
+  reference_type?: string | null
+  episode_index?: number | null
+  title?: string | null
+  url?: string | null
+  bvid?: string | null
+  aid?: string | number | null
+  cid?: string | number | null
+  thumbnail_url?: string | null
+  status: string
+  current_stage?: string | null
+  progress_percent: number
+  error_message?: string | null
+  raw_text?: string | null
+  translated_text?: string | null
+  segments: BilibiliOcrSegment[]
+  created_at: string
+  updated_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+export type BilibiliOcrProgress = {
+  content_id: string
+  title: string
+  source_type: 'BILIBILI' | string
+  expected_episode_count: number
+  overall: {
+    status: string
+    total: number
+    queued: number
+    active: number
+    completed: number
+    failed: number
+    progress_percent: number
+  }
+  episodes: BilibiliOcrEpisodeProgress[]
+  updated_at?: string | null
+}
+
 export type VnExpressRssFeed = {
   key: string
   label: string
@@ -324,6 +415,11 @@ export const fetchContentStoriesApi = async () => {
   return data as ContentStory[]
 }
 
+export const fetchStoryPublishStatusApi = async () => {
+  const { data } = await api.get('/stories/publish-status')
+  return data as { items: StoryPublishStatus[] }
+}
+
 export const fetchFinalContentViewApi = async (params?: {
   crawl_job_id?: string
   content_scope?: string
@@ -368,6 +464,42 @@ export type ContentCreateInput = {
 export const createContentApi = async (payload: ContentCreateInput) => {
   const { data } = await api.post('/contents', payload)
   return data as ContentItem
+}
+
+export const queueBilibiliOcrApi = async (contentId: string, episodeIndices?: number[]) => {
+  const payload = episodeIndices?.length ? { episode_indices: episodeIndices } : undefined
+  const { data } = await api.post(`/contents/${contentId}/bilibili/ocr-queue`, payload)
+  return data as { content_id: string; queued: number; reused: number; task_ids: string[] }
+}
+
+export const createBilibiliTranslationWorkflowApi = async (
+  contentId: string,
+  payload: { profile_id: string; episode_indices?: number[]; title?: string },
+) => {
+  const { data } = await api.post(`/contents/${contentId}/bilibili/translation-workflow`, payload)
+  return data as {
+    workflow: {
+      id: string
+      title: string
+      status: string
+      profile_id: string
+      primary_content_id?: string | null
+      current_stage?: string | null
+      progress_percent?: number
+    }
+    ocr_queue: { content_id: string; queued: number; reused: number; task_ids: string[] }
+    reused: boolean
+  }
+}
+
+export const queueBilibiliStoryOcrApi = async (storyId: string) => {
+  const { data } = await api.post(`/stories/${storyId}/bilibili/ocr-queue`)
+  return data as { story_id: string; queued: number; reused: number; task_ids: string[]; contents: Array<{ content_id: string; queued: number; reused: number; task_ids: string[] }> }
+}
+
+export const fetchBilibiliOcrProgressApi = async (contentId: string) => {
+  const { data } = await api.get(`/contents/${contentId}/bilibili/ocr-progress`)
+  return data as BilibiliOcrProgress
 }
 
 // Crawl Source Management

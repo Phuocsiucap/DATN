@@ -25,7 +25,15 @@ export function cleanMediaUrl(value?: unknown) {
 
 export function mediaPlaybackUrl(item?: MediaLike | null) {
   if (!item) return ''
-  const url = cleanMediaUrl(item.embed_url) || cleanMediaUrl(item.storage_url) || cleanMediaUrl(item.source_url)
+  let url = cleanMediaUrl(item.embed_url) || cleanMediaUrl(item.storage_url) || cleanMediaUrl(item.source_url)
+  
+  if (url && url.includes('bilibili.com/video/') && !url.includes('player.bilibili.com')) {
+    const match = url.match(/\/video\/(BV[a-zA-Z0-9]+)/)
+    if (match) {
+      url = `https://player.bilibili.com/player.html?bvid=${match[1]}&autoplay=0`
+    }
+  }
+  
   return mediaProxyPlaybackUrl(url)
 }
 
@@ -80,6 +88,13 @@ export function MediaAssetPreview({
 
   if (isVideo) {
     if (!compact && controls && playbackUrl) {
+      if (playbackUrl.includes('player.bilibili.com')) {
+        return (
+          <div className={shellClass}>
+            <iframe src={playbackUrl} width="100%" height="100%" frameBorder="0" scrolling="no" allowFullScreen />
+          </div>
+        )
+      }
       return (
         <div className={shellClass}>
           <ReactPlayer src={playbackUrl} controls light={previewUrl || undefined} width="100%" height="100%" />

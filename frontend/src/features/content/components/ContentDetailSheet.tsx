@@ -1,8 +1,16 @@
-import { useState } from 'react'
-import { ChevronDown, ExternalLink, FileText, Loader2, Wand2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ExternalLink, FileText, Languages, Loader2, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createDirectScriptApi } from '@/commons/apis/generateVideo'
-import type { ContentDetail, FinalContentItem, ProfileContentMatch } from '@/commons/apis/module1'
+import {
+  createBilibiliTranslationWorkflowApi,
+  fetchBilibiliOcrProgressApi,
+  type BilibiliOcrEpisodeProgress,
+  type BilibiliOcrProgress,
+  type ContentDetail,
+  type FinalContentItem,
+  type ProfileContentMatch,
+} from '@/commons/apis/module1'
 import { AppButton, EmptyBlock, PlatformIcon, SocialProfileAvatar, StatusPill, Thumbnail } from '@/commons/component/social-ui'
 import { SocialPostPreview } from '@/commons/component/social-previews'
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/commons/component/ui/sheet'
@@ -27,6 +35,7 @@ const formatSimilarity = (value?: number | null) => {
 }
 
 type ContentViewItem = FinalContentItem & Partial<ContentDetail>
+type EpisodeRecord = Record<string, unknown>
 const getContentMedia = (item: ContentViewItem) => item.media_jsonb || item.media || []
 const countByMediaType = (item: ContentViewItem, pattern: RegExp) => {
   const counts = item.media_counts
@@ -48,6 +57,26 @@ const getMediaSrc = (item: ContentViewItem) => {
   const media = (item.media_jsonb || item.media || [])[0]
   return item.thumbnail_url || media?.thumbnail_url || media?.source_url || media?.storage_url || null
 }
+const getEpisodeItems = (item: ContentViewItem) => {
+  const metadata = item.source_metadata || {}
+  const episodes = metadata.episodes
+  return Array.isArray(episodes) ? episodes.filter((episode): episode is EpisodeRecord => Boolean(episode && typeof episode === 'object')) : []
+}
+const formatDuration = (value: unknown) => {
+  const seconds = Number(value)
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${String(secs).padStart(2, '0')}`
+}
+const formatTimecode = (value?: number | null) => {
+  const seconds = Number(value)
+  if (!Number.isFinite(seconds) || seconds < 0) return '--:--'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+const isBilibiliItem = (item: ContentViewItem | null) => String(item?.source_type || '').toUpperCase() === 'BILIBILI'
 
 function SkeletonLine({ className }: { className: string }) {
   return <div className={`animate-pulse bg-[#eef1f7] ${className}`} />
@@ -81,6 +110,41 @@ export function ContentDetailSheet({
   onOpenModule2?: (jobId?: string) => void
 }) {
   const [creatingProfileId, setCreatingProfileId] = useState<string | null>(null)
+  const [ocrProgress, setOcrProgress] = useState<BilibiliOcrProgress | null>(null)
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [translatingKey, setTranslatingKey] = useState<string | null>(null)
+  const itemId = item?.id || ''
+  const isBilibili = isBilibiliItem(item)
+  const ocrHasActiveTasks = Boolean(ocrProgress?.episodes.some((episode) => ['PENDING', 'RUNNING', 'PROCESSING'].includes(episode.status)))
+  const ocrTranslatedSegments = useMemo(
+    () => ocrProgress?.episodes.flatMap((episode) => episode.segments.filter((segment) => segment.translated_text)) || [],
+    [ocrProgress],
+  )
+
+  useEffect(() => {
+    if (!itemId || !isBilibili) {
+      setOcrProgress(null)
+      return
+    }
+    let disposed = false
+    const loadProgress = async (quiet = false) => {
+      if (!quiet) setOcrLoading(true)
+      try {
+        const data = await fetchBilibiliOcrProgressApi(itemId)
+        if (!disposed) setOcrProgress(data)
+      } catch {
+        if (!disposed) setOcrProgress(null)
+      } finally {
+        if (!quiet && !disposed) setOcrLoading(false)
+      }
+    }
+    void loadProgress()
+    const timer = window.setInterval(() => void loadProgress(true), 2500)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [itemId, isBilibili])
 
   if (!item && !loading) return null
 
@@ -109,6 +173,7 @@ export function ContentDetailSheet({
   const mediaItems = getContentMedia(item)
   const imageItems = mediaItems.filter((media) => /image/i.test(String(media.media_type || media.mime_type || '')))
   const videoItems = mediaItems.filter((media) => /video/i.test(String(media.media_type || media.mime_type || '')) || ['hls', 'mp4'].includes(String(media.format || '').toLowerCase()))
+  const episodeItems = getEpisodeItems(item)
   const sourceUrl = getSourceUrl(item)
   const profileMatches = item.profile_matches || []
   const tiktokMatch = profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok' && match.can_create_script)
@@ -141,9 +206,36 @@ export function ContentDetailSheet({
     }
   }
 
+  const queueTranslation = async (episodeIndex?: number) => {
+    if (!item?.id || !isBilibili || translatingKey) return
+    const targetProfile = tiktokMatch || profileMatches.find((match) => match.can_create_script) || profileMatches[0]
+    if (!targetProfile?.profile_id) {
+      toast.error('Chưa có kênh social phù hợp để tạo workflow dịch.')
+      return
+    }
+    const key = episodeIndex ? `episode-${episodeIndex}` : 'all'
+    setTranslatingKey(key)
+    try {
+      const result = await createBilibiliTranslationWorkflowApi(item.id, {
+        profile_id: targetProfile.profile_id,
+        episode_indices: episodeIndex ? [episodeIndex] : undefined,
+        title: episodeIndex ? `${item.canonical_title || item.normalized_title || 'Bilibili'} · tập ${episodeIndex}` : undefined,
+      })
+      toast.success(`Đã tạo workflow dịch cho ${targetProfile.profile_name}.`)
+      const progress = await fetchBilibiliOcrProgressApi(item.id)
+      setOcrProgress(progress)
+      onOpenModule2?.(result.workflow.id)
+    } catch (error: unknown) {
+      const candidate = error as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(candidate.response?.data?.detail || candidate.message || 'Không thể tạo workflow dịch.')
+    } finally {
+      setTranslatingKey(null)
+    }
+  }
+
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="max-w-[720px]">
+      <SheetContent side="right" className={isBilibili ? 'max-w-[920px]' : 'max-w-[720px]'}>
       <div className="detail-shell">
       <SheetHeader>
         <div className="flex items-center justify-between gap-3 pr-10">
@@ -183,21 +275,43 @@ export function ContentDetailSheet({
           </div>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-[#111827]">
-              <FileText size={16} /> Nội dung bài viết
-            </div>
-            {contentLines.length > 0 ? (
-              <ol className="list-decimal space-y-2 pl-4 text-sm leading-6 text-[#34415a]">
-                {contentLines.map((line, index) => <li key={`${index}-${line.slice(0, 12)}`}>{line}</li>)}
-              </ol>
-            ) : (
-              <EmptyBlock label="Chưa có nội dung bài viết." />
-            )}
-          </section>
+        {isBilibili ? (
+          <div className="grid gap-4">
+            <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-[#111827]">
+                <FileText size={16} /> Nội dung bài viết
+              </div>
+              {contentLines.length > 0 ? (
+                <ol className="list-decimal space-y-2 pl-4 text-sm leading-6 text-[#34415a]">
+                  {contentLines.map((line, index) => <li key={`${index}-${line.slice(0, 12)}`}>{line}</li>)}
+                </ol>
+              ) : (
+                <EmptyBlock label="Chưa có nội dung bài viết." />
+              )}
+            </section>
+            <BilibiliContentDetail
+              item={item}
+              episodes={episodeItems}
+              translatingKey={translatingKey}
+              onQueueTranslation={queueTranslation}
+            />
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-[#111827]">
+                <FileText size={16} /> Nội dung bài viết
+              </div>
+              {contentLines.length > 0 ? (
+                <ol className="list-decimal space-y-2 pl-4 text-sm leading-6 text-[#34415a]">
+                  {contentLines.map((line, index) => <li key={`${index}-${line.slice(0, 12)}`}>{line}</li>)}
+                </ol>
+              ) : (
+                <EmptyBlock label="Chưa có nội dung bài viết." />
+              )}
+            </section>
 
-          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4">
             <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
               <div className="mb-3 text-sm font-extrabold text-[#111827]">Hình ảnh đính kèm ({imageItems.length})</div>
               {imageItems.length > 0 ? (
@@ -243,8 +357,93 @@ export function ContentDetailSheet({
                 </div>
               </section>
             )}
+
+            {episodeItems.length > 0 && (
+              <section className="rounded-[8px] border border-[var(--outline-variant)] p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-extrabold text-[#111827]">Danh sách tập ({episodeItems.length})</div>
+                  {isBilibili && (
+                    <AppButton
+                      className="h-8 px-3 text-xs"
+                      variant="secondary"
+                      icon={translatingKey === 'all' ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
+                      disabled={Boolean(translatingKey)}
+                      onClick={() => void queueTranslation()}
+                    >
+                      Dịch toàn bộ
+                    </AppButton>
+                  )}
+                </div>
+                <div className="max-h-[360px] overflow-y-auto rounded-[8px] border border-[#edf1f7]">
+                  {episodeItems.map((episode, index) => {
+                    const title = String(episode.title || `Tập ${index + 1}`)
+                    const url = String(episode.url || episode.embed_url || '')
+                    const duration = formatDuration(episode.duration_seconds)
+                    const episodeIndex = Number(episode.episode_index || index + 1)
+                    const thumbnail = String(episode.thumbnail_url || '')
+                    const isCurrent = Boolean(episode.current)
+                    return (
+                      <div
+                        key={`${url || title}-${index}`}
+                        className={`grid grid-cols-[44px_56px_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-[#edf1f7] px-3 py-2 text-left text-xs last:border-b-0 hover:bg-[#f8fafc] ${isCurrent ? 'bg-blue-50/60' : ''}`}
+                      >
+                        <span className="font-mono font-bold text-[#64748b]">{String(episode.episode_index || index + 1).padStart(2, '0')}</span>
+                        <button
+                          type="button"
+                          disabled={!url}
+                          onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}
+                          className="h-10 overflow-hidden rounded-[6px] border border-[#edf1f7] bg-[#f8fafc] disabled:cursor-default"
+                          title={url ? 'Mở tập gốc' : title}
+                        >
+                          {thumbnail ? <img src={thumbnail} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center font-bold text-[#94a3b8]">EP</span>}
+                        </button>
+                        <span className="min-w-0">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="line-clamp-1 font-bold text-[#34415a]">{title}</span>
+                            {isCurrent && <span className="shrink-0 rounded-[5px] bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-black uppercase text-[#1d4ed8]">Hiện tại</span>}
+                          </span>
+                          {Boolean(duration || episode.bvid) && <span className="mt-0.5 block text-[#64748b]">{[duration, episode.bvid ? String(episode.bvid) : ''].filter(Boolean).join(' · ')}</span>}
+                        </span>
+                        {url ? (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="grid h-8 w-8 place-items-center rounded-[8px] text-[#94a3b8] hover:bg-white hover:text-[#2556ea]"
+                            title="Mở tập gốc"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        ) : <span />}
+                        {isBilibili && (
+                          <button
+                            type="button"
+                            onClick={() => void queueTranslation(episodeIndex)}
+                            disabled={Boolean(translatingKey)}
+                            className="grid h-8 w-8 place-items-center rounded-[8px] border border-[var(--outline-variant)] text-[#64748b] hover:bg-white hover:text-[#2556ea] disabled:opacity-50"
+                            title="Dịch tập này"
+                          >
+                            {translatingKey === `episode-${episodeIndex}` ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
           </div>
         </div>
+        )}
+
+        {isBilibili && (
+          <BilibiliOcrProgressPanel
+            progress={ocrProgress}
+            loading={ocrLoading}
+            polling={ocrHasActiveTasks}
+            translatedSegmentCount={ocrTranslatedSegments.length}
+          />
+        )}
 
         <section className="mt-4 rounded-[8px] border border-[var(--outline-variant)] p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -310,6 +509,303 @@ function MetaCard({ label, value }: { label: string; value: string }) {
       <div className="mt-1 truncate text-xs font-extrabold text-[#34415a]">{value}</div>
     </div>
   )
+}
+
+function BilibiliContentDetail({
+  item,
+  episodes,
+  translatingKey,
+  onQueueTranslation,
+}: {
+  item: ContentViewItem
+  episodes: EpisodeRecord[]
+  translatingKey: string | null
+  onQueueTranslation: (episodeIndex?: number) => void
+}) {
+  const mediaItems = getContentMedia(item)
+  const listMetadata = (item as ContentViewItem & { list_metadata?: Record<string, unknown> }).list_metadata || {}
+  const currentEpisodeIndex = Math.max(0, episodes.findIndex((episode) => Boolean(episode.current)))
+  const [selectedIndex, setSelectedIndex] = useState(currentEpisodeIndex)
+  const selectedEpisode = episodes[selectedIndex] || episodes[0] || null
+  const selectedTitle = String(selectedEpisode?.title || item.canonical_title || 'Bilibili video')
+  const selectedSourceUrl = String(selectedEpisode?.url || '')
+  const selectedEmbedUrl = String(selectedEpisode?.embed_url || '')
+  const selectedUrl = selectedSourceUrl || selectedEmbedUrl
+  const selectedThumb = String(selectedEpisode?.thumbnail_url || item.thumbnail_url || getMediaSrc(item) || '')
+  const selectedEpisodeNumber = Number(selectedEpisode?.episode_index || selectedIndex + 1)
+  const selectedMedia = selectedUrl && !selectedEmbedUrl
+    ? {
+        media_type: 'VIDEO_REFERENCE',
+        source_url: selectedUrl,
+        embed_url: selectedEmbedUrl,
+        thumbnail_url: selectedThumb,
+        title: selectedTitle,
+        provider: 'bilibili',
+      }
+    : null
+  const fallbackVideo = mediaItems.find((media) => /video/i.test(String(media.media_type || media.mime_type || '')) || String(media.media_type || '').toUpperCase().includes('VIDEO'))
+  const playerMedia = selectedMedia || (selectedEpisode?.current && fallbackVideo ? fallbackVideo : null)
+
+  useEffect(() => {
+    const nextIndex = Math.max(0, episodes.findIndex((episode) => Boolean(episode.current)))
+    setSelectedIndex(nextIndex)
+  }, [item.id, episodes.length])
+
+  return (
+          <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="overflow-hidden rounded-[8px] border border-[var(--outline-variant)] bg-slate-950">
+              {selectedEmbedUrl ? (
+                <div className="aspect-video w-full overflow-hidden bg-black">
+                  <iframe
+                    key={selectedEmbedUrl}
+                    src={selectedEmbedUrl}
+                    title={selectedTitle}
+                    width="100%"
+                    height="100%"
+                    frameBorder="0"
+                    scrolling="no"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              ) : playerMedia ? (
+                <MediaAssetPreview item={playerMedia} controls className="aspect-video w-full rounded-none" />
+              ) : (
+                <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-slate-950 px-6 text-center text-sm font-semibold text-white/75">
+                  <span>Chưa có URL video cho tập này.</span>
+                  <span className="text-xs font-medium text-white/45">Danh sách tập được lấy từ metadata/text crawl, không tạo thêm content item.</span>
+                </div>
+              )}
+              <div className="border-t border-white/10 px-4 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="break-words text-base font-black leading-6 text-white">{selectedTitle}</h3>
+                    <p className="mt-1 text-xs font-semibold text-white/55">
+                      Tập {Number.isFinite(selectedEpisodeNumber) ? selectedEpisodeNumber : selectedIndex + 1}
+                      {selectedEpisode?.bvid ? ` · ${String(selectedEpisode.bvid)}` : ''}
+                    </p>
+                  </div>
+                  {selectedSourceUrl && (
+                    <AppButton
+                      className="h-8 shrink-0 px-3 text-xs"
+                      variant="secondary"
+                      icon={<ExternalLink size={14} />}
+                      onClick={() => window.open(selectedSourceUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      Mở gốc
+                    </AppButton>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <section className="rounded-[8px] border border-[#222831] bg-[#202124] p-3 text-white shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <div className="line-clamp-1 text-base font-extrabold text-white">{String(listMetadata.series_title || listMetadata.season_title || item.canonical_title || 'Chuỗi video')}</div>
+                  <div className="mt-1 text-xs font-semibold text-white/55">{episodes.length || 1} tập</div>
+                </div>
+                <AppButton
+                  className="h-8 px-3 text-xs"
+                  variant="secondary"
+                  icon={translatingKey === 'all' ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
+                  disabled={Boolean(translatingKey)}
+                  onClick={() => onQueueTranslation()}
+                >
+                  Tạo workflow dịch
+                </AppButton>
+              </div>
+              <div className="max-h-[560px] overflow-y-auto rounded-[8px] border border-white/10">
+                {(episodes.length ? episodes : [{ title: item.canonical_title, current: true }]).map((episode, index) => {
+                  const title = String(episode.title || `Tập ${index + 1}`)
+                  const episodeIndex = Number(episode.episode_index || index + 1)
+                  const duration = formatDuration(episode.duration_seconds)
+                  const thumbnail = String(episode.thumbnail_url || '')
+                  const active = index === selectedIndex
+                  const hasUrl = Boolean(episode.url || episode.embed_url)
+                  return (
+                    <button
+                      key={`${String(episode.url || '')}-${title}-${index}`}
+                      type="button"
+                      onClick={() => setSelectedIndex(index)}
+                      className={`grid w-full grid-cols-[24px_minmax(0,1fr)_44px_28px] items-center gap-2 border-b border-white/10 px-3 py-3 text-left text-xs last:border-b-0 ${active ? 'bg-[#111827]' : 'hover:bg-white/5'}`}
+                    >
+                      <span className={`font-mono font-black ${active ? 'text-[#00a1d6]' : 'text-white/45'}`}>{active ? '||' : String(episodeIndex).padStart(2, '0')}</span>
+                      <span className="min-w-0">
+                        <span className={`line-clamp-2 font-extrabold leading-5 ${active ? 'text-[#00a1d6]' : 'text-white/90'}`}>{title}</span>
+                        <span className="mt-0.5 block truncate text-white/40">
+                          {[thumbnail ? 'có thumbnail' : '', hasUrl ? 'có video' : 'metadata'].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                      <span className="text-right font-mono text-sm font-semibold text-white/55">{duration || '--:--'}</span>
+                      <span className="grid h-7 w-7 place-items-center rounded-[7px] text-white/55 hover:bg-white/10 hover:text-white">
+                        {translatingKey === `episode-${episodeIndex}` ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Languages
+                            size={14}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onQueueTranslation(episodeIndex)
+                            }}
+                          />
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          </section>
+  )
+}
+
+function BilibiliOcrProgressPanel({
+  progress,
+  loading,
+  polling,
+  translatedSegmentCount,
+}: {
+  progress: BilibiliOcrProgress | null
+  loading: boolean
+  polling: boolean
+  translatedSegmentCount: number
+}) {
+  const overall = progress?.overall
+  const percent = Math.round(Number(overall?.progress_percent || 0))
+  return (
+    <section className="mt-4 rounded-[8px] border border-[var(--outline-variant)] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-extrabold text-[#111827]">
+            OCR & text dịch Bilibili
+            {polling && <span className="h-2 w-2 rounded-full bg-blue-500 shadow-xs shadow-blue-300" />}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[#64748b]">
+            Hệ thống đọc task OCR theo thời gian thực; worker cập nhật segment dịch tới đâu sẽ hiện tới đó.
+          </p>
+        </div>
+        {loading ? <Loader2 size={16} className="animate-spin text-[#64748b]" /> : <StatusPill value={ocrStatusLabel(overall?.status)} tone={ocrStatusTone(overall?.status)} />}
+      </div>
+
+      {!progress ? (
+        <EmptyBlock label="Chưa có task OCR cho video này." />
+      ) : (
+        <div className="space-y-3">
+          <div className="grid gap-3 text-xs sm:grid-cols-4">
+            <MetaCard label="Tổng tiến trình" value={`${percent}%`} />
+            <MetaCard label="Tập đã queue" value={`${overall?.queued || 0}/${overall?.total || 0}`} />
+            <MetaCard label="Hoàn tất" value={`${overall?.completed || 0}`} />
+            <MetaCard label="Segment đã dịch" value={`${translatedSegmentCount}`} />
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-[#edf1f7]">
+            <div className="h-full rounded-full bg-[#2556ea] transition-all" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+          </div>
+
+          <div className="max-h-[420px] overflow-y-auto rounded-[8px] border border-[#edf1f7]">
+            {progress.episodes.length === 0 ? (
+              <div className="p-3"><EmptyBlock label="Chưa có tập nào trong hàng đợi OCR." /></div>
+            ) : (
+              progress.episodes.map((episode) => (
+                <OcrEpisodeRow key={episode.id} episode={episode} />
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function OcrEpisodeRow({ episode }: { episode: BilibiliOcrEpisodeProgress }) {
+  const segmentPreview = episode.segments.filter((segment) => segment.raw_text || segment.translated_text).slice(-4)
+  return (
+    <details className="group/ocr border-b border-[#edf1f7] last:border-b-0" open={episode.status !== 'COMPLETED'}>
+      <summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_96px_auto] items-center gap-3 px-3 py-2.5 text-xs [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0">
+          <div className="line-clamp-1 font-extrabold text-[#34415a]">
+            {episode.episode_index ? `Tập ${episode.episode_index} · ` : ''}{episode.title || episode.bvid || episode.id.slice(0, 8)}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[#64748b]">
+            <span>{ocrStageLabel(episode.current_stage) || episode.current_stage || 'Đang chờ'}</span>
+            {episode.bvid && <span>{episode.bvid}</span>}
+          </div>
+        </div>
+        <div className="text-right font-black tabular-nums text-[#111827]">{Math.round(Number(episode.progress_percent || 0))}%</div>
+        <StatusPill value={ocrTaskStatusLabel(episode.status)} tone={ocrStatusTone(episode.status)} />
+      </summary>
+      <div className="space-y-3 px-3 pb-3">
+        <div className="h-1.5 overflow-hidden rounded-full bg-[#edf1f7]">
+          <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${Math.max(0, Math.min(100, Number(episode.progress_percent || 0)))}%` }} />
+        </div>
+        {episode.error_message && <div className="rounded-[8px] bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{episode.error_message}</div>}
+        {(episode.translated_text || episode.raw_text) && (
+          <div className="rounded-[8px] bg-[#f8fafc] p-3 text-xs leading-5 text-[#34415a]">
+            {episode.translated_text || episode.raw_text}
+          </div>
+        )}
+        {segmentPreview.length > 0 && (
+          <div className="divide-y divide-[#edf1f7] rounded-[8px] border border-[#edf1f7]">
+            {segmentPreview.map((segment) => (
+              <div key={`${episode.id}-${segment.index}`} className="grid gap-2 px-3 py-2 text-xs sm:grid-cols-[74px_minmax(0,1fr)]">
+                <div className="font-mono font-bold text-[#64748b]">{formatTimecode(segment.start)}-{formatTimecode(segment.end)}</div>
+                <div className="min-w-0">
+                  {segment.raw_text && <div className="break-words text-[#64748b]">{segment.raw_text}</div>}
+                  {segment.translated_text && <div className="mt-1 break-words font-semibold text-[#111827]">{segment.translated_text}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function ocrStatusLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    NOT_QUEUED: 'Chưa queue',
+    QUEUED: 'Đang chờ OCR',
+    PROCESSING: 'Đang OCR',
+    COMPLETED: 'OCR xong',
+    FAILED: 'OCR lỗi',
+  }
+  return labels[String(value || '').toUpperCase()] || String(value || 'Chưa queue')
+}
+
+function ocrTaskStatusLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    PENDING: 'Chờ',
+    RUNNING: 'Đang chạy',
+    PROCESSING: 'Đang chạy',
+    COMPLETED: 'Xong',
+    FAILED: 'Lỗi',
+    CANCELLED: 'Đã hủy',
+  }
+  return labels[String(value || '').toUpperCase()] || String(value || '-')
+}
+
+function ocrStatusTone(value?: string | null): 'green' | 'blue' | 'amber' | 'red' | 'gray' {
+  const status = String(value || '').toUpperCase()
+  if (status === 'COMPLETED') return 'green'
+  if (status === 'FAILED') return 'red'
+  if (['RUNNING', 'PROCESSING'].includes(status)) return 'blue'
+  if (status === 'PENDING' || status === 'QUEUED') return 'amber'
+  return 'gray'
+}
+
+function ocrStageLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    QUEUED_OCR: 'Đang chờ OCR',
+    DOWNLOADING_VIDEO: 'Đang tải video',
+    EXTRACTING_FRAMES: 'Đang tách khung hình',
+    RUNNING_OCR: 'Đang nhận diện chữ',
+    TRANSLATING_TEXT: 'Đang dịch text',
+    SAVING_TRANSCRIPT: 'Đang lưu transcript',
+    COMPLETED: 'Hoàn tất',
+  }
+  return labels[String(value || '').toUpperCase()]
 }
 
 function ProfileMatchRow({

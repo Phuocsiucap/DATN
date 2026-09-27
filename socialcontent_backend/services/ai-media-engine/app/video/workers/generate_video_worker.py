@@ -10,6 +10,7 @@ from app.video.consumers.generate_video_requested import run_generate_video_requ
 
 class HealthHandler(BaseHTTPRequestHandler):
     task_types: set[str] = set()
+    service_name = "ai-media-worker"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP handler contract
         if self.path.rstrip("/") != "/health":
@@ -18,7 +19,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             return
         body = json.dumps({
             "status": "ok",
-            "service": "ai-media-worker",
+            "service": self.service_name,
             "detail": "Worker consumer đang chạy",
             "task_types": sorted(self.task_types),
         }).encode("utf-8")
@@ -32,8 +33,9 @@ class HealthHandler(BaseHTTPRequestHandler):
         return
 
 
-def start_health_server(task_types: set[str]) -> ThreadingHTTPServer:
+def start_health_server(task_types: set[str], service_name: str | None = None) -> ThreadingHTTPServer:
     HealthHandler.task_types = task_types
+    HealthHandler.service_name = service_name or os.getenv("WORKER_SERVICE_NAME", "ai-media-worker")
     port = int(os.getenv("HEALTH_PORT", "8060"))
     server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
     threading.Thread(target=server.serve_forever, name="ai-media-health", daemon=True).start()
@@ -55,7 +57,7 @@ def main() -> None:
     start_health_server(task_types)
     run_generate_video_requested_consumer(
         task_types=task_types,
-        group_id="generate-video-workers",
+        group_id=os.getenv("GENERATE_VIDEO_WORKER_GROUP_ID", "generate-video-workers"),
     )
 
 

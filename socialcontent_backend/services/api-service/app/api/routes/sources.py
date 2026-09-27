@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("/source-types")
 def source_types(_: User = Depends(get_current_user)):
     return [
-        {"type": "BILIBILI", "supports": ["keywords", "url", "playlist", "metadata"]},
+        {"type": "BILIBILI", "supports": ["keywords", "url", "queries", "max_duration_seconds", "playlist", "metadata"]},
         {"type": "VNEXPRESS", "supports": ["keywords", "url", "rss", "category"], "rss_feeds": vnexpress_rss_catalog()},
         {"type": "MANUAL", "supports": ["manual_input"], "description": "Nội dung nhập thủ công"},
     ]
@@ -47,6 +47,20 @@ def validate_source_config(source_type: str, configuration: dict) -> None:
         catalog = {feed["key"] for feed in vnexpress_rss_catalog()}
         if source_type != "VNEXPRESS" or not isinstance(keys, list) or any(not isinstance(key, str) or key not in catalog for key in keys):
             raise HTTPException(400, "Chuyên mục RSS không hợp lệ")
+    if source_type == "BILIBILI":
+        queries = configuration.get("queries")
+        if queries is not None and (
+            not isinstance(queries, list) or any(not isinstance(query, str) or not query.strip() for query in queries)
+        ):
+            raise HTTPException(400, "Danh sách truy vấn Bilibili không hợp lệ")
+        max_duration_seconds = configuration.get("max_duration_seconds")
+        if max_duration_seconds is not None:
+            try:
+                value = int(max_duration_seconds)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Thời lượng tối đa Bilibili không hợp lệ") from None
+            if value < 60 or value > 86400:
+                raise HTTPException(400, "Thời lượng tối đa Bilibili phải từ 60 đến 86400 giây")
 
 
 def _serialize_source_config(config: CrawlSourceConfig) -> dict:

@@ -16,9 +16,10 @@ import DashboardPage from '@/features/dashboard/DashboardPage'
 import CreatorDashboardPage from '@/features/dashboard/CreatorDashboardPage'
 import CrawlPage from '@/features/crawl/CrawlPage'
 import ContentPage from '@/features/content/ContentPage'
+import StoryPublishStatusPage from '@/features/stories/StoryPublishStatusPage'
 import PlanningPage from '@/features/planning/PlanningPage'
 import GenerateVideoProjectsPage from '@/features/generate-video/GenerateVideoProjectsPage'
-import VideoProductionWorkspace from '@/features/generate-video/VideoProductionWorkspace'
+import MediaWorkflowWorkspaceRouter from '@/features/generate-video/MediaWorkflowWorkspaceRouter'
 import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
 import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
@@ -58,11 +59,12 @@ const LEGACY_PATHS: Record<string, string> = {
   '/analytics/accounts': TAB_PATHS.settings,
 }
 
-const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems'])
+const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems', 'storyStatus'])
 const CREATOR_TABS = new Set<Tab>([
   'dashboard',
   'crawl',
   'content',
+  'storyStatus',
   'planning',
   'generateVideo',
   'approvals',
@@ -293,9 +295,10 @@ function AppContent() {
             : <CreatorDashboardPage onNavigate={handleTabChange} onOpenProject={handleOpenGenerateVideo} />)}
           {activeTab === 'crawl' && <CrawlPage isSystemUser={isSystemUser} onOpenModule2={handleOpenGenerateVideo} />}
           {activeTab === 'content' && <ContentPage isSystemUser={isSystemUser} onOpenModule2={handleOpenGenerateVideo} />}
+          {activeTab === 'storyStatus' && <StoryPublishStatusPage onOpenGenerateVideo={handleOpenGenerateVideo} />}
           {activeTab === 'planning' && <PlanningPage initialStep="jobs" isSystemUser={isSystemUser} onOpenProfileSettings={handleOpenProfileSettings} onOpenGenerateVideo={handleOpenGenerateVideo} />}
           {activeTab === 'generateVideo' && (effectiveGenerateVideoProjectId ? (
-            <VideoProductionWorkspace workflowId={effectiveGenerateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
+            <MediaWorkflowWorkspaceRouter workflowId={effectiveGenerateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
           ) : (
             <GenerateVideoProjectsPage onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
           ))}

@@ -53,19 +53,24 @@ def _empty_daily_views(date_key: str) -> dict:
     return {"date": date_key, "views": 0, "avg_views": 0, "videos": 0}
 
 
+def _period_day_keys(start: datetime | None, end: datetime | None) -> list[str]:
+    if start is None or end is None:
+        return []
+    keys: list[str] = []
+    cursor = start.date()
+    while cursor < end.date():
+        keys.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return keys
+
+
 def _daily_view_deltas(
     db: Session,
     profile_id: uuid.UUID,
     start: datetime | None,
     end: datetime | None,
 ) -> list[dict]:
-    by_day: dict[str, dict] = {}
-    if start is not None and end is not None:
-        cursor = start.date()
-        while cursor < end.date():
-            key = cursor.isoformat()
-            by_day[key] = _empty_daily_views(key)
-            cursor += timedelta(days=1)
+    by_day: dict[str, dict] = {key: _empty_daily_views(key) for key in _period_day_keys(start, end)}
 
     metrics_query = (
         db.query(SocialPostMetric)
@@ -76,36 +81,73 @@ def _daily_view_deltas(
         metrics_query = metrics_query.filter(SocialPostMetric.captured_at < end)
     metrics = metrics_query.order_by(SocialPostMetric.post_id.asc(), SocialPostMetric.captured_at.asc()).all()
 
-    latest_by_post: dict[uuid.UUID, SocialPostMetric] = {}
-    changed_post_ids_by_day: dict[str, set[uuid.UUID]] = {}
-    today = datetime.now(timezone.utc).date()
+    metrics_by_post: dict[uuid.UUID, list[SocialPostMetric]] = {}
+    all_days: set[date] = set()
+    if start is not None and end is not None:
+        cursor = start.date()
+        while cursor < end.date():
+            all_days.add(cursor)
+            cursor += timedelta(days=1)
+
     for metric in metrics:
         captured_at = _aware_utc(metric.captured_at)
-        previous = latest_by_post.get(metric.post_id)
-        latest_by_post[metric.post_id] = metric
+        metrics_by_post.setdefault(metric.post_id, []).append(metric)
         if start is not None and captured_at < start:
             continue
-        if previous is None:
-            published_at = _aware_utc(metric.post.published_at)
-            if captured_at.date() != today or published_at.date() != today:
-                # First observation is only a baseline. It does not prove those views
-                # happened on the capture date, except for videos published today.
-                continue
-            delta_views = int(metric.views or 0)
-        else:
-            delta_views = max(int(metric.views or 0) - int(previous.views or 0), 0)
+        all_days.add(captured_at.date())
 
-        day_key = captured_at.date().isoformat()
+    def latest_metric_before(post_metrics: list[SocialPostMetric], cutoff: datetime) -> SocialPostMetric | None:
+        latest = None
+        for metric in post_metrics:
+            if _aware_utc(metric.captured_at) < cutoff:
+                latest = metric
+            else:
+                break
+        return latest
+
+    for day in sorted(all_days):
+        day_start = datetime.combine(day, time.min, tzinfo=timezone.utc)
+        next_day_start = day_start + timedelta(days=1)
+        if start is not None and day_start < start:
+            continue
+        if end is not None and day_start >= end:
+            continue
+
+        day_key = day.isoformat()
         if day_key not in by_day:
             by_day[day_key] = _empty_daily_views(day_key)
-        by_day[day_key]["views"] += delta_views
-        changed_post_ids_by_day.setdefault(day_key, set()).add(metric.post_id)
 
-    for day_key, item in by_day.items():
-        item["videos"] = len(changed_post_ids_by_day.get(day_key, set()))
+        current_total = 0
+        previous_total = 0
+        changed_posts = 0
+        for post_metrics in metrics_by_post.values():
+            current = latest_metric_before(post_metrics, next_day_start)
+            previous = latest_metric_before(post_metrics, day_start)
+            if current is None:
+                continue
+            current_views = int(current.views or 0)
+            previous_views = int(previous.views or 0) if previous else 0
+            current_total += current_views
+            previous_total += previous_views
+            if current_views > previous_views:
+                changed_posts += 1
+
+        item = by_day[day_key]
+        item["views"] = max(current_total - previous_total, 0)
+        item["videos"] = changed_posts
         item["avg_views"] = round(item["views"] / item["videos"]) if item["videos"] else 0
 
     return [by_day[key] for key in sorted(by_day)]
+
+
+def _latest_snapshots_by_day(snapshots: list[SocialProfileSnapshot]) -> list[SocialProfileSnapshot]:
+    latest_by_day: dict[date, SocialProfileSnapshot] = {}
+    for snapshot in snapshots:
+        day = _aware_utc(snapshot.captured_at).date()
+        current = latest_by_day.get(day)
+        if current is None or _aware_utc(snapshot.captured_at) >= _aware_utc(current.captured_at):
+            latest_by_day[day] = snapshot
+    return [latest_by_day[key] for key in sorted(latest_by_day)]
 
 
 def _owned_profile(db: Session, service: SocialProfileService, profile_id: uuid.UUID, user: User) -> SocialProfile:
@@ -233,6 +275,7 @@ def account_charts(
 
     snapshots_query = db.query(SocialProfileSnapshot).filter(SocialProfileSnapshot.profile_id == profile.id)
     snapshots = _apply_period(snapshots_query, SocialProfileSnapshot.captured_at, start, end).order_by(SocialProfileSnapshot.captured_at.asc()).all()
+    daily_snapshots = _latest_snapshots_by_day(snapshots)
 
     return {
         "profile_id": str(profile.id),
@@ -247,7 +290,7 @@ def account_charts(
                 "likes": snapshot.likes_count,
                 "videos": snapshot.video_count,
             }
-            for snapshot in snapshots
+            for snapshot in daily_snapshots
         ],
         "content_mix": [
             {"name": "Video ngắn", "value": len(posts), "color": "#2556ea"},

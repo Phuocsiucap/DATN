@@ -21,6 +21,15 @@ MAX_CHUNK_SIZE = 64 * 1024 * 1024
 DEFAULT_DIRECT_PRIVACY_LEVEL = "SELF_ONLY"
 TIKTOK_PUBLISH_COMPLETE_STATUS = "PUBLISH_COMPLETE"
 TIKTOK_PUBLISH_FAILED_STATUSES = {"FAILED", "PUBLISH_FAILED"}
+TIKTOK_UNAUDITED_CLIENT_COOLDOWN_SECONDS = 60 * 60
+TIKTOK_RATE_LIMIT_COOLDOWN_SECONDS = 15 * 60
+
+
+class TikTokPublishBlockedError(HTTPException):
+    def __init__(self, *, detail: str, tiktok_code: str | None = None, retry_after_seconds: int | None = None) -> None:
+        super().__init__(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+        self.tiktok_code = tiktok_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 def _utc_now() -> datetime:
@@ -52,8 +61,10 @@ def _raise_for_tiktok_error(payload: dict[str, Any], fallback: str) -> None:
         code = error.get("code")
         if code and code != "ok":
             message = error.get("message") or fallback
+            retry_after_seconds: int | None = None
             if code == "unaudited_client_can_only_post_to_private_accounts":
                 message = "TikTok Direct Post client chưa audit chỉ đăng được vào tài khoản TikTok đang để private và privacy SELF_ONLY."
+                retry_after_seconds = TIKTOK_UNAUDITED_CLIENT_COOLDOWN_SECONDS
             elif code == "privacy_level_option_mismatch":
                 message = "Privacy level không nằm trong privacy_level_options TikTok trả về cho creator này."
             elif "content-sharing-guidelines" in str(message):
@@ -61,6 +72,15 @@ def _raise_for_tiktok_error(payload: dict[str, Any], fallback: str) -> None:
                     "TikTok chặn Direct Post theo Content Sharing Guidelines. "
                     "Với app chưa audit, hãy để tài khoản TikTok ở chế độ private và dùng privacy SELF_ONLY; "
                     "nếu vẫn lỗi, app cần qua TikTok audit."
+                )
+                retry_after_seconds = TIKTOK_UNAUDITED_CLIENT_COOLDOWN_SECONDS
+            elif "rate limit" in str(message).lower() or "rate_limit" in str(code).lower():
+                retry_after_seconds = TIKTOK_RATE_LIMIT_COOLDOWN_SECONDS
+            if retry_after_seconds:
+                raise TikTokPublishBlockedError(
+                    detail=message,
+                    tiktok_code=str(code),
+                    retry_after_seconds=retry_after_seconds,
                 )
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=message)
         return

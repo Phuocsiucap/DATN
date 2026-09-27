@@ -1,6 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BarChart3, ChevronLeft, ChevronRight, ExternalLink, Eye, Heart, Loader2, Maximize2, MessageCircle, Minimize2, Share2 } from 'lucide-react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -28,6 +30,15 @@ const formatDateTime = (value?: string | null) => {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
 }
+const dateKey = (value?: string | null) => {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+}
+const shortDateLabel = (value: string) => {
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+}
 
 export function PostDetailSheet({
   post,
@@ -46,12 +57,14 @@ export function PostDetailSheet({
   const [analyticsOverview, setAnalyticsOverview] = useState<PostAnalyticsOverview | null>(null)
   const [analyticsCharts, setAnalyticsCharts] = useState<PostAnalyticsCharts | null>(null)
   const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const [chartMode, setChartMode] = useState<'daily' | 'cumulative'>('cumulative')
 
   // Reset expansion and data when sheet closes or when post changes
   useEffect(() => {
     setIsExpanded(false)
     setAnalyticsOverview(null)
     setAnalyticsCharts(null)
+    setChartMode('cumulative')
   }, [open, post?.id])
 
   // Fetch analytics data only when sheet is expanded
@@ -77,9 +90,40 @@ export function PostDetailSheet({
     return () => { isMounted = false }
   }, [isExpanded, post?.id, open, analyticsOverview])
 
+  const dailyViewGrowth = useMemo(() => {
+    const timeline = analyticsCharts?.engagement_timeline || []
+    const latestByDay = new Map<string, { date: string; views: number; capturedAt: number }>()
+    for (const item of timeline) {
+      const capturedAt = new Date(item.time).getTime()
+      if (Number.isNaN(capturedAt)) continue
+      const key = dateKey(item.time)
+      if (!key) continue
+      const current = latestByDay.get(key)
+      if (!current || capturedAt >= current.capturedAt) {
+        latestByDay.set(key, { date: key, views: Number(item.views || 0), capturedAt })
+      }
+    }
+
+    let previousViews: number | null = null
+    const publishedDay = dateKey(post?.published_at)
+    return Array.from(latestByDay.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((item) => {
+        const baseline = previousViews ?? (item.date === publishedDay ? 0 : item.views)
+        const views = Math.max(item.views - baseline, 0)
+        previousViews = item.views
+        return {
+          date: item.date,
+          label: shortDateLabel(item.date),
+          views,
+          total_views: item.views,
+        }
+      })
+  }, [analyticsCharts?.engagement_timeline, post?.published_at])
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className={cn("flex flex-col transition-all duration-300 !overflow-visible", isExpanded ? "!max-w-[1100px] w-[90vw]" : "")}>
+      <SheetContent side="right" className={cn("flex flex-col transition-all duration-300 !overflow-visible", isExpanded ? "!max-w-[80vw] w-[80vw]" : "")}>
         {post && (
           <button
             type="button"
@@ -193,65 +237,117 @@ export function PostDetailSheet({
                         </div>
 
                         <div className="rounded-xl border border-[var(--outline-variant)] bg-white p-5 shadow-sm">
-                          <div className="mb-6 text-base font-extrabold text-[#111827]">Tăng trưởng lượt xem theo thời gian</div>
+                          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                            <div className="text-base font-extrabold text-[#111827]">
+                              {chartMode === 'daily' ? 'Lượt xem tăng theo ngày' : 'Tăng trưởng lượt xem theo thời gian'}
+                            </div>
+                            <div className="inline-flex rounded-lg border border-[var(--outline-variant)] bg-slate-50 p-1">
+                              <button
+                                type="button"
+                                onClick={() => setChartMode('daily')}
+                                className={cn(
+                                  'rounded-md px-3 py-1.5 text-xs font-bold transition-colors',
+                                  chartMode === 'daily' ? 'bg-white text-[#2556ea] shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                                )}
+                              >
+                                View theo ngày
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setChartMode('cumulative')}
+                                className={cn(
+                                  'rounded-md px-3 py-1.5 text-xs font-bold transition-colors',
+                                  chartMode === 'cumulative' ? 'bg-white text-[#2556ea] shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                                )}
+                              >
+                                Lũy kế
+                              </button>
+                            </div>
+                          </div>
                           {analyticsCharts.engagement_timeline.length > 0 ? (
                             <div className="h-[300px]">
                               <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={analyticsCharts.engagement_timeline}>
-                                  <CartesianGrid stroke="#f1f5f9" vertical={false} />
-                                  <XAxis
-                                    dataKey="hours_since_publish"
-                                    tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
-                                    axisLine={{ stroke: '#e2e8f0' }}
-                                    tickLine={false}
-                                    tickFormatter={(v) => `${v}h`}
-                                    dy={10}
-                                  />
-                                  <YAxis 
-                                    tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }} 
-                                    axisLine={false} 
-                                    tickLine={false}
-                                    dx={-10}
-                                  />
-                                  <Tooltip
-                                    contentStyle={{ borderRadius: 12, borderColor: '#e2e8f0', fontSize: 12, fontWeight: 600, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    labelFormatter={(v) => `Sau ${v} giờ`}
-                                  />
-                                  <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px', fontWeight: 600 }} />
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="views" 
-                                    name="Lượt xem" 
-                                    stroke="#2556eb" 
-                                    strokeWidth={3} 
-                                    dot={false}
-                                    activeDot={{ r: 6, strokeWidth: 0 }}
-                                  />
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="likes" 
-                                    name="Lượt thích" 
-                                    stroke="#db2777" 
-                                    strokeWidth={2} 
-                                    dot={false}
-                                  />
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="comments" 
-                                    name="Bình luận" 
-                                    stroke="#f59e0b" 
-                                    strokeWidth={2} 
-                                    dot={false}
-                                  />
-                                  <Line 
-                                    type="monotone" 
-                                    dataKey="shares" 
-                                    name="Chia sẻ" 
-                                    stroke="#16a34a" 
-                                    strokeWidth={2} 
-                                    dot={false}
-                                  />
-                                </LineChart>
+                                {chartMode === 'daily' ? (
+                                  <BarChart data={dailyViewGrowth}>
+                                    <CartesianGrid stroke="#f1f5f9" vertical={false} />
+                                    <XAxis
+                                      dataKey="label"
+                                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
+                                      axisLine={{ stroke: '#e2e8f0' }}
+                                      tickLine={false}
+                                      dy={10}
+                                    />
+                                    <YAxis
+                                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
+                                      axisLine={false}
+                                      tickLine={false}
+                                      dx={-10}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{ borderRadius: 12, borderColor: '#e2e8f0', fontSize: 12, fontWeight: 600, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                      formatter={(value, name) => [formatMetric(Number(value || 0)), name]}
+                                      labelFormatter={(_, payload) => payload?.[0]?.payload?.date || ''}
+                                    />
+                                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px', fontWeight: 600 }} />
+                                    <Bar dataKey="views" name="View tăng trong ngày" fill="#2556eb" radius={[5, 5, 0, 0]} maxBarSize={44} />
+                                  </BarChart>
+                                ) : (
+                                  <LineChart data={analyticsCharts.engagement_timeline}>
+                                    <CartesianGrid stroke="#f1f5f9" vertical={false} />
+                                    <XAxis
+                                      dataKey="hours_since_publish"
+                                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
+                                      axisLine={{ stroke: '#e2e8f0' }}
+                                      tickLine={false}
+                                      tickFormatter={(v) => `${v}h`}
+                                      dy={10}
+                                    />
+                                    <YAxis 
+                                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }} 
+                                      axisLine={false} 
+                                      tickLine={false}
+                                      dx={-10}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{ borderRadius: 12, borderColor: '#e2e8f0', fontSize: 12, fontWeight: 600, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                      labelFormatter={(v) => `Sau ${v} giờ`}
+                                    />
+                                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px', fontWeight: 600 }} />
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="views" 
+                                      name="Lượt xem" 
+                                      stroke="#2556eb" 
+                                      strokeWidth={3} 
+                                      dot={false}
+                                      activeDot={{ r: 6, strokeWidth: 0 }}
+                                    />
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="likes" 
+                                      name="Lượt thích" 
+                                      stroke="#db2777" 
+                                      strokeWidth={2} 
+                                      dot={false}
+                                    />
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="comments" 
+                                      name="Bình luận" 
+                                      stroke="#f59e0b" 
+                                      strokeWidth={2} 
+                                      dot={false}
+                                    />
+                                    <Line 
+                                      type="monotone" 
+                                      dataKey="shares" 
+                                      name="Chia sẻ" 
+                                      stroke="#16a34a" 
+                                      strokeWidth={2} 
+                                      dot={false}
+                                    />
+                                  </LineChart>
+                                )}
                               </ResponsiveContainer>
                             </div>
                           ) : (

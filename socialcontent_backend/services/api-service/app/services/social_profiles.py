@@ -114,6 +114,52 @@ class SocialProfileService:
         title = str(value or fallback).strip() or fallback
         return title[:255]
 
+    def caption_with_hashtags(
+        self,
+        caption: str | None,
+        profile: SocialProfile | None = None,
+        content: Any | None = None,
+        story: dict[str, Any] | None = None,
+    ) -> str:
+        base_caption = (caption or "").strip()
+        has_story_caption = False
+        if story and isinstance(story.get("meta"), dict):
+            ai_caption = story["meta"].get("social_caption") or story["meta"].get("caption")
+            if ai_caption:
+                base_caption = str(ai_caption).strip()
+                has_story_caption = True
+
+        existing_tags = set(re.findall(r'#\w+', base_caption))
+        new_tags = []
+
+        if not existing_tags and not story and not has_story_caption and profile and getattr(profile, "strategy", None):
+            topics_str = profile.strategy.content_topics
+            if topics_str:
+                for t in topics_str.split(","):
+                    t = t.strip()
+                    if t:
+                        tag = f"#{t.replace(' ', '')}"
+                        if tag not in existing_tags and tag not in new_tags:
+                            new_tags.append(tag)
+
+        if not existing_tags and not new_tags:
+            new_tags = ["#xuhuong", "#tiktok", "#fyp"]
+
+        if new_tags:
+            tags_str = " ".join(new_tags)
+            if base_caption:
+                return f"{base_caption}\n\n{tags_str}"
+            return tags_str
+        return base_caption
+
+    def publish_caption_for_queue_item(self, db: Session, item: PublishingQueueItem) -> str:
+        profile = item.profile
+        workflow = self.find_workflow_for_queue_item(db, item, profile.user) if profile and profile.user else None
+        content = db.get(ContentItem, workflow.primary_content_id) if workflow and workflow.primary_content_id else None
+        story = workflow.draft_json if workflow and isinstance(workflow.draft_json, dict) else None
+        raw_caption = item.generated_content or item.article_title
+        return self.caption_with_hashtags(raw_caption, profile=profile, content=content, story=story)
+
     def list_profiles(self, db: Session, user: User, platform: str | None = None) -> list[SocialProfile]:
         query = db.query(SocialProfile).filter(SocialProfile.status != "deleted")
         if not self.is_system_user(user):
@@ -132,7 +178,6 @@ class SocialProfileService:
             platform=platform,
             profile_name=profile_name,
             username=payload.username.strip() if payload.username else None,
-            folder_path=self.build_profile_identifier(user.id, platform, profile_name),
             status="qr_pending" if platform == "tiktok" else "inactive",
         )
         db.add(profile)
@@ -333,7 +378,6 @@ class SocialProfileService:
                 platform="tiktok",
                 profile_name=profile_name,
                 username=tiktok_username,
-                folder_path=self.build_profile_identifier(user.id, "tiktok", profile_name),
                 status="active",
             )
             db.add(profile)
@@ -417,7 +461,10 @@ class SocialProfileService:
                 latest.captured_at.month == target_time.month and
                 latest.captured_at.day == target_time.day and
                 latest.captured_at.hour == target_time.hour):
-                return False
+                latest_values = (latest.views, latest.likes, latest.comments, latest.shares)
+                incoming_values = (views, likes, comments, shares)
+                if any(latest_values) or not any(incoming_values):
+                    return False
                 
         metric = SocialPostMetric(
             post_id=post_id,
@@ -428,6 +475,21 @@ class SocialProfileService:
             captured_at=target_time,
         )
         db.add(metric)
+        return True
+
+    def create_initial_post_metric(self, db: Session, post: SocialPost, captured_at: datetime | None = None) -> bool:
+        if self.latest_post_metric(db, post.id):
+            return False
+        db.add(
+            SocialPostMetric(
+                post_id=post.id,
+                views=0,
+                likes=0,
+                comments=0,
+                shares=0,
+                captured_at=captured_at or post.published_at or datetime.now(timezone.utc),
+            )
+        )
         return True
 
     async def sync_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
@@ -523,7 +585,7 @@ class SocialProfileService:
     def get_or_create_strategy(self, db: Session, profile: SocialProfile) -> SocialProfileStrategy:
         if profile.strategy:
             return profile.strategy
-        strategy = SocialProfileStrategy(user_id=profile.user_id, profile_id=profile.id)
+        strategy = SocialProfileStrategy(profile_id=profile.id)
         db.add(strategy)
         db.commit()
         db.refresh(strategy)
@@ -727,6 +789,7 @@ class SocialProfileService:
             content = db.get(ContentItem, wf.primary_content_id) if wf.primary_content_id else None
             article_link = final_video
             article_title = wf.title or (content.canonical_title if content else "Video bài viết")
+            publish_caption = self.caption_with_hashtags(wf.title, profile=profile, content=content, story=wf.draft_json)
 
             queue_item = PublishingQueueItem(
                 user_id=wf.user_id,
@@ -735,7 +798,7 @@ class SocialProfileService:
                 article_link=article_link,
                 article_title=article_title,
                 platform=profile.platform or "tiktok",
-                generated_content=wf.title,
+                generated_content=publish_caption,
                 ai_reason="Video hoàn tất được chuyển sang Approvals, chưa lên lịch đăng",
                 status="approved" if metadata.get("video_approved") else "needs_approval",
                 # An Approvals record is not a reserved publishing slot.
@@ -1253,6 +1316,7 @@ class SocialProfileService:
             )
             db.add(post)
             db.flush()
+            self.create_initial_post_metric(db, post, published_at)
             return post
 
         post.title = self._social_post_title(item.article_title, post.title)
@@ -1264,6 +1328,7 @@ class SocialProfileService:
         post.status = "published_to_tiktok"
         post.published_at = published_at
         db.add(post)
+        self.create_initial_post_metric(db, post, published_at)
         return post
 
     def resolve_missing_tiktok_post_ids(
@@ -1551,9 +1616,11 @@ class SocialProfileService:
             return self.refresh_tiktok_publish_status(db, item, "manual", poll_attempts=3, poll_interval_seconds=5)
         self.require_queue_draft_ready(db, item, user)
         video_path = self.resolve_rendered_video_path(item.article_link)
+        publish_caption = self.publish_caption_for_queue_item(db, item)
         action_label = "đăng trực tiếp" if mode == "direct" else "gửi inbox"
         item.status = "publishing"
         item.error = None
+        item.generated_content = publish_caption
         item.ai_reason = f"Đang {action_label} TikTok bằng API ({source})."
         db.add(item)
         db.commit()
@@ -1563,7 +1630,7 @@ class SocialProfileService:
                 result = direct_post_video_to_tiktok(
                     profile,
                     video_path,
-                    caption=item.generated_content,
+                    caption=publish_caption,
                     privacy_level=privacy_level,
                     disable_comment=disable_comment,
                     disable_duet=disable_duet,
@@ -1640,6 +1707,9 @@ class SocialProfileService:
                 status="sent_to_tiktok_inbox",
                 published_at=now,
             )
+            db.add(post)
+            db.flush()
+            self.create_initial_post_metric(db, post, now)
             item.status = "published"
             item.published_at = now
             item.error = None
@@ -1730,6 +1800,8 @@ class SocialProfileService:
             published_at=payload.published_at or datetime.utcnow(),
         )
         db.add(post)
+        db.flush()
+        self.create_initial_post_metric(db, post, post.published_at)
         db.commit()
         db.refresh(post)
         return post

@@ -10,6 +10,7 @@ import {
   Database,
   FileCheck2,
   LayoutDashboard,
+  ListChecks,
   LibraryBig,
   LogOut,
   Megaphone,
@@ -69,6 +70,7 @@ const creatorSections: NavSection[] = [
     items: [
       { key: 'crawl', label: 'Thu thập dữ liệu', icon: <Database size={17} /> },
       { key: 'content', label: 'Bài viết', icon: <Newspaper size={17} /> },
+      { key: 'storyStatus', label: 'Trạng thái series', icon: <ListChecks size={17} /> },
       { key: 'planning', label: 'Kế hoạch nội dung', icon: <Sparkles size={17} /> },
     ],
   },
@@ -102,6 +104,7 @@ const adminSections: NavSection[] = [
     items: [
       { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
       { key: 'contentItems', label: 'Kho nội dung', icon: <LibraryBig size={17} /> },
+      { key: 'storyStatus', label: 'Trạng thái series', icon: <ListChecks size={17} /> },
       { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
       { key: 'auditLogs', label: 'Nhật ký hệ thống', icon: <ScrollText size={17} /> },
     ],

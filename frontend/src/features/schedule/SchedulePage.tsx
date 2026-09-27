@@ -40,6 +40,7 @@ type SocialProfile = {
     approval_mode?: string
     auto_publish_enabled?: boolean
     schedule_timezone?: string
+    schedule_times?: string | null
   } | null
 }
 
@@ -76,6 +77,28 @@ type CalendarDay = {
 }
 
 const baseTimeSlots = [8, 10, 12, 14, 16, 18, 20]
+
+const parseScheduleSlotHours = (value?: string | null) => {
+  const hours = new Set<number>()
+  for (const rawPart of String(value || '').split(',')) {
+    const part = rawPart.trim()
+    if (!part) continue
+    const [startText, endText] = part.split('-', 2).map((text) => text.trim())
+    const start = Number(startText.match(/^(\d{1,2})(?::\d{2})?$/)?.[1])
+    if (!Number.isFinite(start) || start < 0 || start > 23) continue
+    if (!endText) {
+      hours.add(start)
+      continue
+    }
+    const end = Number(endText.match(/^(\d{1,2})(?::\d{2})?$/)?.[1])
+    if (!Number.isFinite(end) || end < start || end > 23) {
+      hours.add(start)
+      continue
+    }
+    for (let hour = start; hour <= end; hour += 2) hours.add(hour)
+  }
+  return Array.from(hours)
+}
 
 const statusMeta: Record<string, { label: string; color: string; dot: string; icon: ReactNode }> = {
   queued: { label: 'Đã lên lịch', color: '#2563eb', dot: '#10b981', icon: <Clock3 size={13} /> },
@@ -248,7 +271,7 @@ export default function SchedulePage() {
           end_date: formatDateKey(addDays(weekStart, 7)),
           q: searchQuery.trim() || undefined,
           view: 'schedule',
-          timezone: 'UTC',
+          timezone: 'Asia/Bangkok',
           include_unscheduled: true,
         }),
       ])
@@ -471,16 +494,19 @@ export default function SchedulePage() {
   }, [todayKey, weekItems])
 
   const calendarSlots = useMemo(() => {
-    const slots = new Set([14])
+    const configuredHours = selectedProfileId !== 'all'
+      ? parseScheduleSlotHours(profilesById.get(selectedProfileId)?.strategy?.schedule_times)
+      : profiles.flatMap((profile) => parseScheduleSlotHours(profile.strategy?.schedule_times))
+    const slots = new Set(configuredHours.length ? configuredHours : baseTimeSlots)
     weekItems.forEach((item) => {
       const value = scheduledValue(item)
       if (!value) return
       const hour = localHour(value)
       if (!Number.isFinite(hour)) return
-      slots.add(Math.floor(hour / 2) * 2)
+      slots.add(hour)
     })
     return Array.from(slots).sort((a, b) => a - b)
-  }, [weekItems])
+  }, [profiles, profilesById, selectedProfileId, weekItems])
 
 
 
@@ -601,12 +627,11 @@ export default function SchedulePage() {
 
             <div className="table-scroll">
               <div className="min-w-[1020px]">
-                <div className="grid grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b border-slate-100 bg-slate-50/30">
-                  <div className="px-3 py-4 text-xs font-bold text-slate-400">Giờ</div>
-                  {weekDays.map((day) => (
+                <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/30">
+                  {weekDays.map((day, index) => (
                     <div
                       key={day.key}
-                      className={`border-l border-slate-100 px-3 py-4 text-center ${day.isToday ? 'bg-blue-50/40' : ''}`}
+                      className={`px-3 py-4 text-center border-slate-100 ${day.isToday ? 'bg-blue-50/40' : ''} ${index > 0 ? 'border-l' : ''}`}
                     >
                       <div className="text-xs font-black uppercase tracking-wider text-slate-500">{day.label}</div>
                       <div className={`mx-auto mt-2 flex h-8 min-w-[32px] w-fit items-center justify-center rounded-full px-2.5 text-sm font-black transition-all ${day.isToday ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-700'}`}>
@@ -616,48 +641,43 @@ export default function SchedulePage() {
                   ))}
                 </div>
 
-                {calendarSlots.map((slot) => (
-                  <div key={slot} className="grid min-h-[120px] grid-cols-[64px_repeat(7,minmax(128px,1fr))] border-b border-slate-100 last:border-b-0">
-                    <div className="px-3 py-4 text-xs font-extrabold text-slate-400">
-                      {String(slot).padStart(2, '0')}:00
-                    </div>
-                    {weekDays.map((day) => {
-                      const dayItems = weekItems.filter((item) => dateKey(scheduledValue(item)) === day.key && isItemInSlot(item, slot, calendarSlots))
-                      return (
-                        <div
-                          key={`${day.key}-${slot}`}
-                          className={`border-l border-slate-100 p-2 transition-colors ${day.isToday ? 'bg-blue-50/10' : 'hover:bg-slate-50/50'}`}
-                        >
-                          <div className="space-y-2">
-                            {dayItems.map((item) => (
-                              <ScheduleEventCard
-                                key={item.id}
-                                item={item}
-                                profile={profilesById.get(String(item.profile_id))}
-                                active={modalItem?.id === item.id}
-                                onSelect={() => void handleOpenDetail(item)}
-                                onOpen={() => void handleOpenDetail(item)}
-                                onApprove={() => void handleApprove(item.id)}
-                                onSchedule={() => setScheduleItem(item)}
-                                onSkip={() => void handleSkip(item.id)}
-                                onPublish={() => void handlePublishNow(item)}
-                                loading={loading}
-                              />
-                            ))}
-                            {dayItems.length === 0 && slot === 14 && day.isToday && (
-                              <button
-                                className="flex h-12 w-full items-center justify-center rounded-md border border-dashed"
-                                style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
-                              >
-                                <Plus size={17} />
-                              </button>
-                            )}
-                          </div>
+                <div className="grid grid-cols-7">
+                  {weekDays.map((day, index) => {
+                    const dayItems = weekItems.filter((item) => dateKey(scheduledValue(item)) === day.key)
+                    return (
+                      <div
+                        key={day.key}
+                        className={`min-h-[120px] p-2 border-slate-100 ${day.isToday ? 'bg-blue-50/10' : 'hover:bg-slate-50/50'} ${index > 0 ? 'border-l' : ''}`}
+                      >
+                        <div className="space-y-3">
+                          {dayItems.map((item) => (
+                            <ScheduleEventCard
+                              key={item.id}
+                              item={item}
+                              profile={profilesById.get(String(item.profile_id))}
+                              active={modalItem?.id === item.id}
+                              onSelect={() => void handleOpenDetail(item)}
+                              onOpen={() => void handleOpenDetail(item)}
+                              onApprove={() => void handleApprove(item.id)}
+                              onSchedule={() => setScheduleItem(item)}
+                              onSkip={() => void handleSkip(item.id)}
+                              onPublish={() => void handlePublishNow(item)}
+                              loading={loading}
+                            />
+                          ))}
+                          {day.isToday && (
+                            <button
+                              className="flex h-12 w-full items-center justify-center rounded-md border border-dashed hover:bg-slate-50 transition-colors"
+                              style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+                            >
+                              <Plus size={17} />
+                            </button>
+                          )}
                         </div>
-                      )
-                    })}
-                  </div>
-                ))}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>

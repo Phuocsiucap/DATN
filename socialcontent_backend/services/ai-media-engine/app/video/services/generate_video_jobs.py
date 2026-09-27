@@ -80,7 +80,13 @@ def process_generate_video_script_run(task_id: uuid.UUID | str) -> None:
 
         source = _build_script_source_from_project(db, project, metadata)
         _update_task_progress(db, task, project, "GENERATING_DRAFT", 30, project_status="SCRIPTING")
-        story = create_story_from_raw(source)
+        
+        project_meta = project.metadata_json or {}
+        if project_meta.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB":
+            story = _create_hardsub_story_from_source(source)
+        else:
+            story = create_story_from_raw(source)
+            
         _update_task_progress(db, task, project, "NORMALIZING_DRAFT", 72, project_status="SCRIPTING")
         story = normalize_story_for_project(story)
         story.setdefault("meta", {})
@@ -184,6 +190,50 @@ def _build_script_source_from_project(db: Any, project: Any, metadata: dict[str,
     if instructions:
         source["instructions"] = instructions
     return source
+
+
+def _create_hardsub_story_from_source(source: dict[str, Any]) -> dict[str, Any]:
+    source_content = source.get("source_content") or {}
+    source_metadata = source_content.get("source_metadata") or {}
+    ocr_results = source_metadata.get("ocr_results") or {}
+    
+    segments = []
+    original_video_url = ""
+    for episode_key, episode_data in ocr_results.items():
+        if isinstance(episode_data, dict):
+            segs = episode_data.get("segments")
+            if segs and isinstance(segs, list):
+                segments = segs
+                original_video_url = episode_data.get("url") or source_content.get("source_url") or ""
+                break
+                
+    story_data = []
+    for idx, seg in enumerate(segments, start=1):
+        if not isinstance(seg, dict):
+            continue
+        start = float(seg.get("start") or 0.0)
+        end = float(seg.get("end") or start + 2.0)
+        duration = max(0.5, end - start)
+        text = str(seg.get("translated_text") or seg.get("raw_text") or "").strip()
+        
+        story_data.append({
+            "scene_index": idx,
+            "duration": round(duration, 2),
+            "subtitle_start": round(start, 2),
+            "subtitle_duration": round(duration, 2),
+            "image": original_video_url,
+            "media_type": "video",
+            "effect": "none",
+            "fit": "contain",
+            "subtitle": text,
+            "voice_text": text,
+        })
+        
+    return {
+        "title": source.get("title") or "Bilibili Translated Video",
+        "story_data": story_data,
+        "source": source,
+    }
 
 
 def _workflow_supporting_source_context(db: Any, project: Any, primary_content_id: uuid.UUID) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -897,6 +947,35 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
             return
 
         metadata = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
+        project_meta = project.metadata_json or {}
+        
+        # Skip voice if workflow is HARDSUB and dubbing is not explicitly enabled
+        if project_meta.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB" and not project_meta.get("enable_dubbing"):
+            task.status = "COMPLETED"
+            task.progress_percent = 100
+            task.current_stage = "VOICE_READY"
+            task.result_jsonb = {"workflow_id": str(project.id), "skipped": True, "reason": "Hardsub workflow does not require voice generation"}
+            task.completed_at = datetime.now(timezone.utc)
+            ready = auto_production_allowed(project.metadata_json, project.draft_json)
+            project.status = "VOICE_READY" if ready else "EDITING"
+            project.current_stage = "VOICE_READY" if ready else "DRAFT_REVIEW_REQUIRED"
+            project.progress_percent = 100 if ready else 80
+            db.add_all([task, project])
+            
+            # Create a Bilibili render task instead of the generic render task
+            if ready:
+                from common.db.models import KafkaTask as dbKafkaTask
+                render_task = dbKafkaTask(
+                    task_type="BILIBILI_RENDER_TASK",
+                    reference_id=project.id,
+                    status="PENDING",
+                    payload_jsonb={"trigger": "voice_skipped"},
+                )
+                db.add(render_task)
+                
+            db.commit()
+            return
+
         story = deepcopy(project.draft_json)
         voice_id = metadata.get("voice_id")
         voice_speed = float(metadata.get("voice_speed") or DEFAULT_VOICE_SPEED)
@@ -915,15 +994,25 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         _update_task_progress(db, task, project, "PREPARING_VOICE", 10, project_status="EDITING")
 
         _update_task_progress(db, task, project, "GENERATING_VOICE", 30, project_status="EDITING")
-        result = enhance_emotion_and_generate_voice(story, voice_id, voice_speed, voice_provider)
+        
+        is_hardsub = project_meta.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB"
+        if is_hardsub:
+            from app.video.services.generate_video_voice import enhance_emotion_and_generate_voice_per_scene
+            result = enhance_emotion_and_generate_voice_per_scene(story, voice_id, voice_speed, voice_provider)
+        else:
+            result = enhance_emotion_and_generate_voice(story, voice_id, voice_speed, voice_provider)
+            
         result_story = result.get("story") or {}
         fit_error = None
-        try:
-            _update_task_progress(db, task, project, "ALIGNING_VOICE", 76, project_status="EDITING")
-            fit_result = fit_frames_with_whisper(result_story)
-            result_story = fit_result.get("story") or result_story
-        except Exception as error:
-            fit_error = str(error)
+        
+        # Do not fit frames for Bilibili because original video has fixed durations
+        if not is_hardsub:
+            try:
+                _update_task_progress(db, task, project, "ALIGNING_VOICE", 76, project_status="EDITING")
+                fit_result = fit_frames_with_whisper(result_story)
+                result_story = fit_result.get("story") or result_story
+            except Exception as error:
+                fit_error = str(error)
 
         result_story = normalize_story_for_project(result_story)
         _preserve_compact_scenes(story, result_story)
@@ -952,8 +1041,24 @@ def process_generate_video_voice_run(task_id: uuid.UUID | str) -> None:
         project.current_stage = "VOICE_READY" if ready else "DRAFT_REVIEW_REQUIRED"
         project.progress_percent = 100 if ready else 80
         db.add_all([task, project])
+        
+        # Trigger Bilibili render or normal render
+        if ready:
+            if is_hardsub:
+                from common.db.models import KafkaTask as dbKafkaTask
+                render_task = dbKafkaTask(
+                    task_type="BILIBILI_RENDER_TASK",
+                    reference_id=project.id,
+                    status="PENDING",
+                    payload_jsonb={"trigger": "voice_completed_dubbing"},
+                )
+                db.add(render_task)
+            else:
+                db.commit() # commit task and project first
+                _maybe_enqueue_auto_generate_video_render(db, project, public_story, trigger="voice_completed")
+                return # avoid second commit
+                
         db.commit()
-        _maybe_enqueue_auto_generate_video_render(db, project, public_story, trigger="voice_completed")
     except Exception as error:
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
@@ -1275,7 +1380,6 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             article_link=rendered_video,
             article_title=project.title,
             platform=profile.platform if profile else "tiktok",
-            generated_content=_default_module4_caption(project, story),
             ai_reason=queued_reason,
             status=queued_status,
         )
@@ -1283,7 +1387,6 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
         item.workflow_id = project.id
         item.article_link = rendered_video
         item.article_title = project.title
-        item.generated_content = item.generated_content or _default_module4_caption(project, story)
         item.ai_reason = queued_reason
         item.status = queued_status
         item.error = None
@@ -1299,6 +1402,8 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
             item.scheduled_at = None
             item.status = "approved"
             queued_reason = f"{queued_reason}. Cần chọn lịch: {exc}"
+    if _has_story_caption(story) or not item.generated_content:
+        item.generated_content = _default_module4_caption(project, story)
     item.ai_reason = queued_reason
     db.add(item)
     db.flush()
@@ -1318,8 +1423,16 @@ def _apply_module4_policy_after_render(db, project, rendered_video: str, story: 
 
 def _default_module4_caption(project, story: dict[str, Any]) -> str:
     meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    caption = meta.get("social_caption") or meta.get("caption")
+    if caption:
+        return str(caption).strip()
     title = str(meta.get("title") or project.title or "").strip()
     return title or "Video mới đã sẵn sàng đăng"
+
+
+def _has_story_caption(story: dict[str, Any]) -> bool:
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    return bool(meta.get("social_caption") or meta.get("caption"))
 
 
 def _upsert_project_rendered_draft(project, story: dict[str, Any]) -> None:

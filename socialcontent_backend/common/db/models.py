@@ -392,7 +392,7 @@ class SocialProfileStrategy(Base):
     avoid_topics = Column(Text, default="", nullable=False)
     avoid_topic_descriptions = Column(JSONB, nullable=False, default=dict)
     tone = Column(String(255), default="ngắn gọn, tự nhiên, đáng tin", nullable=False)
-    target_audience = Column(String(255), default="", nullable=False)
+    target_audience = Column(Text, default="", nullable=False)
     # NULL means that automatic scheduling has no separate daily cap. When
     # schedule_times is configured, those explicit slots still bound the day.
     post_frequency_per_day = Column(Integer, default=None, nullable=True)

@@ -5,13 +5,16 @@ import {
   CalendarDays,
   Eye,
   Grid2X2,
+  Loader2,
   Plus,
   Wand2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   fetchContentDetailApi,
   fetchFinalContentViewApi,
   fetchSourceTypesApi,
+  queueBilibiliOcrApi,
   type ContentDetail,
   type FinalContentItem,
   type FinalContentView,
@@ -68,6 +71,8 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [selectedContentIds, setSelectedContentIds] = useState<string[]>([])
+  const [contentTab, setContentTab] = useState<'articles' | 'videos'>('articles')
+  const [ocrQueueing, setOcrQueueing] = useState(false)
 
   // Creation modals
   const [showManualModal, setShowManualModal] = useState(false)
@@ -117,11 +122,12 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
 
       const data = await fetchFinalContentViewApi(params)
       setView(data)
-      const availableIds = new Set(data.normal_items.map((item) => item.id))
+      const allItems = [...data.normal_items, ...data.series_items]
+      const availableIds = new Set(allItems.map((item) => item.id))
       setSelectedContentIds((current) => current.filter((id) => availableIds.has(id)))
       setSelectedContent((current) => {
         if (!current) return null
-        const next = data.normal_items.find((item) => item.id === current.id) || null
+        const next = allItems.find((item) => item.id === current.id) || null
         if (!next) setContentDetail(null)
         return next
       })
@@ -151,7 +157,10 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
     }
   }
 
-  const baseItems = view.normal_items
+  const allContentItems = useMemo(() => [...view.normal_items, ...view.series_items], [view.normal_items, view.series_items])
+  const articleItems = useMemo(() => allContentItems.filter((item) => !isVideoContent(item)), [allContentItems])
+  const videoItems = useMemo(() => allContentItems.filter((item) => isVideoContent(item)), [allContentItems])
+  const baseItems = contentTab === 'videos' ? videoItems : articleItems
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase()
     return baseItems.filter((item) => {
@@ -183,6 +192,33 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
       : [...current, contentId].slice(0, 20))
   }
 
+  const queueSelectedBilibiliOcr = async () => {
+    const selected = filteredItems.filter((item) => selectedContentIds.includes(item.id))
+    const bilibiliItems = selected.filter((item) => isBilibiliContent(item))
+    if (bilibiliItems.length === 0) {
+      toast.error('Hãy chọn ít nhất một video Bilibili để đưa vào hàng đợi OCR.')
+      return
+    }
+    setOcrQueueing(true)
+    try {
+      let queued = 0
+      let reused = 0
+      for (const item of bilibiliItems) {
+        const result = await queueBilibiliOcrApi(item.id)
+        queued += result.queued
+        reused += result.reused
+      }
+      toast.success(`Đã đưa ${queued} tập vào hàng đợi OCR${reused ? `, ${reused} tập đã có trong hàng đợi` : ''}.`)
+      setSelectedContentIds((current) => current.filter((id) => !bilibiliItems.some((item) => item.id === id)))
+      void loadData()
+    } catch (error: unknown) {
+      const candidate = error as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(candidate.response?.data?.detail || candidate.message || 'Không thể đưa video vào hàng đợi OCR.')
+    } finally {
+      setOcrQueueing(false)
+    }
+  }
+
   return (
     <PageLayout
       title="Bài viết"
@@ -191,7 +227,7 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
         : 'Bài riêng và bài Global được phân cho creator theo strategy của kênh'}
       actions={
         <>
-          {!isSystemUser && (
+          {!isSystemUser && contentTab === 'articles' && (
             <AppButton
               variant="secondary"
               icon={<Wand2 size={16} />}
@@ -199,6 +235,25 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
             >
               Tạo workflow{selectedContentIds.length > 0 ? ` (${selectedContentIds.length})` : ''}
             </AppButton>
+          )}
+          {!isSystemUser && contentTab === 'videos' && (
+            <>
+              <AppButton
+                variant="secondary"
+                icon={ocrQueueing ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                disabled={ocrQueueing || selectedContentIds.length === 0}
+                onClick={() => void queueSelectedBilibiliOcr()}
+              >
+                {ocrQueueing ? 'Đang đưa vào OCR...' : `Đưa vào hàng đợi OCR${selectedContentIds.length > 0 ? ` (${selectedContentIds.length})` : ''}`}
+              </AppButton>
+              <AppButton
+                variant="secondary"
+                icon={<Wand2 size={16} />}
+                onClick={() => setShowWorkflowModal(true)}
+              >
+                Tạo workflow{selectedContentIds.length > 0 ? ` (${selectedContentIds.length})` : ''}
+              </AppButton>
+            </>
           )}
           <AppButton
             icon={<Plus size={16} />}
@@ -211,8 +266,29 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
     >
       <div className="flex min-h-0 flex-1">
         <AppCard className="app-table-card flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--outline-variant)] px-5 py-3">
+            {[
+              { key: 'articles' as const, label: 'Bài báo', count: articleItems.length },
+              { key: 'videos' as const, label: 'Video', count: videoItems.length },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => {
+                  setContentTab(tab.key)
+                  setSelectedContentIds([])
+                  setSelectedContent(null)
+                  setContentDetail(null)
+                }}
+                className={`h-9 rounded-md px-3 text-sm font-extrabold transition ${contentTab === tab.key ? 'bg-[var(--accent)] text-white shadow-sm' : 'bg-[var(--surface-container-low)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container)]'}`}
+              >
+                {tab.label}
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${contentTab === tab.key ? 'bg-white/20 text-white' : 'bg-white text-[var(--on-surface-variant)]'}`}>{tab.count}</span>
+              </button>
+            ))}
+          </div>
           <div className="grid gap-3 border-b border-[var(--outline-variant)] p-5 md:grid-cols-[minmax(220px,1fr)_150px_170px_130px_190px_110px_42px]">
-            <SearchField value={search} onChange={setSearch} placeholder="Tìm kiếm bài viết..." />
+            <SearchField value={search} onChange={setSearch} placeholder={contentTab === 'videos' ? 'Tìm kiếm video...' : 'Tìm kiếm bài viết...'} />
             <SelectControl value={sourceTypeFilter} onChange={setSourceTypeFilter}>
               <option value="">Tất cả nguồn</option>
               {sourceTypes.map((type) => (
@@ -256,11 +332,11 @@ export default function ContentPage({ isSystemUser = false, onOpenModule2 }: { i
             <button className="grid h-10 w-10 place-items-center rounded-[8px] border border-[var(--outline-variant)] bg-white text-[#526179]"><Grid2X2 size={16} /></button>
           </div>
 
-          <PaginatedList items={filteredItems} loading={loading} resetKey={JSON.stringify([search, sourceTypeFilter, categoryFilter, statusFilter, dateRangeFilter, sortBy, sortOrder])}>{(visibleItems) => (
+          <PaginatedList items={filteredItems} loading={loading} resetKey={JSON.stringify([contentTab, search, sourceTypeFilter, categoryFilter, statusFilter, dateRangeFilter, sortBy, sortOrder])}>{(visibleItems) => (
 loading ? (
             <ContentTableSkeleton />
           ) : filteredItems.length === 0 ? (
-            <div className="p-5"><EmptyBlock label="Chưa có dữ liệu bài viết." /></div>
+            <div className="p-5"><EmptyBlock label={contentTab === 'videos' ? 'Chưa có dữ liệu video.' : 'Chưa có dữ liệu bài viết.'} /></div>
           ) : (
             <div className="min-h-0 flex-1">
                   <Table className="min-w-[960px] table-fixed">
@@ -282,7 +358,7 @@ loading ? (
                           aria-label="Chọn tất cả nội dung đang hiển thị"
                           className="h-4 w-4 rounded border-[#cbd5e1] accent-[#6d5dfc]"
                         /></TableHead>
-                        <TableHead className="px-4 py-3"><span>Bài viết</span></TableHead>
+                        <TableHead className="px-4 py-3"><span>{contentTab === 'videos' ? 'Video' : 'Bài viết'}</span></TableHead>
                         <TableHead className="px-4 py-3"><span>Nguồn</span></TableHead>
                         <TableHead className="px-4 py-3"><span>Ngày đăng</span></TableHead>
                         <TableHead className="px-4 py-3"><span>Điểm phù hợp</span></TableHead>
@@ -323,7 +399,7 @@ loading ? (
 
       <CreateWorkflowModal
         open={showWorkflowModal}
-        contents={view.normal_items}
+        contents={allContentItems}
         initialContentIds={selectedContentIds}
         onClose={() => setShowWorkflowModal(false)}
         onCreated={(workflowId) => {
@@ -462,4 +538,15 @@ function ContentRow({
 function getMediaSrc(item: FinalContentItem) {
   const media = (item.media_jsonb || item.media || [])[0]
   return item.thumbnail_url || media?.thumbnail_url || media?.source_url || media?.storage_url || null
+}
+
+function isVideoContent(item: FinalContentItem) {
+  const type = (item.content_type || '').toUpperCase()
+  if (['VIDEO', 'PLAYLIST'].includes(type)) return true
+  const media = item.media_jsonb || item.media || []
+  return media.some((entry) => (entry.media_type || '').toUpperCase().includes('VIDEO'))
+}
+
+function isBilibiliContent(item: FinalContentItem) {
+  return String(item.source_type || '').toUpperCase() === 'BILIBILI'
 }

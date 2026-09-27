@@ -180,9 +180,38 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EMBEDDING_SERVICE_URL: http://embedding-service:8075
       GENERATE_VIDEO_DISABLE_RENDER: "true"
+      GENERATE_VIDEO_WORKER_TASK_TYPES: GENERATE_VIDEO_SCRIPT,GENERATE_VIDEO_EDIT,GENERATE_VIDEO_REVIEW,GENERATE_VIDEO_VOICE
       PYTHONUNBUFFERED: "1"
       VIDEO_STORAGE_ROOT: /app/runtime/video-generation
       HEALTH_PORT: "8060"
+    volumes:
+      - ./runtime/video-generation:/app/runtime/video-generation
+
+  ai-media-ocr-worker:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
+    working_dir: /app/services/ai-media-engine
+    command: python -m app.video.workers.bilibili_ocr_worker
+    ports:
+      - "127.0.0.1:8061:8061"
+    depends_on:
+      - postgres
+      - mongodb
+      - kafka
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_SERVICE_URL: http://embedding-service:8075
+      PYTHONUNBUFFERED: "1"
+      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
+      HEALTH_PORT: "8061"
+      BILIBILI_HARDSUB_OCR_ENABLED: "true"
+      BILIBILI_HARDSUB_OCR_FPS: "1.5"
+      BILIBILI_HARDSUB_OCR_MAX_SECONDS: "360"
     volumes:
       - ./runtime/video-generation:/app/runtime/video-generation
 

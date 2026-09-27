@@ -12,9 +12,9 @@ TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 HLS_URI_ATTR_RE = re.compile(r'URI=(["\'])(?P<uri>[^"\']+)\1', re.IGNORECASE)
 
 
-def _build_headers(request: Request) -> dict[str, str]:
+def _build_headers(request: Request, original_url: str = "") -> dict[str, str]:
     headers = {
-        "Referer": "https://vnexpress.net/",
+        "Referer": "https://www.bilibili.com/" if "bilibili" in original_url or "hdslb" in original_url else "https://vnexpress.net/",
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -70,29 +70,53 @@ def _rewrite_hls_playlist(body: str, playlist_url: str, base_proxy_url: str) -> 
     return "\n".join(rewritten_lines)
 
 
+async def _resolve_bilibili_direct_url(url: str) -> str:
+    import asyncio
+    cmd = ["python", "-m", "yt_dlp", "-f", "b[ext=mp4]", "-g", url]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode == 0 and stdout:
+            direct_url = stdout.decode("utf-8").strip().split('\n')[0]
+            if direct_url.startswith("http"):
+                return direct_url
+    except Exception as exc:
+        print(f"Failed to resolve bilibili url: {exc}")
+    return url
+
+
 @router.get("")
 async def media_proxy(request: Request, url: str = Query(..., description="Media URL to proxy")):
     if not url.startswith("http"):
         raise HTTPException(status_code=400, detail="Invalid URL")
 
-    headers = _build_headers(request)
+    headers = _build_headers(request, url)
     base_proxy_url = str(request.base_url).rstrip("/") + "/api/v1/media-proxy?url="
 
-    if ".m3u8" in url.lower():
+    if "bilibili.com/video/" in url:
+        proxy_target_url = await _resolve_bilibili_direct_url(url)
+    else:
+        proxy_target_url = url
+
+    if ".m3u8" in proxy_target_url.lower():
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-                res = await client.get(url, headers=headers)
+                res = await client.get(proxy_target_url, headers=headers)
         except httpx.RequestError as exc:
             raise HTTPException(status_code=502, detail=f"Proxy request failed: {exc}") from exc
 
         if res.status_code >= 400:
             raise HTTPException(status_code=res.status_code, detail="Proxy failed")
 
-        return Response(content=_rewrite_hls_playlist(res.text, url, base_proxy_url), media_type="application/vnd.apple.mpegurl")
+        return Response(content=_rewrite_hls_playlist(res.text, proxy_target_url, base_proxy_url), media_type="application/vnd.apple.mpegurl")
 
     client = httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True)
     try:
-        req = client.build_request("GET", url, headers=headers)
+        req = client.build_request("GET", proxy_target_url, headers=headers)
         res = await client.send(req, stream=True)
     except httpx.RequestError as exc:
         await client.aclose()

@@ -47,8 +47,15 @@ VIDEO_RUN_TYPES = {
 WORKSPACE_METADATA_KEYS = {
     "selection_mode",
     "creation_source",
+    "workflow_type",
     "primary_source",
     "source_count",
+    "source_type",
+    "bilibili_episode_indices",
+    "target_episode_indices",
+    "series_title",
+    "season_id",
+    "ocr_queue",
     "note",
     "crawl_job_id",
     "content_angle",
@@ -371,6 +378,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
     title = requested_title or _source_ref_title(primary_ref, accessible_contents, accessible_stories) or payload.note or "Content workflow"
 
     primary_category_payload = content_category_payload(primary_content)
+    workflow_type = "ORIGINAL_VIDEO_HARDSUB" if _content_source_type(primary_content) == "BILIBILI" else "ASSEMBLED_VIDEO"
     workflow = MediaWorkflow(
         profile_id=profile.id,
         title=title,
@@ -379,6 +387,7 @@ def create_media_workflow_from_sources(payload: MediaWorkflowFromSourcesRequest,
         primary_content_id=primary_content.id,
         current_stage="READY",
         metadata_json={
+            "workflow_type": workflow_type,
             "selection_mode": payload.selection_mode.upper(),
             "creation_source": "MANUAL_SOURCE_SELECTION",
             "primary_source": {"type": primary_ref.type, "id": str(primary_ref.id)},

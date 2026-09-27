@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from common.core.config import get_settings
 from common.db.models import PublishingQueueItem, SocialProfile, SocialProfileStrategy, SystemSetting, User
 from common.db.session import SessionLocal
 from app.services.social_profiles import SocialProfileService
+from app.services.tiktok_posting import TikTokPublishBlockedError
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +27,55 @@ _publish_queue_task: asyncio.Task | None = None
 _publish_cycle_tasks: set[asyncio.Task] = set()
 _analytics_task: asyncio.Task | None = None
 MAX_CONCURRENT_PUBLISH_CYCLES = 2
+ACCOUNT_SNAPSHOT_TIMEZONE = ZoneInfo("Asia/Bangkok")
+ACCOUNT_SNAPSHOT_CUTOFF_TIME = time(23, 55)
 _last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
 _last_account_snapshot_run: datetime | None = None
 _last_video_analytics_run: datetime | None = None
 _last_account_snapshot_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "snapshots": 0, "failed": 0}
 _last_video_analytics_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "videos": 0, "metrics": 0, "failed": 0}
+_profile_publish_cooldowns: dict[str, datetime] = {}
+
+
+def _profile_scopes(profile: SocialProfile | None) -> set[str]:
+    value = getattr(profile, "scopes_jsonb", None)
+    if isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, list):
+        raw_values = [str(item) for item in value]
+    else:
+        raw_values = []
+    scopes: set[str] = set()
+    for item in raw_values:
+        scopes.update(part.strip() for part in re.split(r"[\s,]+", item) if part.strip())
+    return scopes
+
+
+def _scheduler_publish_mode(profile: SocialProfile | None, *, allow_direct: bool = True) -> str:
+    scopes = _profile_scopes(profile)
+    if allow_direct and "video.publish" in scopes:
+        return "direct"
+    if "video.upload" in scopes:
+        return "inbox"
+    return "direct" if "video.publish" in scopes else "inbox"
+
+
+def _active_publish_cooldown(profile_id: Any, now: datetime | None = None) -> datetime | None:
+    key = str(profile_id)
+    current = now or datetime.now(timezone.utc)
+    cooldown_until = _profile_publish_cooldowns.get(key)
+    if cooldown_until and cooldown_until > current:
+        return cooldown_until
+    _profile_publish_cooldowns.pop(key, None)
+    return None
+
+
+def _set_publish_cooldown(profile_id: Any, seconds: int | None) -> datetime | None:
+    if not seconds or seconds <= 0:
+        return None
+    cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    _profile_publish_cooldowns[str(profile_id)] = cooldown_until
+    return cooldown_until
 
 
 def normalize_scheduler_settings(value: dict[str, Any] | None = None) -> dict[str, int]:
@@ -206,7 +253,18 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
             .all()
         )
         ready_items = []
+        now = datetime.now(timezone.utc)
         for item in due_items:
+            cooldown_until = _active_publish_cooldown(item.profile_id, now)
+            if cooldown_until:
+                logger.info(
+                    "Publish queue skipped queue_item_id=%s profile_id=%s because TikTok publish is cooling down until %s",
+                    item.id,
+                    item.profile_id,
+                    cooldown_until.isoformat(),
+                )
+                result["skipped"] += 1
+                continue
             strategy = item.profile.strategy
             if not strategy or not strategy.auto_publish_enabled:
                 result["skipped"] += 1
@@ -230,6 +288,7 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
         # Claim the whole batch before any network request. The next minute can
         # therefore dispatch other due rows even while TikTok is still working.
         claimed_at = datetime.now(timezone.utc).isoformat()
+        claimed_statuses = {item.id: item.status for item in ready_items}
         for item in ready_items:
             item.status = "publishing"
             item.error = None
@@ -238,11 +297,53 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
         db.commit()
 
         for item in ready_items:
+            cooldown_until = _active_publish_cooldown(item.profile_id)
+            if cooldown_until:
+                skipped_item = db.get(PublishingQueueItem, item.id)
+                if skipped_item and skipped_item.status == "publishing" and not skipped_item.platform_publish_id:
+                    skipped_item.status = claimed_statuses.get(item.id, "queued")
+                    skipped_item.error = None
+                    skipped_item.ai_reason = f"Scheduler tạm dừng đăng TikTok đến {cooldown_until.isoformat()} do lỗi trước đó."
+                    db.add(skipped_item)
+                    db.commit()
+                result["skipped"] += 1
+                continue
+            mode = _scheduler_publish_mode(item.profile)
             try:
-                service.publish_queue_item_to_tiktok(db, item.id, item.profile.user, source="scheduler", mode="direct")
+                service.publish_queue_item_to_tiktok(db, item.id, item.profile.user, source="scheduler", mode=mode)
                 result["published"] += 1
             except Exception as exc:
                 db.rollback()
+                if (
+                    mode == "direct"
+                    and isinstance(exc, TikTokPublishBlockedError)
+                    and "video.upload" in _profile_scopes(item.profile)
+                ):
+                    logger.warning(
+                        "TikTok Direct Post blocked queue_item_id=%s profile_id=%s; retrying scheduler publish via inbox: %s",
+                        item.id,
+                        item.profile_id,
+                        exc.detail,
+                    )
+                    try:
+                        fallback_item = db.get(PublishingQueueItem, item.id)
+                        fallback_user = fallback_item.profile.user if fallback_item and fallback_item.profile else item.profile.user
+                        service.publish_queue_item_to_tiktok(db, item.id, fallback_user, source="scheduler", mode="inbox")
+                        result["published"] += 1
+                        continue
+                    except Exception as fallback_exc:
+                        db.rollback()
+                        exc = fallback_exc
+                if isinstance(exc, TikTokPublishBlockedError):
+                    cooldown_until = _set_publish_cooldown(item.profile_id, exc.retry_after_seconds)
+                    if cooldown_until:
+                        logger.warning(
+                            "TikTok publish cooldown set for profile_id=%s until %s after queue_item_id=%s failed: %s",
+                            item.profile_id,
+                            cooldown_until.isoformat(),
+                            item.id,
+                            exc.detail,
+                        )
                 failed_item = db.get(PublishingQueueItem, item.id)
                 if failed_item and failed_item.status == "publishing" and not failed_item.platform_publish_id:
                     failed_item.status = "failed"
@@ -257,8 +358,14 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
 
 async def run_due_analytics_tracking() -> None:
     global _last_account_snapshot_run, _last_video_analytics_run
-    now = datetime.utcnow()
-    if _last_account_snapshot_run is None or (now - _last_account_snapshot_run).total_seconds() >= 24 * 60 * 60:
+    now = datetime.now(timezone.utc)
+    local_now = now.astimezone(ACCOUNT_SNAPSHOT_TIMEZONE)
+    last_snapshot_day = (
+        _last_account_snapshot_run.astimezone(ACCOUNT_SNAPSHOT_TIMEZONE).date()
+        if _last_account_snapshot_run
+        else None
+    )
+    if local_now.time() >= ACCOUNT_SNAPSHOT_CUTOFF_TIME and last_snapshot_day != local_now.date():
         _last_account_snapshot_run = now
         result = await run_daily_account_snapshots()
         _last_account_snapshot_result.update(result)

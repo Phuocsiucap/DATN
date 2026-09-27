@@ -1063,6 +1063,8 @@ def generate_story_timeline_with_ai(source: dict[str, Any], image_urls: list[str
                 "version": 1,
                 "duration": "number seconds",
                 "metadata": {
+                    "title": "Short catchy Vietnamese title (max 60 chars)",
+                    "social_caption": "Engaging Vietnamese social media caption summarizing this exact video. End with 3-5 concise hashtags directly related to the topic; do not use unrelated generic topic packs.",
                     "script_outline": {
                         "hook": "Vietnamese hook direction",
                         "main_beats": ["Vietnamese beat 1", "Vietnamese beat 2"],

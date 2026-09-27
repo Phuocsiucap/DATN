@@ -570,11 +570,12 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
     if view != "schedule":
         return data
     scheduled_at = item.scheduled_at
-    scheduled_at_local = _ensure_aware(scheduled_at).astimezone(tzinfo).isoformat() if scheduled_at else None
     profile_scopes = data["profile_scopes"] or []
     profile = item.profile
     strategy = getattr(profile, "strategy", None) if profile else None
     schedule_timezone = getattr(strategy, "schedule_timezone", None) or tzinfo.key
+    item_tzinfo = _resolve_timezone(schedule_timezone)
+    scheduled_at_local = _ensure_aware(scheduled_at).astimezone(item_tzinfo).isoformat() if scheduled_at else None
     return {
         "id": data["id"],
         "profile_id": data["profile_id"],

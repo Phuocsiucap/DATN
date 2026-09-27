@@ -390,6 +390,7 @@ class CanonicalWriter:
             "series_title": normalized.get("series_title"),
             "series_source": normalized.get("series_source"),
             "episode_count": normalized.get("episode_count"),
+            "episodes": normalized.get("episodes") if isinstance(normalized.get("episodes"), list) else [],
             "related_count": len(normalized.get("related") or []),
         }
 

@@ -103,8 +103,10 @@ def _download_video_item(source: dict[str, Any], item: dict[str, Any]) -> dict[s
                 errors.append(f"No media request found for {candidate}")
                 continue
             if _is_stream_url(media_url):
-                errors.append(f"HLS stream is not saved without a transmux step: {media_url}")
-                continue
+                # HLS Stream detected. The user requested NOT to download to avoid bloat.
+                # Pass the direct link to the UI. The Render engine (Remotion) must handle the download.
+                return {"asset_path": media_url, "source_url": media_url, "discovery_url": candidate}
+                    
             try:
                 asset_path = _download_direct_video(client, media_url, source)
             except Exception as exc:

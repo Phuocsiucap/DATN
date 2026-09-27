@@ -93,6 +93,58 @@ def enhance_emotion_and_generate_voice(
         "audio_url": f"/api/v1/generate-video/media/assets/audio/{audio_filename}",
     }
 
+def enhance_emotion_and_generate_voice_per_scene(
+    story: dict[str, Any],
+    voice_id: str | None = None,
+    voice_speed: float = DEFAULT_VOICE_SPEED,
+    voice_provider: str | None = None,
+) -> dict[str, Any]:
+    """Generates a separate TTS audio file for each scene in the story data."""
+    settings = get_settings()
+    story_data = story.get("story_data")
+    if not isinstance(story_data, list) or not story_data:
+        raise RuntimeError("Story has no story_data to generate voice")
+        
+    selected_voice_provider = normalize_voice_provider(voice_provider)
+    selected_voice_speed = clamp_voice_speed(voice_speed)
+    selected_voice_id = EDGE_TTS_VOICES.get(selected_voice_provider) or voice_id or DEFAULT_VOICE_ID
+
+    meta = story.get("meta") if isinstance(story.get("meta"), dict) else {}
+    workflow_id = str(meta.get("workflow_id") or "").strip()
+    
+    generated_clips = []
+    
+    for idx, scene in enumerate(story_data):
+        text = strip_voice_tags(str(scene.get("subtitle") or ""))
+        if not text.strip():
+            continue
+            
+        audio_filename = f"voice-scene-{workflow_id}-{idx}.mp3"
+        audio_path = AUDIO_DIR / audio_filename
+        
+        if selected_voice_provider in EDGE_TTS_VOICES:
+            # Add small pause for natural speech if edge tts
+            voice_text = edge_tts_pause_text(text)
+            generate_edge_tts_voice(voice_text, selected_voice_id, selected_voice_speed, audio_path)
+        else:
+            # We don't support deepseek tagger per scene for ElevenLabs right now to save cost, just raw text
+            generate_elevenlabs_voice(story, settings, selected_voice_id, selected_voice_speed, audio_path)
+            
+        scene["audio"] = {
+            "src": f"assets/audio/{audio_filename}",
+            "start": float(scene.get("subtitle_start") or 0.0),
+        }
+        generated_clips.append(scene["audio"])
+        
+    # We won't set a master audio url since it's segmented
+    return {
+        "story": story,
+        "voice_provider": selected_voice_provider,
+        "voice_id": selected_voice_id,
+        "voice_speed": selected_voice_speed,
+        "audio_clips": generated_clips,
+    }
+
 
 
 def story_audio_filename(story: dict[str, Any]) -> str:

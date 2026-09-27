@@ -123,6 +123,7 @@ def create_story_from_project(
         content = db.get(ContentItem, project.primary_content_id)
         if not content or not _can_use_content(db, content, user):
             raise HTTPException(status_code=404, detail="ContentItem chính không tồn tại hoặc không thuộc quyền truy cập")
+        _ensure_bilibili_ocr_ready(content)
 
         project_meta = project.metadata_json if isinstance(project.metadata_json, dict) else {}
         task_payload = _script_task_payload(
@@ -392,6 +393,32 @@ def _can_use_content(db: Session, content: ContentItem, user: User) -> bool:
         )
         .first()
     )
+
+
+def _content_source_type(content: ContentItem | None) -> str:
+    if not content:
+        return ""
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary = sources[0] if sources and isinstance(sources[0], dict) else {}
+    return str(primary.get("source_type") or "").upper()
+
+
+def _ensure_bilibili_ocr_ready(content: ContentItem | None) -> None:
+    if _content_source_type(content) != "BILIBILI":
+        return
+    sources = content.sources_jsonb if content and isinstance(content.sources_jsonb, list) else []
+    primary = sources[0] if sources and isinstance(sources[0], dict) else {}
+    metadata = primary.get("metadata_json") if isinstance(primary.get("metadata_json"), dict) else {}
+    results = metadata.get("ocr_results") if isinstance(metadata.get("ocr_results"), dict) else {}
+    has_translated_text = any(
+        isinstance(item, dict) and bool(item.get("translated_text") or item.get("raw_text"))
+        for item in results.values()
+    )
+    if not has_translated_text:
+        raise HTTPException(
+            status_code=409,
+            detail="Bilibili cần OCR/dịch xong ít nhất một tập trước khi tạo workflow sản xuất.",
+        )
 
 
 def _require_auto_draft_production_ready(project: MediaWorkflow, story: dict) -> None:
@@ -745,14 +772,9 @@ def _queue_project_video(
         )
         db.add(item)
 
-    content = db.get(ContentItem, project.primary_content_id) if project.primary_content_id else None
-    raw_caption = caption or item.generated_content or _default_video_caption(project, story)
-    publish_caption = SocialProfileService().caption_with_hashtags(raw_caption, profile=profile, content=content, story=story)
-
     item.workflow_id = project.id
     item.article_link = rendered_video
     item.article_title = project.title
-    item.generated_content = publish_caption
     item.status = requested_status
     if scheduled_at is not None:
         tzinfo = schedule_timezone(getattr(profile.strategy, "schedule_timezone", None))
@@ -767,6 +789,11 @@ def _queue_project_video(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         item.scheduled_at = decision.scheduled_at
         reason = f"{reason}. {decision.reason}"
+
+    content = db.get(ContentItem, project.primary_content_id) if project.primary_content_id else None
+    raw_caption = caption or item.generated_content or _default_video_caption(project, story)
+    publish_caption = SocialProfileService().caption_with_hashtags(raw_caption, profile=profile, content=content, story=story)
+    item.generated_content = publish_caption
     item.ai_reason = reason
     item.error = None
     db.flush()
@@ -807,6 +834,9 @@ def _serialize_queue_item(item: PublishingQueueItem, profile: SocialProfile, pro
 
 def _default_video_caption(project: MediaWorkflow, story: dict | None) -> str:
     meta = story.get("meta") if isinstance(story, dict) and isinstance(story.get("meta"), dict) else {}
+    caption = meta.get("social_caption") or meta.get("caption")
+    if caption:
+        return str(caption).strip()
     title = str(meta.get("title") or project.title).strip()
     return title or "Video mới đã sẵn sàng đăng"
 
@@ -1122,6 +1152,7 @@ def create_direct_script(
     content = db.get(ContentItem, payload.content_id)
     if not content or not _can_use_content(db, content, user):
         raise HTTPException(status_code=404, detail="ContentItem không tồn tại hoặc không thuộc quyền truy cập")
+    _ensure_bilibili_ocr_ready(content)
 
     existing_workflow = (
         db.query(MediaWorkflow)

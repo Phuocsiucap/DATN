@@ -147,6 +147,11 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
   const [description, setDescription] = useState(config?.description || '')
   const [sourceType, setSourceType] = useState(config?.source_type || 'VNEXPRESS')
   const [sourceUrl, setSourceUrl] = useState(config?.source_url || '')
+  const [bilibiliQueries, setBilibiliQueries] = useState(() => {
+    const queries = config?.configuration?.queries
+    return Array.isArray(queries) ? queries.map(String).join('\n') : ''
+  })
+  const [bilibiliMaxDuration, setBilibiliMaxDuration] = useState(() => String(config?.configuration?.max_duration_seconds ?? 7200))
   const [selectedRssKeys, setSelectedRssKeys] = useState<string[]>(
     (config?.configuration?.rss_feed_keys as string[]) || (vnexpressRssFeeds.length > 0 ? ['tin-moi-nhat'] : [])
   )
@@ -157,6 +162,10 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
   const handleSubmit = async () => {
     if (!name.trim()) return toast.error('Vui lòng nhập tên nguồn')
     if (sourceType === 'VNEXPRESS' && !sourceUrl.trim() && !selectedRssKeys.length) return toast.error('Chọn RSS hoặc nhập URL')
+    const queries = bilibiliQueries.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+    const maxDurationSeconds = bilibiliMaxDuration.trim() ? Number(bilibiliMaxDuration) : undefined
+    // Removed validation to allow entirely blank inputs for Bilibili, which will fallback to backend defaults.
+    if (sourceType === 'BILIBILI' && maxDurationSeconds !== undefined && (!Number.isInteger(maxDurationSeconds) || maxDurationSeconds < 60 || maxDurationSeconds > 86400)) return toast.error('Thời lượng tối đa phải từ 60 đến 86400 giây')
     setSaving(true)
     try {
       const payload = {
@@ -166,8 +175,9 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
         source_url: sourceUrl.trim() || null,
         keywords: keywords.split(',').map(k => k.trim()).filter(Boolean),
         configuration: {
-          ...Object.fromEntries(Object.entries(config?.configuration || {}).filter(([key]) => !['max_items', 'limit', 'rss_feed_keys', 'rss_feed_urls', 'rss_feeds', 'job_options'].includes(key))),
+          ...Object.fromEntries(Object.entries(config?.configuration || {}).filter(([key]) => !['max_items', 'limit', 'rss_feed_keys', 'rss_feed_urls', 'rss_feeds', 'job_options', 'queries', 'max_duration_seconds'].includes(key))),
           ...(sourceType === 'VNEXPRESS' ? { rss_feed_keys: selectedRssKeys } : {}),
+          ...(sourceType === 'BILIBILI' ? { queries, ...(maxDurationSeconds !== undefined ? { max_duration_seconds: maxDurationSeconds } : {}) } : {}),
           job_options: jobOptions.filter(key => key !== 'rss_feed_keys' || sourceType === 'VNEXPRESS'),
         },
       }
@@ -242,6 +252,28 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
             <label className="block text-sm font-semibold">URL nguồn (tùy chọn)
               <input type="text" className="mt-1 w-full rounded-md border px-3 py-2 text-sm" placeholder="VD: https://space.bilibili.com/..." value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} />
             </label>
+          )}
+          {sourceType === 'BILIBILI' && (
+            <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
+              <label className="block text-sm font-semibold">Truy vấn Bilibili mặc định (tùy chọn)
+                <textarea
+                  className="mt-1 min-h-[96px] w-full rounded-md border px-3 py-2 text-sm"
+                  value={bilibiliQueries}
+                  onChange={e => setBilibiliQueries(e.target.value)}
+                  placeholder="Mỗi dòng một truy vấn, ví dụ: 短剧 全集"
+                />
+              </label>
+              <label className="block text-sm font-semibold">Thời lượng tối đa (giây, tùy chọn)
+                <input
+                  type="number"
+                  min={60}
+                  max={86400}
+                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  value={bilibiliMaxDuration}
+                  onChange={e => setBilibiliMaxDuration(e.target.value)}
+                />
+              </label>
+            </div>
           )}
           <label className="block text-sm font-semibold">Từ khóa mặc định (tùy chọn)
             <input className="mt-1 w-full rounded-md border px-3 py-2 text-sm" value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="Phân cách bằng dấu phẩy" />

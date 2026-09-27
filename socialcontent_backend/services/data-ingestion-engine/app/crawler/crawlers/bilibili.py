@@ -280,7 +280,7 @@ class BilibiliCrawler(BaseCrawler):
         if current.get("thumbnail_url"):
             media.append({"media_type": "IMAGE", "source_url": current["thumbnail_url"], "role": "thumbnail"})
         if url:
-            media.append({"media_type": "VIDEO_REFERENCE", "source_url": url, "role": "source_reference"})
+            media.append({"media_type": "VIDEO_REFERENCE", "source_url": url, "role": "source_reference", "embed_url": current.get("embed_url")})
         content_type = "PLAYLIST" if episode_count > 1 else "VIDEO"
         source_external_id = bilibili_source_external_id(raw_json, url, content_type)
         return {

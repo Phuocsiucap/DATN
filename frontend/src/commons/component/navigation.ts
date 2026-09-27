@@ -2,6 +2,7 @@ export type Tab =
   | 'dashboard'
   | 'crawl'
   | 'content'
+  | 'storyStatus'
   | 'planning'
   | 'generateVideo'
   | 'approvals'
@@ -19,6 +20,7 @@ export const TAB_PATHS: Record<Tab, string> = {
   dashboard: '/',
   crawl: '/crawl',
   content: '/content',
+  storyStatus: '/stories/status',
   planning: '/planning',
   generateVideo: '/generate-video',
   approvals: '/approvals',

@@ -88,6 +88,9 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
     if not job:
         print(f"[planning-orchestrator] Skipping auto workflow because crawl job {job_id} was not found")
         return
+    if any(str(source.source_type or "").upper() == "BILIBILI" for source in (job.sources or [])):
+        print(f"[planning-orchestrator] Skipping auto planning for Bilibili crawl job {job_id}; user selection/OCR queue is manual")
+        return
     source_scope = str(job.content_scope or "").upper()
     if source_scope not in {"GLOBAL", "PRIVATE"}:
         print(f"[planning-orchestrator] Skipping crawl job {job_id}; unsupported content scope {source_scope!r}")
@@ -109,6 +112,9 @@ def _handle_crawl_job_completed(db: Session, message: dict[str, Any]) -> None:
     )
     if not items:
         print(f"[planning-orchestrator] No READY content found for crawl job {job_id}; recording 0-candidate planning run")
+    if any(_content_source_type(item) == "BILIBILI" for item in items):
+        print(f"[planning-orchestrator] Skipping auto planning for crawl job {job_id}; Bilibili content requires manual OCR queue")
+        return
 
     content_ids = [item.id for item in items]
     # PRIVATE history belongs to the user, so capture it before processing any
@@ -328,17 +334,24 @@ def _content_items_for_crawl_job(
     )
 
 
+def _content_source_type(content: ContentItem) -> str:
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary = sources[0] if sources and isinstance(sources[0], dict) else {}
+    return str(primary.get("source_type") or "").upper()
+
+
 def _recent_global_content(db: Session, *, limit: int) -> list[ContentItem]:
-    return (
+    rows = (
         db.query(ContentItem)
         .filter(
             ContentItem.content_scope == "GLOBAL",
             ContentItem.status.in_(["READY", "USABLE_WITH_WARNING"]),
         )
         .order_by(ContentItem.updated_at.desc(), ContentItem.quality_score.desc())
-        .limit(limit)
+        .limit(limit * 2)
         .all()
     )
+    return [item for item in rows if _content_source_type(item) != "BILIBILI"][:limit]
 
 
 def _daily_recommendation_limit(strategy: SocialProfileStrategy) -> int:

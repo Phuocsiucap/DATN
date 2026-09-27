@@ -16,20 +16,43 @@ from app.video.services.generate_video_jobs import (
     process_generate_video_script_run,
     process_generate_video_voice_run,
 )
+from app.video.services.bilibili_ocr_jobs import (
+    BILIBILI_OCR_TASK_TYPE,
+    process_bilibili_ocr_episode_task,
+)
+from app.video.services.generate_video_bilibili_render import process_bilibili_hardsub_render
+
+BILIBILI_RENDER_TASK = "BILIBILI_RENDER_TASK"
 
 TASK_TOPIC_MAP = {
     "GENERATE_VIDEO_SCRIPT": GENERATE_VIDEO_SCRIPT_REQUESTED,
     "GENERATE_VIDEO_EDIT": GENERATE_VIDEO_EDIT_REQUESTED,
     "GENERATE_VIDEO_REVIEW": GENERATE_VIDEO_REVIEW_REQUESTED,
     "GENERATE_VIDEO_VOICE": GENERATE_VIDEO_VOICE_REQUESTED,
+    BILIBILI_OCR_TASK_TYPE: None,
+    BILIBILI_RENDER_TASK: None,
 }
 
 TOPIC_PROCESSORS = {
-    GENERATE_VIDEO_SCRIPT_REQUESTED: process_generate_video_script_run,
-    GENERATE_VIDEO_EDIT_REQUESTED: process_generate_video_edit_run,
-    GENERATE_VIDEO_REVIEW_REQUESTED: process_generate_video_review_run,
-    GENERATE_VIDEO_VOICE_REQUESTED: process_generate_video_voice_run,
+    "GENERATE_VIDEO_SCRIPT": process_generate_video_script_run,
+    "GENERATE_VIDEO_EDIT": process_generate_video_edit_run,
+    "GENERATE_VIDEO_REVIEW": process_generate_video_review_run,
+    "GENERATE_VIDEO_VOICE": process_generate_video_voice_run,
+    BILIBILI_OCR_TASK_TYPE: process_bilibili_ocr_episode_task,
+    BILIBILI_RENDER_TASK: process_bilibili_hardsub_render,
 }
+
+
+def _processor_for_event(event_type: str | None):
+    if not event_type:
+        return None
+    processor = TOPIC_PROCESSORS.get(event_type)
+    if processor:
+        return processor
+    for task_type, topic in TASK_TOPIC_MAP.items():
+        if topic == event_type:
+            return TOPIC_PROCESSORS.get(task_type)
+    return None
 
 
 def _enabled_task_types(task_types: set[str] | None = None) -> list[str]:
@@ -82,14 +105,11 @@ def process_pending_tasks_from_db(task_types: set[str] | None = None) -> None:
         for task in pending_tasks:
             print(f"[Worker DB Sweep] Processing pending task {task.id} (type: {task.task_type})...")
             try:
-                if task.task_type == "GENERATE_VIDEO_SCRIPT":
-                    process_generate_video_script_run(task.id)
-                elif task.task_type == "GENERATE_VIDEO_EDIT":
-                    process_generate_video_edit_run(task.id)
-                elif task.task_type == "GENERATE_VIDEO_REVIEW":
-                    process_generate_video_review_run(task.id)
-                elif task.task_type == "GENERATE_VIDEO_VOICE":
-                    process_generate_video_voice_run(task.id)
+                processor = TOPIC_PROCESSORS.get(task.task_type)
+                if processor:
+                    processor(task.id)
+                else:
+                    print(f"[Worker DB Sweep Error] No processor found for task type: {task.task_type}")
             except Exception as exc:
                 print(f"[Worker DB Sweep Error] Task {task.id} failed: {exc}")
     except Exception as exc:
@@ -105,12 +125,12 @@ def run_generate_video_requested_consumer(
 ) -> None:
     settings = get_settings()
     enabled_task_types = set(_enabled_task_types(task_types))
-    topics = [TASK_TOPIC_MAP[task_type] for task_type in enabled_task_types]
+    topics = [topic for task_type in enabled_task_types if (topic := TASK_TOPIC_MAP[task_type])]
 
     # Always process pending DB tasks on startup
     process_pending_tasks_from_db(enabled_task_types)
 
-    if settings.disable_kafka:
+    if settings.disable_kafka or not topics:
         print(f"Kafka disabled; generate-video worker using DB polling for: {', '.join(sorted(enabled_task_types))}")
         while True:
             process_pending_tasks_from_db(enabled_task_types)
@@ -125,8 +145,8 @@ def run_generate_video_requested_consumer(
             job_id = event.get("job_id") or (event.get("payload") or {}).get("run_id") or (event.get("payload") or {}).get("task_id")
             if job_id:
                 event_type = event.get("event_type") or record.topic
-                processor = TOPIC_PROCESSORS.get(event_type)
-                if processor and event_type in topics:
+                processor = _processor_for_event(event_type)
+                if processor and record.topic in topics:
                     processor(job_id)
             kafka_consumer.commit()
     except Exception as exc:

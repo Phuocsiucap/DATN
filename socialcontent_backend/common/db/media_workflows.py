@@ -363,6 +363,26 @@ def _compact_scene_text(text: str, limit: int) -> str:
     return value[: max(0, limit - 1)].rstrip() + "..."
 
 
+def format_display_subtitle(text: str) -> str:
+    import re
+    cleaned = re.sub(r"[ \t]+", " ", str(text or "").strip())
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    if "\n" in cleaned:
+        return cleaned
+    if len(cleaned) <= 34:
+        return cleaned
+    breakpoints = [match.start() for match in re.finditer(r"[,.!?;:，。！？；：] ", cleaned)]
+    midpoint = len(cleaned) // 2
+    if breakpoints:
+        split_at = min(breakpoints, key=lambda value: abs(value - midpoint)) + 2
+        return cleaned[:split_at].strip() + "\n" + cleaned[split_at:].strip()
+    words = cleaned.split()
+    if len(words) < 6:
+        return cleaned
+    half = len(words) // 2
+    return " ".join(words[:half]) + "\n" + " ".join(words[half:])
+
+
 def sanitize_instruction_text(text: str) -> str:
     """Removes leaked internal instruction lines and JSON-like system strings."""
     if not text:
@@ -550,7 +570,7 @@ def _normalize_story_scene(raw: dict[str, Any], index: int, fallback_text: str =
         "image": image,
         "effect": DEFAULT_STORY_EFFECTS[(index - 1) % len(DEFAULT_STORY_EFFECTS)],
         "fit": "cover" if str(raw.get("fit") or "cover").lower() == "cover" else "contain",
-        "subtitle": _compact_scene_text(subtitle, 140),
+        "subtitle": format_display_subtitle(_compact_scene_text(subtitle, 140)),
         "voice_text": _compact_scene_text(voice_text, 250),
     }
     for key in (
