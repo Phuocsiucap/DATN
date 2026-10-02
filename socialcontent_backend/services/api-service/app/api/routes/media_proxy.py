@@ -70,9 +70,22 @@ def _rewrite_hls_playlist(body: str, playlist_url: str, base_proxy_url: str) -> 
     return "\n".join(rewritten_lines)
 
 
-async def _resolve_bilibili_direct_url(url: str) -> str:
+async def _resolve_bilibili_direct_url(url: str, kind: str = "video") -> str:
     import asyncio
-    cmd = ["python", "-m", "yt_dlp", "-f", "b[ext=mp4]", "-g", url]
+    format_selector = (
+        "ba/bestaudio"
+        if kind == "audio"
+        else "bv*[vcodec^=avc1][height<=720]/bv*[height<=720]/bv*"
+    )
+    cmd = [
+        "python",
+        "-m",
+        "yt_dlp",
+        "-f",
+        format_selector,
+        "-g",
+        url,
+    ]
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -84,13 +97,21 @@ async def _resolve_bilibili_direct_url(url: str) -> str:
             direct_url = stdout.decode("utf-8").strip().split('\n')[0]
             if direct_url.startswith("http"):
                 return direct_url
+        detail = stderr.decode("utf-8", errors="ignore").strip().splitlines()[-1:] or ["yt-dlp did not return a playable video URL"]
+        raise HTTPException(status_code=502, detail=detail[0])
     except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
         print(f"Failed to resolve bilibili url: {exc}")
-    return url
+        raise HTTPException(status_code=502, detail=f"Failed to resolve Bilibili preview URL: {exc}") from exc
 
 
 @router.get("")
-async def media_proxy(request: Request, url: str = Query(..., description="Media URL to proxy")):
+async def media_proxy(
+    request: Request,
+    url: str = Query(..., description="Media URL to proxy"),
+    kind: str = Query("video", pattern="^(video|audio)$"),
+):
     if not url.startswith("http"):
         raise HTTPException(status_code=400, detail="Invalid URL")
 
@@ -98,7 +119,7 @@ async def media_proxy(request: Request, url: str = Query(..., description="Media
     base_proxy_url = str(request.base_url).rstrip("/") + "/api/v1/media-proxy?url="
 
     if "bilibili.com/video/" in url:
-        proxy_target_url = await _resolve_bilibili_direct_url(url)
+        proxy_target_url = await _resolve_bilibili_direct_url(url, kind=kind)
     else:
         proxy_target_url = url
 

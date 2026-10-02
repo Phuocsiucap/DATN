@@ -4,13 +4,26 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, CrawlJob, CrawlJobContent, MediaWorkflow, PublishingQueueItem, SocialPost, SocialProfile, Story, User
+from common.db.models import ContentItem, CrawlJob, CrawlJobContent, KafkaTask, MediaWorkflow, PublishingQueueItem, SocialPost, SocialProfile, Story, User
 from common.db.session import get_db
 from app.api.deps import get_current_user
 from app.api.routes.contents import _queue_bilibili_ocr_for_content
 from app.schemas import api as schemas
 
 router = APIRouter()
+
+VIDEO_RUN_TYPES = {
+    "GENERATE_VIDEO_SCRIPT",
+    "GENERATE_VIDEO_EDIT",
+    "GENERATE_VIDEO_REVIEW",
+    "GENERATE_VIDEO_VOICE",
+    "GENERATE_VIDEO_RENDER",
+    "BILIBILI_OCR_EPISODE",
+    "BILIBILI_RENDER_TASK",
+}
+
+ACTIVE_TASK_STATUSES = {"PENDING", "QUEUED", "RUNNING", "PROCESSING"}
+ACTIVE_WORKFLOW_STATUSES = {"PROCESSING", "SCRIPTING", "EDITING", "REVIEWING", "VOICE_READY", "RENDERING"}
 
 
 @router.get("/stories", response_model=list[schemas.StoryResponse])
@@ -45,8 +58,10 @@ def story_publish_status(user: User = Depends(get_current_user), db: Session = D
     fallback_contents = _fallback_series_contents(db, user, exclude_content_ids={episode.id for episode in episodes})
     all_content_rows = [*episodes, *fallback_contents]
     content_ids = [episode.id for episode in all_content_rows]
-    workflows_by_content = _latest_workflows_by_content(db, content_ids, user)
-    queues_by_workflow = _latest_queue_items_by_workflow(db, [workflow.id for workflow in workflows_by_content.values()], user)
+    workflows_by_content = _workflows_by_content(db, content_ids, user)
+    workflow_ids = [workflow.id for workflows in workflows_by_content.values() for workflow in workflows]
+    tasks_by_workflow = _latest_tasks_by_workflow(db, workflow_ids)
+    queues_by_workflow = _latest_queue_items_by_workflow(db, workflow_ids, user)
     posts_by_queue = _latest_posts_by_queue(db, [item.id for item in queues_by_workflow.values()], user)
 
     items = []
@@ -54,9 +69,9 @@ def story_publish_status(user: User = Depends(get_current_user), db: Session = D
         story_episodes = episodes_by_story.get(story.id, [])
         episode_rows = []
         for episode in story_episodes:
-            episode_rows.extend(_episode_publish_rows(episode, workflows_by_content.get(episode.id), queues_by_workflow, posts_by_queue))
+            episode_rows.extend(_episode_publish_rows(episode, workflows_by_content.get(episode.id), tasks_by_workflow, queues_by_workflow, posts_by_queue))
         published_count = sum(1 for row in episode_rows if row["publish_status"] == "PUBLISHED")
-        in_progress_count = sum(1 for row in episode_rows if row["publish_status"] in {"QUEUED", "WORKFLOW_READY"})
+        in_progress_count = sum(1 for row in episode_rows if _is_episode_in_progress(row))
         unpublished_count = sum(1 for row in episode_rows if row["publish_status"] == "NOT_PUBLISHED")
 
         items.append({
@@ -79,9 +94,9 @@ def story_publish_status(user: User = Depends(get_current_user), db: Session = D
     for content in fallback_contents:
         source = _primary_source(content)
         metadata = _source_metadata(source)
-        episode_rows = _episode_publish_rows(content, workflows_by_content.get(content.id), queues_by_workflow, posts_by_queue)
+        episode_rows = _episode_publish_rows(content, workflows_by_content.get(content.id), tasks_by_workflow, queues_by_workflow, posts_by_queue)
         published_count = sum(1 for row in episode_rows if row["publish_status"] == "PUBLISHED")
-        in_progress_count = sum(1 for row in episode_rows if row["publish_status"] in {"QUEUED", "WORKFLOW_READY"})
+        in_progress_count = sum(1 for row in episode_rows if _is_episode_in_progress(row))
         unpublished_count = sum(1 for row in episode_rows if row["publish_status"] == "NOT_PUBLISHED")
         title = metadata.get("season_title") or metadata.get("series_title") or content.canonical_title
         items.append({
@@ -198,7 +213,7 @@ def _get_visible_story(db: Session, story_id: uuid.UUID, user: User) -> Story:
     raise HTTPException(status_code=404, detail="Story not found")
 
 
-def _latest_workflows_by_content(db: Session, content_ids: list[uuid.UUID], user: User) -> dict[uuid.UUID, MediaWorkflow]:
+def _workflows_by_content(db: Session, content_ids: list[uuid.UUID], user: User) -> dict[uuid.UUID, list[MediaWorkflow]]:
     if not content_ids:
         return {}
     query = (
@@ -209,11 +224,37 @@ def _latest_workflows_by_content(db: Session, content_ids: list[uuid.UUID], user
     if not user.is_system_admin:
         query = query.filter(SocialProfile.user_id == user.id)
     workflows = query.order_by(MediaWorkflow.updated_at.desc(), MediaWorkflow.created_at.desc()).all()
-    by_content: dict[uuid.UUID, MediaWorkflow] = {}
+    by_content: dict[uuid.UUID, list[MediaWorkflow]] = {}
     for workflow in workflows:
-        if workflow.primary_content_id and workflow.primary_content_id not in by_content:
-            by_content[workflow.primary_content_id] = workflow
+        if workflow.primary_content_id:
+            by_content.setdefault(workflow.primary_content_id, []).append(workflow)
     return by_content
+
+
+def _latest_tasks_by_workflow(db: Session, workflow_ids: list[uuid.UUID]) -> dict[uuid.UUID, KafkaTask]:
+    if not workflow_ids:
+        return {}
+    tasks = (
+        db.query(KafkaTask)
+        .filter(
+            KafkaTask.reference_type == "media_workflow",
+            KafkaTask.reference_id.in_(workflow_ids),
+            KafkaTask.task_type.in_(VIDEO_RUN_TYPES),
+        )
+        .order_by(KafkaTask.created_at.desc())
+        .all()
+    )
+    by_workflow: dict[uuid.UUID, KafkaTask] = {}
+    for task in tasks:
+        if not task.reference_id:
+            continue
+        current = by_workflow.get(task.reference_id)
+        if not current:
+            by_workflow[task.reference_id] = task
+            continue
+        if str(current.status or "").upper() not in ACTIVE_TASK_STATUSES and str(task.status or "").upper() in ACTIVE_TASK_STATUSES:
+            by_workflow[task.reference_id] = task
+    return by_workflow
 
 
 def _latest_queue_items_by_workflow(db: Session, workflow_ids: list[uuid.UUID], user: User) -> dict[uuid.UUID, PublishingQueueItem]:
@@ -254,7 +295,8 @@ def _latest_posts_by_queue(db: Session, queue_item_ids: list[uuid.UUID], user: U
 
 def _episode_publish_rows(
     episode: ContentItem,
-    workflow: MediaWorkflow | None,
+    workflows: list[MediaWorkflow] | None,
+    tasks_by_workflow: dict[uuid.UUID, KafkaTask],
     queues_by_workflow: dict[uuid.UUID, PublishingQueueItem],
     posts_by_queue: dict[uuid.UUID, SocialPost],
 ) -> list[dict]:
@@ -265,9 +307,12 @@ def _episode_publish_rows(
         rows = []
         for index, metadata_episode in enumerate(metadata_episodes, start=1):
             if isinstance(metadata_episode, dict):
+                episode_order = _safe_int(metadata_episode.get("episode_index")) or index
+                workflow = _workflow_for_episode(workflows or [], episode_order)
                 rows.append(_episode_publish_row(
                     episode,
                     workflow,
+                    tasks_by_workflow,
                     queues_by_workflow,
                     posts_by_queue,
                     episode_metadata=metadata_episode,
@@ -275,12 +320,13 @@ def _episode_publish_rows(
                 ))
         if rows:
             return rows
-    return [_episode_publish_row(episode, workflow, queues_by_workflow, posts_by_queue)]
+    return [_episode_publish_row(episode, _workflow_for_episode(workflows or [], episode.episode_order), tasks_by_workflow, queues_by_workflow, posts_by_queue)]
 
 
 def _episode_publish_row(
     episode: ContentItem,
     workflow: MediaWorkflow | None,
+    tasks_by_workflow: dict[uuid.UUID, KafkaTask],
     queues_by_workflow: dict[uuid.UUID, PublishingQueueItem],
     posts_by_queue: dict[uuid.UUID, SocialPost],
     *,
@@ -289,6 +335,9 @@ def _episode_publish_row(
 ) -> dict:
     queue_item = queues_by_workflow.get(workflow.id) if workflow else None
     post = posts_by_queue.get(queue_item.id) if queue_item else None
+    task = tasks_by_workflow.get(workflow.id) if workflow else None
+    active_task = task if task and str(task.status or "").upper() in ACTIVE_TASK_STATUSES else None
+    artifacts = workflow.artifacts_jsonb if workflow and isinstance(workflow.artifacts_jsonb, list) else []
     publish_status = "NOT_PUBLISHED"
     if post and (post.status or "").lower() == "published":
         publish_status = "PUBLISHED"
@@ -313,6 +362,14 @@ def _episode_publish_row(
         "publish_status": publish_status,
         "workflow_id": str(workflow.id) if workflow else None,
         "workflow_status": workflow.status if workflow else None,
+        "workflow_current_stage": (active_task.current_stage if active_task else workflow.current_stage if workflow else None),
+        "workflow_progress_percent": float(active_task.progress_percent if active_task else workflow.progress_percent if workflow else 0),
+        "workflow_task_id": str(task.id) if task else None,
+        "workflow_task_type": task.task_type if task else None,
+        "workflow_task_status": task.status if task else None,
+        "workflow_error_message": task.error_message if task and str(task.status or "").upper() == "FAILED" else None,
+        "workflow_final_video": _final_video_uri(artifacts),
+        "workflow_updated_at": workflow.updated_at if workflow else None,
         "queue_item_id": str(queue_item.id) if queue_item else None,
         "queue_status": queue_item.status if queue_item else None,
         "scheduled_at": queue_item.scheduled_at if queue_item else None,
@@ -330,6 +387,51 @@ def _episode_publish_row(
             else None
         ),
     }
+
+
+def _workflow_for_episode(workflows: list[MediaWorkflow], episode_index: int | None) -> MediaWorkflow | None:
+    if not workflows:
+        return None
+    if episode_index:
+        for workflow in workflows:
+            indices = _workflow_episode_indices(workflow)
+            if indices and episode_index in indices:
+                return workflow
+    for workflow in workflows:
+        if not _workflow_episode_indices(workflow):
+            return workflow
+    return workflows[0]
+
+
+def _workflow_episode_indices(workflow: MediaWorkflow) -> set[int]:
+    metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
+    indices = metadata.get("target_episode_indices")
+    if isinstance(indices, list):
+        return {int(value) for value in indices if _safe_int(value)}
+    indices_text = str(metadata.get("bilibili_episode_indices") or "")
+    return {int(value) for value in indices_text.replace(";", ",").split(",") if _safe_int(value)}
+
+
+def _final_video_uri(artifacts: list[dict]) -> str | None:
+    candidates = [
+        item for item in artifacts
+        if isinstance(item, dict)
+        and item.get("uri")
+        and item.get("status") != "STALE"
+        and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return str(candidates[0]["uri"])
+
+
+def _is_episode_in_progress(row: dict) -> bool:
+    if row.get("publish_status") == "QUEUED":
+        return True
+    if str(row.get("workflow_task_status") or "").upper() in ACTIVE_TASK_STATUSES:
+        return True
+    return str(row.get("workflow_status") or "").upper() in ACTIVE_WORKFLOW_STATUSES
 
 
 def _primary_source(content: ContentItem) -> dict:

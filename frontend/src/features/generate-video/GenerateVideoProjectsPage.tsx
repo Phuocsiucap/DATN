@@ -48,9 +48,10 @@ import { buildVideoKanbanColumns, classifyVideoWorkspace, getVideoWorkspaceActiv
 
 type GenerateVideoProjectsPageProps = {
   onOpenProject: (workflowId: string) => void
+  refreshKey?: number
 }
 
-export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVideoProjectsPageProps) {
+export default function GenerateVideoProjectsPage({ onOpenProject, refreshKey = 0 }: GenerateVideoProjectsPageProps) {
   const [profiles, setProfiles] = useState<PlanningProfile[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [series, setSeries] = useState<ContentSeries[]>([])
@@ -149,7 +150,7 @@ export default function GenerateVideoProjectsPage({ onOpenProject }: GenerateVid
     if (!selectedProfileId) return
     const timer = window.setTimeout(() => void loadWorkspaces(), 250)
     return () => window.clearTimeout(timer)
-  }, [loadWorkspaces, selectedProfileId])
+  }, [loadWorkspaces, selectedProfileId, refreshKey])
 
   useEffect(() => {
     if (!selectedProfileId || !items.some(hasActiveTask)) return
@@ -630,7 +631,7 @@ export function VideoKanbanCard({
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <StatusPill value={item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'Cần duyệt draft' : workflowStatusLabel(item.status)} tone={isFailedVideoWorkspace(item) ? 'red' : item.status === 'RENDERING' || item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'amber' : 'purple'} />
+          <StatusPill value={workflowCardStatusLabel(item)} tone={isFailedVideoWorkspace(item) ? 'red' : item.status === 'RENDERING' || item.current_stage === 'DRAFT_REVIEW_REQUIRED' ? 'amber' : 'purple'} />
           {item.category && <span className="rounded-[5px] bg-[#f2f0ff] px-2 py-0.5 text-xs font-bold text-[#6d5dfc]">{item.category}</span>}
         </div>
 
@@ -675,8 +676,25 @@ export function VideoKanbanCard({
   )
 }
 
+function workflowCardStatusLabel(item: VideoWorkspaceSummary) {
+  const stage = String(item.current_stage || '').toUpperCase()
+  const stageLabels: Record<string, string> = {
+    QUEUED_OCR: 'Chờ OCR',
+    LOADING_EPISODE_METADATA: 'Đang tải tập',
+    EXTRACTING_SOURCE_TEXT: 'Đang OCR',
+    SEGMENTING_TRANSCRIPT: 'Tách subtitle',
+    TRANSLATING_TRANSCRIPT: 'Đang dịch',
+    SAVING_TRANSLATED_TEXT: 'Lưu bản dịch',
+    OCR_TRANSLATION_READY: 'OCR/dịch xong',
+    DRAFT_REVIEW_REQUIRED: 'Cần duyệt draft',
+  }
+  if (stageLabels[stage]) return stageLabels[stage]
+  return workflowStatusLabel(item.status)
+}
+
 function workflowStatusLabel(value: string) {
   const labels: Record<string, string> = {
+    READY: 'Sẵn sàng',
     SCRIPTING: 'Tạo draft',
     EDITING: 'Biên tập',
     REVIEWING: 'Review kịch bản',

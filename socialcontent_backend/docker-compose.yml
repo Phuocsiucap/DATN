@@ -9,6 +9,12 @@ services:
       - "5432:5432"
     volumes:
       - socialcontent_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d socialcontent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -99,9 +105,12 @@ services:
     ports:
       - "127.0.0.1:8010:8010"
     depends_on:
-      - postgres
-      - mongodb
-      - kafka
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -117,9 +126,12 @@ services:
     working_dir: /app/services/embedding-service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8075
     depends_on:
-      - postgres
-      - mongodb
-      - kafka
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -143,10 +155,14 @@ services:
     ports:
       - "127.0.0.1:8050:8050"
     depends_on:
-      - postgres
-      - mongodb
-      - kafka
-      - embedding-service
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
+      embedding-service:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -169,9 +185,12 @@ services:
     ports:
       - "127.0.0.1:8060:8060"
     depends_on:
-      - postgres
-      - mongodb
-      - kafka
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -196,9 +215,12 @@ services:
     ports:
       - "127.0.0.1:8061:8061"
     depends_on:
-      - postgres
-      - mongodb
-      - kafka
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
     env_file:
       - .env
     environment:
@@ -210,7 +232,12 @@ services:
       VIDEO_STORAGE_ROOT: /app/runtime/video-generation
       HEALTH_PORT: "8061"
       BILIBILI_HARDSUB_OCR_ENABLED: "true"
-      BILIBILI_HARDSUB_OCR_FPS: "1.5"
+      BILIBILI_HARDSUB_OCR_FPS: "1.0"
+      BILIBILI_HARDSUB_OCR_WORKERS: "2"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
       BILIBILI_HARDSUB_OCR_MAX_SECONDS: "360"
     volumes:
       - ./runtime/video-generation:/app/runtime/video-generation

@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Download, Film, RefreshCw } from 'lucide-react'
 import { fetchBilibiliOcrProgressApi, type BilibiliOcrEpisodeProgress } from '@/commons/apis/module1'
-import { fetchVideoWorkspaceApi, fetchVideoWorkflowProgressApi, type VideoWorkspaceDetail, type VideoWorkflowProgress } from '@/commons/apis/generateVideo'
+import {
+  fetchGenerateVideoJobApi,
+  fetchVideoWorkspaceApi,
+  fetchVideoWorkflowProgressApi,
+  generateVideoOutputUrl,
+  renderGenerateVideoProjectApi,
+  type GenerateVideoJob,
+  type VideoWorkspaceDetail,
+  type VideoWorkflowProgress,
+} from '@/commons/apis/generateVideo'
 import WorkflowProgress from '../WorkflowProgress'
 import BilibiliRenderPreview from './BilibiliRenderPreview'
 import BilibiliSubtitleStylePanel from './BilibiliSubtitleStylePanel'
@@ -42,6 +51,10 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
   const [style, setStyle] = useState<SubtitleStyle>(defaultSubtitleStyle)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [renderJob, setRenderJob] = useState<GenerateVideoJob | null>(null)
+  const [rendering, setRendering] = useState(false)
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const [finalVideo, setFinalVideo] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -49,6 +62,7 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
     const wfProgress = await fetchVideoWorkflowProgressApi(workflowId)
     setWorkspace(detail)
     setProgress(wfProgress)
+    setFinalVideo(detail.final_video || wfProgress.final_video || null)
     if (detail.primary_content_id) {
       const ocr = await fetchBilibiliOcrProgressApi(detail.primary_content_id)
       const rows = ocr.episodes
@@ -82,10 +96,51 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
     return () => window.clearInterval(timer)
   }, [load, progress])
 
+  useEffect(() => {
+    if (!renderJob || !['PENDING', 'RUNNING', 'PROCESSING'].includes(renderJob.status.toUpperCase())) return
+    const timer = window.setInterval(async () => {
+      try {
+        const result = await fetchGenerateVideoJobApi(renderJob.id)
+        setRenderJob(result.job)
+        if (result.job.status === 'COMPLETED' || result.job.status === 'RENDERED') {
+          setRendering(false)
+          setFinalVideo(result.job.output_path || result.job.video_url || null)
+          void load().catch(() => undefined)
+        } else if (result.job.status === 'FAILED') {
+          setRendering(false)
+          setRenderError(result.job.error_message || 'Render MP4 thất bại.')
+        }
+      } catch {
+        // Keep polling; the workspace refresh loop will surface final state if the job finishes.
+      }
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [load, renderJob])
+
+  const handleRender = async () => {
+    setRendering(true)
+    setRenderError(null)
+    try {
+      const result = await renderGenerateVideoProjectApi(workflowId)
+      setRenderJob(result.job)
+      if (result.job.status === 'COMPLETED' || result.job.status === 'RENDERED') {
+        setRendering(false)
+        setFinalVideo(result.job.output_path || result.job.video_url || null)
+      }
+      void load().catch(() => undefined)
+    } catch (err) {
+      setRendering(false)
+      setRenderError(err instanceof Error ? err.message : 'Không đưa được video vào hàng đợi render.')
+    }
+  }
+
   const selectedEpisode = useMemo(
     () => episodes.find((episode) => episode.id === selectedEpisodeId) || episodes[0],
     [episodes, selectedEpisodeId],
   )
+  const renderedVideoUrl = finalVideo ? generateVideoOutputUrl(finalVideo) : null
+  const ocrReady = episodes.some((episode) => episode.status === 'COMPLETED' && episode.segments.length > 0)
+  const activeRender = rendering || Boolean(renderJob && ['PENDING', 'RUNNING', 'PROCESSING'].includes(renderJob.status.toUpperCase()))
 
   useEffect(() => {
     if (!selectedSegment || selectedEpisode?.segments.some((segment) => segment.index === selectedSegment.index)) return
@@ -119,14 +174,27 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
             </p>
           </div>
         </div>
-        <button type="button" onClick={() => void load()} className="flex h-9 items-center gap-2 rounded-md border border-[var(--border)] px-3 text-xs font-medium text-[var(--on-surface)]">
-          <RefreshCw className="h-4 w-4" />
-          Làm mới
-        </button>
+        <div className="flex items-center gap-2">
+          {renderedVideoUrl && (
+            <a href={renderedVideoUrl} target="_blank" rel="noreferrer" className="flex h-9 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700">
+              <Download className="h-4 w-4" />
+              Video kết quả
+            </a>
+          )}
+          <button type="button" onClick={() => void handleRender()} disabled={!ocrReady || activeRender} className="flex h-9 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <Film className="h-4 w-4" />
+            {activeRender ? `Đang render ${Math.round(Number(renderJob?.progress_percent || workspace.progress_percent || 0))}%` : 'Render MP4'}
+          </button>
+          <button type="button" onClick={() => void load()} className="flex h-9 items-center gap-2 rounded-md border border-[var(--border)] px-3 text-xs font-medium text-[var(--on-surface)]">
+            <RefreshCw className="h-4 w-4" />
+            Làm mới
+          </button>
+        </div>
       </header>
 
       <div className="border-b border-[var(--border)] px-4 py-3">
         <WorkflowProgress progress={progress} compact />
+        {renderError && <p className="mt-2 text-xs font-medium text-red-600">{renderError}</p>}
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -144,7 +212,7 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
             setSeekTime(segment.start)
           }}
         />
-        <BilibiliRenderPreview episode={selectedEpisode} selectedSegment={selectedSegment} seekTime={seekTime} style={style} />
+        <BilibiliRenderPreview episode={selectedEpisode} selectedSegment={selectedSegment} seekTime={seekTime} style={style} renderedVideoUrl={renderedVideoUrl} />
         <BilibiliSubtitleStylePanel value={style} onChange={setStyle} />
       </div>
     </div>

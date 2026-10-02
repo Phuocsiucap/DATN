@@ -9,23 +9,45 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from common.core.config import get_settings
+from app.video.services.generate_video_constants import VIDEO_OUT_DIR
 
 
-def process_bilibili_hardsub_render(project_id: uuid.UUID | str) -> None:
+def process_bilibili_hardsub_render(task_id: uuid.UUID | str) -> None:
     from common.db.models import MediaWorkflow, KafkaTask
     from common.db.session import SessionLocal
 
     db = SessionLocal()
+    task = None
+    project = None
     try:
-        project = db.get(MediaWorkflow, uuid.UUID(str(project_id)))
+        task = db.get(KafkaTask, uuid.UUID(str(task_id)))
+        if task and task.task_type == "BILIBILI_RENDER_TASK":
+            project = db.get(MediaWorkflow, task.reference_id) if task.reference_id else None
+        else:
+            project = db.get(MediaWorkflow, uuid.UUID(str(task_id)))
+            task = (
+                db.query(KafkaTask)
+                .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == "BILIBILI_RENDER_TASK", KafkaTask.status == "PENDING")
+                .order_by(KafkaTask.created_at.desc())
+                .first()
+            ) if project else None
         if not project:
             return
-            
+        if not task:
+            raise RuntimeError("Bilibili render task not found")
+        if task.status not in {"PENDING", "FAILED"}:
+            return
+
+        task.status = "RUNNING"
+        task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        task.current_stage = "DOWNLOADING_SOURCE"
+        task.progress_percent = 10
         project.status = "RENDERING"
         project.current_stage = "DOWNLOADING_SOURCE"
         project.progress_percent = 10
-        db.add(project)
+        db.add_all([task, project])
         db.commit()
         
         # Extract necessary data
@@ -40,14 +62,15 @@ def process_bilibili_hardsub_render(project_id: uuid.UUID | str) -> None:
         if not video_url:
             raise RuntimeError("Missing source video URL in draft story_data")
             
-        settings = get_settings()
-        artifacts_dir = Path(settings.artifacts_dir)
-        job_dir = artifacts_dir / "bilibili_renders" / str(project.id)
+        job_dir = VIDEO_OUT_DIR / "bilibili" / str(project.id)
         job_dir.mkdir(parents=True, exist_ok=True)
         
         # 1. Download video using yt-dlp
         project.current_stage = "DOWNLOADING_SOURCE"
         project.progress_percent = 20
+        task.current_stage = "DOWNLOADING_SOURCE"
+        task.progress_percent = 20
+        db.add_all([task, project])
         db.commit()
         
         video_path = _download_video(video_url, job_dir)
@@ -55,6 +78,9 @@ def process_bilibili_hardsub_render(project_id: uuid.UUID | str) -> None:
         # 2. Generate SRT from story_data
         project.current_stage = "PREPARING_SUBTITLES"
         project.progress_percent = 50
+        task.current_stage = "PREPARING_SUBTITLES"
+        task.progress_percent = 50
+        db.add_all([task, project])
         db.commit()
         
         srt_path = job_dir / "subtitles.srt"
@@ -77,34 +103,51 @@ def process_bilibili_hardsub_render(project_id: uuid.UUID | str) -> None:
         # 4. Render Hardsub with FFmpeg
         project.current_stage = "RENDERING_VIDEO"
         project.progress_percent = 60
+        task.current_stage = "RENDERING_VIDEO"
+        task.progress_percent = 60
+        db.add_all([task, project])
         db.commit()
         
         output_path = job_dir / f"final_{project.id}.mp4"
         _render_hardsub_ffmpeg(video_path, srt_path, output_path, voice_clips)
         
         # 5. Finish
-        project.status = "COMPLETED"
-        project.current_stage = "COMPLETED"
+        output_uri = f"bilibili/{project.id}/{output_path.name}"
+        artifacts = project.artifacts_jsonb if isinstance(project.artifacts_jsonb, list) else []
+        artifacts.append({
+            "artifact_type": "FINAL_VIDEO",
+            "uri": output_uri,
+            "status": "READY",
+            "metadata": {"task_id": str(task.id), "renderer": "ffmpeg-bilibili-hardsub"},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        project.artifacts_jsonb = artifacts
+        project.status = "RENDERED"
+        project.current_stage = "RENDERED"
         project.progress_percent = 100
-        
-        # Update metadata to include the result
-        if not project.result_jsonb:
-            project.result_jsonb = {}
-        if isinstance(project.result_jsonb, dict):
-            project.result_jsonb["rendered_video_path"] = str(output_path)
-            project.result_jsonb["rendered_video_url"] = f"/api/files/download?path={output_path}"
-            
-        db.add(project)
+        task.status = "COMPLETED"
+        task.current_stage = "RENDERED"
+        task.progress_percent = 100
+        task.result_jsonb = {"output_path": output_uri, "workflow_id": str(project.id)}
+        task.completed_at = datetime.now(timezone.utc)
+        db.add_all([task, project])
         db.commit()
         
     except Exception as error:
         db.rollback()
-        project = db.get(MediaWorkflow, uuid.UUID(str(project_id)))
+        if not task:
+            task = db.get(KafkaTask, uuid.UUID(str(task_id)))
+        project = db.get(MediaWorkflow, task.reference_id) if task and task.reference_id else project
+        if task:
+            task.status = "FAILED"
+            task.current_stage = task.current_stage or "FAILED"
+            task.error_message = str(error)[-2000:]
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
         if project:
             project.status = "FAILED"
-            project.error_message = str(error)[-2000:]
             db.add(project)
-            db.commit()
+        db.commit()
         raise
     finally:
         db.close()

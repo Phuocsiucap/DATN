@@ -13,7 +13,6 @@ import {
   MoreVertical,
   Plus,
   Search,
-  ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/commons/lib/utils'
 
@@ -162,9 +161,7 @@ export function SocialProfileAvatar({
 export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="grid h-8 w-8 place-items-center rounded-[8px] bg-[linear-gradient(135deg,#6d5dfc,#2556ea)] text-white shadow-[0_8px_22px_rgba(79,70,229,0.24)]">
-        <ShieldCheck size={18} fill="currentColor" strokeWidth={1.8} />
-      </div>
+      <img src="/logo.png" alt="SocialHub" className="h-9 w-9 shrink-0 object-contain" />
       {!compact && <div className="text-lg font-extrabold leading-none text-[#111827]">Social<span className="text-[#2556ea]">Hub</span></div>}
     </div>
   )

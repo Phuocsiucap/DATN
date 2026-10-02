@@ -490,7 +490,15 @@ def _final_content_list_item(content: ContentItem, primary_source: dict, source_
 
 
 def _profile_matches(db: Session, content: ContentItem, source_metadata: dict, user: User) -> list[dict]:
-    profiles = db.query(SocialProfile).filter(SocialProfile.user_id == user.id).order_by(SocialProfile.created_at.desc()).all()
+    profiles = (
+        db.query(SocialProfile)
+        .filter(
+            SocialProfile.user_id == user.id,
+            func.lower(SocialProfile.status) != "deleted",
+        )
+        .order_by(SocialProfile.created_at.desc())
+        .all()
+    )
     links = (
         db.query(ProfileContentLink)
         .join(SocialProfile, SocialProfile.id == ProfileContentLink.profile_id)
@@ -1390,6 +1398,7 @@ def _serialize_bilibili_ocr_task(task: KafkaTask) -> dict:
         "error_message": task.error_message,
         "raw_text": result.get("raw_text") or result.get("ocr_text") or result.get("transcript"),
         "translated_text": result.get("translated_text") or result.get("translation"),
+        "source_kind": result.get("source_kind"),
         "segments": segments,
         "created_at": task.created_at,
         "updated_at": task.completed_at or task.heartbeat_at or task.started_at or task.created_at,

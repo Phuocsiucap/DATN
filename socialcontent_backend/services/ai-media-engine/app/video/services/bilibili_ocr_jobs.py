@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -19,6 +22,8 @@ import httpx
 
 
 BILIBILI_OCR_TASK_TYPE = "BILIBILI_OCR_EPISODE"
+logger = logging.getLogger(__name__)
+_WORKER_OCR = None
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,7 @@ def process_bilibili_ocr_episode_task(task_id: uuid.UUID | str) -> None:
         _update_task(db, task, "EXTRACTING_SOURCE_TEXT", 28)
         raw_text, source_kind, extracted_segments = _extract_episode_text(content, episode, payload)
         if not raw_text:
-            raise RuntimeError("Không tìm thấy text/transcript/metadata đủ để OCR Bilibili")
+            raise RuntimeError("Không tìm thấy phụ đề Bilibili: subtitle API trống, hard-sub OCR không đủ dòng, và không có transcript rõ ràng.")
 
         _update_task(db, task, "SEGMENTING_TRANSCRIPT", 45)
         raw_segments = extracted_segments or _segments_from_text(raw_text, duration_seconds=_safe_int(episode.get("duration_seconds")))
@@ -106,6 +111,7 @@ def process_bilibili_ocr_episode_task(task_id: uuid.UUID | str) -> None:
         db.add_all([content, task])
         db.commit()
     except Exception as error:
+        logger.exception("Bilibili OCR task %s failed", task_id)
         db.rollback()
         task = db.get(KafkaTask, uuid.UUID(str(task_id)))
         if task:
@@ -160,17 +166,16 @@ def _extract_episode_text(content: Any, episode: dict[str, Any], payload: dict[s
         hard_subtitle_text = "\n".join(segment["raw_text"] for segment in hard_subtitle_segments if segment.get("raw_text")).strip()
         return hard_subtitle_text, "hard_subtitle_frame_ocr", hard_subtitle_segments
 
+    # Only fallback to explicit transcript/subtitle fields. Descriptions,
+    # summaries, and titles are metadata, not timed subtitles; accepting them
+    # makes the UI show a false "OCR ready" state with one fabricated segment.
     candidates: list[tuple[str, Any]] = [
         ("episode_transcript", episode.get("transcript") or episode.get("subtitle") or episode.get("subtitles")),
-        ("episode_description", episode.get("description")),
         ("payload_text", payload.get("raw_text") or payload.get("transcript")),
-        ("content_summary", content.summary),
-        ("episode_title", episode.get("title") or payload.get("title")),
     ]
     metadata = _primary_source_metadata(content)
     candidates.extend([
         ("metadata_transcript", metadata.get("transcript") or metadata.get("subtitle") or metadata.get("subtitles")),
-        ("metadata_description", metadata.get("description")),
     ])
     for source_kind, value in candidates:
         text = _coerce_text(value)
@@ -202,7 +207,7 @@ def _fetch_bilibili_subtitle_segments(episode: dict[str, Any], payload: dict[str
         with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
             cid = cid or _resolve_bilibili_cid(client, bvid, episode, payload)
             if not cid:
-                return ""
+                return []
             response = client.get("https://api.bilibili.com/x/player/v2", params={"bvid": bvid, "cid": cid})
             response.raise_for_status()
             subtitles = ((response.json().get("data") or {}).get("subtitle") or {}).get("subtitles") or []
@@ -223,6 +228,7 @@ def _fetch_bilibili_subtitle_segments(episode: dict[str, Any], payload: dict[str
                 if segments:
                     return segments
     except Exception:
+        logger.exception("Failed to fetch Bilibili subtitle API for bvid=%s cid=%s", bvid, cid)
         return []
     return []
 
@@ -285,21 +291,22 @@ def _fetch_hard_subtitle_ocr_segments(episode: dict[str, Any], payload: dict[str
     if not url:
         return []
 
-    fps = _safe_float(os.getenv("BILIBILI_HARDSUB_OCR_FPS")) or 1.5
+    fps = _safe_float(os.getenv("BILIBILI_HARDSUB_OCR_FPS")) or 1.0
     max_duration = _safe_int(os.getenv("BILIBILI_HARDSUB_OCR_MAX_SECONDS")) or 360
-    try:
-        with tempfile.TemporaryDirectory(prefix="bili_hardsub_ocr_") as temp_dir:
-            work_dir = Path(temp_dir)
-            video_path = _download_bilibili_video(url, work_dir)
-            frame_dir = work_dir / "frames"
-            frame_dir.mkdir(parents=True, exist_ok=True)
-            _extract_subtitle_frames(video_path, frame_dir, fps=fps, duration_seconds=max_duration)
-            segments = _ocr_subtitle_frames(frame_dir, fps=fps)
-            if len(segments) < 2:
-                return []
-            return _segments_from_timed_text(segments)
-    except Exception:
-        return []
+    with tempfile.TemporaryDirectory(prefix="bili_hardsub_ocr_") as temp_dir:
+        work_dir = Path(temp_dir)
+        video_path = _download_bilibili_video(url, work_dir)
+        frame_dir = work_dir / "frames"
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[Bilibili OCR] Extracting frames url={url} fps={fps} max_duration={max_duration}", flush=True)
+        _extract_subtitle_frames(video_path, frame_dir, fps=fps, duration_seconds=max_duration)
+        frame_count = len(list(frame_dir.glob("frame-*.jpg")))
+        print(f"[Bilibili OCR] Extracted {frame_count} frame(s) from {video_path}", flush=True)
+        segments = _ocr_subtitle_frames(frame_dir, fps=fps)
+        print(f"[Bilibili OCR] Recognized {len(segments)} segment(s)", flush=True)
+        if len(segments) < 2:
+            raise RuntimeError(f"Bilibili hard-sub OCR found only {len(segments)} timed segment(s); expected at least 2.")
+        return _segments_from_timed_text(segments)
 
 
 def _download_bilibili_video(url: str, work_dir: Path) -> Path:
@@ -308,19 +315,47 @@ def _download_bilibili_video(url: str, work_dir: Path) -> Path:
     except ImportError as exc:
         raise RuntimeError("yt-dlp is required for Bilibili hard-subtitle OCR") from exc
 
-    outtmpl = str(work_dir / "source.%(ext)s")
+    format_profiles = [
+        "bv*[vcodec^=avc1][height<=480]+ba/b[height<=480]/bv*[vcodec^=avc1][height<=480]/bv*[height<=480]/30032/30016",
+        "bv*[vcodec^=avc1][height<=720]+ba/b[height<=720]/bv*[vcodec^=avc1][height<=720]/bv*[height<=720]/best[height<=720]",
+        "bv*[height<=480]+ba/b[height<=480]/bv*[height<=480]/best[height<=480]",
+    ]
+    last_error: Exception | None = None
+    for index, format_selector in enumerate(format_profiles, start=1):
+        try:
+            return _download_bilibili_video_with_format(url, work_dir, format_selector, suffix=f"{index}")
+        except Exception as exc:
+            last_error = exc
+            logger.warning("Bilibili OCR download attempt %s failed for %s: %s", index, url, exc)
+    raise RuntimeError(f"Could not download Bilibili video for OCR after {len(format_profiles)} attempts: {last_error}") from last_error
+
+
+def _download_bilibili_video_with_format(url: str, work_dir: Path, format_selector: str, *, suffix: str) -> Path:
+    from yt_dlp import YoutubeDL
+
+    outtmpl = str(work_dir / f"source-{suffix}.%(ext)s")
     options: dict[str, Any] = {
         "outtmpl": outtmpl,
-        "format": "bv*[height<=720]/bv*/30064/30032/30016",
+        "format": format_selector,
+        "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "no_progress": True,
-        "socket_timeout": 20,
-        "retries": 2,
-        "fragment_retries": 2,
-        "extractor_retries": 2,
+        "noprogress": True,
+        "continuedl": True,
+        "http_chunk_size": int(os.getenv("BILIBILI_YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024))),
+        "socket_timeout": 60,
+        "retries": 10,
+        "fragment_retries": 10,
+        "extractor_retries": 5,
+        "file_access_retries": 5,
+        "concurrent_fragment_downloads": int(os.getenv("BILIBILI_YTDLP_FRAGMENTS", "8")),
     }
+    aria2c = shutil.which("aria2c")
+    if aria2c:
+        connections = os.getenv("BILIBILI_ARIA2_CONNECTIONS", "8")
+        options["external_downloader"] = aria2c
+        options["external_downloader_args"] = {"default": ["-x", connections, "-s", connections, "-k", "1M"]}
     cookiefile = os.getenv("ACD_YTDLP_COOKIES") or os.getenv("BILIBILI_YTDLP_COOKIES")
     if cookiefile and Path(cookiefile).exists():
         options["cookiefile"] = cookiefile
@@ -335,7 +370,7 @@ def _download_bilibili_video(url: str, work_dir: Path) -> Path:
             *(Path(item.get("filepath")) for item in info.get("requested_downloads") or [] if item.get("filepath")),
             Path(ydl.prepare_filename(info)),
             Path(ydl.prepare_filename(info)).with_suffix(".mp4"),
-            *sorted(work_dir.glob("source.*"), key=lambda path: path.stat().st_mtime, reverse=True),
+            *sorted(work_dir.glob(f"source-{suffix}.*"), key=lambda path: path.stat().st_mtime, reverse=True),
         ]
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
@@ -348,7 +383,8 @@ def _extract_subtitle_frames(video_path: Path, frame_dir: Path, *, fps: float, d
     if not ffmpeg:
         raise RuntimeError("FFmpeg is required for Bilibili hard-subtitle OCR")
     output = frame_dir / "frame-%06d.jpg"
-    vf = f"fps={fps},scale=-1:720,crop=iw:ih*0.55:0:ih*0.45"
+    frame_height = _safe_int(os.getenv("BILIBILI_HARDSUB_OCR_FRAME_HEIGHT")) or 480
+    vf = f"fps={fps},scale=-1:{frame_height},crop=iw:ih*0.55:0:ih*0.45"
     cmd = [
         ffmpeg,
         "-y",
@@ -375,9 +411,13 @@ def _ocr_subtitle_frames(frame_dir: Path, *, fps: float) -> list[dict[str, Any]]
     active_text = ""
     active_start = 0.0
     active_last = 0.0
-    for index, frame_path in enumerate(frame_paths):
+    workers = _safe_int(os.getenv("BILIBILI_HARDSUB_OCR_WORKERS")) or min(2, max(1, (os.cpu_count() or 2) - 1))
+    started_at = time.monotonic()
+    print(f"[Bilibili OCR] Recognizing {len(frame_paths)} frame(s) with {workers} worker(s)", flush=True)
+    texts = _recognize_frames(frame_paths, ocr=ocr, workers=workers)
+    print(f"[Bilibili OCR] Frame recognition finished in {time.monotonic() - started_at:.1f}s", flush=True)
+    for index, text in enumerate(texts):
         timestamp = index * frame_step
-        text = _recognize_frame_text(ocr, frame_path)
         if not text:
             if active_text and timestamp - active_last > frame_step * 1.5:
                 segments.append({"start": round(active_start, 2), "end": round(active_last + frame_step, 2), "text": active_text})
@@ -394,6 +434,29 @@ def _ocr_subtitle_frames(frame_dir: Path, *, fps: float) -> list[dict[str, Any]]
     if active_text:
         segments.append({"start": round(active_start, 2), "end": round(active_last + frame_step, 2), "text": active_text})
     return _merge_close_ocr_duplicates(segments)
+
+
+def _recognize_frames(frame_paths: list[Path], *, ocr: Any, workers: int) -> list[str]:
+    if workers <= 1 or len(frame_paths) < 24:
+        return [_recognize_frame_text(ocr, frame_path) for frame_path in frame_paths]
+    try:
+        with ProcessPoolExecutor(max_workers=workers, initializer=_init_ocr_worker) as executor:
+            return list(executor.map(_recognize_frame_text_worker, [str(path) for path in frame_paths], chunksize=8))
+    except Exception:
+        logger.exception("Parallel Bilibili OCR failed; retrying frames in current process")
+        return [_recognize_frame_text(ocr, frame_path) for frame_path in frame_paths]
+
+
+def _init_ocr_worker() -> None:
+    global _WORKER_OCR
+    _WORKER_OCR = _load_rapid_ocr()
+
+
+def _recognize_frame_text_worker(frame_path: str) -> str:
+    global _WORKER_OCR
+    if _WORKER_OCR is None:
+        _WORKER_OCR = _load_rapid_ocr()
+    return _recognize_frame_text(_WORKER_OCR, Path(frame_path))
 
 
 def _recognize_frame_text(ocr: Any, frame_path: Path) -> str:
@@ -585,10 +648,17 @@ def _translate_segments(segments: list[dict[str, Any]], content: Any, payload: d
         ], {"provider": "none", "status": "SOURCE_REUSED", "reason": "Missing DEEPSEEK_API_KEY"}
 
     prompt = {
-        "task": "Translate Bilibili video OCR/transcript segments into natural Vietnamese for short-video production.",
+        "task": "Translate Chinese Bilibili OCR/transcript subtitle segments into natural Vietnamese.",
+        "return_schema": {
+            "segments": [
+                {"index": 1, "translated_text": "Vietnamese translation only"}
+            ]
+        },
         "rules": [
-            "Return only valid JSON object.",
-            "Keep the same segment indexes.",
+            "Return exactly one valid JSON object with a segments array.",
+            "Each item must include index and translated_text.",
+            "translated_text must be Vietnamese, not Chinese.",
+            "Keep exactly the same segment indexes.",
             "Do not add facts that are not in the source text.",
             "Make Vietnamese concise, spoken, and suitable for subtitles.",
         ],
@@ -596,24 +666,28 @@ def _translate_segments(segments: list[dict[str, Any]], content: Any, payload: d
         "episode_title": payload.get("title"),
         "segments": [{"index": segment["index"], "text": segment["raw_text"]} for segment in segments],
     }
+    last_content = ""
     try:
         result = deepseek_chat_completion(
             base_url=settings.deepseek_base_url,
             api_key=settings.deepseek_api_key,
             model="deepseek-v4-flash",
             messages=[
-                {"role": "system", "content": "You translate video transcript segments to Vietnamese JSON."},
+                {"role": "system", "content": "You translate Chinese subtitles to Vietnamese. Output JSON only."},
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
             ],
-            temperature=0.2,
+            temperature=0.1,
             response_format={"type": "json_object"},
             thinking=False,
             timeout=120,
         )
-        parsed = result.parsed_json()
-        rows = parsed.get("segments") if isinstance(parsed, dict) else []
+        last_content = result.content
+        parsed = _parse_llm_json_object(result.content)
+        rows = parsed.get("segments") or parsed.get("translations") or parsed.get("items") or []
+        if not isinstance(rows, list):
+            raise RuntimeError("LLM translation response missing segments list")
         translated_by_index = {
-            _safe_int(row.get("index")): str(row.get("translated_text") or row.get("translation") or row.get("text") or "").strip()
+            _safe_int(row.get("index")): str(row.get("translated_text") or row.get("translation") or row.get("vi_text") or "").strip()
             for row in rows
             if isinstance(row, dict)
         }
@@ -632,7 +706,30 @@ def _translate_segments(segments: list[dict[str, Any]], content: Any, payload: d
         return [
             {**segment, "translated_text": segment["raw_text"], "translation_status": "SOURCE_REUSED"}
             for segment in segments
-        ], {"provider": "deepseek", "status": "SOURCE_REUSED", "error": str(exc)[-500:]}
+        ], {
+            "provider": "deepseek",
+            "status": "SOURCE_REUSED",
+            "error": str(exc)[-500:],
+            "raw_content_prefix": last_content[:500] if last_content else None,
+        }
+
+
+def _parse_llm_json_object(content: str) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start < 0:
+            raise
+        parsed, _end = json.JSONDecoder().raw_decode(text[start:])
+    if not isinstance(parsed, dict):
+        raise RuntimeError("LLM translation response must be a JSON object")
+    return parsed
 
 
 def _segments_from_text(text: str, *, duration_seconds: int | None = None) -> list[dict[str, Any]]:

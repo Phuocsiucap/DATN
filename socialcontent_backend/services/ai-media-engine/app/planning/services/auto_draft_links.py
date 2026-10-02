@@ -117,11 +117,74 @@ def linked_text_ids(videos: list[dict[str, Any]], texts: list[dict[str, Any]]) -
     return {video["id"]: [text["id"] for text in texts if text["id"] in video.get("text_ids", []) or video["id"] in text.get("video_ids", [])] for video in videos}
 
 
+def _enforce_media_preferences(timeline: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, Any]:
+    """Keep the model's narrative links, but prevent an underused source catalog."""
+    videos = timeline.get("video") if isinstance(timeline.get("video"), list) else []
+    texts = timeline.get("text") if isinstance(timeline.get("text"), list) else []
+    if not videos or not texts or not catalog:
+        return timeline
+
+    video_indexes = [item["index"] for item in catalog if item.get("type") == "video"]
+    image_indexes = [item["index"] for item in catalog if item.get("type") == "image"]
+    selected_video_indexes = {
+        item.get("source_media_index")
+        for item in videos
+        if item.get("type") == "video" and item.get("source_media_index") in video_indexes
+    }
+
+    # A playable source video is more useful than an image placeholder. Keep it
+    # as the opening visual when the model omitted all video links.
+    if video_indexes and not selected_video_indexes:
+        first = videos[0]
+        first["type"] = "video"
+        first["source_media_index"] = video_indexes[0]
+
+    links = linked_text_ids(videos, texts)
+    first_refs = links.get(videos[0].get("id"), [])
+    if len(image_indexes) <= 1 or len(first_refs) <= 1:
+        return timeline
+
+    # One image covering every narration beat is technically valid but loses
+    # most of the source article's visual evidence. Split that single visual
+    # into contiguous clips and distribute the available images across them.
+    if len(videos) != 1:
+        return timeline
+
+    original = videos[0]
+    clip_count = min(len(image_indexes) + (1 if video_indexes else 0), len(first_refs))
+    source_indexes = ([video_indexes[0]] if video_indexes else []) + image_indexes
+    source_indexes = source_indexes[:clip_count]
+    split_videos: list[dict[str, Any]] = []
+    text_to_video: dict[str, str] = {}
+    for clip_index in range(clip_count):
+        start = (clip_index * len(first_refs)) // clip_count
+        end = ((clip_index + 1) * len(first_refs)) // clip_count
+        refs = first_refs[start:end]
+        clip = dict(original)
+        clip_id = original.get("id") if clip_index == 0 else f"{original.get('id', 'video')}-media-{clip_index + 1}"
+        clip["id"] = clip_id
+        clip["type"] = catalog[source_indexes[clip_index]]["type"]
+        clip["source_media_index"] = source_indexes[clip_index]
+        clip["text_ids"] = refs
+        split_videos.append(clip)
+        for text_id in refs:
+            text_to_video[text_id] = clip_id
+
+    for text in texts:
+        text_id = text.get("id")
+        if text_id in text_to_video:
+            text["video_ids"] = [text_to_video[text_id]]
+
+    timeline["video"] = split_videos
+    return timeline
+
+
 def build_linked_timeline(compact: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, Any]:
     from app.video.services.generate_video_constants import DEFAULT_IMAGES, DEFAULT_EFFECTS
     from app.video.services.generate_video_timeline import fit_video_clips_to_text
 
-    timeline = compact["timeline"]
+    timeline = normalize_linked_timeline(compact["timeline"])
+    timeline = _enforce_media_preferences(timeline, catalog)
     problems = linked_draft_issues(timeline, catalog)
     if problems:
         raise ValueError("Invalid media/text graph: " + ", ".join(dict.fromkeys(p["code"] for p in problems)))

@@ -290,6 +290,14 @@ export type StoryEpisodePublishStatus = {
   publish_status: 'PUBLISHED' | 'QUEUED' | 'WORKFLOW_READY' | 'NOT_PUBLISHED' | string
   workflow_id?: string | null
   workflow_status?: string | null
+  workflow_current_stage?: string | null
+  workflow_progress_percent?: number | null
+  workflow_task_id?: string | null
+  workflow_task_type?: string | null
+  workflow_task_status?: string | null
+  workflow_error_message?: string | null
+  workflow_final_video?: string | null
+  workflow_updated_at?: string | null
   queue_item_id?: string | null
   queue_status?: string | null
   scheduled_at?: string | null

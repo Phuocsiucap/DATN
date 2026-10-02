@@ -175,7 +175,9 @@ export function ContentDetailSheet({
   const videoItems = mediaItems.filter((media) => /video/i.test(String(media.media_type || media.mime_type || '')) || ['hls', 'mp4'].includes(String(media.format || '').toLowerCase()))
   const episodeItems = getEpisodeItems(item)
   const sourceUrl = getSourceUrl(item)
-  const profileMatches = item.profile_matches || []
+  const profileMatches = (item.profile_matches || []).filter(
+    (match) => String(match.status || '').toLowerCase() !== 'deleted',
+  )
   const tiktokMatch = profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok' && match.can_create_script)
     || profileMatches.find((match) => String(match.platform || '').toLowerCase() === 'tiktok')
 

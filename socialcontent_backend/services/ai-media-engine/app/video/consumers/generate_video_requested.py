@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta, timezone
+from sqlalchemy.exc import OperationalError
 from common.core.config import get_settings
 from common.events.kafka import consumer
 from common.events.topics import (
@@ -42,6 +43,9 @@ TOPIC_PROCESSORS = {
     BILIBILI_RENDER_TASK: process_bilibili_hardsub_render,
 }
 
+_DB_UNAVAILABLE_LOG_INTERVAL_SECONDS = 30
+_last_db_unavailable_log_at = 0.0
+
 
 def _processor_for_event(event_type: str | None):
     if not event_type:
@@ -59,6 +63,19 @@ def _enabled_task_types(task_types: set[str] | None = None) -> list[str]:
     if task_types is None:
         return list(TASK_TOPIC_MAP)
     return [task_type for task_type in TASK_TOPIC_MAP if task_type in task_types]
+
+
+def _log_db_unavailable(exc: OperationalError) -> None:
+    global _last_db_unavailable_log_at
+
+    now = time.monotonic()
+    if now - _last_db_unavailable_log_at < _DB_UNAVAILABLE_LOG_INTERVAL_SECONDS:
+        return
+    _last_db_unavailable_log_at = now
+
+    original = getattr(exc, "orig", None)
+    detail = str(original or exc).strip().splitlines()[0]
+    print(f"[Worker DB Sweep] Database unavailable; retrying DB polling ({detail})")
 
 
 def process_pending_tasks_from_db(task_types: set[str] | None = None) -> None:
@@ -112,7 +129,11 @@ def process_pending_tasks_from_db(task_types: set[str] | None = None) -> None:
                     print(f"[Worker DB Sweep Error] No processor found for task type: {task.task_type}")
             except Exception as exc:
                 print(f"[Worker DB Sweep Error] Task {task.id} failed: {exc}")
+    except OperationalError as exc:
+        db.rollback()
+        _log_db_unavailable(exc)
     except Exception as exc:
+        db.rollback()
         print(f"[Worker DB Sweep Error] Failed query: {exc}")
     finally:
         db.close()

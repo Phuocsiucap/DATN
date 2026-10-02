@@ -60,6 +60,7 @@ PRE_RENDER_TASK_TYPES = {
     "GENERATE_VIDEO_REVIEW",
     "GENERATE_VIDEO_VOICE",
 }
+BILIBILI_RENDER_TASK = "BILIBILI_RENDER_TASK"
 
 class StoryRequest(BaseModel):
     story: dict
@@ -311,6 +312,10 @@ def _script_task_payload(
 
 
 def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> KafkaTask:
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if metadata.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB":
+        return _enqueue_bilibili_render_job(db, project, story, trigger=trigger, mode=mode)
+
     _require_auto_draft_production_ready(project, story)
     blocking = _active_pre_render_task(db, project)
     if blocking:
@@ -359,6 +364,39 @@ def _enqueue_project_render_job(db: Session, project: MediaWorkflow, story: dict
             correlation_id=project.id,
         ),
     )
+    return job
+
+
+def _enqueue_bilibili_render_job(db: Session, project: MediaWorkflow, story: dict, *, trigger: str, mode: str) -> KafkaTask:
+    story_data = story.get("story_data") if isinstance(story, dict) else None
+    if not isinstance(story_data, list) or not any(isinstance(scene, dict) and scene.get("image") and scene.get("subtitle") for scene in story_data):
+        raise HTTPException(status_code=409, detail="Chưa có bản dịch OCR đủ để render video Bilibili.")
+
+    existing = (
+        db.query(KafkaTask)
+        .filter(KafkaTask.reference_id == project.id, KafkaTask.task_type == BILIBILI_RENDER_TASK, KafkaTask.status.in_(ACTIVE_TASK_STATUSES))
+        .order_by(KafkaTask.created_at.desc())
+        .first()
+    )
+    if existing:
+        return existing
+
+    job = KafkaTask(
+        reference_id=project.id,
+        reference_type="media_workflow",
+        task_type=BILIBILI_RENDER_TASK,
+        status="PENDING",
+        current_stage="QUEUED_RENDER",
+        progress_percent=0,
+        payload_jsonb={"trigger": trigger, "video_render_mode": mode},
+    )
+    db.add(job)
+    project.status = "RENDERING"
+    project.current_stage = "QUEUED_RENDER"
+    project.progress_percent = 0
+    db.add(project)
+    db.commit()
+    db.refresh(job)
     return job
 
 
@@ -989,12 +1027,16 @@ def generate_video(
     try:
         project = _get_owned_project(db, payload.workflow_id, user)
         story = project.draft_json if isinstance(project.draft_json, dict) else {}
+        if _is_bilibili_hardsub_project(project) and not story:
+            story = _build_bilibili_hardsub_story_from_ocr(db, project)
         if not story:
             raise HTTPException(status_code=404, detail="Story not found for content project")
         story = pipeline.normalize_story_for_project(story)
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
-        _require_auto_draft_production_ready(project, story)
+        is_bilibili_hardsub = _is_bilibili_hardsub_project(project)
+        if not is_bilibili_hardsub:
+            _require_auto_draft_production_ready(project, story)
         blocking = _active_pre_render_task(db, project)
         if blocking:
             label = {
@@ -1014,6 +1056,77 @@ def generate_video(
         raise
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+def _is_bilibili_hardsub_project(project: MediaWorkflow) -> bool:
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    return metadata.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB" or metadata.get("source_type") == "BILIBILI"
+
+
+def _build_bilibili_hardsub_story_from_ocr(db: Session, project: MediaWorkflow) -> dict:
+    tasks = (
+        db.query(KafkaTask)
+        .filter(
+            KafkaTask.reference_id == project.id,
+            KafkaTask.task_type == "BILIBILI_OCR_EPISODE",
+            KafkaTask.status == "COMPLETED",
+        )
+        .order_by(KafkaTask.created_at.asc())
+        .all()
+    )
+    story_data: list[dict] = []
+    for task in tasks:
+        result = task.result_jsonb if isinstance(task.result_jsonb, dict) else {}
+        payload = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
+        video_url = str(result.get("url") or payload.get("url") or "").strip()
+        segments = result.get("translated_segments") or result.get("segments") or []
+        if not video_url or not isinstance(segments, list):
+            continue
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            start = _safe_float(segment.get("start") or segment.get("start_time"), 0.0)
+            end = _safe_float(segment.get("end") or segment.get("end_time"), start + 2.0)
+            duration = max(0.5, end - start)
+            subtitle = str(segment.get("translated_text") or segment.get("translation") or segment.get("raw_text") or segment.get("text") or "").strip()
+            if not subtitle:
+                continue
+            story_data.append({
+                "scene_index": len(story_data) + 1,
+                "duration": round(duration, 2),
+                "subtitle_start": round(start, 2),
+                "subtitle_duration": round(duration, 2),
+                "image": video_url,
+                "media_type": "video",
+                "effect": "none",
+                "fit": "contain",
+                "subtitle": subtitle,
+                "voice_text": subtitle,
+            })
+
+    if not story_data:
+        return {}
+
+    return {
+        "title": project.title,
+        "meta": {
+            "workflow_id": str(project.id),
+            "profile_id": str(project.profile_id),
+            "source_content_id": str(project.primary_content_id) if project.primary_content_id else None,
+            "source": "BILIBILI",
+        },
+        "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
+        "audio": {"voiceVolume": 0, "musicVolume": 0},
+        "story_data": story_data,
+        "source": {"workflow_id": str(project.id), "type": "BILIBILI"},
+    }
+
+
+def _safe_float(value: object, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
 
 
 @router.post("/projects/{workflow_id}/render")
@@ -1038,6 +1151,7 @@ def get_render_job(
         "GENERATE_VIDEO_EDIT",
         "GENERATE_VIDEO_REVIEW",
         "GENERATE_VIDEO_VOICE",
+        BILIBILI_RENDER_TASK,
     }:
         raise HTTPException(status_code=404, detail="Render job not found")
 

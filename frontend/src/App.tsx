@@ -59,7 +59,7 @@ const LEGACY_PATHS: Record<string, string> = {
   '/analytics/accounts': TAB_PATHS.settings,
 }
 
-const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems', 'storyStatus'])
+const ADMIN_TABS = new Set<Tab>(['dashboard', 'crawl', 'users', 'profile', 'openaiUsage', 'deepseekUsage', 'auditLogs', 'contentItems'])
 const CREATOR_TABS = new Set<Tab>([
   'dashboard',
   'crawl',
@@ -112,6 +112,7 @@ function AppContent() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`)
   const [tab, setTab] = useState<Tab>(getTabFromPath)
   const [generateVideoProjectId, setGenerateVideoProjectId] = useState(getGenerateVideoProjectIdFromPath)
+  const [generateVideoListRefreshKey, setGenerateVideoListRefreshKey] = useState(0)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -149,6 +150,7 @@ function AppContent() {
 
   const handleOpenGenerateVideo = useCallback((workflowId?: string) => {
     const nextPath = workflowId ? `${TAB_PATHS.generateVideo}/${encodeURIComponent(workflowId)}` : TAB_PATHS.generateVideo
+    if (!workflowId) setGenerateVideoListRefreshKey((current) => current + 1)
     if (window.location.pathname !== nextPath) {
       window.history.pushState({ workflowId }, '', nextPath)
       window.dispatchEvent(new Event('popstate'))
@@ -300,7 +302,7 @@ function AppContent() {
           {activeTab === 'generateVideo' && (effectiveGenerateVideoProjectId ? (
             <MediaWorkflowWorkspaceRouter workflowId={effectiveGenerateVideoProjectId} onBackToList={() => handleOpenGenerateVideo()} />
           ) : (
-            <GenerateVideoProjectsPage onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
+            <GenerateVideoProjectsPage refreshKey={generateVideoListRefreshKey} onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
           ))}
           {activeTab === 'approvals' && <ApprovalsPage />}
           {activeTab === 'schedule' && <SchedulePage />}

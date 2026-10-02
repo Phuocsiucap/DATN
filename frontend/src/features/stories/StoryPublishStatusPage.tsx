@@ -9,6 +9,7 @@ import {
   type StoryEpisodePublishStatus,
   type StoryPublishStatus,
 } from '@/commons/apis/module1'
+import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import {
   AppButton,
   AppCard,
@@ -57,6 +58,43 @@ const statusTone = (status?: string | null): 'green' | 'blue' | 'amber' | 'gray'
 
 const normalizeText = (value?: string | null) => String(value || '').trim().toLowerCase()
 const isBilibiliSource = (value?: string | null) => String(value || '').toUpperCase() === 'BILIBILI'
+const activeTaskStatuses = new Set(['PENDING', 'QUEUED', 'RUNNING', 'PROCESSING'])
+const activeQueueStatuses = new Set(['PENDING', 'QUEUED', 'PROCESSING', 'SCHEDULED'])
+
+const workflowStageLabel = (stage?: string | null, taskType?: string | null) => {
+  const key = String(stage || taskType || '').toUpperCase()
+  switch (key) {
+    case 'QUEUED_OCR':
+      return 'Chờ OCR'
+    case 'LOADING_EPISODE_METADATA':
+      return 'Đọc metadata'
+    case 'DOWNLOADING_SOURCE_VIDEO':
+      return 'Tải video gốc'
+    case 'EXTRACTING_SOURCE_TEXT':
+      return 'OCR phụ đề'
+    case 'SEGMENTING_TRANSCRIPT':
+      return 'Tách đoạn'
+    case 'TRANSLATING_TRANSCRIPT':
+      return 'Dịch subtitle'
+    case 'SAVING_TRANSLATED_TEXT':
+      return 'Lưu bản dịch'
+    case 'OCR_TRANSLATION_READY':
+      return 'Dịch xong'
+    case 'BILIBILI_RENDER_TASK':
+    case 'RENDERING':
+      return 'Đang render'
+    case 'RENDERED':
+      return 'Đã render'
+    default:
+      return stage ? stage.replace(/_/g, ' ').toLowerCase() : 'Đang xử lý'
+  }
+}
+
+const isEpisodeProcessing = (episode: StoryEpisodePublishStatus) => {
+  if (activeQueueStatuses.has(String(episode.queue_status || '').toUpperCase())) return true
+  if (activeTaskStatuses.has(String(episode.workflow_task_status || '').toUpperCase())) return true
+  return ['PROCESSING', 'SCRIPTING', 'EDITING', 'REVIEWING', 'VOICE_READY', 'RENDERING'].includes(String(episode.workflow_status || '').toUpperCase())
+}
 
 export default function StoryPublishStatusPage({ onOpenGenerateVideo }: { onOpenGenerateVideo?: (workflowId?: string) => void }) {
   const [stories, setStories] = useState<StoryPublishStatus[]>([])
@@ -316,6 +354,13 @@ function EpisodeRow({
   translating?: boolean
   translateDisabled?: boolean
 }) {
+  const processing = isEpisodeProcessing(episode)
+  const progress = Math.max(0, Math.min(100, Math.round(Number(episode.workflow_progress_percent || 0))))
+  const renderedVideoUrl = episode.workflow_final_video ? generateVideoOutputUrl(episode.workflow_final_video) : ''
+  const workflowLabel = workflowStageLabel(episode.workflow_current_stage, episode.workflow_task_type)
+  const rowStatusLabel = processing ? workflowLabel : renderedVideoUrl ? 'Đã render' : statusLabel(episode.publish_status)
+  const rowStatusTone = processing ? 'blue' : renderedVideoUrl ? 'green' : statusTone(episode.publish_status)
+
   return (
     <TableRow className="hover:bg-[#f8fafc]">
       <TableCell className="px-4 py-3">
@@ -328,17 +373,42 @@ function EpisodeRow({
           <div className="line-clamp-2 text-sm font-extrabold text-[#111827]">{episode.title}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-[#64748b]">
             {episode.source_url && (
-              <a className="inline-flex items-center gap-1 hover:text-[#2556ea]" href={episode.source_url} target="_blank" rel="noreferrer">
-                Nguồn <ExternalLink size={12} />
+              <a className="inline-flex items-center gap-1 rounded-[7px] border border-[var(--outline-variant)] px-2 py-1 hover:border-[#2556ea] hover:text-[#2556ea]" href={episode.source_url} target="_blank" rel="noreferrer">
+                Video gốc <ExternalLink size={12} />
               </a>
             )}
-            {episode.workflow_status && <span>Workflow: {episode.workflow_status}</span>}
-            {episode.queue_status && <span>Queue: {episode.queue_status}</span>}
+            {processing && (
+              <span className="inline-flex items-center gap-1 rounded-[7px] border border-[#bfdbfe] bg-[#eff6ff] px-2 py-1 text-[#1d4ed8]">
+                <Loader2 size={12} className="animate-spin" />
+                {workflowLabel}{progress ? ` · ${progress}%` : ''}
+              </span>
+            )}
+            {!processing && episode.workflow_current_stage && (
+              <span className="inline-flex items-center rounded-[7px] border border-[#d1fae5] bg-[#ecfdf5] px-2 py-1 text-[#047857]">
+                {workflowLabel}{progress ? ` · ${progress}%` : ''}
+              </span>
+            )}
+            {renderedVideoUrl && (
+              <a className="inline-flex items-center gap-1 rounded-[7px] border border-[#bbf7d0] bg-[#f0fdf4] px-2 py-1 text-[#15803d] hover:border-[#16a34a]" href={renderedVideoUrl} target="_blank" rel="noreferrer">
+                Video đã render <ExternalLink size={12} />
+              </a>
+            )}
+            {episode.workflow_id && onOpenGenerateVideo && (
+              <button
+                type="button"
+                onClick={() => onOpenGenerateVideo(episode.workflow_id || undefined)}
+                className="inline-flex items-center gap-1 rounded-[7px] border border-[var(--outline-variant)] px-2 py-1 hover:border-[#2556ea] hover:text-[#2556ea]"
+              >
+                Workflow <CheckCircle2 size={12} />
+              </button>
+            )}
+            {episode.workflow_error_message && <span className="text-[#dc2626]">{episode.workflow_error_message}</span>}
+            {!episode.workflow_id && !episode.source_url && <span>Chưa có video nguồn</span>}
           </div>
         </div>
       </TableCell>
       <TableCell className="px-4 py-3">
-        <StatusPill value={statusLabel(episode.publish_status)} tone={statusTone(episode.publish_status)} />
+        <StatusPill value={rowStatusLabel} tone={rowStatusTone} />
       </TableCell>
       <TableCell className="px-4 py-3">
         <div className="text-xs font-semibold text-[#526179]">

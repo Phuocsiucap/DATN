@@ -42,6 +42,8 @@ VIDEO_RUN_TYPES = {
     "GENERATE_VIDEO_REVIEW",
     "GENERATE_VIDEO_VOICE",
     "GENERATE_VIDEO_RENDER",
+    "BILIBILI_OCR_EPISODE",
+    "BILIBILI_RENDER_TASK",
 }
 
 WORKSPACE_METADATA_KEYS = {
@@ -262,8 +264,12 @@ def get_video_workspace(
     metadata = workflow.metadata_json if isinstance(workflow.metadata_json, dict) else {}
     has_draft = bool(draft.get("timeline") or draft.get("story_data") or draft.get("scenes"))
     has_voice = _draft_has_voice(draft)
+    is_bilibili_hardsub = metadata.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB" or metadata.get("source_type") == "BILIBILI"
     final_video = _final_video_uri(artifacts)
     production_allowed = workflow.status != "REJECTED" and auto_production_allowed(metadata, draft)
+    can_render = has_draft and production_allowed and active_task is None
+    if is_bilibili_hardsub:
+        can_render = has_draft and workflow.status != "REJECTED" and active_task is None
     auto_review_required = is_auto_workflow(metadata) and has_draft and not production_allowed
 
     return {
@@ -298,7 +304,7 @@ def get_video_workspace(
             "can_edit": has_draft and workflow.status != "REJECTED" and active_task is None,
             "can_approve_draft": auto_review_required and workflow.status != "REJECTED" and active_task is None,
             "can_generate_voice": has_draft and production_allowed and active_task is None,
-            "can_render": has_draft and has_voice and production_allowed and active_task is None,
+            "can_render": can_render if is_bilibili_hardsub else has_draft and has_voice and production_allowed and active_task is None,
             "can_approve": bool(final_video) and production_allowed and active_task is None,
             "can_queue": bool(final_video) and bool(metadata.get("video_approved")) and production_allowed and active_task is None,
         },

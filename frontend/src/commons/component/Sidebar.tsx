@@ -104,7 +104,6 @@ const adminSections: NavSection[] = [
     items: [
       { key: 'crawl', label: 'Nguồn dữ liệu', icon: <Database size={17} /> },
       { key: 'contentItems', label: 'Kho nội dung', icon: <LibraryBig size={17} /> },
-      { key: 'storyStatus', label: 'Trạng thái series', icon: <ListChecks size={17} /> },
       { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
       { key: 'auditLogs', label: 'Nhật ký hệ thống', icon: <ScrollText size={17} /> },
     ],
