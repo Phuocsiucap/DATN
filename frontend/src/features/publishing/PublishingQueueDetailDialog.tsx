@@ -17,6 +17,7 @@ import {
 import { fetchContentDetailApi, type ContentDetail } from '@/commons/apis/module1'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { MediaAssetPreview } from '@/commons/media'
+import TikTokEmbedPlayer from '@/features/analytics/TikTokEmbedPlayer'
 
 export type PublishingQueueDetailItem = {
   id: string
@@ -33,6 +34,9 @@ export type PublishingQueueDetailItem = {
   scheduled_at?: string | null
   scheduled_at_local?: string | null
   schedule_timezone?: string | null
+  post_url?: string | null
+  platform_post_id?: string | null
+  tiktok_embed_url?: string | null
   published_at?: string | null
   error?: string | null
   created_at?: string | null
@@ -95,6 +99,10 @@ export function PublishingQueueDetailDialog({
     return generateVideoOutputUrl(item.article_link)
   }, [item?.article_link])
 
+  const canShowTikTokEmbed = item?.status === 'published'
+    && item?.platform === 'tiktok'
+    && Boolean(item?.platform_post_id)
+
   const article = useMemo(() => {
     const normalized = contentDetail?.normalized
     return {
@@ -150,9 +158,15 @@ export function PublishingQueueDetailDialog({
           <section className="space-y-4 border-b p-5 lg:border-b-0 lg:border-r" style={{ borderColor: 'var(--outline-variant)' }}>
             <div className="flex items-center gap-2 text-xs font-bold uppercase" style={{ color: 'var(--on-surface-variant)' }}>
               <Video size={15} />
-              Video đã render
+              {canShowTikTokEmbed ? 'Video đã đăng trên TikTok' : 'Video đã render'}
             </div>
-            {renderedVideoUrl ? (
+            {canShowTikTokEmbed ? (
+              <TikTokEmbedPlayer
+                postId={item.platform_post_id}
+                postUrl={item.post_url}
+                title={item.article_title}
+              />
+            ) : renderedVideoUrl ? (
               <div className="overflow-hidden rounded-lg border bg-black" style={{ borderColor: 'var(--outline-variant)' }}>
                 <MediaAssetPreview
                   item={{

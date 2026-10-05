@@ -349,6 +349,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           setAddProfileOpen(false)
           setNewProfileName('')
           setNewProfileUsername('')
+          // Reset adding flag so method buttons are enabled if the dialog is re-opened
+          setAddingProfile(false)
           await loadProfiles()
           toast.success('Đã thêm và đăng nhập TikTok profile qua trình duyệt thành công.')
         }
@@ -447,6 +449,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   const handleStartPendingQr = async () => {
+    // Guard: prevent concurrent QR + OAuth sessions
+    if (pendingOAuthState) return
     if (addingProfile) return
     const profileName = newProfileName.trim() || 'TikTok account'
     setAddingProfile(true)
@@ -762,6 +766,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   onQr={() => void handleStartQr(profile.id)}
                   onStopQr={() => void handleStopQr(profile.id)}
                   onOAuth={() => void handleStartOAuthForProfile(profile.id)}
+                  onCancelOAuth={() => void handleCancelOAuth()}
                   onDelete={() => void handleDeleteProfile(profile.id)}
                 />
               ))}
@@ -995,6 +1000,7 @@ function SocialProfileCard({
   onQr,
   onStopQr,
   onOAuth,
+  onCancelOAuth,
   onDelete,
 }: {
   profile: SocialProfile
@@ -1007,6 +1013,7 @@ function SocialProfileCard({
   onQr: () => void
   onStopQr: () => void
   onOAuth: () => void
+  onCancelOAuth: () => void
   onDelete: () => void
 }) {
   const stats = [
@@ -1119,10 +1126,13 @@ function SocialProfileCard({
                 <AppButton
                   variant="secondary"
                   className="col-span-2 w-full justify-center text-xs"
-                  disabled
                   icon={<RefreshCw size={13} className="animate-spin" />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onCancelOAuth()
+                  }}
                 >
-                  Đang xác thực...
+                  Hủy xác thực
                 </AppButton>
               ) : (
                 <>
