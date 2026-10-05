@@ -36,7 +36,6 @@ export function AddTikTokProfileDialog({
   qrReady: boolean
   sessionStatus: string
   oauthState: string | null
-  oauthPolling: boolean
   oauthAuthUrl: string | null
   onPlatformChange: (value: string) => void
   onNameChange: (value: string) => void

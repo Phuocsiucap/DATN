@@ -26,3 +26,8 @@ export const getTikTokOAuthStatusForProfileApi = async (profileId: string | numb
   const { data } = await api.get(`/social-profiles/${profileId}/tiktok/oauth/${state}/status`)
   return data as { authenticated: boolean; status?: string }
 }
+
+export const cancelTikTokOAuthForProfileApi = async (profileId: string | number, state: string) => {
+  const { data } = await api.post(`/social-profiles/${profileId}/tiktok/oauth/${state}/cancel`)
+  return data
+}

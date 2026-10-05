@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'sonner'
 
@@ -25,6 +25,7 @@ import {
   updateSocialProfileStrategyApi,
   initTikTokOAuthForProfileApi,
   getTikTokOAuthStatusForProfileApi,
+  cancelTikTokOAuthForProfileApi,
   initTikTokOAuthApi,
   getTikTokOAuthStatusApi,
   cancelTikTokOAuthApi,
@@ -111,6 +112,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [newProfilePlatform, setNewProfilePlatform] = useState('tiktok')
   const [newProfileName, setNewProfileName] = useState('')
   const [newProfileUsername, setNewProfileUsername] = useState('')
+  // Refs to avoid stale closure in pending-QR polling effect
+  const newProfileNameRef = useRef(newProfileName)
+  const newProfileUsernameRef = useRef(newProfileUsername)
+  newProfileNameRef.current = newProfileName
+  newProfileUsernameRef.current = newProfileUsername
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null)
   const [pendingQrImage, setPendingQrImage] = useState<string | null>(null)
   const [pendingQrUrl, setPendingQrUrl] = useState<string | null>(null)
@@ -267,8 +273,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     const timer = setInterval(async () => {
       try {
         const data = await getPendingTikTokQrLoginStatusApi(pendingSessionId, {
-          profile_name: newProfileName || 'TikTok account',
-          username: newProfileUsername || undefined,
+          profile_name: newProfileNameRef.current || 'TikTok account',
+          username: newProfileUsernameRef.current || undefined,
         })
         if (data.qr_image) setPendingQrImage(data.qr_image)
         if (data.qr_url) setPendingQrUrl(data.qr_url)
@@ -292,7 +298,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     }, 4000)
 
     return () => clearInterval(timer)
-  }, [pendingSessionId, newProfileName, newProfileUsername])
+  }, [pendingSessionId])
 
   useEffect(() => {
     if (!pendingSessionId || (!pendingQrImage && !pendingQrUrl)) {
@@ -522,7 +528,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
-  const handleCancelOAuth = () => {
+  const handleCancelOAuth = async () => {
+    if (oauthProfileId && oauthState) {
+      try {
+        await cancelTikTokOAuthForProfileApi(oauthProfileId, oauthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
     oauthPopup?.close()
     setOauthProfileId(null)
     setOauthState(null)
@@ -775,7 +788,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                 </a>
               )}
               <button
-                onClick={handleCancelOAuth}
+                onClick={() => void handleCancelOAuth()}
                 className="mt-3 h-8 rounded-lg border border-indigo-200 bg-white px-4 text-xs font-bold text-indigo-700 hover:bg-indigo-50"
               >
                 Hủy
@@ -937,7 +950,6 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         qrReady={pendingQrReady}
         sessionStatus={sessionStatus}
         oauthState={pendingOAuthState}
-        oauthPolling={!!pendingOAuthState}
         oauthAuthUrl={pendingOAuthAuthUrl}
         onPlatformChange={setNewProfilePlatform}
         onNameChange={setNewProfileName}
