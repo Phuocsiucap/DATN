@@ -170,3 +170,23 @@ class SocialProfileResponse(BaseModel):
 
 class SocialProfileListResponse(BaseModel):
     items: list[SocialProfileResponse]
+
+
+class ManualPhotoQueueRequest(BaseModel):
+    profile_id: uuid.UUID
+    photo_urls: list[str] = Field(..., min_length=2, max_length=35)
+    photo_cover_index: int = Field(default=0, ge=0)
+    title: str = Field(default="", max_length=90)
+    caption: str = Field(default="", max_length=4000)
+    auto_add_music: bool = False
+    post_mode: Literal["DIRECT_POST", "MEDIA_UPLOAD"] = "DIRECT_POST"
+    scheduled_at: str
+    timezone: str = "Asia/Bangkok"
+    is_aigc: bool = False
+    privacy_level: str = "PUBLIC_TO_EVERYONE"
+
+    @model_validator(mode="after")
+    def validate_cover_index(self) -> "ManualPhotoQueueRequest":
+        if self.photo_cover_index >= len(self.photo_urls):
+            raise ValueError("photo_cover_index must be < len(photo_urls)")
+        return self

@@ -14,6 +14,7 @@ from common.db.models import SocialProfile
 
 INBOX_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
 DIRECT_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+CONTENT_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/"
 CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
 PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
@@ -408,6 +409,119 @@ def _upload_file_chunks(upload_url: str, video_path: Path, video_size: int, chun
                     detail=f"TikTok upload chunk thất bại: HTTP {response.status_code}",
                 )
             start = end + 1
+
+
+def direct_post_photo_to_tiktok(
+    profile: SocialProfile,
+    photo_urls: list[str],
+    *,
+    photo_cover_index: int = 0,
+    title: str = "",
+    caption: str = "",
+    privacy_level: str | None = None,
+    auto_add_music: bool = False,
+    disable_comment: bool = False,
+    is_aigc: bool = False,
+    brand_content_toggle: bool = False,
+    brand_organic_toggle: bool = False,
+) -> dict[str, Any]:
+    """Directly post a photo carousel to TikTok (requires video.publish scope)."""
+    if profile.platform != "tiktok":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Profile này không phải TikTok")
+    scopes = _scope_set(profile.scopes_jsonb)
+    if "video.publish" not in scopes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TikTok profile chưa cấp scope video.publish.")
+    if not (2 <= len(photo_urls) <= 35):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Số ảnh phải từ 2 đến 35")
+    token = ensure_tiktok_access_token(profile)
+    creator_info = query_tiktok_creator_info(token)
+    privacy_options = creator_info.get("privacy_level_options") if isinstance(creator_info, dict) else None
+    resolved_privacy = _resolve_privacy_level(privacy_level, privacy_options)
+    with httpx.Client(timeout=30) as client:
+        response = client.post(
+            CONTENT_INIT_URL,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"},
+            json={
+                "media_type": "PHOTO",
+                "post_mode": "DIRECT_POST",
+                "post_info": {
+                    "title": (title or "").strip()[:90],
+                    "description": (caption or "").strip()[:4000],
+                    "privacy_level": resolved_privacy,
+                    "disable_comment": disable_comment,
+                    "auto_add_music": auto_add_music,
+                    "brand_content_toggle": brand_content_toggle,
+                    "brand_organic_toggle": brand_organic_toggle,
+                },
+                "source_info": {
+                    "source": "PULL_FROM_URL",
+                    "photo_images": photo_urls,
+                    "photo_cover_index": photo_cover_index,
+                },
+                "is_aigc": is_aigc,
+            },
+        )
+    payload = _json_payload(response, "TikTok photo post init response không hợp lệ")
+    if response.status_code >= 400:
+        _raise_for_tiktok_error(payload, "Không khởi tạo được TikTok Photo Post")
+        raise HTTPException(status_code=response.status_code, detail="Không khởi tạo được TikTok Photo Post")
+    _raise_for_tiktok_error(payload, "Không khởi tạo được TikTok Photo Post")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    publish_id = data.get("publish_id")
+    if not publish_id:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="TikTok Photo Post response thiếu publish_id")
+    status_data = fetch_tiktok_publish_status(token, publish_id)
+    return {"publish_id": publish_id, "status": status_data, "privacy_level": resolved_privacy, "creator_info": creator_info}
+
+
+def upload_photo_to_tiktok_inbox(
+    profile: SocialProfile,
+    photo_urls: list[str],
+    *,
+    photo_cover_index: int = 0,
+    title: str = "",
+    caption: str = "",
+    is_aigc: bool = False,
+) -> dict[str, Any]:
+    """Upload photo carousel to TikTok inbox (requires video.upload scope)."""
+    if profile.platform != "tiktok":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Profile này không phải TikTok")
+    scopes = _scope_set(profile.scopes_jsonb)
+    if "video.upload" not in scopes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TikTok profile chưa cấp scope video.upload.")
+    if not (2 <= len(photo_urls) <= 35):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Số ảnh phải từ 2 đến 35")
+    token = ensure_tiktok_access_token(profile)
+    with httpx.Client(timeout=30) as client:
+        response = client.post(
+            CONTENT_INIT_URL,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"},
+            json={
+                "media_type": "PHOTO",
+                "post_mode": "MEDIA_UPLOAD",
+                "post_info": {
+                    "title": (title or "").strip()[:90],
+                    "description": (caption or "").strip()[:4000],
+                },
+                "source_info": {
+                    "source": "PULL_FROM_URL",
+                    "photo_images": photo_urls,
+                    "photo_cover_index": photo_cover_index,
+                },
+                "is_aigc": is_aigc,
+            },
+        )
+    payload = _json_payload(response, "TikTok photo upload init response không hợp lệ")
+    if response.status_code >= 400:
+        _raise_for_tiktok_error(payload, "Không khởi tạo được TikTok Photo Upload")
+        raise HTTPException(status_code=response.status_code, detail="Không khởi tạo được TikTok Photo Upload")
+    _raise_for_tiktok_error(payload, "Không khởi tạo được TikTok Photo Upload")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    publish_id = data.get("publish_id")
+    if not publish_id:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="TikTok Photo Upload response thiếu publish_id")
+    status_data = fetch_tiktok_publish_status(token, publish_id)
+    return {"publish_id": publish_id, "status": status_data}
 
 
 def fetch_tiktok_publish_status(access_token: str, publish_id: str) -> dict[str, Any]:

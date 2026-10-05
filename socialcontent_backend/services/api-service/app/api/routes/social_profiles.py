@@ -5,10 +5,10 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from common.db.models import ContentItem, MediaWorkflow, SocialProfileSnapshot, User
+from common.db.models import ContentItem, MediaWorkflow, SocialPost, SocialProfileSnapshot, User
 from common.db.session import get_db
 from common.events.envelope import build_event
 from common.events.kafka import publish
@@ -103,6 +103,48 @@ async def stop_pending_tiktok_qr_login(session_id: str, current_user: User = Dep
     return await service.stop_pending_tiktok_qr_login(current_user, session_id)
 
 
+@router.post("/queue/items/manual-photo", status_code=201)
+def create_manual_photo_queue_item(
+    payload: schemas.ManualPhotoQueueRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    item = service.create_manual_photo_queue_item(db, current_user, payload)
+    return _serialize_queue_response_item(db, service, item, "schedule", _resolve_timezone(payload.timezone))
+
+
+@router.get("/cloudinary/sign")
+def get_cloudinary_sign(
+    folder: str = Query(default="photo-posts"),
+    profile_id: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+):
+    import hashlib
+    import time as _time
+    from common.core.config import get_settings as _get_settings
+    settings = _get_settings()
+    if not settings.cloudinary_cloud_name or not settings.cloudinary_api_key or not settings.cloudinary_api_secret:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=503,
+            detail="Cloudinary chưa được cấu hình trên server. Hãy dùng nhập URL trực tiếp.",
+        )
+    timestamp = int(_time.time())
+    folder_path = folder or f"tiktok-photos/user-{current_user.id}"
+    params_to_sign = f"folder={folder_path}&timestamp={timestamp}"
+    sig_str = f"{params_to_sign}{settings.cloudinary_api_secret}"
+    signature = hashlib.sha1(sig_str.encode()).hexdigest()
+    return {
+        "cloud_name": settings.cloudinary_cloud_name,
+        "api_key": settings.cloudinary_api_key,
+        "timestamp": timestamp,
+        "folder": folder_path,
+        "signature": signature,
+        "upload_url": f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload",
+    }
+
+
 @router.get("/queue/items")
 def list_my_queue(
     queue_status: str | None = None,
@@ -146,6 +188,32 @@ def list_my_queue(
         "total": len(items),
         "summary": _queue_summary(summary_items, start_date, end_date, tzinfo),
     }
+
+
+@router.post("/queue/items/manual", status_code=201)
+async def create_manual_queue_item(
+    profile_id: uuid.UUID = Form(...),
+    caption: str = Form(...),
+    scheduled_at: str = Form(...),
+    timezone_name: str = Form(default="Asia/Bangkok", alias="timezone"),
+    video: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialProfileService()
+    profile = service.get_owned_profile(db, profile_id, current_user)
+    content = await video.read()
+    item = service.create_manual_queue_item(
+        db,
+        profile,
+        current_user,
+        filename=video.filename or "manual-video.mp4",
+        content=content,
+        caption=caption,
+        scheduled_at=scheduled_at,
+        timezone_name=timezone_name,
+    )
+    return _serialize_queue_response_item(db, service, item, "schedule", _resolve_timezone(timezone_name))
 
 
 @router.get("/queue/items/{queue_item_id}")
@@ -565,6 +633,7 @@ def _local_date(value: datetime, tzinfo: ZoneInfo) -> date:
 
 def _serialize_queue_response_item(db: Session, service: SocialProfileService, item, view: str | None, tzinfo: ZoneInfo) -> dict:
     data = service.serialize_queue_item(item)
+    data.update(_queue_post_payload(db, service, item))
     if view == "approval":
         return _serialize_approval_queue_item(db, item, data, tzinfo)
     if view != "schedule":
@@ -598,6 +667,9 @@ def _serialize_queue_response_item(db: Session, service: SocialProfileService, i
         "updated_at": data["updated_at"],
         "can_upload_inbox": "video.upload" in profile_scopes,
         "can_publish_direct": "video.publish" in profile_scopes,
+        "post_url": data.get("post_url"),
+        "platform_post_id": data.get("platform_post_id"),
+        "tiktok_embed_url": data.get("tiktok_embed_url"),
     }
 
 
@@ -662,6 +734,36 @@ def _serialize_approval_queue_item(db: Session, item, data: dict, tzinfo: ZoneIn
         "creator_name": _display_user_name(profile.user if profile else None),
         "can_upload_inbox": "video.upload" in profile_scopes,
         "can_publish_direct": "video.publish" in profile_scopes,
+        "post_url": data.get("post_url"),
+        "platform_post_id": data.get("platform_post_id"),
+        "tiktok_embed_url": data.get("tiktok_embed_url"),
+    }
+
+
+def _queue_post_payload(db: Session, service: SocialProfileService, item) -> dict:
+    post = (
+        db.query(SocialPost)
+        .filter(SocialPost.queue_item_id == item.id)
+        .order_by(SocialPost.created_at.desc())
+        .first()
+    )
+    if not post and item.platform_publish_id:
+        post = (
+            db.query(SocialPost)
+            .filter(
+                SocialPost.profile_id == item.profile_id,
+                SocialPost.platform_publish_id == item.platform_publish_id,
+            )
+            .order_by(SocialPost.created_at.desc())
+            .first()
+        )
+    if not post:
+        return {"post_url": None, "platform_post_id": None, "tiktok_embed_url": None}
+    post_id = service._clean_tiktok_post_id(post.platform_post_id)
+    return {
+        "post_url": post.post_url,
+        "platform_post_id": post_id or post.platform_post_id,
+        "tiktok_embed_url": service._tiktok_embed_url(post_id),
     }
 
 

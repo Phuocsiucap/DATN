@@ -136,6 +136,26 @@ export const fetchPublishingQueueItemApi = async (queueItemId: string | number) 
   return data
 }
 
+export const createManualPublishingQueueItemApi = async (payload: {
+  profile_id: string | number
+  video: File
+  caption: string
+  scheduled_at: string
+  timezone?: string
+}) => {
+  const formData = new FormData()
+  formData.append('profile_id', String(payload.profile_id))
+  formData.append('video', payload.video)
+  formData.append('caption', payload.caption)
+  formData.append('scheduled_at', payload.scheduled_at)
+  formData.append('timezone', payload.timezone || 'Asia/Bangkok')
+  const { data } = await api.post('/social-profiles/queue/items/manual', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  })
+  return data
+}
+
 export const fetchPublishingQueueApprovalItemApi = async (queueItemId: string | number) => {
   const { data } = await api.get(`/social-profiles/queue/items/${queueItemId}`, {
     params: { view: 'approval', timezone: 'Asia/Bangkok' },
@@ -319,5 +339,61 @@ export const getTikTokQrLoginStatusApi = async (profileId: string | number) => {
 
 export const stopTikTokQrLoginApi = async (profileId: string | number) => {
   const { data } = await api.post(`/social-profiles/${profileId}/tiktok/qr/stop`)
+  return data
+}
+
+// ─── Cloudinary ──────────────────────────────────────────────────────────────
+
+export type CloudinarySignResponse = {
+  cloud_name: string
+  api_key: string
+  timestamp: number
+  folder: string
+  signature: string
+  upload_url: string
+}
+
+export const getCloudinarySignApi = async (params?: { folder?: string; profile_id?: string }): Promise<CloudinarySignResponse> => {
+  const { data } = await api.get('/social-profiles/cloudinary/sign', { params })
+  return data
+}
+
+export const uploadImageToCloudinary = async (
+  sign: CloudinarySignResponse,
+  file: File,
+): Promise<string> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('api_key', sign.api_key)
+  formData.append('timestamp', String(sign.timestamp))
+  formData.append('signature', sign.signature)
+  formData.append('folder', sign.folder)
+  const response = await fetch(sign.upload_url, { method: 'POST', body: formData })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
+    throw new Error(err.error?.message || 'Upload ảnh thất bại')
+  }
+  const result = await response.json() as { secure_url: string }
+  return result.secure_url
+}
+
+// ─── Manual photo queue ───────────────────────────────────────────────────────
+
+export type ManualPhotoQueuePayload = {
+  profile_id: string | number
+  photo_urls: string[]
+  photo_cover_index: number
+  title: string
+  caption: string
+  auto_add_music: boolean
+  post_mode: 'DIRECT_POST' | 'MEDIA_UPLOAD'
+  scheduled_at: string
+  timezone: string
+  is_aigc: boolean
+  privacy_level: string
+}
+
+export const createManualPhotoQueueItemApi = async (payload: ManualPhotoQueuePayload) => {
+  const { data } = await api.post('/social-profiles/queue/items/manual-photo', payload)
   return data
 }

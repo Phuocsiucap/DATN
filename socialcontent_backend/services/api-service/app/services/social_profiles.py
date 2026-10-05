@@ -31,6 +31,7 @@ from app.services.tiktok_oauth import (
 )
 from app.services import generate_video as video_pipeline
 from app.services.tiktok_posting import (
+    direct_post_photo_to_tiktok,
     direct_post_video_to_tiktok,
     ensure_tiktok_access_token,
     extract_tiktok_public_post_id,
@@ -40,6 +41,7 @@ from app.services.tiktok_posting import (
     tiktok_publish_is_complete,
     tiktok_publish_is_failed,
     tiktok_publish_status_value,
+    upload_photo_to_tiktok_inbox,
     upload_video_to_tiktok_inbox,
 )
 
@@ -155,6 +157,8 @@ class SocialProfileService:
     def publish_caption_for_queue_item(self, db: Session, item: PublishingQueueItem) -> str:
         profile = item.profile
         workflow = self.find_workflow_for_queue_item(db, item, profile.user) if profile and profile.user else None
+        if not workflow and "thủ công" in str(item.ai_reason or "").lower() and item.generated_content:
+            return item.generated_content
         content = db.get(ContentItem, workflow.primary_content_id) if workflow and workflow.primary_content_id else None
         story = workflow.draft_json if workflow and isinstance(workflow.draft_json, dict) else None
         raw_caption = item.generated_content or item.article_title
@@ -845,6 +849,139 @@ class SocialProfileService:
         )
         return query.order_by(PublishingQueueItem.scheduled_at.asc(), PublishingQueueItem.created_at.desc()).all()
 
+    def create_manual_queue_item(
+        self,
+        db: Session,
+        profile: SocialProfile,
+        user: User,
+        *,
+        filename: str,
+        content: bytes,
+        caption: str,
+        scheduled_at: str,
+        timezone_name: str | None = None,
+    ) -> PublishingQueueItem:
+        if not self.is_system_user(user) and profile.user_id != user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy social profile")
+        caption_text = (caption or "").strip()
+        if not caption_text:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="caption không được để trống")
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video không được để trống")
+        if len(content) > 500 * 1024 * 1024:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video vượt quá giới hạn 500MB")
+
+        suffix = Path(filename or "").suffix.lower()
+        if suffix not in {".mp4", ".mov", ".m4v", ".webm"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video phải là MP4, MOV, M4V hoặc WEBM")
+
+        tzinfo = schedule_timezone(timezone_name or getattr(getattr(profile, "strategy", None), "schedule_timezone", None))
+        raw_scheduled_at = str(scheduled_at or "").strip()
+        if not raw_scheduled_at:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at không được để trống")
+        try:
+            parsed = datetime.fromisoformat(raw_scheduled_at.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at không hợp lệ") from error
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=tzinfo)
+        scheduled_utc = parsed.astimezone(timezone.utc)
+        if scheduled_utc <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thời gian đăng phải ở tương lai")
+
+        safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(filename).stem).strip("-") or "video"
+        stored_name = f"manual-{uuid.uuid4().hex[:12]}-{safe_stem}{suffix}"
+        relative_path = Path("manual-uploads") / f"user-{profile.user_id}" / f"profile-{profile.id}" / stored_name
+        target_path = (video_pipeline.VIDEO_OUT_DIR / relative_path).resolve()
+        output_root = video_pipeline.VIDEO_OUT_DIR.resolve()
+        if not target_path.is_relative_to(output_root):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Đường dẫn video không hợp lệ")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
+
+        first_line = next((line.strip() for line in caption_text.splitlines() if line.strip()), "")
+        title = self._social_post_title(first_line or Path(filename).stem or "Bài đăng thủ công", fallback="Bài đăng thủ công")
+        lock_schedule_profile(db, profile.id)
+        item = PublishingQueueItem(
+            profile_id=profile.id,
+            article_link=relative_path.as_posix(),
+            article_title=title,
+            platform=(profile.platform or "tiktok").strip().lower(),
+            generated_content=caption_text,
+            ai_reason="Bài đăng thủ công được thêm trực tiếp từ lịch đăng.",
+            status="queued",
+            scheduled_at=scheduled_utc,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def create_manual_photo_queue_item(
+        self,
+        db: Session,
+        user: User,
+        payload: "schemas.ManualPhotoQueueRequest",
+    ) -> PublishingQueueItem:
+        profile = self.get_owned_profile(db, payload.profile_id, user)
+        if profile.platform.lower() != "tiktok":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Photo carousel chỉ hỗ trợ TikTok")
+        if not payload.photo_urls:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cần ít nhất 2 ảnh")
+        if not (2 <= len(payload.photo_urls) <= 35):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Số ảnh phải từ 2 đến 35")
+        if payload.photo_cover_index >= len(payload.photo_urls):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="photo_cover_index vượt quá số ảnh")
+
+        tzinfo = schedule_timezone(
+            payload.timezone or getattr(getattr(profile, "strategy", None), "schedule_timezone", None)
+        )
+        raw_scheduled_at = str(payload.scheduled_at or "").strip()
+        if not raw_scheduled_at:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at không được để trống")
+        try:
+            parsed = datetime.fromisoformat(raw_scheduled_at.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_at không hợp lệ") from error
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=tzinfo)
+        scheduled_utc = parsed.astimezone(timezone.utc)
+        if scheduled_utc <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thời gian đăng phải ở tương lai")
+
+        caption_text = (payload.caption or "").strip()
+        title_text = (payload.title or "").strip()
+        display_title = title_text or self._social_post_title(
+            caption_text.splitlines()[0].strip() if caption_text else "Photo Carousel",
+            fallback="Bài đăng ảnh thủ công",
+        )
+        photo_config: dict = {
+            "media_type": "PHOTO",
+            "photo_urls": payload.photo_urls,
+            "photo_cover_index": payload.photo_cover_index,
+            "title": title_text,
+            "auto_add_music": payload.auto_add_music,
+            "post_mode": payload.post_mode,
+            "is_aigc": payload.is_aigc,
+            "privacy_level": payload.privacy_level,
+        }
+        lock_schedule_profile(db, profile.id)
+        item = PublishingQueueItem(
+            profile_id=profile.id,
+            article_link=None,
+            article_title=display_title,
+            platform=(profile.platform or "tiktok").strip().lower(),
+            generated_content=caption_text,
+            ai_reason="Bài đăng ảnh thủ công được thêm trực tiếp từ lịch đăng.",
+            status="queued",
+            scheduled_at=scheduled_utc,
+            metadata_json=photo_config,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
     def apply_queue_filters(
         self,
         query,
@@ -1306,6 +1443,7 @@ class SocialProfileService:
         if not post:
             post = SocialPost(
                 profile_id=profile.id,
+                queue_item_id=item.id,
                 title=self._social_post_title(item.article_title),
                 post_url=post_url,
                 platform_post_id=post_id,
@@ -1320,6 +1458,7 @@ class SocialProfileService:
             return post
 
         post.title = self._social_post_title(item.article_title, post.title)
+        post.queue_item_id = post.queue_item_id or item.id
         post.post_url = post_url or post.post_url
         if post_id:
             post.platform_post_id = post_id
@@ -1615,6 +1754,97 @@ class SocialProfileService:
         if item.status == "publishing" and item.platform_publish_id and mode == "direct":
             return self.refresh_tiktok_publish_status(db, item, "manual", poll_attempts=3, poll_interval_seconds=5)
         self.require_queue_draft_ready(db, item, user)
+
+        # --- Photo carousel path ---
+        photo_config = (item.metadata_json or {}) if isinstance(item.metadata_json, dict) else {}
+        if photo_config.get("media_type") == "PHOTO":
+            photo_urls = photo_config.get("photo_urls") or []
+            photo_cover_index = int(photo_config.get("photo_cover_index") or 0)
+            title = str(photo_config.get("title") or "")
+            publish_caption = self.publish_caption_for_queue_item(db, item)
+            is_aigc = bool(photo_config.get("is_aigc", False))
+            auto_add_music = bool(photo_config.get("auto_add_music", False))
+            post_mode = str(photo_config.get("post_mode") or "DIRECT_POST")
+            item.status = "publishing"
+            item.error = None
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            try:
+                if post_mode == "DIRECT_POST":
+                    result = direct_post_photo_to_tiktok(
+                        profile,
+                        photo_urls,
+                        photo_cover_index=photo_cover_index,
+                        title=title,
+                        caption=publish_caption,
+                        privacy_level=privacy_level or photo_config.get("privacy_level"),
+                        auto_add_music=auto_add_music,
+                        disable_comment=disable_comment,
+                        is_aigc=is_aigc,
+                        brand_content_toggle=brand_content_toggle,
+                        brand_organic_toggle=brand_organic_toggle,
+                    )
+                else:
+                    result = upload_photo_to_tiktok_inbox(
+                        profile,
+                        photo_urls,
+                        photo_cover_index=photo_cover_index,
+                        title=title,
+                        caption=publish_caption,
+                        is_aigc=is_aigc,
+                    )
+            except HTTPException as error:
+                item.status = "failed"
+                item.error = str(error.detail)
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+                raise
+            except Exception as error:
+                item.status = "failed"
+                item.error = str(error)
+                db.add(item)
+                db.commit()
+                db.refresh(item)
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+            publish_id = result["publish_id"]
+            status_data = result.get("status") or {}
+            item.platform_publish_id = publish_id
+            item.publish_status_jsonb = status_data
+            now = datetime.utcnow()
+            if post_mode == "DIRECT_POST":
+                if not (tiktok_publish_is_complete(status_data) or tiktok_publish_is_failed(status_data)):
+                    status_data = poll_tiktok_publish_status(
+                        ensure_tiktok_access_token(profile), publish_id, max_attempts=3, interval_seconds=5
+                    )
+                    item.publish_status_jsonb = status_data
+                if tiktok_publish_is_failed(status_data):
+                    item.status = "failed"
+                    item.error = tiktok_publish_failure_reason(status_data) or "TikTok Photo Post failed"
+                elif tiktok_publish_is_complete(status_data):
+                    item.status = "published"
+                    item.published_at = now
+                else:
+                    item.status = "publishing"
+            else:
+                item.status = "published"
+                item.published_at = now
+            db.add_all([profile, item])
+            db.commit()
+            db.refresh(item)
+            return {
+                "queue_item": self.serialize_queue_item(item),
+                "post": None,
+                "tiktok": {
+                    "publish_id": publish_id,
+                    "post_id": extract_tiktok_public_post_id(status_data),
+                    "mode": post_mode,
+                    "status": status_data,
+                },
+            }
+        # --- End photo carousel path ---
+
         video_path = self.resolve_rendered_video_path(item.article_link)
         publish_caption = self.publish_caption_for_queue_item(db, item)
         action_label = "đăng trực tiếp" if mode == "direct" else "gửi inbox"
@@ -1699,6 +1929,7 @@ class SocialProfileService:
         else:
             post = SocialPost(
                 profile_id=profile.id,
+                queue_item_id=item.id,
                 title=self._social_post_title(item.article_title),
                 post_url=item.article_link,
                 platform_post_id=None,

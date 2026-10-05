@@ -33,6 +33,7 @@ from app.schemas.sources import (
 )
 from app.schemas.stories import StoryResponse
 from app.schemas.social_profiles import (
+    ManualPhotoQueueRequest,
     QueueStatusRequest,
     QueueApproveScheduleRequest,
     QueueRescheduleRequest,
@@ -95,6 +96,7 @@ __all__ = [
     "SchedulerSettingsRequest",
     "TikTokPublishRequest",
     "TikTokQrStartRequest",
+    "ManualPhotoQueueRequest",
     "StoryResponse",
     "TokenResponse",
     "UserResponse",

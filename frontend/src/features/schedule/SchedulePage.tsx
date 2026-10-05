@@ -19,7 +19,7 @@ import {
   Play,
   Pause,
 } from 'lucide-react'
-import { approveAndScheduleQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, rescheduleQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
+import { approveAndScheduleQueueItemApi, createManualPhotoQueueItemApi, createManualPublishingQueueItemApi, fetchPublishingQueueApi, fetchPublishingQueueItemApi, fetchSocialProfilesApi, publishPublishingQueueItemApi, refreshPublishingQueueItemPublishStatusApi, rescheduleQueueItemApi, updatePublishingQueueItemApi } from '@/commons/apis/api'
 import { AppButton, PageLayout, SearchField, SelectControl, SocialProfileAvatar, TableRowActions, type TableRowActionItem } from '@/commons/component/social-ui'
 import { generateVideoOutputUrl } from '@/commons/apis/generateVideo'
 import { SocialProfileFilter } from '@/commons/component/SocialProfileFilter'
@@ -27,6 +27,7 @@ import { MediaAssetPreview } from '@/commons/media'
 import { PublishingQueueDetailDialog, type PublishingQueueDetailItem } from '@/features/publishing/PublishingQueueDetailDialog'
 import { QueueScheduleDialog, type QueueScheduleMode, type QueueScheduleTarget } from './components/QueueScheduleDialog'
 import { SkipConfirmDialog } from './components/SkipConfirmDialog'
+import { ManualQueuePostDialog, type ManualQueuePostPayload } from './components/ManualQueuePostDialog'
 
 
 type SocialProfile = {
@@ -250,6 +251,8 @@ export default function SchedulePage() {
   const [modalItem, setModalItem] = useState<QueueItem | null>(null)
   const [scheduleItem, setScheduleItem] = useState<QueueScheduleTarget | null>(null)
   const [skipTarget, setSkipTarget] = useState<QueueItem | null>(null)
+  const [manualDialogOpen, setManualDialogOpen] = useState(false)
+  const [manualDateKey, setManualDateKey] = useState<string | null>(null)
 
   const mergeQueueItem = useCallback((updated: QueueItem) => {
     const profile = profiles.find((candidate) => String(candidate.id) === String(updated.profile_id))
@@ -426,6 +429,51 @@ export default function SchedulePage() {
     void handlePublishNow(item, mode)
   }
 
+  const openManualDialog = (targetDateKey?: string | null) => {
+    setManualDateKey(targetDateKey || null)
+    setManualDialogOpen(true)
+  }
+
+  const handleCreateManualPost = async (payload: ManualQueuePostPayload) => {
+    setLoading(true)
+    try {
+      if (payload.type === 'photo') {
+        const created = await createManualPhotoQueueItemApi({
+          profile_id: payload.profileId,
+          photo_urls: payload.photoUrls,
+          photo_cover_index: payload.photoCoverIndex,
+          title: payload.title,
+          caption: payload.caption,
+          auto_add_music: payload.autoAddMusic,
+          post_mode: payload.postMode,
+          scheduled_at: payload.scheduledAt,
+          timezone: payload.timezone,
+          is_aigc: payload.isAigc,
+          privacy_level: payload.privacyLevel,
+        })
+        mergeQueueItem(created)
+      } else {
+        const created = await createManualPublishingQueueItemApi({
+          profile_id: payload.profileId,
+          video: payload.video,
+          caption: payload.caption,
+          scheduled_at: payload.scheduledAt,
+          timezone: payload.timezone,
+        })
+        mergeQueueItem(created)
+      }
+      await loadData()
+      toast.success('Đã thêm bài đăng thủ công vào lịch.')
+      return true
+    } catch (error: unknown) {
+      const apiError = error as { response?: { data?: { detail?: string } } }
+      toast.error(apiError?.response?.data?.detail || 'Không thể thêm bài đăng thủ công')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleOpenDetail = async (item: QueueItem) => {
     setLoading(true)
     try {
@@ -535,6 +583,13 @@ export default function SchedulePage() {
             placeholder="Tìm kiếm bài viết, kênh..."
             className="w-full sm:w-[260px]"
           />
+          <AppButton
+            icon={<Plus size={15} />}
+            onClick={() => openManualDialog(todayKey)}
+            disabled={loading || profiles.length === 0}
+          >
+            Thêm bài thủ công
+          </AppButton>
           <SelectControl
             value={selectedStatus}
             onChange={setSelectedStatus}
@@ -665,14 +720,15 @@ export default function SchedulePage() {
                               loading={loading}
                             />
                           ))}
-                          {day.isToday && (
-                            <button
-                              className="flex h-12 w-full items-center justify-center rounded-md border border-dashed hover:bg-slate-50 transition-colors"
-                              style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
-                            >
-                              <Plus size={17} />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => openManualDialog(day.key)}
+                            className="flex h-12 w-full items-center justify-center rounded-md border border-dashed hover:bg-slate-50 transition-colors"
+                            style={{ borderColor: 'var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+                            title="Thêm bài thủ công vào ngày này"
+                          >
+                            <Plus size={17} />
+                          </button>
                         </div>
                       </div>
                     )
@@ -701,6 +757,16 @@ export default function SchedulePage() {
         loading={loading}
         onClose={() => setScheduleItem(null)}
         onSubmit={handleSchedule}
+      />
+
+      <ManualQueuePostDialog
+        open={manualDialogOpen}
+        profiles={profiles}
+        initialProfileId={selectedProfileId}
+        initialDateKey={manualDateKey}
+        loading={loading}
+        onClose={() => setManualDialogOpen(false)}
+        onSubmit={handleCreateManualPost}
       />
 
       <SkipConfirmDialog

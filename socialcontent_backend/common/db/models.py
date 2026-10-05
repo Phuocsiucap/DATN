@@ -431,6 +431,7 @@ class PublishingQueueItem(Base):
     status = Column(String(40), default="queued", nullable=False, index=True)
     platform_publish_id = Column(String(255), nullable=True, index=True)
     publish_status_jsonb = Column("publish_status", JSONB, nullable=False, default=dict)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
     scheduled_at = Column(DateTime(timezone=True), nullable=True, index=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     error = Column(Text, nullable=True)
