@@ -418,6 +418,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setPendingQrUrl(null)
     setPendingQrReady(false)
     setSessionStatus('idle')
+    setAddingProfile(false)
   }
 
   const handleCreateProfile = async () => {
@@ -468,6 +469,11 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   }
 
   const handleStartPendingOAuth = async () => {
+    // Guard: prevent concurrent QR + OAuth sessions
+    if (pendingSessionId) return
+    // Guard: prevent double-tap (same pattern as handleStartPendingQr)
+    if (addingProfile) return
+    setAddingProfile(true)
     try {
       const data = await initTikTokOAuthApi({
         profile_name: newProfileName.trim() || 'TikTok account',
@@ -480,6 +486,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       toast.info('Đã mở trang đăng nhập TikTok. Hoàn tất trong cửa sổ mới.')
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth TikTok')
+    } finally {
+      setAddingProfile(false)
     }
   }
 
@@ -495,6 +503,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setPendingOAuthState(null)
     setPendingOAuthPopup(null)
     setPendingOAuthAuthUrl(null)
+    setAddingProfile(false)
   }
 
   const handleStartQr = async (profileId: string) => {
