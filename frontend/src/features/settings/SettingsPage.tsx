@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'sonner'
 
-import { AlertTriangle, CalendarClock, Check, CircleUserRound, ExternalLink, Pause, Play, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, Zap } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Check, CircleUserRound, ExternalLink, Globe, Pause, Play, Plus, QrCode, RefreshCw, Save, SlidersHorizontal, Trash2, Zap } from 'lucide-react'
 import {
   fetchSocialProfilesApi,
   createSocialProfileApi,
@@ -23,6 +23,11 @@ import {
   updateCrawlJobScheduleApi,
   fetchSocialProfileStrategyApi,
   updateSocialProfileStrategyApi,
+  initTikTokOAuthForProfileApi,
+  getTikTokOAuthStatusForProfileApi,
+  initTikTokOAuthApi,
+  getTikTokOAuthStatusApi,
+  cancelTikTokOAuthApi,
   type CrawlJob,
   type SchedulerSettingsStatus,
   type SchedulerSettings,
@@ -111,6 +116,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [pendingQrUrl, setPendingQrUrl] = useState<string | null>(null)
   const [pendingQrReady, setPendingQrReady] = useState(false)
   const [addingProfile, setAddingProfile] = useState(false)
+
+  // OAuth state for existing-profile re-connect
+  const [oauthProfileId, setOauthProfileId] = useState<string | null>(null)
+  const [oauthState, setOauthState] = useState<string | null>(null)
+  const [oauthPopup, setOauthPopup] = useState<Window | null>(null)
+  const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null)
+
+  // OAuth state for pending (new) profile
+  const [pendingOAuthState, setPendingOAuthState] = useState<string | null>(null)
+  const [pendingOAuthPopup, setPendingOAuthPopup] = useState<Window | null>(null)
+  const [pendingOAuthAuthUrl, setPendingOAuthAuthUrl] = useState<string | null>(null)
 
   // Scheduler state
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerSettingsStatus | null>(null)
@@ -289,6 +305,54 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     return () => window.clearTimeout(timer)
   }, [pendingSessionId, pendingQrImage, pendingQrUrl])
 
+  // OAuth polling: existing profile re-connect
+  useEffect(() => {
+    if (!oauthProfileId || !oauthState) return
+    const timer = setInterval(async () => {
+      try {
+        const data = await getTikTokOAuthStatusForProfileApi(oauthProfileId, oauthState)
+        if (data.authenticated) {
+          clearInterval(timer)
+          oauthPopup?.close()
+          setOauthProfileId(null)
+          setOauthState(null)
+          setOauthPopup(null)
+          setOauthAuthUrl(null)
+          await loadProfiles()
+          toast.success('Đăng nhập TikTok qua trình duyệt thành công.')
+        }
+      } catch (error: any) {
+        console.error(error)
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [oauthProfileId, oauthState])
+
+  // OAuth polling: pending (new) profile
+  useEffect(() => {
+    if (!pendingOAuthState) return
+    const timer = setInterval(async () => {
+      try {
+        const data = await getTikTokOAuthStatusApi(pendingOAuthState)
+        if (data.authenticated) {
+          clearInterval(timer)
+          pendingOAuthPopup?.close()
+          setPendingOAuthState(null)
+          setPendingOAuthPopup(null)
+          setPendingOAuthAuthUrl(null)
+          setAddProfileOpen(false)
+          setNewProfileName('')
+          setNewProfileUsername('')
+          await loadProfiles()
+          toast.success('Đã thêm và đăng nhập TikTok profile qua trình duyệt thành công.')
+        }
+      } catch (error: any) {
+        console.error(error)
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [pendingOAuthState])
+
   const openProfileStrategyDialog = async (profile: SocialProfile) => {
     setActiveStrategyProfile(profile)
     setStrategyDialogOpen(true)
@@ -331,6 +395,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         console.error(error)
       }
     }
+    if (pendingOAuthState) {
+      try {
+        await cancelTikTokOAuthApi(pendingOAuthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    pendingOAuthPopup?.close()
+    setPendingOAuthState(null)
+    setPendingOAuthPopup(null)
+    setPendingOAuthAuthUrl(null)
     setAddProfileOpen(false)
     setPendingSessionId(null)
     setPendingQrImage(null)
@@ -386,6 +461,36 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     }
   }
 
+  const handleStartPendingOAuth = async () => {
+    try {
+      const data = await initTikTokOAuthApi({
+        profile_name: newProfileName.trim() || 'TikTok account',
+        username: newProfileUsername.trim() || undefined,
+      })
+      const popup = window.open(data.auth_url, 'tiktok_oauth', 'width=600,height=700,left=200,top=100')
+      setPendingOAuthState(data.state)
+      setPendingOAuthPopup(popup)
+      setPendingOAuthAuthUrl(data.auth_url)
+      toast.info('Đã mở trang đăng nhập TikTok. Hoàn tất trong cửa sổ mới.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth TikTok')
+    }
+  }
+
+  const handleCancelPendingOAuth = async () => {
+    if (pendingOAuthState) {
+      try {
+        await cancelTikTokOAuthApi(pendingOAuthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    pendingOAuthPopup?.close()
+    setPendingOAuthState(null)
+    setPendingOAuthPopup(null)
+    setPendingOAuthAuthUrl(null)
+  }
+
   const handleStartQr = async (profileId: string) => {
     setLoading(true)
     try {
@@ -401,6 +506,28 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleStartOAuthForProfile = async (profileId: string) => {
+    try {
+      const data = await initTikTokOAuthForProfileApi(profileId)
+      const popup = window.open(data.auth_url, 'tiktok_oauth', 'width=600,height=700,left=200,top=100')
+      setOauthProfileId(profileId)
+      setOauthState(data.state)
+      setOauthPopup(popup)
+      setOauthAuthUrl(data.auth_url)
+      toast.info('Đã mở trang đăng nhập TikTok. Hoàn tất trong cửa sổ mới.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth TikTok')
+    }
+  }
+
+  const handleCancelOAuth = () => {
+    oauthPopup?.close()
+    setOauthProfileId(null)
+    setOauthState(null)
+    setOauthPopup(null)
+    setOauthAuthUrl(null)
   }
 
   const handleStopQr = async (profileId: string) => {
@@ -605,12 +732,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   key={profile.id}
                   profile={profile}
                   qrActive={activeProfileId === profile.id}
+                  oauthActive={oauthProfileId === profile.id}
                   syncing={syncingProfileId === profile.id}
                   onOpenStrategy={() => void openProfileStrategyDialog(profile)}
                   onOpenPublishedPosts={() => handleOpenPublishedPosts(profile.id)}
                   onSync={() => void handleSyncProfile(profile.id)}
                   onQr={() => void handleStartQr(profile.id)}
                   onStopQr={() => void handleStopQr(profile.id)}
+                  onOAuth={() => void handleStartOAuthForProfile(profile.id)}
                   onDelete={() => void handleDeleteProfile(profile.id)}
                 />
               ))}
@@ -627,6 +756,32 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               </button>
             </div>
           </AppCard>
+
+          {oauthProfileId && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+              <RefreshCw size={32} className="animate-spin text-indigo-600 mb-3" />
+              <h4 className="font-bold text-indigo-900 mb-1">Đang chờ xác thực qua trình duyệt</h4>
+              <p className="text-xs text-indigo-800 mb-1">
+                {profiles.find((p) => p.id === oauthProfileId)?.profile_name ?? oauthProfileId}
+              </p>
+              {oauthAuthUrl && (
+                <a
+                  href={oauthAuthUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-white px-3 text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+                >
+                  <ExternalLink size={14} /> Mở lại trang đăng nhập
+                </a>
+              )}
+              <button
+                onClick={handleCancelOAuth}
+                className="mt-3 h-8 rounded-lg border border-indigo-200 bg-white px-4 text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+              >
+                Hủy
+              </button>
+            </div>
+          )}
 
           {activeProfileId && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
@@ -781,12 +936,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         qrUrl={pendingQrUrl}
         qrReady={pendingQrReady}
         sessionStatus={sessionStatus}
+        oauthState={pendingOAuthState}
+        oauthPolling={!!pendingOAuthState}
+        oauthAuthUrl={pendingOAuthAuthUrl}
         onPlatformChange={setNewProfilePlatform}
         onNameChange={setNewProfileName}
         onUsernameChange={setNewProfileUsername}
         onClose={() => void closeAddProfile()}
         onCreate={() => void handleCreateProfile()}
         onStartQr={() => void handleStartPendingQr()}
+        onStartOAuth={() => void handleStartPendingOAuth()}
+        onCancelOAuth={() => void handleCancelPendingOAuth()}
       />
       {/* Social Profile Strategy Modal */}
       <SocialProfileStrategyDialog
@@ -806,22 +966,26 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
 function SocialProfileCard({
   profile,
   qrActive,
+  oauthActive,
   syncing,
   onOpenStrategy,
   onOpenPublishedPosts,
   onSync,
   onQr,
   onStopQr,
+  onOAuth,
   onDelete,
 }: {
   profile: SocialProfile
   qrActive: boolean
+  oauthActive: boolean
   syncing: boolean
   onOpenStrategy: () => void
   onOpenPublishedPosts: () => void
   onSync: () => void
   onQr: () => void
   onStopQr: () => void
+  onOAuth: () => void
   onDelete: () => void
 }) {
   const stats = [
@@ -917,18 +1081,55 @@ function SocialProfileCard({
           </AppButton>
 
           {String(profile.platform || '').toLowerCase() === 'tiktok' && (
-            <AppButton
-              variant="secondary"
-              className="w-full justify-center text-xs"
-              icon={<QrCode size={13} />}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (qrActive) onStopQr()
-                else onQr()
-              }}
-            >
-              {qrActive ? 'Dừng QR' : 'Mở QR'}
-            </AppButton>
+            <>
+              {qrActive ? (
+                <AppButton
+                  variant="secondary"
+                  className="col-span-2 w-full justify-center text-xs"
+                  icon={<QrCode size={13} />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onStopQr()
+                  }}
+                >
+                  Dừng QR
+                </AppButton>
+              ) : oauthActive ? (
+                <AppButton
+                  variant="secondary"
+                  className="col-span-2 w-full justify-center text-xs"
+                  disabled
+                  icon={<RefreshCw size={13} className="animate-spin" />}
+                >
+                  Đang xác thực...
+                </AppButton>
+              ) : (
+                <>
+                  <AppButton
+                    variant="secondary"
+                    className="w-full justify-center text-xs"
+                    icon={<QrCode size={13} />}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onQr()
+                    }}
+                  >
+                    QR
+                  </AppButton>
+                  <AppButton
+                    variant="secondary"
+                    className="w-full justify-center text-xs"
+                    icon={<Globe size={13} />}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onOAuth()
+                    }}
+                  >
+                    Web
+                  </AppButton>
+                </>
+              )}
+            </>
           )}
         </div>
       </div>
