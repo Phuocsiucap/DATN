@@ -14,7 +14,9 @@ from common.core.config import get_settings
 from common.db.models import PublishingQueueItem, SocialProfile, SocialProfileStrategy, SystemSetting, User
 from common.db.session import SessionLocal
 from app.services.social_profiles import SocialProfileService
+from app.services.ai_management import AiManagementService
 from app.services.tiktok_posting import TikTokPublishBlockedError
+from app.services.video_artifact_retention import run_video_artifact_retention_once
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,12 @@ ACCOUNT_SNAPSHOT_CUTOFF_TIME = time(23, 55)
 _last_run: dict[str, Any] = {"checked_at": None, "published": 0, "failed": 0, "skipped": 0, "finalized": 0, "pending": 0}
 _last_account_snapshot_run: datetime | None = None
 _last_video_analytics_run: datetime | None = None
+_last_video_artifact_retention_run: datetime | None = None
+_last_ai_management_run: datetime | None = None
 _last_account_snapshot_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "snapshots": 0, "failed": 0}
 _last_video_analytics_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "videos": 0, "metrics": 0, "failed": 0}
+_last_video_artifact_retention_result: dict[str, Any] = {"checked_at": None, "checked": 0, "purged": 0, "skipped": 0, "failed": 0, "bytes_freed": 0}
+_last_ai_management_result: dict[str, Any] = {"checked_at": None, "profiles": 0, "runs": 0, "failed": 0}
 _profile_publish_cooldowns: dict[str, datetime] = {}
 
 
@@ -129,6 +135,10 @@ def scheduler_snapshot(db: Session) -> dict[str, Any]:
             "account_snapshots": _last_account_snapshot_result,
             "video_metrics": _last_video_analytics_result,
         },
+        "retention": {
+            "video_artifacts": _last_video_artifact_retention_result,
+        },
+        "ai_management": _last_ai_management_result,
     }
 
 
@@ -357,7 +367,7 @@ def run_publish_queue_once(limit: int = 5) -> dict[str, Any]:
 
 
 async def run_due_analytics_tracking() -> None:
-    global _last_account_snapshot_run, _last_video_analytics_run
+    global _last_account_snapshot_run, _last_video_analytics_run, _last_video_artifact_retention_run, _last_ai_management_run
     now = datetime.now(timezone.utc)
     local_now = now.astimezone(ACCOUNT_SNAPSHOT_TIMEZONE)
     last_snapshot_day = (
@@ -374,6 +384,21 @@ async def run_due_analytics_tracking() -> None:
         _last_video_analytics_run = now
         result = await run_hourly_video_analytics()
         _last_video_analytics_result.update(result)
+
+    if _last_ai_management_run is None or (now - _last_ai_management_run).total_seconds() >= 60 * 60:
+        _last_ai_management_run = now
+        result = await asyncio.to_thread(run_due_ai_management_analyses)
+        _last_ai_management_result.update(result)
+
+    last_retention_day = (
+        _last_video_artifact_retention_run.astimezone(ACCOUNT_SNAPSHOT_TIMEZONE).date()
+        if _last_video_artifact_retention_run
+        else None
+    )
+    if local_now.hour >= 2 and last_retention_day != local_now.date():
+        _last_video_artifact_retention_run = now
+        result = await asyncio.to_thread(run_daily_video_artifact_retention)
+        _last_video_artifact_retention_result.update(result)
 
 
 async def run_daily_account_snapshots(limit: int | None = None) -> dict[str, Any]:
@@ -410,4 +435,42 @@ async def run_hourly_video_analytics() -> dict[str, Any]:
         sync_result = await service.sync_recent_tiktok_post_metrics(db, since_days=30, batch_size=20)
         result.update(sync_result)
         result["checked_at"] = datetime.utcnow().isoformat()
+    return result
+
+
+def run_daily_video_artifact_retention(limit: int = 100) -> dict[str, Any]:
+    with SessionLocal() as db:
+        return run_video_artifact_retention_once(db, limit=limit)
+
+
+def run_due_ai_management_analyses(limit: int = 10) -> dict[str, Any]:
+    result = {"checked_at": datetime.now(timezone.utc).isoformat(), "profiles": 0, "runs": 0, "failed": 0}
+    service = AiManagementService()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        strategies = (
+            db.query(SocialProfileStrategy)
+            .join(SocialProfile, SocialProfile.id == SocialProfileStrategy.profile_id)
+            .filter(
+                SocialProfile.status == "active",
+                SocialProfileStrategy.ai_management_enabled.is_(True),
+            )
+            .order_by(SocialProfileStrategy.ai_management_last_analysis_at.asc().nullsfirst(), SocialProfileStrategy.updated_at.asc())
+            .limit(max(limit, 1))
+            .all()
+        )
+        for strategy in strategies:
+            result["profiles"] += 1
+            last = strategy.ai_management_last_analysis_at
+            last = last.replace(tzinfo=timezone.utc) if last and last.tzinfo is None else last
+            frequency_days = max(int(strategy.ai_management_frequency_days or 7), 1)
+            if last and now - last < timedelta(days=frequency_days):
+                continue
+            try:
+                service.analyze(db, strategy.profile, days=frequency_days, trigger_type="auto")
+                result["runs"] += 1
+            except Exception as exc:
+                db.rollback()
+                logger.exception("AI management analysis failed profile_id=%s: %s", strategy.profile_id, exc)
+                result["failed"] += 1
     return result

@@ -366,6 +366,8 @@ class SocialProfile(Base):
     snapshots = relationship("SocialProfileSnapshot", back_populates="profile", cascade="all, delete-orphan")
     content_plans = relationship("MediaWorkflow", back_populates="profile", cascade="all, delete-orphan")
     content_links = relationship("ProfileContentLink", back_populates="profile", cascade="all, delete-orphan")
+    ai_analysis_runs = relationship("AiAnalysisRun", back_populates="profile", cascade="all, delete-orphan")
+    ai_content_decisions = relationship("AiContentDecision", back_populates="profile", cascade="all, delete-orphan")
 
 
 class SocialProfileSnapshot(Base):
@@ -411,10 +413,56 @@ class SocialProfileStrategy(Base):
     max_system_recommendations = Column(Integer, default=20, nullable=False)
     auto_queue_enabled = Column(Boolean, default=True, nullable=False)
     auto_publish_enabled = Column(Boolean, default=False, nullable=False)
+    ai_management_enabled = Column(Boolean, default=False, nullable=False)
+    ai_management_frequency_days = Column(Integer, default=7, nullable=False)
+    ai_management_last_analysis_at = Column(DateTime(timezone=True), nullable=True)
     created_at = now_col()
     updated_at = updated_col()
 
     profile = relationship("SocialProfile", back_populates="strategy")
+
+
+class AiAnalysisRun(Base):
+    __tablename__ = "ai_analysis_runs"
+
+    id = uuid_pk()
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    trigger_type = Column(String(40), default="manual", nullable=False, index=True)
+    status = Column(String(40), default="completed", nullable=False, index=True)
+    data_range_start = Column(DateTime(timezone=True), nullable=True)
+    data_range_end = Column(DateTime(timezone=True), nullable=True)
+    summary = Column(Text, nullable=True)
+    input_jsonb = Column(JSONB, nullable=False, default=dict)
+    output_jsonb = Column(JSONB, nullable=False, default=dict)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = now_col()
+
+    profile = relationship("SocialProfile", back_populates="ai_analysis_runs")
+    decisions = relationship("AiContentDecision", back_populates="analysis_run", cascade="all, delete-orphan")
+
+
+class AiContentDecision(Base):
+    __tablename__ = "ai_content_decisions"
+
+    id = uuid_pk()
+    analysis_run_id = Column(UUID(as_uuid=True), ForeignKey("ai_analysis_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("social_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    decision_type = Column(String(60), nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    target_audience = Column(Text, nullable=True)
+    recommended_topics = Column(JSONB, nullable=False, default=list)
+    recommended_posting_times = Column(JSONB, nullable=False, default=list)
+    growth_insights = Column(JSONB, nullable=False, default=list)
+    content_warnings = Column(JSONB, nullable=False, default=list)
+    summary = Column(Text, nullable=True)
+    confidence_score = Column(Float, default=0.0, nullable=False)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    created_at = now_col()
+
+    analysis_run = relationship("AiAnalysisRun", back_populates="decisions")
+    profile = relationship("SocialProfile", back_populates="ai_content_decisions")
 
 
 class PublishingQueueItem(Base):

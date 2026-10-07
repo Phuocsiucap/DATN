@@ -126,6 +126,8 @@ const DEFAULT_STRATEGY_FORM = {
   video_render_mode: 'manual',
   auto_queue_enabled: true,
   auto_publish_enabled: false,
+  ai_management_enabled: false,
+  ai_management_frequency_days: 7,
   receive_system_content: true,
 }
 

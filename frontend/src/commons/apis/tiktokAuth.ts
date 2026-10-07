@@ -7,12 +7,12 @@ export const initTikTokOAuthApi = async (payload: { profile_name?: string; usern
 }
 
 export const getTikTokOAuthStatusApi = async (state: string) => {
-  const { data } = await api.get(`/social-profiles/tiktok/oauth/${state}/status`)
+  const { data } = await api.get(`/social-profiles/tiktok/oauth/${encodeURIComponent(state)}/status`)
   return data as { authenticated: boolean; status?: string; profile?: unknown }
 }
 
 export const cancelTikTokOAuthApi = async (state: string) => {
-  const { data } = await api.post(`/social-profiles/tiktok/oauth/${state}/cancel`)
+  const { data } = await api.post(`/social-profiles/tiktok/oauth/${encodeURIComponent(state)}/cancel`)
   return data
 }
 
@@ -23,11 +23,11 @@ export const initTikTokOAuthForProfileApi = async (profileId: string | number, p
 }
 
 export const getTikTokOAuthStatusForProfileApi = async (profileId: string | number, state: string) => {
-  const { data } = await api.get(`/social-profiles/${profileId}/tiktok/oauth/${state}/status`)
+  const { data } = await api.get(`/social-profiles/${profileId}/tiktok/oauth/${encodeURIComponent(state)}/status`)
   return data as { authenticated: boolean; status?: string }
 }
 
 export const cancelTikTokOAuthForProfileApi = async (profileId: string | number, state: string) => {
-  const { data } = await api.post(`/social-profiles/${profileId}/tiktok/oauth/${state}/cancel`)
+  const { data } = await api.post(`/social-profiles/${profileId}/tiktok/oauth/${encodeURIComponent(state)}/cancel`)
   return data
 }

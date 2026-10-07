@@ -75,6 +75,8 @@ def _schema_compatibility_current(db: Session) -> bool:
         "social_posts",
         "planning_runs",
         "planning_candidates",
+        "ai_analysis_runs",
+        "ai_content_decisions",
         "content_embeddings",
         "topic_embeddings",
     }
@@ -92,6 +94,9 @@ def _schema_compatibility_current(db: Session) -> bool:
             "avoid_similarity_threshold",
             "content_topic_descriptions",
             "avoid_topic_descriptions",
+            "ai_management_enabled",
+            "ai_management_frequency_days",
+            "ai_management_last_analysis_at",
         },
         "crawl_job_contents": {"job_id", "content_id", "is_duplicate", "created_at"},
         "profile_content_links": {"recommended_at"},
@@ -192,6 +197,15 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     ALTER TABLE social_profile_strategies
                     ADD COLUMN IF NOT EXISTS post_frequency_per_day INTEGER;
+
+                    ALTER TABLE social_profile_strategies
+                    ADD COLUMN IF NOT EXISTS ai_management_enabled BOOLEAN DEFAULT FALSE NOT NULL;
+
+                    ALTER TABLE social_profile_strategies
+                    ADD COLUMN IF NOT EXISTS ai_management_frequency_days INTEGER DEFAULT 7 NOT NULL;
+
+                    ALTER TABLE social_profile_strategies
+                    ADD COLUMN IF NOT EXISTS ai_management_last_analysis_at TIMESTAMPTZ;
 
                     ALTER TABLE social_profile_strategies
                     ALTER COLUMN post_frequency_per_day DROP NOT NULL;
@@ -414,6 +428,47 @@ def ensure_schema_compatibility(db: Session) -> None:
                         REFERENCES planning_candidates(id)
                         ON DELETE SET NULL;
                     END IF;
+                END IF;
+
+                IF to_regclass('social_profiles') IS NOT NULL THEN
+                    CREATE TABLE IF NOT EXISTS ai_analysis_runs (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        profile_id UUID NOT NULL REFERENCES social_profiles(id) ON DELETE CASCADE,
+                        trigger_type VARCHAR(40) NOT NULL DEFAULT 'manual',
+                        status VARCHAR(40) NOT NULL DEFAULT 'completed',
+                        data_range_start TIMESTAMPTZ,
+                        data_range_end TIMESTAMPTZ,
+                        summary TEXT,
+                        input_jsonb JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        output_jsonb JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        error_message TEXT,
+                        started_at TIMESTAMPTZ,
+                        finished_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_ai_analysis_runs_profile_id ON ai_analysis_runs (profile_id);
+                    CREATE INDEX IF NOT EXISTS ix_ai_analysis_runs_trigger_type ON ai_analysis_runs (trigger_type);
+                    CREATE INDEX IF NOT EXISTS ix_ai_analysis_runs_status ON ai_analysis_runs (status);
+
+                    CREATE TABLE IF NOT EXISTS ai_content_decisions (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        analysis_run_id UUID NOT NULL REFERENCES ai_analysis_runs(id) ON DELETE CASCADE,
+                        profile_id UUID NOT NULL REFERENCES social_profiles(id) ON DELETE CASCADE,
+                        decision_type VARCHAR(60) NOT NULL,
+                        title TEXT NOT NULL,
+                        target_audience TEXT,
+                        recommended_topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        recommended_posting_times JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        growth_insights JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        content_warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        summary TEXT,
+                        confidence_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_ai_content_decisions_analysis_run_id ON ai_content_decisions (analysis_run_id);
+                    CREATE INDEX IF NOT EXISTS ix_ai_content_decisions_profile_id ON ai_content_decisions (profile_id);
+                    CREATE INDEX IF NOT EXISTS ix_ai_content_decisions_decision_type ON ai_content_decisions (decision_type);
                 END IF;
 
                 IF to_regclass('content_embeddings') IS NOT NULL THEN

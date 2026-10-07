@@ -71,7 +71,8 @@ def list_social_profiles(platform: str | None = None, db: Session = Depends(get_
 
 @router.post("", response_model=schemas.SocialProfileResponse, status_code=201)
 def create_social_profile(payload: schemas.SocialProfileCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if payload.platform.strip().lower() != "tiktok":
+    allowed_platforms = {"tiktok", "youtube"}
+    if payload.platform.strip().lower() not in allowed_platforms:
         from fastapi import HTTPException
         raise HTTPException(status_code=501, detail="Tạm thời chưa triển khai cho nền tảng này")
     service = SocialProfileService()
@@ -101,6 +102,43 @@ async def pending_tiktok_qr_status(
 async def stop_pending_tiktok_qr_login(session_id: str, current_user: User = Depends(get_current_user)):
     service = SocialProfileService()
     return await service.stop_pending_tiktok_qr_login(current_user, session_id)
+
+
+# ── YouTube OAuth (new profile) ───────────────────────────────────────────────
+
+@router.post("/youtube/oauth/init")
+async def init_pending_youtube_oauth(
+    payload: schemas.SocialProfileCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Start a new YouTube OAuth session (creates a new profile on success)."""
+    service = SocialProfileService()
+    return await service.init_youtube_oauth(
+        current_user,
+        profile_name=payload.profile_name or "YouTube Channel",
+    )
+
+
+@router.get("/youtube/oauth/{state}/status")
+async def pending_youtube_oauth_status(
+    state: str,
+    profile_name: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Poll the YouTube OAuth session status."""
+    service = SocialProfileService()
+    return await service.get_youtube_oauth_status(db, current_user, state, profile_name=profile_name)
+
+
+@router.post("/youtube/oauth/{state}/cancel")
+async def cancel_pending_youtube_oauth(
+    state: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel a pending YouTube OAuth session."""
+    service = SocialProfileService()
+    return await service.cancel_youtube_oauth(current_user, state)
 
 
 @router.post("/queue/items/manual-photo", status_code=201)
@@ -856,3 +894,47 @@ async def stop_tiktok_qr_login(profile_id: uuid.UUID, db: Session = Depends(get_
     service = SocialProfileService()
     profile = service.get_owned_profile(db, profile_id, current_user)
     return await service.stop_tiktok_qr_login(db, profile)
+
+
+# ── YouTube OAuth (reconnect existing profile) ────────────────────────────────
+
+@router.post("/{profile_id}/youtube/oauth/init")
+async def init_youtube_oauth_for_profile(
+    profile_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Start a YouTube OAuth session to reconnect an existing profile."""
+    service = SocialProfileService()
+    profile = service.get_owned_profile(db, profile_id, current_user)
+    return await service.init_youtube_oauth(
+        current_user,
+        profile_name=profile.profile_name,
+        target_profile_id=profile.id,
+    )
+
+
+@router.get("/{profile_id}/youtube/oauth/{state}/status")
+async def youtube_oauth_status_for_profile(
+    profile_id: uuid.UUID,
+    state: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Poll YouTube OAuth status for an existing profile reconnect."""
+    service = SocialProfileService()
+    service.get_owned_profile(db, profile_id, current_user)  # ownership check
+    return await service.get_youtube_oauth_status(db, current_user, state)
+
+
+@router.post("/{profile_id}/youtube/oauth/{state}/cancel")
+async def cancel_youtube_oauth_for_profile(
+    profile_id: uuid.UUID,
+    state: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel a YouTube OAuth reconnect session."""
+    service = SocialProfileService()
+    service.get_owned_profile(db, profile_id, current_user)  # ownership check
+    return await service.cancel_youtube_oauth(current_user, state)

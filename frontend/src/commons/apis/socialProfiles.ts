@@ -23,6 +23,8 @@ export type SocialProfileStrategyPayload = {
   max_system_recommendations?: number | null
   auto_queue_enabled?: boolean | null
   auto_publish_enabled?: boolean
+  ai_management_enabled?: boolean | null
+  ai_management_frequency_days?: number | null
 }
 
 export type StrategyTopicDetail = {
@@ -59,6 +61,9 @@ export type SocialProfileStrategy = {
   max_system_recommendations: number
   auto_queue_enabled: boolean
   auto_publish_enabled: boolean
+  ai_management_enabled: boolean
+  ai_management_frequency_days: number
+  ai_management_last_analysis_at?: string | null
   created_at: string
   updated_at: string
 }

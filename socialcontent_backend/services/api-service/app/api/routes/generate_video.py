@@ -762,13 +762,15 @@ def _rendered_video_uri(project: MediaWorkflow, story: dict | None) -> str | Non
         (
             item
             for item in sorted(artifacts, key=lambda value: value.get("created_at", ""), reverse=True)
-            if item.get("status") != "STALE" and item.get("uri") and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
+            if item.get("status") not in {"STALE", "PURGED"} and item.get("uri") and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
         ),
         None,
     )
     if artifact:
         return artifact.get("uri")
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    if metadata.get("artifact_lifecycle") == "PURGED":
+        return None
     if metadata.get("rendered_video"):
         return str(metadata["rendered_video"])
     story_artifacts = story.get("video_artifacts") if isinstance(story, dict) and isinstance(story.get("video_artifacts"), dict) else {}
@@ -838,6 +840,8 @@ def _queue_project_video(
 
     metadata["queued_post_id"] = str(item.id)
     metadata["queued_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["artifact_lifecycle"] = "QUEUED_FOR_PUBLISHING"
+    metadata["retention_reason"] = "active_queue_item"
     metadata["module4_queue"] = {
         "status": item.status,
         "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,

@@ -381,6 +381,13 @@ export function SocialProfileStrategyDialog({
                       checked={strategyForm.auto_publish_enabled ?? false}
                       onChange={(checked) => onChange('auto_publish_enabled', checked)}
                     />
+
+                    <SwitchRow
+                      label="AI Management"
+                      description="Tự động phân tích tương tác, thời gian đăng và chủ đề để lưu quyết định gợi ý nội dung/lịch đăng."
+                      checked={strategyForm.ai_management_enabled ?? false}
+                      onChange={(checked) => onChange('ai_management_enabled', checked)}
+                    />
                   </div>
 
                   <div className="rounded-2xl border border-indigo-100/50 bg-gradient-to-br from-indigo-50/50 to-white p-5 shadow-sm">
@@ -434,6 +441,25 @@ export function SocialProfileStrategyDialog({
                               event.target.value === '' ? null : Number(event.target.value),
                             )}
                             placeholder="Không giới hạn"
+                          />
+                        </div>
+                      </Field>
+                      <Field label="Chu kỳ AI Management" description="Số ngày giữa hai lần phân tích tự động.">
+                        <div className="group relative">
+                          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                            <Bot size={15} />
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={90}
+                            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-bold text-slate-700 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 hover:border-slate-300"
+                            value={strategyForm.ai_management_frequency_days ?? 7}
+                            onChange={(event) => onChange(
+                              'ai_management_frequency_days',
+                              event.target.value === '' ? 7 : Number(event.target.value),
+                            )}
+                            placeholder="7"
                           />
                         </div>
                       </Field>

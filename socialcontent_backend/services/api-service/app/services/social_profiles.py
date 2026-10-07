@@ -30,6 +30,17 @@ from app.services.tiktok_oauth import (
     stop_tiktok_oauth_qr_session,
 )
 from app.services import generate_video as video_pipeline
+from app.services.youtube_oauth import (
+    build_youtube_token_metadata,
+    cancel_youtube_oauth_session,
+    init_youtube_oauth_session,
+    poll_youtube_oauth_session,
+)
+from app.services.youtube_posting import (
+    ensure_youtube_profile,
+    fetch_youtube_channel_stats,
+    upload_video_to_youtube,
+)
 from app.services.tiktok_posting import (
     direct_post_photo_to_tiktok,
     direct_post_video_to_tiktok,
@@ -406,6 +417,126 @@ class SocialProfileService:
         db.refresh(profile)
         return profile
 
+    # ── YouTube OAuth helpers ─────────────────────────────────────────────────
+
+    def upsert_youtube_oauth_profile(
+        self,
+        db: Session,
+        user: User,
+        token_data: dict,
+        channel_info: dict,
+        fallback_profile_name: str | None = None,
+        target_profile: SocialProfile | None = None,
+    ) -> SocialProfile:
+        channel_id = channel_info.get("channel_id")
+        if not channel_id:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="YouTube không trả về channel_id")
+
+        profile = target_profile
+        if profile is None:
+            profile = (
+                db.query(SocialProfile)
+                .filter(
+                    SocialProfile.user_id == user.id,
+                    SocialProfile.platform == "youtube",
+                    SocialProfile.external_id == channel_id,
+                    SocialProfile.status != "deleted",
+                )
+                .first()
+            )
+
+        channel_title = (channel_info.get("title") or "").strip()
+        custom_url = (channel_info.get("custom_url") or "").strip() or None
+        profile_name = channel_title or (fallback_profile_name or "").strip() or custom_url or "YouTube Channel"
+
+        now = datetime.utcnow()
+        expires_in = int(token_data.get("expires_in") or 3600)
+        # Google refresh_token is only present on first consent; preserve existing one if absent
+        new_refresh = token_data.get("refresh_token")
+
+        if profile is None:
+            profile = SocialProfile(
+                user_id=user.id,
+                platform="youtube",
+                profile_name=profile_name,
+                username=custom_url,
+                status="active",
+            )
+            db.add(profile)
+        else:
+            profile.profile_name = profile_name
+            profile.username = custom_url
+            profile.status = "active"
+
+        profile.external_id = channel_id
+        profile.avatar_url = channel_info.get("thumbnail_url")
+        profile.access_token = token_data.get("access_token")
+        if new_refresh:
+            profile.refresh_token = new_refresh
+        profile.token_expires_at = now + timedelta(seconds=expires_in)
+        profile.refresh_expires_at = None  # Google refresh tokens don't expire normally
+        profile.scopes_jsonb = (token_data.get("scope") or "").split()
+        profile.follower_count = channel_info.get("subscriber_count") or 0
+        profile.video_count = channel_info.get("video_count") or 0
+        profile.metadata_json = build_youtube_token_metadata(token_data, channel_info)
+
+        db.flush()
+        self.create_profile_snapshot_if_changed(db, profile, datetime.now(timezone.utc))
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    async def init_youtube_oauth(
+        self,
+        user: User,
+        profile_name: str,
+        target_profile_id: uuid.UUID | None = None,
+    ) -> dict:
+        return await init_youtube_oauth_session(
+            user_id=user.id,
+            profile_name=profile_name,
+            target_profile_id=target_profile_id,
+        )
+
+    async def get_youtube_oauth_status(
+        self,
+        db: Session,
+        user: User,
+        state: str,
+        profile_name: str | None = None,
+    ) -> dict:
+        result = await poll_youtube_oauth_session(state, user.id)
+        if not result.get("authenticated"):
+            return result
+
+        session = result["session"]
+        token_data = result["token_data"]
+        channel_info = result["channel_info"]
+
+        target_profile_id = session.target_profile_id
+        target_profile = None
+        if target_profile_id:
+            target_profile = self.get_owned_profile(db, target_profile_id, user)
+
+        profile = self.upsert_youtube_oauth_profile(
+            db=db,
+            user=user,
+            token_data=token_data,
+            channel_info=channel_info,
+            fallback_profile_name=profile_name or session.profile_name,
+            target_profile=target_profile,
+        )
+        return {
+            "session_active": False,
+            "authenticated": True,
+            "profile": self.serialize_profile(profile),
+            "status": "confirmed",
+        }
+
+    async def cancel_youtube_oauth(self, user: User, state: str) -> dict:
+        await cancel_youtube_oauth_session(state, user.id)
+        return {"message": "Đã hủy phiên YouTube OAuth"}
+
     def current_profile_stats(self, profile: SocialProfile) -> dict[str, int]:
         return {
             "follower_count": int(profile.follower_count or 0),
@@ -497,6 +628,8 @@ class SocialProfileService:
         return True
 
     async def sync_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
+        if profile.platform == "youtube":
+            return await self._sync_youtube_profile(db, profile)
         self.ensure_tiktok_profile(profile)
         access_token = ensure_tiktok_access_token(profile)
 
@@ -605,6 +738,8 @@ class SocialProfileService:
                 value = max(0.0, min(float(value), 1.0))
             elif field == "avoid_similarity_threshold" and value is not None:
                 value = max(0.0, min(float(value), 1.0))
+            elif field == "ai_management_frequency_days" and value is not None:
+                value = max(1, min(int(value), 90))
             elif field in {"content_topic_descriptions", "avoid_topic_descriptions"}:
                 value = self.normalize_topic_descriptions(value)
             elif field == "schedule_days" and value is not None:
@@ -750,6 +885,8 @@ class SocialProfileService:
         changed = False
         for wf in workflows:
             metadata = dict(wf.metadata_json or {})
+            if metadata.get("artifact_lifecycle") == "PURGED":
+                continue
             if not auto_production_allowed(metadata, wf.draft_json):
                 continue
             queued_id = metadata.get("queued_post_id")
@@ -777,7 +914,7 @@ class SocialProfileService:
 
             artifacts = wf.artifacts_jsonb if isinstance(wf.artifacts_jsonb, list) else []
             final_video = next(
-                (item.get("uri") for item in reversed(artifacts) if isinstance(item, dict) and item.get("status") != "STALE" and item.get("uri") and (item.get("type") or item.get("artifact_type")) == "FINAL_VIDEO"),
+                (item.get("uri") for item in reversed(artifacts) if isinstance(item, dict) and item.get("status") not in {"STALE", "PURGED"} and item.get("uri") and (item.get("type") or item.get("artifact_type")) == "FINAL_VIDEO"),
                 metadata.get("rendered_video") or metadata.get("final_video")
             )
             if not final_video and isinstance(wf.draft_json, dict):
@@ -1640,6 +1777,29 @@ class SocialProfileService:
                 result["failed"] += 1
         return result
 
+    async def _sync_youtube_profile(self, db: Session, profile: SocialProfile) -> dict[str, Any]:
+        """Sync YouTube channel stats into the SocialProfile record."""
+        ensure_youtube_profile(profile)
+        from app.services.youtube_posting import _ensure_valid_token
+        access_token = _ensure_valid_token(profile)
+
+        stats = await fetch_youtube_channel_stats(access_token)
+        profile.follower_count = stats.get("subscriber_count") or 0
+        profile.video_count = stats.get("video_count") or 0
+        profile.status = "active"
+
+        now = datetime.now(timezone.utc)
+        snapshot_created = self.create_profile_snapshot_if_changed(db, profile, now)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return {
+            "message": "YouTube profile synced",
+            "snapshot_created": snapshot_created,
+            "subscriber_count": profile.follower_count,
+            "video_count": profile.video_count,
+        }
+
     async def sync_recent_tiktok_post_metrics(
         self,
         db: Session,
@@ -1713,6 +1873,84 @@ class SocialProfileService:
                 result["failed"] += 1
         return result
 
+    def _publish_queue_item_to_youtube(
+        self,
+        db: Session,
+        item: PublishingQueueItem,
+        profile: SocialProfile,
+        user: User,
+        privacy_level: str | None = None,
+    ) -> dict:
+        """Publish a queue item to YouTube via resumable upload."""
+        import asyncio as _asyncio
+        from app.services.youtube_posting import upload_video_to_youtube, DEFAULT_PRIVACY_LEVEL
+
+        ensure_youtube_profile(profile)
+        self.require_queue_draft_ready(db, item, user)
+
+        video_url = self.resolve_rendered_video_path(item.article_link)
+        title = (item.article_title or item.generated_content or "YouTube Video")[:100]
+        caption = self.publish_caption_for_queue_item(db, item)
+        level = (privacy_level or DEFAULT_PRIVACY_LEVEL).lower()
+
+        item.status = "publishing"
+        item.error = None
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        try:
+            try:
+                loop = _asyncio.get_event_loop()
+                result = loop.run_until_complete(
+                    upload_video_to_youtube(profile, video_url, title, caption, privacy_level=level)
+                )
+            except RuntimeError:
+                result = _asyncio.run(
+                    upload_video_to_youtube(profile, video_url, title, caption, privacy_level=level)
+                )
+
+            video_id = result["video_id"]
+            post_url = result["post_url"]
+
+            item.status = "published"
+            item.platform_publish_id = video_id
+            item.published_at = datetime.now(timezone.utc)
+            item.error = None
+            db.add(item)
+
+            post = SocialPost(
+                profile_id=profile.id,
+                queue_item_id=item.id,
+                title=title,
+                post_url=post_url,
+                platform_post_id=video_id,
+                platform_publish_id=video_id,
+                caption=caption,
+                status="published",
+                published_at=item.published_at,
+            )
+            db.add(post)
+            db.commit()
+            db.refresh(item)
+            logger.info("YouTube publish ok queue_item_id=%s video_id=%s", item.id, video_id)
+            return {
+                "message": "Đã đăng video lên YouTube",
+                "platform_publish_id": video_id,
+                "post_url": post_url,
+                "status": "published",
+            }
+        except Exception as exc:
+            db.rollback()
+            failed = db.get(PublishingQueueItem, item.id)
+            if failed and failed.status == "publishing" and not failed.platform_publish_id:
+                failed.status = "failed"
+                failed.error = str(getattr(exc, "detail", exc))[-2000:]
+                db.add(failed)
+                db.commit()
+            logger.exception("YouTube publish failed queue_item_id=%s: %s", item.id, exc)
+            raise
+
     def publish_queue_item_to_tiktok(
         self,
         db: Session,
@@ -1749,12 +1987,16 @@ class SocialProfileService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue item chưa sẵn sàng để đăng")
 
         profile = item.profile
+
+        # ── Platform dispatch ──────────────────────────────────────────────
+        if profile.platform == "youtube":
+            return self._publish_queue_item_to_youtube(db, item, profile, user, privacy_level=privacy_level)
+
         self.ensure_tiktok_profile(profile)
         mode = self.resolve_tiktok_publish_mode(profile, mode)
         if item.status == "publishing" and item.platform_publish_id and mode == "direct":
             return self.refresh_tiktok_publish_status(db, item, "manual", poll_attempts=3, poll_interval_seconds=5)
         self.require_queue_draft_ready(db, item, user)
-
         # --- Photo carousel path ---
         photo_config = (item.metadata_json or {}) if isinstance(item.metadata_json, dict) else {}
         if photo_config.get("media_type") == "PHOTO":
@@ -2129,6 +2371,9 @@ class SocialProfileService:
             "max_system_recommendations": getattr(strategy, "max_system_recommendations", 20),
             "auto_queue_enabled": strategy.auto_queue_enabled,
             "auto_publish_enabled": strategy.auto_publish_enabled,
+            "ai_management_enabled": getattr(strategy, "ai_management_enabled", False),
+            "ai_management_frequency_days": getattr(strategy, "ai_management_frequency_days", 7),
+            "ai_management_last_analysis_at": getattr(strategy, "ai_management_last_analysis_at", None),
             "created_at": strategy.created_at,
             "updated_at": strategy.updated_at,
         }

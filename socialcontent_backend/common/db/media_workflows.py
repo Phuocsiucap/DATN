@@ -27,6 +27,7 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
             item
             for item in artifacts
             if getattr(item, "get", lambda x: None)("uri")
+            and item.get("status") != "PURGED"
             and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
         ),
         None,
@@ -53,6 +54,12 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         "progress_percent": float(workflow.progress_percent or 0),
         "timeline_duration": raw_meta.get("timeline_duration"),
         "rendered_video": final_artifact.get("uri") if final_artifact else None,
+        "artifact_lifecycle": raw_meta.get("artifact_lifecycle"),
+        "artifact_expires_at": raw_meta.get("artifact_expires_at"),
+        "artifact_purged_at": raw_meta.get("artifact_purged_at"),
+        "purged_paths": raw_meta.get("purged_paths") or [],
+        "retention_reason": raw_meta.get("retention_reason"),
+        "storage_bytes_freed": raw_meta.get("storage_bytes_freed"),
         "metadata": metadata,
         "source_content": source_context["source_content"],
         "media": source_context["media"],

@@ -29,6 +29,12 @@ import {
   initTikTokOAuthApi,
   getTikTokOAuthStatusApi,
   cancelTikTokOAuthApi,
+  initYouTubeOAuthApi,
+  getYouTubeOAuthStatusApi,
+  cancelYouTubeOAuthApi,
+  initYouTubeOAuthForProfileApi,
+  getYouTubeOAuthStatusForProfileApi,
+  cancelYouTubeOAuthForProfileApi,
   type CrawlJob,
   type SchedulerSettingsStatus,
   type SchedulerSettings,
@@ -105,6 +111,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [qrImage, setQrImage] = useState<string | null>(null)
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [qrReady, setQrReady] = useState(false)
+  const [qrRefreshing, setQrRefreshing] = useState(false)
   const [sessionStatus, setSessionStatus] = useState<string>('idle')
 
   // Add profile state
@@ -121,6 +128,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [pendingQrImage, setPendingQrImage] = useState<string | null>(null)
   const [pendingQrUrl, setPendingQrUrl] = useState<string | null>(null)
   const [pendingQrReady, setPendingQrReady] = useState(false)
+  const [pendingQrRefreshing, setPendingQrRefreshing] = useState(false)
   const [addingProfile, setAddingProfile] = useState(false)
 
   // OAuth state for existing-profile re-connect
@@ -133,6 +141,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   const [pendingOAuthState, setPendingOAuthState] = useState<string | null>(null)
   const [pendingOAuthPopup, setPendingOAuthPopup] = useState<Window | null>(null)
   const [pendingOAuthAuthUrl, setPendingOAuthAuthUrl] = useState<string | null>(null)
+
+  // YouTube OAuth state for existing-profile re-connect
+  const [ytOAuthProfileId, setYtOAuthProfileId] = useState<string | null>(null)
+  const [ytOAuthState, setYtOAuthState] = useState<string | null>(null)
+  const [ytOAuthPopup, setYtOAuthPopup] = useState<Window | null>(null)
+  const [ytOAuthAuthUrl, setYtOAuthAuthUrl] = useState<string | null>(null)
+
+  // YouTube OAuth state for pending (new) profile
+  const [pendingYtOAuthState, setPendingYtOAuthState] = useState<string | null>(null)
+  const [pendingYtOAuthPopup, setPendingYtOAuthPopup] = useState<Window | null>(null)
+  const [pendingYtOAuthAuthUrl, setPendingYtOAuthAuthUrl] = useState<string | null>(null)
 
   // Scheduler state
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerSettingsStatus | null>(null)
@@ -167,6 +186,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     video_render_mode: 'manual',
     auto_queue_enabled: true,
     auto_publish_enabled: false,
+    ai_management_enabled: false,
+    ai_management_frequency_days: 7,
     receive_system_content: true
   })
   const [strategyLoading, setStrategyLoading] = useState(false)
@@ -246,6 +267,23 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           setQrReady(false)
           await loadProfiles()
           toast.success('Đăng nhập TikTok thành công.')
+        } else if (resolveTikTokQrStatus(data) === 'expired') {
+          // QR expired — auto-refresh by starting a new session
+          setQrRefreshing(true)
+          setQrReady(false)
+          setQrImage(null)
+          setQrUrl(null)
+          try {
+            const fresh = await startTikTokQrLoginApi(activeProfileId)
+            if (fresh.qr_image) setQrImage(fresh.qr_image)
+            if (fresh.qr_url) setQrUrl(fresh.qr_url)
+            setSessionStatus(resolveTikTokQrStatus(fresh))
+            toast.info('Mã QR đã hết hạn, đã tự động làm mới.')
+          } catch (refreshErr: any) {
+            toast.error(refreshErr?.response?.data?.detail || 'Không thể làm mới mã QR')
+          } finally {
+            setQrRefreshing(false)
+          }
         }
       } catch (error: any) {
         console.error(error)
@@ -290,6 +328,27 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
           setNewProfileUsername('')
           await loadProfiles()
           toast.success('Đã thêm và đăng nhập TikTok profile thành công.')
+        } else if (resolveTikTokQrStatus(data) === 'expired') {
+          // QR expired — auto-refresh by starting a new pending session
+          setPendingQrRefreshing(true)
+          setPendingQrReady(false)
+          setPendingQrImage(null)
+          setPendingQrUrl(null)
+          try {
+            const fresh = await startPendingTikTokQrLoginApi({
+              profile_name: newProfileNameRef.current || 'TikTok account',
+              username: newProfileUsernameRef.current || undefined,
+            })
+            setPendingSessionId(fresh.session_id)
+            if (fresh.qr_image) setPendingQrImage(fresh.qr_image)
+            if (fresh.qr_url) setPendingQrUrl(fresh.qr_url)
+            setSessionStatus(resolveTikTokQrStatus(fresh))
+            toast.info('Mã QR đã hết hạn, đã tự động làm mới.')
+          } catch (refreshErr: any) {
+            toast.error(refreshErr?.response?.data?.detail || 'Không thể làm mới mã QR')
+          } finally {
+            setPendingQrRefreshing(false)
+          }
         }
       } catch (error: any) {
         console.error(error)
@@ -314,21 +373,22 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   // OAuth polling: existing profile re-connect
   useEffect(() => {
     if (!oauthProfileId || !oauthState) return
+    const capturedProfileId = oauthProfileId
+    const capturedState = oauthState
     const timer = setInterval(async () => {
       try {
-        const data = await getTikTokOAuthStatusForProfileApi(oauthProfileId, oauthState)
+        const data = await getTikTokOAuthStatusForProfileApi(capturedProfileId, capturedState)
         if (data.authenticated) {
-          clearInterval(timer)
-          oauthPopup?.close()
           setOauthProfileId(null)
           setOauthState(null)
-          setOauthPopup(null)
+          setOauthPopup((prev) => { prev?.close(); return null })
           setOauthAuthUrl(null)
           await loadProfiles()
           toast.success('Đăng nhập TikTok qua trình duyệt thành công.')
         }
       } catch (error: any) {
         console.error(error)
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái đăng nhập TikTok')
       }
     }, 3000)
     return () => clearInterval(timer)
@@ -337,29 +397,90 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
   // OAuth polling: pending (new) profile
   useEffect(() => {
     if (!pendingOAuthState) return
+    const capturedState = pendingOAuthState
     const timer = setInterval(async () => {
       try {
-        const data = await getTikTokOAuthStatusApi(pendingOAuthState)
+        const data = await getTikTokOAuthStatusApi(capturedState)
         if (data.authenticated) {
-          clearInterval(timer)
-          pendingOAuthPopup?.close()
+          setPendingOAuthPopup((prev) => { prev?.close(); return null })
           setPendingOAuthState(null)
-          setPendingOAuthPopup(null)
           setPendingOAuthAuthUrl(null)
           setAddProfileOpen(false)
           setNewProfileName('')
           setNewProfileUsername('')
-          // Reset adding flag so method buttons are enabled if the dialog is re-opened
           setAddingProfile(false)
           await loadProfiles()
           toast.success('Đã thêm và đăng nhập TikTok profile qua trình duyệt thành công.')
         }
       } catch (error: any) {
         console.error(error)
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái đăng nhập TikTok')
       }
     }, 3000)
     return () => clearInterval(timer)
   }, [pendingOAuthState])
+
+  // YouTube OAuth polling: existing profile re-connect
+  useEffect(() => {
+    if (!ytOAuthProfileId || !ytOAuthState) return
+    const capturedProfileId = ytOAuthProfileId
+    const capturedState = ytOAuthState
+    const timer = setInterval(async () => {
+      try {
+        const data = await getYouTubeOAuthStatusForProfileApi(capturedProfileId, capturedState)
+        if (data.authenticated) {
+          setYtOAuthProfileId(null)
+          setYtOAuthState(null)
+          setYtOAuthPopup((prev) => { prev?.close(); return null })
+          setYtOAuthAuthUrl(null)
+          await loadProfiles()
+          toast.success('Kết nối YouTube thành công.')
+        } else if (data.status === 'error') {
+          setYtOAuthProfileId(null)
+          setYtOAuthState(null)
+          setYtOAuthPopup((prev) => { prev?.close(); return null })
+          setYtOAuthAuthUrl(null)
+          toast.error((data as any).error || 'Kết nối YouTube thất bại.')
+        }
+      } catch (error: any) {
+        console.error(error)
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái kết nối YouTube')
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [ytOAuthProfileId, ytOAuthState])
+
+  // YouTube OAuth polling: pending (new) profile
+  useEffect(() => {
+    if (!pendingYtOAuthState) return
+    const capturedState = pendingYtOAuthState
+    const timer = setInterval(async () => {
+      try {
+        const data = await getYouTubeOAuthStatusApi(capturedState)
+        if (data.authenticated) {
+          setPendingYtOAuthPopup((prev) => { prev?.close(); return null })
+          setPendingYtOAuthState(null)
+          setPendingYtOAuthAuthUrl(null)
+          setAddProfileOpen(false)
+          setNewProfileName('')
+          setNewProfileUsername('')
+          setAddingProfile(false)
+          await loadProfiles()
+          toast.success('Đã thêm và kết nối YouTube channel thành công.')
+        } else if (data.status === 'error') {
+          setPendingYtOAuthPopup((prev) => { prev?.close(); return null })
+          setPendingYtOAuthState(null)
+          setPendingYtOAuthAuthUrl(null)
+          setAddingProfile(false)
+          toast.error((data as any).error || 'Kết nối YouTube thất bại.')
+        }
+      } catch (error: any) {
+        console.error(error)
+        toast.error(error?.response?.data?.detail || 'Không kiểm tra được trạng thái kết nối YouTube')
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [pendingYtOAuthState])
 
   const openProfileStrategyDialog = async (profile: SocialProfile) => {
     setActiveStrategyProfile(profile)
@@ -414,6 +535,17 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setPendingOAuthState(null)
     setPendingOAuthPopup(null)
     setPendingOAuthAuthUrl(null)
+    if (pendingYtOAuthState) {
+      try {
+        await cancelYouTubeOAuthApi(pendingYtOAuthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    pendingYtOAuthPopup?.close()
+    setPendingYtOAuthState(null)
+    setPendingYtOAuthPopup(null)
+    setPendingYtOAuthAuthUrl(null)
     setAddProfileOpen(false)
     setPendingSessionId(null)
     setPendingQrImage(null)
@@ -488,9 +620,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       setPendingOAuthPopup(popup)
       setPendingOAuthAuthUrl(data.auth_url)
       toast.info('Đã mở trang đăng nhập TikTok. Hoàn tất trong cửa sổ mới.')
+      // NOTE: addingProfile stays true for the lifetime of the OAuth session.
+      // It is reset only on cancel (handleCancelPendingOAuth) or success (polling effect).
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth TikTok')
-    } finally {
       setAddingProfile(false)
     }
   }
@@ -554,6 +687,70 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
     setOauthState(null)
     setOauthPopup(null)
     setOauthAuthUrl(null)
+  }
+
+  // ── YouTube OAuth handlers ────────────────────────────────────────────────
+
+  const handleStartPendingYouTubeOAuth = async () => {
+    if (pendingSessionId || addingProfile) return
+    setAddingProfile(true)
+    try {
+      const data = await initYouTubeOAuthApi({
+        profile_name: newProfileName.trim() || 'YouTube Channel',
+      })
+      const popup = window.open(data.auth_url, 'youtube_oauth', 'width=600,height=700,left=200,top=100')
+      setPendingYtOAuthState(data.state)
+      setPendingYtOAuthPopup(popup)
+      setPendingYtOAuthAuthUrl(data.auth_url)
+      toast.info('Đã mở trang đăng nhập Google. Hoàn tất trong cửa sổ mới.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth YouTube')
+      setAddingProfile(false)
+    }
+  }
+
+  const handleCancelPendingYouTubeOAuth = async () => {
+    if (pendingYtOAuthState) {
+      try {
+        await cancelYouTubeOAuthApi(pendingYtOAuthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    pendingYtOAuthPopup?.close()
+    setPendingYtOAuthState(null)
+    setPendingYtOAuthPopup(null)
+    setPendingYtOAuthAuthUrl(null)
+    setAddingProfile(false)
+  }
+
+  const handleStartYouTubeOAuthForProfile = async (profileId: string) => {
+    try {
+      const data = await initYouTubeOAuthForProfileApi(profileId)
+      const popup = window.open(data.auth_url, 'youtube_oauth', 'width=600,height=700,left=200,top=100')
+      setYtOAuthProfileId(profileId)
+      setYtOAuthState(data.state)
+      setYtOAuthPopup(popup)
+      setYtOAuthAuthUrl(data.auth_url)
+      toast.info('Đã mở trang đăng nhập Google. Hoàn tất trong cửa sổ mới.')
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Không thể khởi tạo OAuth YouTube')
+    }
+  }
+
+  const handleCancelYouTubeOAuth = async () => {
+    if (ytOAuthProfileId && ytOAuthState) {
+      try {
+        await cancelYouTubeOAuthForProfileApi(ytOAuthProfileId, ytOAuthState)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    ytOAuthPopup?.close()
+    setYtOAuthProfileId(null)
+    setYtOAuthState(null)
+    setYtOAuthPopup(null)
+    setYtOAuthAuthUrl(null)
   }
 
   const handleStopQr = async (profileId: string) => {
@@ -759,6 +956,7 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   profile={profile}
                   qrActive={activeProfileId === profile.id}
                   oauthActive={oauthProfileId === profile.id}
+                  ytOAuthActive={ytOAuthProfileId === profile.id}
                   syncing={syncingProfileId === profile.id}
                   onOpenStrategy={() => void openProfileStrategyDialog(profile)}
                   onOpenPublishedPosts={() => handleOpenPublishedPosts(profile.id)}
@@ -767,6 +965,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
                   onStopQr={() => void handleStopQr(profile.id)}
                   onOAuth={() => void handleStartOAuthForProfile(profile.id)}
                   onCancelOAuth={() => void handleCancelOAuth()}
+                  onYouTubeOAuth={() => void handleStartYouTubeOAuthForProfile(profile.id)}
+                  onCancelYouTubeOAuth={() => void handleCancelYouTubeOAuth()}
                   onDelete={() => void handleDeleteProfile(profile.id)}
                 />
               ))}
@@ -814,9 +1014,14 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
               <h4 className="font-bold text-blue-900 mb-2">Mã QR Đăng Nhập TikTok</h4>
               <p className="text-xs text-blue-800 mb-4">
-                {qrReady ? getTikTokQrHelpText(sessionStatus, false) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
+                {qrRefreshing ? 'Mã QR đã hết hạn, đang tạo mã mới...' : qrReady ? getTikTokQrHelpText(sessionStatus, false) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
               </p>
-              {!qrReady ? (
+              {qrRefreshing ? (
+                <div className="flex h-64 w-64 flex-col gap-3 items-center justify-center rounded-xl bg-blue-100">
+                  <RefreshCw size={32} className="animate-spin text-blue-600" />
+                  <span className="text-sm font-semibold text-blue-800">Đang làm mới mã QR...</span>
+                </div>
+              ) : !qrReady ? (
                 <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
               ) : qrImage ? (
                 <img src={qrImage} alt="QR Code" className="h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
@@ -827,14 +1032,18 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
               ) : (
                 <div className="flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100">Đang tải...</div>
               )}
-              {qrReady && qrUrl && (
+              {!qrRefreshing && qrReady && qrUrl && (
                 <a href={qrUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">
                   <ExternalLink size={14} /> Mở link QR
                 </a>
               )}
               <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700">
-                {qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
-                Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}
+                {qrRefreshing ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Đang làm mới QR</>
+                ) : (
+                  <>{qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
+                  Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}</>
+                )}
               </div>
             </div>
           )}
@@ -962,9 +1171,12 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         qrImage={pendingQrImage}
         qrUrl={pendingQrUrl}
         qrReady={pendingQrReady}
+        qrRefreshing={pendingQrRefreshing}
         sessionStatus={sessionStatus}
         oauthState={pendingOAuthState}
         oauthAuthUrl={pendingOAuthAuthUrl}
+        ytOAuthState={pendingYtOAuthState}
+        ytOAuthAuthUrl={pendingYtOAuthAuthUrl}
         onPlatformChange={setNewProfilePlatform}
         onNameChange={setNewProfileName}
         onUsernameChange={setNewProfileUsername}
@@ -973,6 +1185,8 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
         onStartQr={() => void handleStartPendingQr()}
         onStartOAuth={() => void handleStartPendingOAuth()}
         onCancelOAuth={() => void handleCancelPendingOAuth()}
+        onStartYouTubeOAuth={() => void handleStartPendingYouTubeOAuth()}
+        onCancelYouTubeOAuth={() => void handleCancelPendingYouTubeOAuth()}
       />
       {/* Social Profile Strategy Modal */}
       <SocialProfileStrategyDialog
@@ -993,6 +1207,7 @@ function SocialProfileCard({
   profile,
   qrActive,
   oauthActive,
+  ytOAuthActive,
   syncing,
   onOpenStrategy,
   onOpenPublishedPosts,
@@ -1001,11 +1216,14 @@ function SocialProfileCard({
   onStopQr,
   onOAuth,
   onCancelOAuth,
+  onYouTubeOAuth,
+  onCancelYouTubeOAuth,
   onDelete,
 }: {
   profile: SocialProfile
   qrActive: boolean
   oauthActive: boolean
+  ytOAuthActive: boolean
   syncing: boolean
   onOpenStrategy: () => void
   onOpenPublishedPosts: () => void
@@ -1014,6 +1232,8 @@ function SocialProfileCard({
   onStopQr: () => void
   onOAuth: () => void
   onCancelOAuth: () => void
+  onYouTubeOAuth: () => void
+  onCancelYouTubeOAuth: () => void
   onDelete: () => void
 }) {
   const stats = [
@@ -1159,6 +1379,36 @@ function SocialProfileCard({
                     Web
                   </AppButton>
                 </>
+              )}
+            </>
+          )}
+
+          {String(profile.platform || '').toLowerCase() === 'youtube' && (
+            <>
+              {ytOAuthActive ? (
+                <AppButton
+                  variant="secondary"
+                  className="col-span-2 w-full justify-center text-xs"
+                  icon={<RefreshCw size={13} className="animate-spin" />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onCancelYouTubeOAuth()
+                  }}
+                >
+                  Hủy kết nối
+                </AppButton>
+              ) : (
+                <AppButton
+                  variant="secondary"
+                  className="col-span-2 w-full justify-center text-xs"
+                  icon={<Globe size={13} />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onYouTubeOAuth()
+                  }}
+                >
+                  Kết nối lại Google
+                </AppButton>
               )}
             </>
           )}

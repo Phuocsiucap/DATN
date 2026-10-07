@@ -27,6 +27,14 @@ class Settings(BaseSettings):
         default="user.info.basic,video.upload,video.publish",
         validation_alias=AliasChoices("TIKTOK_OAUTH_SCOPES", "TIKTOK_SCOPES"),
     )
+    # YouTube / Google OAuth2
+    google_client_id: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_ID"))
+    google_client_secret: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET"))
+    google_redirect_uri: str = Field(default="", validation_alias=AliasChoices("GOOGLE_REDIRECT_URI"))
+    google_oauth_scopes: str = Field(
+        default="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+        validation_alias=AliasChoices("GOOGLE_OAUTH_SCOPES"),
+    )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
     embedding_service_url: str = Field(default="http://localhost:8075", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))

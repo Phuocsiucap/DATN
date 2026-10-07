@@ -1047,11 +1047,18 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
     [project.profile_id],
   );
   const profile = profileResult.rows[0] || {};
+  const renderedAt = new Date().toISOString();
   const metadata = {
     ...(project.metadata || {}),
+    artifact_lifecycle: 'ACTIVE',
+    artifact_retention_started_at: renderedAt,
+    artifact_purged_at: null,
+    purged_paths: [],
+    retention_reason: 'render_completed',
+    rendered_video: renderedVideo,
     module4_quality: {
       status: 'passed_basic_render_check',
-      checked_at: new Date().toISOString(),
+      checked_at: renderedAt,
       checks: ['final_video_exists', 'render_task_completed'],
     },
   };
@@ -1158,6 +1165,8 @@ async function applyModule4Policy(client, project, story, renderedVideo) {
 
   metadata.queued_post_id = String(queueItem.id);
   metadata.queued_at = new Date().toISOString();
+  metadata.artifact_lifecycle = 'QUEUED_FOR_PUBLISHING';
+  metadata.retention_reason = 'active_queue_item';
   metadata.module4_queue = {
     status: queueItem.status,
     scheduled_at: queueItem.scheduled_at ? new Date(queueItem.scheduled_at).toISOString() : null,

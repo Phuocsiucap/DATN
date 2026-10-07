@@ -1,5 +1,5 @@
 import { QRCodeSVG } from 'qrcode.react'
-import { ExternalLink, Globe, QrCode, RefreshCw } from 'lucide-react'
+import { ExternalLink, Globe, Play, QrCode, RefreshCw } from 'lucide-react'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/commons/component/ui/dialog'
 import { getTikTokQrHelpText, getTikTokQrStatusLabel, isTikTokQrProcessingStatus, TIKTOK_QR_SIZE } from '../tiktokQr'
 
@@ -13,9 +13,12 @@ export function AddTikTokProfileDialog({
   qrImage,
   qrUrl,
   qrReady,
+  qrRefreshing,
   sessionStatus,
   oauthState,
   oauthAuthUrl,
+  ytOAuthState,
+  ytOAuthAuthUrl,
   onPlatformChange,
   onNameChange,
   onUsernameChange,
@@ -24,6 +27,8 @@ export function AddTikTokProfileDialog({
   onStartQr,
   onStartOAuth,
   onCancelOAuth,
+  onStartYouTubeOAuth,
+  onCancelYouTubeOAuth,
 }: {
   open: boolean
   platform: string
@@ -34,9 +39,12 @@ export function AddTikTokProfileDialog({
   qrImage: string | null
   qrUrl: string | null
   qrReady: boolean
+  qrRefreshing: boolean
   sessionStatus: string
   oauthState: string | null
   oauthAuthUrl: string | null
+  ytOAuthState: string | null
+  ytOAuthAuthUrl: string | null
   onPlatformChange: (value: string) => void
   onNameChange: (value: string) => void
   onUsernameChange: (value: string) => void
@@ -45,7 +53,12 @@ export function AddTikTokProfileDialog({
   onStartQr: () => void
   onStartOAuth: () => void
   onCancelOAuth: () => void
+  onStartYouTubeOAuth: () => void
+  onCancelYouTubeOAuth: () => void
 }) {
+  const isYouTube = platform === 'youtube'
+  const isTikTok = platform === 'tiktok'
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-w-lg">
@@ -56,54 +69,115 @@ export function AddTikTokProfileDialog({
         <DialogBody className="space-y-4">
           <label className="block space-y-1.5 text-sm">
             <span className="font-bold text-slate-700">Nền tảng</span>
-            <select value={platform} onChange={(event) => onPlatformChange(event.target.value)} className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)] bg-white">
+            <select
+              value={platform}
+              onChange={(event) => onPlatformChange(event.target.value)}
+              className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)] bg-white"
+            >
               <option value="tiktok">TikTok</option>
+              <option value="youtube">YouTube</option>
               <option value="facebook">Facebook</option>
               <option value="instagram">Instagram</option>
-              <option value="youtube">YouTube</option>
             </select>
           </label>
           <label className="block space-y-1.5 text-sm">
             <span className="font-bold text-slate-700">Tên profile</span>
-            <input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="VD: TikTok Storytelling Channel" className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]" />
+            <input
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder={isYouTube ? 'VD: YouTube Channel của tôi' : 'VD: TikTok Storytelling Channel'}
+              className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]"
+            />
           </label>
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-bold text-slate-700">Username</span>
-            <input value={username} onChange={(event) => onUsernameChange(event.target.value)} placeholder="@username hoặc để trống" className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]" />
-          </label>
+          {!isYouTube && (
+            <label className="block space-y-1.5 text-sm">
+              <span className="font-bold text-slate-700">Username</span>
+              <input
+                value={username}
+                onChange={(event) => onUsernameChange(event.target.value)}
+                placeholder="@username hoặc để trống"
+                className="w-full rounded-lg border border-[var(--outline-variant)] px-3 py-2 outline-none focus:border-[var(--accent)]"
+              />
+            </label>
+          )}
 
-          {/* Case A: QR session active */}
-          {sessionId && (
+          {/* ── TikTok: QR session active ── */}
+          {isTikTok && sessionId && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
               <h3 className="text-base font-bold text-blue-900">Quét QR để hoàn tất</h3>
-              <p className="mb-4 mt-1 text-xs text-blue-800">{qrReady ? getTikTokQrHelpText(sessionStatus, true) : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}</p>
-              {!qrReady ? <div className="mx-auto flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">Đang chuẩn bị QR...</div>
-                : qrImage ? <img src={qrImage} alt="QR Code" className="mx-auto h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
-                  : qrUrl ? <div className="mx-auto inline-flex rounded-xl border-2 border-white bg-white p-2 shadow-sm"><QRCodeSVG value={qrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin /></div>
-                    : <div className="mx-auto flex h-64 w-64 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>}
-              {qrReady && qrUrl && <a href={qrUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50"><ExternalLink size={14} /> Mở link QR</a>}
-              <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase text-blue-700">{qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}</div>
+              <p className="mb-4 mt-1 text-xs text-blue-800">
+                {qrRefreshing
+                  ? 'Mã QR đã hết hạn, đang tạo mã mới...'
+                  : qrReady
+                  ? getTikTokQrHelpText(sessionStatus, true)
+                  : 'Đang chuẩn bị mã QR, vui lòng chờ vài giây.'}
+              </p>
+              {qrRefreshing ? (
+                <div className="mx-auto flex h-64 w-64 flex-col gap-3 items-center justify-center rounded-xl bg-blue-100">
+                  <RefreshCw size={28} className="animate-spin text-blue-600" />
+                  <span className="text-sm font-semibold text-blue-800">Đang làm mới mã QR...</span>
+                </div>
+              ) : !qrReady ? (
+                <div className="mx-auto flex h-64 w-64 animate-pulse items-center justify-center rounded-xl bg-blue-100 text-sm font-semibold text-blue-800">
+                  Đang chuẩn bị QR...
+                </div>
+              ) : qrImage ? (
+                <img src={qrImage} alt="QR Code" className="mx-auto h-64 w-64 rounded-xl border-2 border-white bg-white p-2 shadow-sm" />
+              ) : qrUrl ? (
+                <div className="mx-auto inline-flex rounded-xl border-2 border-white bg-white p-2 shadow-sm">
+                  <QRCodeSVG value={qrUrl} size={TIKTOK_QR_SIZE} level="M" includeMargin />
+                </div>
+              ) : (
+                <div className="mx-auto flex h-64 w-64 items-center justify-center rounded-xl bg-blue-100 text-sm text-blue-800">Đang tải...</div>
+              )}
+              {!qrRefreshing && qrReady && qrUrl && (
+                <a
+                  href={qrUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                >
+                  <ExternalLink size={14} /> Mở link QR
+                </a>
+              )}
+              <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase text-blue-700">
+                {qrRefreshing ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Đang làm mới QR</>
+                ) : (
+                  <>
+                    {qrReady && isTikTokQrProcessingStatus(sessionStatus) && <RefreshCw size={14} className="animate-spin" />}
+                    Trạng thái: {getTikTokQrStatusLabel(qrReady ? sessionStatus : 'preparing_qr')}
+                  </>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Case B: OAuth waiting */}
-          {!sessionId && oauthState && (
+          {/* ── TikTok: OAuth waiting ── */}
+          {isTikTok && !sessionId && oauthState && (
             <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-center">
               <div className="flex items-center justify-center gap-2 mb-2">
                 <RefreshCw size={18} className="animate-spin text-indigo-600" />
                 <span className="font-bold text-indigo-900">Đang chờ xác thực qua trình duyệt</span>
               </div>
-              <p className="text-xs text-indigo-800 mb-4">Hoàn tất đăng nhập trên cửa sổ TikTok đã mở. Trang này sẽ tự động cập nhật.</p>
+              <p className="text-xs text-indigo-800 mb-4">
+                Hoàn tất đăng nhập trên cửa sổ TikTok đã mở. Trang này sẽ tự động cập nhật.
+              </p>
               {oauthAuthUrl && (
-                <a href={oauthAuthUrl} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-white px-3 text-xs font-bold text-indigo-700 hover:bg-indigo-50">
+                <a
+                  href={oauthAuthUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-white px-3 text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+                >
                   <ExternalLink size={14} /> Mở lại trang đăng nhập
                 </a>
               )}
             </div>
           )}
 
-          {/* Case C: method selector (TikTok, no session, no oauth) */}
-          {platform === 'tiktok' && !sessionId && !oauthState && (
+          {/* ── TikTok: method selector ── */}
+          {isTikTok && !sessionId && !oauthState && (
             <div className="space-y-2">
               <p className="text-sm font-bold text-slate-700">Chọn phương thức kết nối TikTok</p>
               <div className="grid grid-cols-2 gap-3">
@@ -130,42 +204,130 @@ export function AddTikTokProfileDialog({
               </div>
             </div>
           )}
+
+          {/* ── YouTube: OAuth waiting ── */}
+          {isYouTube && ytOAuthState && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-center">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <RefreshCw size={18} className="animate-spin text-red-600" />
+                <span className="font-bold text-red-900">Đang chờ xác thực Google</span>
+              </div>
+              <p className="text-xs text-red-800 mb-4">
+                Hoàn tất đăng nhập trên cửa sổ Google đã mở. Trang này sẽ tự động cập nhật.
+              </p>
+              {ytOAuthAuthUrl && (
+                <a
+                  href={ytOAuthAuthUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 text-xs font-bold text-red-700 hover:bg-red-50"
+                >
+                  <ExternalLink size={14} /> Mở lại trang đăng nhập Google
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* ── YouTube: connect button ── */}
+          {isYouTube && !ytOAuthState && (
+            <div className="rounded-xl border border-red-100 bg-red-50/50 p-5 text-center">
+              <Play size={32} className="mx-auto mb-2 text-red-600" />
+              <p className="text-sm font-bold text-slate-800 mb-1">Kết nối qua Google</p>
+              <p className="text-xs text-slate-500 mb-4">
+                Đăng nhập tài khoản Google có YouTube Channel để kết nối.
+              </p>
+              <button
+                type="button"
+                onClick={onStartYouTubeOAuth}
+                disabled={adding || !name.trim()}
+                className="inline-flex h-9 items-center gap-2 rounded-md bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                <Globe size={16} /> Đăng nhập với Google
+              </button>
+              {!name.trim() && (
+                <p className="mt-2 text-xs text-amber-600">Nhập tên profile trước khi kết nối.</p>
+              )}
+            </div>
+          )}
         </DialogBody>
+
         <DialogFooter>
-          {/* Footer: QR session active */}
-          {sessionId && (
-            <button onClick={onClose} className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white">
+          {/* TikTok: QR active */}
+          {isTikTok && sessionId && (
+            <button
+              onClick={onClose}
+              className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+            >
               Dừng QR
             </button>
           )}
 
-          {/* Footer: OAuth waiting */}
-          {!sessionId && oauthState && (
-            <button onClick={onCancelOAuth} className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white">
+          {/* TikTok: OAuth waiting */}
+          {isTikTok && !sessionId && oauthState && (
+            <button
+              onClick={onCancelOAuth}
+              className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+            >
               Hủy kết nối
             </button>
           )}
 
-          {/* Footer: no session, no oauth */}
-          {!sessionId && !oauthState && (
-            platform === 'tiktok' ? (
-              <>
-                <button onClick={onClose} className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white">
-                  Hủy
-                </button>
-                <button
-                  onClick={onCreate}
-                  disabled={adding || !name.trim()}
-                  className="h-9 rounded-md border border-[var(--outline-variant)] px-4 text-sm font-semibold text-[var(--on-surface-variant)] hover:bg-white disabled:opacity-60"
-                >
-                  Tạo trước, đăng nhập sau
-                </button>
-              </>
-            ) : (
-              <button onClick={onCreate} disabled={adding} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60">
+          {/* TikTok: no session, no oauth */}
+          {isTikTok && !sessionId && !oauthState && (
+            <>
+              <button
+                onClick={onClose}
+                className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={onCreate}
+                disabled={adding || !name.trim()}
+                className="h-9 rounded-md border border-[var(--outline-variant)] px-4 text-sm font-semibold text-[var(--on-surface-variant)] hover:bg-white disabled:opacity-60"
+              >
+                Tạo trước, đăng nhập sau
+              </button>
+            </>
+          )}
+
+          {/* YouTube: OAuth waiting */}
+          {isYouTube && ytOAuthState && (
+            <button
+              onClick={onCancelYouTubeOAuth}
+              className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+            >
+              Hủy kết nối
+            </button>
+          )}
+
+          {/* YouTube: idle */}
+          {isYouTube && !ytOAuthState && (
+            <button
+              onClick={onClose}
+              className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+            >
+              Hủy
+            </button>
+          )}
+
+          {/* Other platforms (facebook, instagram) */}
+          {!isTikTok && !isYouTube && (
+            <>
+              <button
+                onClick={onClose}
+                className="h-9 rounded-lg border border-[var(--outline-variant)] px-4 text-sm font-bold text-[var(--on-surface-variant)] hover:bg-white"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={onCreate}
+                disabled={adding}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:opacity-60"
+              >
                 Thêm kênh social
               </button>
-            )
+            </>
           )}
         </DialogFooter>
       </DialogContent>

@@ -15,6 +15,7 @@ from common.db.session import get_db
 from common.planning.auto_draft_policy import auto_production_allowed, draft_script_signature, invalidate_draft_media, is_auto_workflow, sync_compact_scenes
 from app.api.deps import get_current_user
 from app.schemas.video_workspace_list import VideoWorkspaceListResponse
+from app.services.video_artifact_retention import purge_workflow_artifacts
 from app.services.video_workspace_list import ACTIVE_TASK_STATUSES, ACTIVE_TASK_STATUS_PRIORITY, build_video_workspace_list
 
 
@@ -294,6 +295,12 @@ def get_video_workspace(
         "progress_percent": float(workflow.progress_percent or 0),
         "planning_mode": workflow.planning_mode or "SINGLE",
         "metadata": {key: metadata[key] for key in WORKSPACE_METADATA_KEYS if key in metadata},
+        "artifact_lifecycle": metadata.get("artifact_lifecycle"),
+        "artifact_expires_at": metadata.get("artifact_expires_at"),
+        "artifact_purged_at": metadata.get("artifact_purged_at"),
+        "purged_paths": metadata.get("purged_paths") or [],
+        "retention_reason": metadata.get("retention_reason"),
+        "storage_bytes_freed": metadata.get("storage_bytes_freed"),
         "source_content": source,
         "inputs": workflow.inputs_jsonb if isinstance(workflow.inputs_jsonb, list) else [],
         "draft": draft,
@@ -621,6 +628,22 @@ def delete_media_workflow(
     return {"message": "Workflow deleted successfully", "workflow_id": str(workflow_id)}
 
 
+@router.post("/{workflow_id:uuid}/purge-artifacts")
+def purge_media_workflow_artifacts(
+    workflow_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    workflow = _get_owned_workflow(db, workflow_id, user, for_update=True, allow_admin=True)
+    result = purge_workflow_artifacts(db, workflow, reason="manual_user_request")
+    db.commit()
+    db.refresh(workflow)
+    return {
+        **result,
+        "workflow": serialize_workflow(workflow, db),
+    }
+
+
 def _ordered_source_refs(payload: MediaWorkflowFromSourcesRequest) -> list[MediaWorkflowSourceRef]:
     refs = [
         *[MediaWorkflowSourceRef(type="content", id=value) for value in dict.fromkeys(payload.content_ids)],
@@ -863,7 +886,7 @@ def _final_video_uri(artifacts: list[dict]) -> str | None:
         item for item in artifacts
         if isinstance(item, dict)
         and item.get("uri")
-        and item.get("status") != "STALE"
+        and item.get("status") not in {"STALE", "PURGED"}
         and (item.get("type") == "FINAL_VIDEO" or item.get("artifact_type") == "FINAL_VIDEO")
     ]
     if not candidates:

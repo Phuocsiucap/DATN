@@ -22,6 +22,7 @@ import GenerateVideoProjectsPage from '@/features/generate-video/GenerateVideoPr
 import MediaWorkflowWorkspaceRouter from '@/features/generate-video/MediaWorkflowWorkspaceRouter'
 import ApprovalsPage from '@/features/approvals/ApprovalsPage'
 import SchedulePage from '@/features/schedule/SchedulePage'
+import AiManagementPage from '@/features/ai-management/AiManagementPage'
 import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
 import UsersPage from '@/features/users/UsersPage'
 import ProfilePage from '@/features/users/ProfilePage'
@@ -29,6 +30,7 @@ import SettingsPage from '@/features/settings/SettingsPage'
 import TermsPage from '@/features/legal/TermsPage'
 import PrivacyPage from '@/features/legal/PrivacyPage'
 import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
+import YouTubeCallbackPage from '@/features/legal/YouTubeCallbackPage'
 import OpenAiUsagePage from '@/features/admin/OpenAiUsagePage'
 import DeepseekUsagePage from '@/features/admin/DeepseekUsagePage'
 import AuditLogsPage from '@/features/admin/AuditLogsPage'
@@ -69,6 +71,7 @@ const CREATOR_TABS = new Set<Tab>([
   'generateVideo',
   'approvals',
   'schedule',
+  'aiManagement',
   'publishedPosts',
   'settings',
   'profile',
@@ -306,6 +309,7 @@ function AppContent() {
           ))}
           {activeTab === 'approvals' && <ApprovalsPage />}
           {activeTab === 'schedule' && <SchedulePage />}
+          {activeTab === 'aiManagement' && <AiManagementPage />}
           {isPublishedPostsSubpage && <PublishedPostsPage scopedProfileId={socialAccountProfileId} />}
           {!isPublishedPostsSubpage && activeTab === 'publishedPosts' && <PublishedPostsPage />}
           {activeTab === 'users' && <UsersPage currentUser={currentUser} />}
@@ -326,6 +330,7 @@ export default function App() {
   if (normalizedPath === '/terms') return <TermsPage />
   if (normalizedPath === '/privacy') return <PrivacyPage />
   if (normalizedPath === '/auth/tiktok/callback') return <TikTokCallbackPage />
+  if (normalizedPath === '/auth/youtube/callback') return <YouTubeCallbackPage />
 
   return (
     <Provider store={store}>

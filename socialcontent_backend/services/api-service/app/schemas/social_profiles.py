@@ -41,6 +41,8 @@ class SocialProfileStrategyRequest(BaseModel):
     max_system_recommendations: int | None = Field(default=None, ge=1, le=500)
     auto_queue_enabled: bool | None = None
     auto_publish_enabled: bool = False
+    ai_management_enabled: bool | None = None
+    ai_management_frequency_days: int | None = Field(default=None, ge=1, le=90)
 
     @model_validator(mode="before")
     @classmethod
@@ -91,6 +93,9 @@ class SocialProfileStrategyResponse(BaseModel):
     max_system_recommendations: int
     auto_queue_enabled: bool
     auto_publish_enabled: bool
+    ai_management_enabled: bool
+    ai_management_frequency_days: int
+    ai_management_last_analysis_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

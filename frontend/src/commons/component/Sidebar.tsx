@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   BarChart3,
+  BrainCircuit,
   CalendarDays,
   ChevronDown,
   CircleHelp,
@@ -86,6 +87,7 @@ const creatorSections: NavSection[] = [
     items: [
       { key: 'settings', label: 'Social account', icon: <Megaphone size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
+      { key: 'aiManagement', label: 'AI Management', icon: <BrainCircuit size={17} /> },
     ],
   },
 ]
