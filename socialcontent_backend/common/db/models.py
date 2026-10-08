@@ -61,6 +61,7 @@ class User(Base):
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     crawl_jobs = relationship("CrawlJob", back_populates="requester")
     social_profiles = relationship("SocialProfile", back_populates="user", cascade="all, delete-orphan")
+    tiktok_shop_credentials = relationship("TikTokShopCredential", back_populates="user", cascade="all, delete-orphan")
 
 
 class Role(Base):
@@ -368,6 +369,27 @@ class SocialProfile(Base):
     content_links = relationship("ProfileContentLink", back_populates="profile", cascade="all, delete-orphan")
     ai_analysis_runs = relationship("AiAnalysisRun", back_populates="profile", cascade="all, delete-orphan")
     ai_content_decisions = relationship("AiContentDecision", back_populates="profile", cascade="all, delete-orphan")
+
+
+class TikTokShopCredential(Base):
+    __tablename__ = "tiktok_shop_credentials"
+
+    id = uuid_pk()
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    shop_id = Column(String(255), nullable=False, index=True)
+    shop_name = Column(String(255), nullable=False)
+    shop_cipher = Column(Text, nullable=True)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_expires_at = Column(DateTime(timezone=True), nullable=True)
+    authorized_scopes = Column(JSONB, nullable=False, default=list)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+    status = Column(String(40), default="active", nullable=False, index=True)
+    created_at = now_col()
+    updated_at = updated_col()
+
+    user = relationship("User", back_populates="tiktok_shop_credentials")
 
 
 class SocialProfileSnapshot(Base):

@@ -27,6 +27,13 @@ class Settings(BaseSettings):
         default="user.info.basic,video.upload,video.publish",
         validation_alias=AliasChoices("TIKTOK_OAUTH_SCOPES", "TIKTOK_SCOPES"),
     )
+    # TikTok Shop Affiliate API
+    tiktok_shop_app_key: str = Field(default="", validation_alias=AliasChoices("TIKTOK_SHOP_APP_KEY"))
+    tiktok_shop_app_secret: str = Field(default="", validation_alias=AliasChoices("TIKTOK_SHOP_APP_SECRET"))
+    tiktok_shop_redirect_uri: str = Field(
+        default="http://localhost:3000/auth/tiktok-shop/callback",
+        validation_alias=AliasChoices("TIKTOK_SHOP_REDIRECT_URI"),
+    )
     # YouTube / Google OAuth2
     google_client_id: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_ID"))
     google_client_secret: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET"))
