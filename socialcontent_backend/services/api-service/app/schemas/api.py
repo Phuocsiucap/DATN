@@ -51,6 +51,23 @@ from app.schemas.social_profiles import (
     TikTokPublishRequest,
     TikTokQrStartRequest,
 )
+from app.schemas.tiktok_shop import (
+    TikTokShopOAuthStartRequest,
+    TikTokShopOAuthStartResponse,
+    TikTokShopOAuthPollResponse,
+    TikTokShopCredentialResponse,
+    TikTokShopProductSearchRequest,
+    TikTokShopProduct,
+    TikTokShopProductSearchResponse,
+    TikTokShopCollaborationApplyRequest,
+    TikTokShopCollaborationStatusRequest,
+    TikTokShopCollaborationStatus,
+    TikTokShopGenerateLinkRequest,
+    TikTokShopGenerateLinkResponse,
+    TikTokShopOrdersRequest,
+    TikTokShopOrder,
+    TikTokShopOrdersResponse,
+)
 from app.schemas.users import AdminUserCreateRequest, MyProfileUpdateRequest, UserResponse, UserUpdateRequest
 
 __all__ = [
@@ -101,4 +118,19 @@ __all__ = [
     "TokenResponse",
     "UserResponse",
     "UserUpdateRequest",
+    "TikTokShopOAuthStartRequest",
+    "TikTokShopOAuthStartResponse",
+    "TikTokShopOAuthPollResponse",
+    "TikTokShopCredentialResponse",
+    "TikTokShopProductSearchRequest",
+    "TikTokShopProduct",
+    "TikTokShopProductSearchResponse",
+    "TikTokShopCollaborationApplyRequest",
+    "TikTokShopCollaborationStatusRequest",
+    "TikTokShopCollaborationStatus",
+    "TikTokShopGenerateLinkRequest",
+    "TikTokShopGenerateLinkResponse",
+    "TikTokShopOrdersRequest",
+    "TikTokShopOrder",
+    "TikTokShopOrdersResponse",
 ]

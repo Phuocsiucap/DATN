@@ -365,3 +365,43 @@ def requested_tiktok_shop_scopes() -> list[str]:
         List of scope strings
     """
     return REQUIRED_TIKTOK_SHOP_SCOPES.copy()
+
+
+async def receive_tiktok_shop_oauth_callback(state: str, code: str | None, error: str | None) -> None:
+    """Receive OAuth callback and store code in session.
+
+    Called by callback route handler. Finds session by state and stores authorization code.
+
+    Args:
+        state: State parameter from callback (used to find session)
+        code: Authorization code from TikTok Shop (if successful)
+        error: Error code from TikTok Shop (if failed)
+    """
+    if error:
+        logger.error("TikTok Shop OAuth callback error: %s", error)
+        return
+
+    if not code:
+        logger.warning("TikTok Shop OAuth callback missing code")
+        return
+
+    # Find session by state
+    async with _sessions_lock:
+        session = None
+        for s in _sessions.values():
+            if s.state == state:
+                session = s
+                break
+
+        if not session:
+            logger.warning("TikTok Shop OAuth callback: session not found for state %s", state)
+            return
+
+        if session.is_expired():
+            logger.warning("TikTok Shop OAuth callback: session %s expired", session.session_id)
+            return
+
+        # Store authorization code
+        session.authorization_code = code
+        session.last_status = "confirmed"
+        logger.info("TikTok Shop OAuth callback: stored code for session %s", session.session_id)
