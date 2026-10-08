@@ -27,6 +27,7 @@ import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
 import UsersPage from '@/features/users/UsersPage'
 import ProfilePage from '@/features/users/ProfilePage'
 import SettingsPage from '@/features/settings/SettingsPage'
+import TikTokShopPage from '@/features/tiktok-shop/TikTokShopPage'
 import TermsPage from '@/features/legal/TermsPage'
 import PrivacyPage from '@/features/legal/PrivacyPage'
 import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
@@ -75,6 +76,7 @@ const CREATOR_TABS = new Set<Tab>([
   'publishedPosts',
   'settings',
   'profile',
+  'tiktokShop',
 ])
 
 const getNormalizedPath = () => {
@@ -318,6 +320,7 @@ function AppContent() {
           {activeTab === 'deepseekUsage' && <DeepseekUsagePage />}
           {activeTab === 'auditLogs' && <AuditLogsPage />}
           {activeTab === 'contentItems' && <AdminContentItemsPage />}
+          {activeTab === 'tiktokShop' && <TikTokShopPage />}
           {!isPublishedPostsSubpage && activeTab === 'settings' && <SettingsPage currentUser={currentUser} />}
         </div>
       </main>

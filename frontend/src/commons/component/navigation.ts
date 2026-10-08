@@ -9,6 +9,7 @@ export type Tab =
   | 'schedule'
   | 'aiManagement'
   | 'publishedPosts'
+  | 'tiktokShop'
   | 'users'
   | 'settings'
   | 'profile'
@@ -28,6 +29,7 @@ export const TAB_PATHS: Record<Tab, string> = {
   schedule: '/schedule',
   aiManagement: '/ai-management',
   publishedPosts: '/published-posts',
+  tiktokShop: '/tiktok-shop',
   users: '/users',
   settings: '/social-account',
   profile: '/profile',

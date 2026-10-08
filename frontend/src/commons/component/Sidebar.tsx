@@ -19,6 +19,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
+  ShoppingBag,
   Sparkles,
   UserRound,
   X,
@@ -88,6 +89,7 @@ const creatorSections: NavSection[] = [
       { key: 'settings', label: 'Social account', icon: <Megaphone size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
       { key: 'aiManagement', label: 'AI Management', icon: <BrainCircuit size={17} /> },
+      { key: 'tiktokShop', label: 'TikTok Shop', icon: <ShoppingBag size={17} /> },
     ],
   },
 ]
