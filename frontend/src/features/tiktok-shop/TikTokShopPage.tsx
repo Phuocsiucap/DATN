@@ -8,10 +8,11 @@ import {
 } from '@/commons/apis/tiktokShopApi'
 import TikTokShopAuthButton from './TikTokShopAuthButton'
 import ProductSearchPanel from './ProductSearchPanel'
+import ShowcasePanel from './ShowcasePanel'
 import AffiliateLinkGenerator from './AffiliateLinkGenerator'
 import OrderTracker from './OrderTracker'
 
-type TabMode = 'account' | 'search' | 'link' | 'orders'
+type TabMode = 'account' | 'search' | 'showcase' | 'link' | 'orders'
 
 export default function TikTokShopPage() {
   const [activeTab, setActiveTab] = useState<TabMode>('account')
@@ -79,11 +80,10 @@ export default function TikTokShopPage() {
     }
   }
 
-  const selectedCredential = credentials.find((c) => c.id === selectedCredentialId)
-
   const tabs = [
     { key: 'account' as TabMode, label: 'Tài khoản', icon: <Store size={16} /> },
-    { key: 'search' as TabMode, label: 'Tìm sản phẩm', icon: <Search size={16} />, needsCredential: true },
+    { key: 'search' as TabMode, label: 'Open Collaboration', icon: <Search size={16} />, needsCredential: true },
+    { key: 'showcase' as TabMode, label: 'Showcase', icon: <ShoppingBag size={16} />, needsCredential: true },
     { key: 'link' as TabMode, label: 'Tạo link', icon: <Link2 size={16} />, needsCredential: true },
     { key: 'orders' as TabMode, label: 'Đơn hàng', icon: <Package size={16} />, needsCredential: true },
   ]
@@ -98,7 +98,7 @@ export default function TikTokShopPage() {
           </div>
           <div>
             <h1 className="text-xl font-extrabold text-[#111827]">TikTok Shop Affiliate</h1>
-            <p className="text-xs text-[#64748b]">Quản lý affiliate marketing trên TikTok Shop</p>
+            <p className="text-xs text-[#64748b]">Quản lý affiliate marketing trên TikTok Shop Partner Platform</p>
           </div>
         </div>
 
@@ -239,8 +239,15 @@ export default function TikTokShopPage() {
 
         {!loading && activeTab === 'search' && selectedCredentialId && (
           <div className="rounded-xl border border-[var(--outline-variant)] bg-white p-5">
-            <h2 className="text-base font-extrabold text-slate-800 mb-4">Tìm kiếm sản phẩm</h2>
+            <h2 className="text-base font-extrabold text-slate-800 mb-4">Open Collaboration Products</h2>
             <ProductSearchPanel credentialId={selectedCredentialId} />
+          </div>
+        )}
+
+        {!loading && activeTab === 'showcase' && selectedCredentialId && (
+          <div className="rounded-xl border border-[var(--outline-variant)] bg-white p-5">
+            <h2 className="text-base font-extrabold text-slate-800 mb-4">Showcase Products</h2>
+            <ShowcasePanel credentialId={selectedCredentialId} />
           </div>
         )}
 

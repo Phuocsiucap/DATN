@@ -24,10 +24,10 @@ export default function AffiliateLinkGenerator({ credentialId }: AffiliateLinkGe
     try {
       const response = await generateAffiliateLinkApi(credentialId, {
         product_id: productId.trim(),
-        link_type: linkType,
+        promotion_link_type: linkType,
       })
-      setGeneratedLink(response.link)
-      toast.success('Đã tạo affiliate link')
+      setGeneratedLink(response.affiliate_link)
+      toast.success('Đã lấy link tiếp thị sản phẩm')
     } catch (error) {
       const message = error && typeof error === 'object' && 'response' in error
         ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Tạo link thất bại')
@@ -85,7 +85,7 @@ export default function AffiliateLinkGenerator({ credentialId }: AffiliateLinkGe
           className="inline-flex h-9 items-center gap-2 rounded-md bg-[#2556ea] px-4 text-sm font-semibold text-white hover:bg-[#1e47c8] disabled:opacity-60 transition-colors"
         >
           <Link2 size={16} />
-          {loading ? 'Đang tạo...' : 'Tạo link'}
+          {loading ? 'Đang tạo...' : 'Lấy affiliate link'}
         </button>
       </div>
 
@@ -93,7 +93,7 @@ export default function AffiliateLinkGenerator({ credentialId }: AffiliateLinkGe
         <div className="rounded-xl border border-green-200 bg-green-50 p-5">
           <div className="flex items-center gap-2 mb-3">
             <CheckCircle2 size={18} className="text-green-600" />
-            <span className="text-sm font-bold text-green-900">Affiliate link đã được tạo</span>
+            <span className="text-sm font-bold text-green-900">Affiliate link đã sẵn sàng</span>
           </div>
 
           <div className="rounded-lg border border-green-200 bg-white p-3 mb-3">
@@ -125,7 +125,7 @@ export default function AffiliateLinkGenerator({ credentialId }: AffiliateLinkGe
         <div className="rounded-xl border border-[var(--outline-variant)] bg-[#f8fafc] p-8 text-center">
           <Link2 size={32} className="mx-auto mb-2 text-slate-400" />
           <p className="text-sm font-medium text-slate-600">
-            Nhập Product ID và tạo affiliate link để bắt đầu kiếm hoa hồng
+            Nhập Product ID và lấy affiliate link để bắt đầu kiếm hoa hồng
           </p>
         </div>
       )}

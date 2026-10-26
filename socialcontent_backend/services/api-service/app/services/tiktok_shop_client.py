@@ -38,60 +38,39 @@ class TikTokShopClient:
         self.access_token = access_token
         self.request_count = 0
 
-    def _sign_request(self, path: str, params: dict[str, Any]) -> str:
-        """Generate HMAC-SHA256 signature for TikTok Shop API request.
+    def _sign_request(self, query_params: dict[str, Any], body_params: dict[str, Any] | None = None) -> str:
+        """Generate HMAC-SHA256 signature per TikTok Shop Partner API spec.
 
-        TikTok Shop signing convention:
-        1. Sort all query parameters (including app_key, timestamp, access_token if present)
-        2. Concatenate as key1value1key2value2...
-        3. Prepend path and append timestamp
-        4. Sign with HMAC-SHA256 using app_secret
-
-        Args:
-            path: API endpoint path (e.g., "/api/products/search")
-            params: Query parameters dict
-
-        Returns:
-            HMAC-SHA256 signature as hex string
+        Algorithm:
+          1. Collect all query + body params, exclude 'sign' and 'access_token'
+          2. Sort alphabetically by key
+          3. Concatenate: {app_secret}{key1}{val1}{key2}{val2}...{app_secret}
+          4. HMAC-SHA256 with key=app_secret, output hex digest
         """
-        # Ensure timestamp and app_key are in params
-        if "timestamp" not in params:
-            params["timestamp"] = str(int(time.time()))
-        if "app_key" not in params:
-            params["app_key"] = self.app_key
+        combined: dict[str, Any] = {}
+        combined.update(query_params)
+        if body_params:
+            combined.update(body_params)
 
-        # Sort parameters by key
-        sorted_params = sorted(params.items())
+        # Exclude sign and access_token from signing
+        to_sign = {k: v for k, v in combined.items() if k not in ("sign", "access_token")}
 
-        # Build string to sign: path + sorted key-value pairs concatenated
-        param_str = "".join(f"{key}{value}" for key, value in sorted_params)
-        sign_str = f"{path}{param_str}"
+        sorted_pairs = sorted(to_sign.items())
+        param_str = "".join(f"{k}{v}" for k, v in sorted_pairs)
+        sign_str = f"{self.app_secret}{param_str}{self.app_secret}"
 
-        # Generate HMAC-SHA256 signature
-        signature = hmac.new(
+        return hmac.new(
             self.app_secret.encode("utf-8"),
             sign_str.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
 
-        return signature
-
     def _prepare_params(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Prepare request parameters with required fields.
-
-        Args:
-            params: Optional query parameters
-
-        Returns:
-            Parameters dict with app_key, timestamp, access_token (if set), and sign
-        """
+        """Prepare base query parameters (app_key, timestamp). No access_token here."""
         request_params: dict[str, Any] = params.copy() if params else {}
         request_params["app_key"] = self.app_key
         request_params["timestamp"] = str(int(time.time()))
-
-        if self.access_token:
-            request_params["access_token"] = self.access_token
-
+        # access_token goes in x-tts-access-token header, NOT as a query param
         return request_params
 
     def _raise_for_error(self, payload: dict[str, Any], response: httpx.Response, fallback: str) -> None:
@@ -154,7 +133,7 @@ class TikTokShopClient:
         """Send authenticated GET request to TikTok Shop API.
 
         Args:
-            path: API endpoint path (e.g., "/api/products/search")
+            path: API endpoint path (e.g., "/authorization/202309/shops")
             params: Optional query parameters
 
         Returns:
@@ -164,7 +143,11 @@ class TikTokShopClient:
             HTTPException: If request fails or API returns error
         """
         request_params = self._prepare_params(params)
-        request_params["sign"] = self._sign_request(path, request_params)
+        request_params["sign"] = self._sign_request(request_params)
+
+        headers = {"Content-Type": "application/json"}
+        if self.access_token:
+            headers["x-tts-access-token"] = self.access_token
 
         url = f"{TIKTOK_SHOP_API_BASE}{path}"
         self.request_count += 1
@@ -173,7 +156,7 @@ class TikTokShopClient:
             logger.info("TikTok Shop API request count: %d", self.request_count)
 
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(url, params=request_params)
+            response = await client.get(url, params=request_params, headers=headers)
 
         payload = self._json_payload(response, f"TikTok Shop GET {path} response không hợp lệ")
         self._raise_for_error(payload, response, f"TikTok Shop GET {path} thất bại")
@@ -185,7 +168,7 @@ class TikTokShopClient:
         """Send authenticated POST request to TikTok Shop API.
 
         Args:
-            path: API endpoint path (e.g., "/api/affiliate/product_apply")
+            path: API endpoint path (e.g., "/affiliate_creator/202405/open_collaborations/products/search")
             data: Optional JSON body
             params: Optional query parameters
 
@@ -196,7 +179,12 @@ class TikTokShopClient:
             HTTPException: If request fails or API returns error
         """
         request_params = self._prepare_params(params)
-        request_params["sign"] = self._sign_request(path, request_params)
+        body = data or {}
+        request_params["sign"] = self._sign_request(request_params, body)
+
+        headers = {"Content-Type": "application/json"}
+        if self.access_token:
+            headers["x-tts-access-token"] = self.access_token
 
         url = f"{TIKTOK_SHOP_API_BASE}{path}"
         self.request_count += 1
@@ -208,8 +196,8 @@ class TikTokShopClient:
             response = await client.post(
                 url,
                 params=request_params,
-                json=data or {},
-                headers={"Content-Type": "application/json"},
+                json=body,
+                headers=headers,
             )
 
         payload = self._json_payload(response, f"TikTok Shop POST {path} response không hợp lệ")
@@ -221,7 +209,7 @@ class TikTokShopClient:
     async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
         """Refresh access token using refresh token.
 
-        Calls TikTok Shop /api/token/refresh endpoint.
+        Calls TikTok Shop /api/v2/token/refresh endpoint without signing.
 
         Args:
             refresh_token: Valid refresh token
@@ -232,13 +220,13 @@ class TikTokShopClient:
         Raises:
             HTTPException: If token refresh fails
         """
-        path = "/api/token/refresh"
+        path = "/api/v2/token/refresh"
         params = {
             "app_key": self.app_key,
-            "timestamp": str(int(time.time())),
+            "app_secret": self.app_secret,
             "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
         }
-        params["sign"] = self._sign_request(path, params)
 
         url = f"{TIKTOK_SHOP_API_BASE}{path}"
 
@@ -256,4 +244,9 @@ class TikTokShopClient:
             )
 
         logger.info("TikTok Shop token refreshed successfully")
-        return data
+        return {
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token"),
+            "expires_in": data.get("access_token_expire_in", 0),
+            "refresh_expires_in": data.get("refresh_token_expire_in", 0),
+        }

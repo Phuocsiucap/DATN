@@ -117,6 +117,7 @@ def _schema_compatibility_current(db: Session) -> bool:
         "publishing_queue_items": {
             "platform_publish_id",
             "publish_status",
+            "metadata",
         },
         "social_posts": {
             "platform_publish_id",
@@ -305,6 +306,9 @@ def ensure_schema_compatibility(db: Session) -> None:
 
                     ALTER TABLE publishing_queue_items
                     ADD COLUMN IF NOT EXISTS publish_status JSONB DEFAULT '{}'::jsonb NOT NULL;
+
+                    ALTER TABLE publishing_queue_items
+                    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb NOT NULL;
 
                     CREATE INDEX IF NOT EXISTS ix_publishing_queue_items_platform_publish_id
                     ON publishing_queue_items (platform_publish_id);

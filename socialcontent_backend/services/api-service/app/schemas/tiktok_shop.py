@@ -71,8 +71,10 @@ class TikTokShopProduct(BaseModel):
     product_name: str
     image_url: str | None = None
     price: float | None = None
-    commission_rate: float | None = None
+    currency: str | None = None
+    commission_rate: int | None = None  # int in hundredths of % (e.g. 3000 = 30.00%)
     shop_name: str | None = None
+    detail_link: str | None = None
 
 
 class TikTokShopProductSearchResponse(BaseModel):
@@ -88,15 +90,23 @@ class TikTokShopProductSearchResponse(BaseModel):
 
 
 class TikTokShopCollaborationApplyRequest(BaseModel):
-    """Request to apply for product collaboration."""
+    """Request to apply for product collaboration / add to showcase."""
 
     product_id: str = Field(..., min_length=1)
+
+
+class TikTokShopCollaborationApplyResponse(BaseModel):
+    """Response from applying / adding to showcase."""
+
+    success: bool
+    errors: list[dict[str, Any]] = []
+    message: str
 
 
 class TikTokShopCollaborationStatusRequest(BaseModel):
     """Request to query collaboration status."""
 
-    product_ids: list[str] = Field(..., min_length=1)
+    product_ids: list[str] = Field(default=[], min_length=0)
 
 
 class TikTokShopCollaborationStatus(BaseModel):
@@ -106,6 +116,30 @@ class TikTokShopCollaborationStatus(BaseModel):
     status: str
     commission_rate: float | None = None
     approved_at: datetime | None = None
+
+
+class TikTokShopTargetCollaboration(BaseModel):
+    """Target collaboration search result."""
+
+    id: str
+    name: str
+    status: str
+    products: list[dict[str, Any]] = []
+
+
+# ── Creator Profile Schema ────────────────────────────────────────────────────
+
+
+class TikTokShopCreatorProfile(BaseModel):
+    """Creator profile information."""
+
+    creator_user_id: str | None = None
+    username: str | None = None
+    register_region: str | None = None
+    selection_region: str | None = None
+    user_type: str | None = None
+    permissions: list[str] = []
+    avatar: dict[str, Any] | None = None
 
 
 # ── Affiliate Link Schemas ────────────────────────────────────────────────────

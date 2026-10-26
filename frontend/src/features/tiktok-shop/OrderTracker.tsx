@@ -45,7 +45,7 @@ export default function OrderTracker({ credentialId }: OrderTrackerProps) {
       }
       
       setPage(pageNumber)
-      setHasMore(response.orders.length === response.page_size)
+      setHasMore(response.has_more ?? (response.orders.length > 0))
       toast.success(`Tìm thấy ${response.total} đơn hàng`)
     } catch (error) {
       const message = error && typeof error === 'object' && 'response' in error

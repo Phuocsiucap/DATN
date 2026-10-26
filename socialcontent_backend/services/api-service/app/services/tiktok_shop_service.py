@@ -121,16 +121,15 @@ class TikTokShopService:
         page_number: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
-        """Search products available for affiliate promotion.
+        """Search products available for open collaboration.
 
-        Calls TikTok Shop /api/products/search endpoint.
-        Required scope: product.read
+        Calls TikTok Shop POST /affiliate_creator/202405/open_collaborations/products/search.
 
         Args:
             credential_id: TikTok Shop credential ID
             query: Search query string
             page_number: Page number (1-indexed)
-            page_size: Number of items per page (max 100)
+            page_size: Number of items per page (max 20 per OAS)
 
         Returns:
             dict with products (list), total (int), has_more (bool)
@@ -142,20 +141,31 @@ class TikTokShopService:
         access_token = await self._ensure_fresh_token(credential)
 
         client = TikTokShopClient(self.app_key, self.app_secret, access_token)
-        path = "/api/products/search"
+        path = "/affiliate_creator/202405/open_collaborations/products/search"
+        body = {
+            "title_keywords": [kw.strip() for kw in query.split() if kw.strip()][:20],
+        }
+        query_params = {"page_size": min(page_size, 20)}
 
         try:
-            response = await client.post(
-                path,
-                data={
-                    "search_query": query,
-                    "page_number": page_number,
-                    "page_size": min(page_size, 100),
-                },
-            )
+            response = await client.post(path, data=body, params=query_params)
             data = response.get("data", {})
-            products = data.get("products", [])
-            total = data.get("total", 0)
+            products_raw = data.get("products", [])
+
+            products = []
+            for p in products_raw:
+                sp = p.get("sales_price", {})
+                commission = p.get("commission", {})
+                products.append({
+                    "product_id": p.get("id", ""),
+                    "product_name": p.get("title", ""),
+                    "image_url": p.get("main_image_url"),
+                    "price": float(sp.get("minimum_amount", 0) or 0),
+                    "currency": sp.get("currency"),
+                    "commission_rate": commission.get("rate"),  # int in hundredths of %
+                    "shop_name": p.get("shop", {}).get("name"),
+                    "detail_link": p.get("detail_link"),
+                })
 
             logger.info(
                 "TikTok Shop product search: query=%s, page=%d, found=%d",
@@ -166,8 +176,8 @@ class TikTokShopService:
 
             return {
                 "products": products,
-                "total": total,
-                "has_more": page_number * page_size < total,
+                "total": data.get("total_count", 0),
+                "has_more": bool(data.get("next_page_token")),
             }
         except HTTPException:
             raise
@@ -179,17 +189,16 @@ class TikTokShopService:
             ) from exc
 
     async def apply_collaboration(self, credential_id: uuid.UUID, product_id: str) -> dict[str, Any]:
-        """Apply for product collaboration (affiliate partnership).
+        """Add product to creator's showcase.
 
-        Calls TikTok Shop /api/affiliate/product_apply endpoint.
-        Required scope: affiliate.apply
+        Calls TikTok Shop POST /affiliate_creator/202405/showcases/products/add.
 
         Args:
             credential_id: TikTok Shop credential ID
-            product_id: Product ID to apply for
+            product_id: Product ID to add to showcase
 
         Returns:
-            dict with application_id, status, message
+            dict with success, errors, message
 
         Raises:
             HTTPException: If request fails
@@ -198,25 +207,25 @@ class TikTokShopService:
         access_token = await self._ensure_fresh_token(credential)
 
         client = TikTokShopClient(self.app_key, self.app_secret, access_token)
-        path = "/api/affiliate/product_apply"
+        path = "/affiliate_creator/202405/showcases/products/add"
+        body = {"add_type": "PRODUCT_ID", "product_ids": [product_id]}
 
         try:
-            response = await client.post(
-                path,
-                data={"product_id": product_id},
-            )
+            response = await client.post(path, data=body)
             data = response.get("data", {})
+            errors = data.get("errors", [])
+            success = len(errors) == 0
 
             logger.info(
-                "TikTok Shop collaboration applied: product_id=%s, status=%s",
+                "TikTok Shop add to showcase: product_id=%s, success=%s",
                 product_id,
-                data.get("status"),
+                success,
             )
 
             return {
-                "application_id": data.get("application_id"),
-                "status": data.get("status"),
-                "message": data.get("message"),
+                "success": success,
+                "errors": errors,
+                "message": "Đã thêm vào showcase" if success else (errors[0].get("message", "Thêm thất bại") if errors else "Thất bại"),
             }
         except HTTPException:
             raise
@@ -232,17 +241,16 @@ class TikTokShopService:
         credential_id: uuid.UUID,
         product_ids: list[str],
     ) -> dict[str, Any]:
-        """Query collaboration status for multiple products.
+        """Search target collaborations.
 
-        Calls TikTok Shop /api/affiliate/collaboration_query endpoint.
-        Required scope: affiliate.apply
+        Calls TikTok Shop POST /affiliate_creator/202405/target_collaborations/search.
 
         Args:
             credential_id: TikTok Shop credential ID
             product_ids: List of product IDs to query
 
         Returns:
-            dict with collaborations (list of {product_id, status, commission_rate, ...})
+            dict with target_collaborations list
 
         Raises:
             HTTPException: If request fails
@@ -251,23 +259,22 @@ class TikTokShopService:
         access_token = await self._ensure_fresh_token(credential)
 
         client = TikTokShopClient(self.app_key, self.app_secret, access_token)
-        path = "/api/affiliate/collaboration_query"
+        path = "/affiliate_creator/202405/target_collaborations/search"
+        body = {}
+        if product_ids:
+            body = {"keyword": product_ids[0], "keyword_type": "TARGET_COLLABORATIONS_ID"}
 
         try:
-            response = await client.post(
-                path,
-                data={"product_ids": product_ids},
-            )
+            response = await client.post(path, data=body, params={"page_size": 20})
             data = response.get("data", {})
-            collaborations = data.get("collaborations", [])
+            target_collaborations = data.get("target_collaborations", [])
 
             logger.info(
-                "TikTok Shop collaboration query: products=%d, results=%d",
-                len(product_ids),
-                len(collaborations),
+                "TikTok Shop target collaboration query: results=%d",
+                len(target_collaborations),
             )
 
-            return {"collaborations": collaborations}
+            return {"target_collaborations": target_collaborations}
         except HTTPException:
             raise
         except Exception as exc:
@@ -283,47 +290,38 @@ class TikTokShopService:
         product_id: str,
         promotion_link_type: str = "ShortLink",
     ) -> dict[str, Any]:
-        """Generate affiliate promotion link for approved product.
+        """Fetch product promotion link from showcase products.
 
-        Calls TikTok Shop /api/affiliate/create_link endpoint.
-        Required scope: affiliate.apply
+        Calls TikTok Shop GET /affiliate_creator/202405/showcases/products.
 
         Args:
             credential_id: TikTok Shop credential ID
-            product_id: Product ID (must have approved collaboration)
-            promotion_link_type: Link type (ShortLink, LongLink, QRCode)
+            product_id: Product ID
+            promotion_link_type: Link type parameter
 
         Returns:
-            dict with promotion_link, qr_code_url (if applicable)
+            dict with promotion_link, qr_code_url
 
         Raises:
-            HTTPException: If request fails or collaboration not approved
+            HTTPException: If request fails
         """
         credential = self._get_credential(credential_id)
         access_token = await self._ensure_fresh_token(credential)
 
         client = TikTokShopClient(self.app_key, self.app_secret, access_token)
-        path = "/api/affiliate/create_link"
+        path = "/affiliate_creator/202405/showcases/products"
 
         try:
-            response = await client.post(
-                path,
-                data={
-                    "product_id": product_id,
-                    "promotion_link_type": promotion_link_type,
-                },
-            )
+            response = await client.get(path, params={"page_size": 20, "origin": "SHOWCASE"})
             data = response.get("data", {})
+            products = data.get("products", [])
+            product = next((p for p in products if p.get("id") == product_id), None)
+            link = product.get("detail_link", "") if product else ""
 
-            logger.info(
-                "TikTok Shop affiliate link generated: product_id=%s, link_type=%s",
-                product_id,
-                promotion_link_type,
-            )
-
+            logger.info("TikTok Shop product link found for product_id=%s", product_id)
             return {
-                "promotion_link": data.get("promotion_link"),
-                "qr_code_url": data.get("qr_code_url"),
+                "promotion_link": link,
+                "qr_code_url": None,
             }
         except HTTPException:
             raise
@@ -342,10 +340,9 @@ class TikTokShopService:
         page_number: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
-        """Fetch affiliate orders within time range.
+        """Fetch affiliate orders.
 
-        Calls TikTok Shop /api/affiliate/order_list endpoint.
-        Required scope: affiliate.order.read
+        Calls TikTok Shop POST /affiliate_creator/202405/orders/search.
 
         Args:
             credential_id: TikTok Shop credential ID
@@ -364,34 +361,37 @@ class TikTokShopService:
         access_token = await self._ensure_fresh_token(credential)
 
         client = TikTokShopClient(self.app_key, self.app_secret, access_token)
-        path = "/api/affiliate/order_list"
+        path = "/affiliate_creator/202405/orders/search"
+        query_params = {"page_size": min(page_size, 50)}
 
         try:
-            response = await client.post(
-                path,
-                data={
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "page_number": page_number,
-                    "page_size": min(page_size, 50),
-                },
-            )
+            response = await client.post(path, data={}, params=query_params)
             data = response.get("data", {})
-            orders = data.get("orders", [])
-            total = data.get("total", 0)
+            orders_raw = data.get("orders", [])
+
+            orders = []
+            for o in orders_raw:
+                line_items = o.get("line_items", [])
+                for item in line_items:
+                    orders.append({
+                        "order_id": o.get("id", ""),
+                        "product_id": item.get("product_id", ""),
+                        "product_name": "",
+                        "order_amount": 0,
+                        "commission_amount": 0,
+                        "order_status": "",
+                        "create_time": datetime.now(timezone.utc),
+                    })
 
             logger.info(
-                "TikTok Shop orders fetched: range=%d-%d, page=%d, found=%d",
-                start_time,
-                end_time,
-                page_number,
+                "TikTok Shop orders fetched: count=%d",
                 len(orders),
             )
 
             return {
                 "orders": orders,
-                "total": total,
-                "has_more": page_number * page_size < total,
+                "total": data.get("total_count", 0),
+                "has_more": bool(data.get("next_page_token")),
             }
         except HTTPException:
             raise
@@ -401,3 +401,74 @@ class TikTokShopService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Không lấy được danh sách order TikTok Shop",
             ) from exc
+
+    async def get_creator_profile(self, credential_id: uuid.UUID) -> dict[str, Any]:
+        """Get creator profile.
+
+        Calls TikTok Shop GET /affiliate_creator/202405/profiles.
+
+        Args:
+            credential_id: TikTok Shop credential ID
+
+        Returns:
+            dict with creator profile data
+
+        Raises:
+            HTTPException: If request fails
+        """
+        credential = self._get_credential(credential_id)
+        access_token = await self._ensure_fresh_token(credential)
+
+        client = TikTokShopClient(self.app_key, self.app_secret, access_token)
+        response = await client.get("/affiliate_creator/202405/profiles")
+        return response.get("data", {})
+
+    async def get_showcase_products(
+        self,
+        credential_id: uuid.UUID,
+        page_size: int = 20,
+        origin: str = "SHOWCASE",
+    ) -> dict[str, Any]:
+        """List products in creator's showcase.
+
+        Calls TikTok Shop GET /affiliate_creator/202405/showcases/products.
+
+        Args:
+            credential_id: TikTok Shop credential ID
+            page_size: Number of items per page (max 20)
+            origin: Origin filter (SHOWCASE)
+
+        Returns:
+            dict with products, total, has_more
+        """
+        credential = self._get_credential(credential_id)
+        access_token = await self._ensure_fresh_token(credential)
+
+        client = TikTokShopClient(self.app_key, self.app_secret, access_token)
+        response = await client.get(
+            "/affiliate_creator/202405/showcases/products",
+            params={"page_size": min(page_size, 20), "origin": origin},
+        )
+        data = response.get("data", {})
+        products_raw = data.get("products", [])
+        products = []
+        for p in products_raw:
+            commission = p.get("commission", {})
+            price = p.get("price", {})
+            sp = price.get("seller_discount_price", {})
+            products.append({
+                "product_id": p.get("id", ""),
+                "product_name": p.get("title", ""),
+                "image_url": (p.get("main_images") or [{}])[0].get("url"),
+                "price": float(sp.get("minimum_amount", 0) or 0),
+                "currency": sp.get("currency"),
+                "commission_rate": commission.get("rate"),  # hundredths of %
+                "shop_name": p.get("shop", {}).get("name"),
+                "detail_link": p.get("detail_link"),
+                "status": p.get("status", {}),
+            })
+        return {
+            "products": products,
+            "total": data.get("total_count", 0),
+            "has_more": bool(data.get("next_page_token")),
+        }

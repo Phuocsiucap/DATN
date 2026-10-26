@@ -18,6 +18,7 @@ from app.services.tiktok_shop_oauth import (
     start_oauth_session,
     poll_oauth_status,
     stop_oauth_session,
+    receive_tiktok_shop_oauth_callback,
 )
 from app.services.tiktok_shop_service import TikTokShopService
 
@@ -166,6 +167,17 @@ async def cancel_tiktok_shop_oauth(
     return {"message": "OAuth session cancelled"}
 
 
+@router.get("/auth/callback")
+async def tiktok_shop_oauth_callback(
+    state: str = Query(...),
+    code: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> dict:
+    """Receive OAuth redirect from TikTok Shop."""
+    await receive_tiktok_shop_oauth_callback(state=state, code=code, error=error)
+    return {"message": "Authorization received. You may close this window."}
+
+
 # ── Credential Management Endpoints ───────────────────────────────────────────
 
 
@@ -242,6 +254,40 @@ def disconnect_tiktok_shop_credential(
     )
 
 
+# ── Profile & Showcase Endpoints ──────────────────────────────────────────────
+
+
+@router.get("/profile")
+async def get_creator_profile(
+    credential_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """GET /affiliate_creator/202405/profiles — creator profile info."""
+    credential = db.get(TikTokShopCredential, credential_id)
+    if not credential or credential.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TikTok Shop credential không tồn tại")
+    service = TikTokShopService(db)
+    return await service.get_creator_profile(credential_id)
+
+
+@router.get("/showcase/products", response_model=schemas.TikTokShopProductSearchResponse)
+async def get_showcase_products(
+    credential_id: uuid.UUID = Query(...),
+    page_size: int = Query(default=20, ge=1, le=20),
+    origin: str = Query(default="SHOWCASE"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """GET /affiliate_creator/202405/showcases/products — list showcase products."""
+    credential = db.get(TikTokShopCredential, credential_id)
+    if not credential or credential.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TikTok Shop credential không tồn tại")
+    service = TikTokShopService(db)
+    result = await service.get_showcase_products(credential_id, page_size=page_size, origin=origin)
+    return {**result, "page_number": 1}
+
+
 # ── Product Search Endpoint ───────────────────────────────────────────────────
 
 
@@ -295,8 +341,10 @@ async def search_tiktok_shop_products(
                 "product_name": p.get("product_name", ""),
                 "image_url": p.get("image_url"),
                 "price": p.get("price"),
+                "currency": p.get("currency"),
                 "commission_rate": p.get("commission_rate"),
                 "shop_name": p.get("shop_name"),
+                "detail_link": p.get("detail_link"),
             })
 
         return {
@@ -358,12 +406,7 @@ async def apply_tiktok_shop_collaboration(
             product_id=payload.product_id,
         )
 
-        return {
-            "success": True,
-            "message": result.get("message", "Đã gửi yêu cầu collaboration"),
-            "application_id": result.get("application_id"),
-            "status": result.get("status"),
-        }
+        return result
     except HTTPException:
         raise
     except Exception as exc:
@@ -372,6 +415,22 @@ async def apply_tiktok_shop_collaboration(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Không apply được collaboration TikTok Shop",
         ) from exc
+
+
+@router.post("/collaborations/target")
+async def search_target_collaborations(
+    payload: schemas.TikTokShopCollaborationStatusRequest,
+    credential_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """POST /affiliate_creator/202405/target_collaborations/search"""
+    credential = db.get(TikTokShopCredential, credential_id)
+    if not credential or credential.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    service = TikTokShopService(db)
+    result = await service.query_collaboration_status(credential_id, payload.product_ids)
+    return result
 
 
 @router.post("/collaborations/status")
@@ -416,6 +475,7 @@ async def query_tiktok_shop_collaboration_status(
 
         return {
             "collaborations": result.get("collaborations", []),
+            "target_collaborations": result.get("target_collaborations", []),
         }
     except HTTPException:
         raise
@@ -548,6 +608,16 @@ async def fetch_tiktok_shop_orders(
         # Transform orders to match schema
         orders = []
         for o in result.get("orders", []):
+            ct = o.get("create_time")
+            order_dt = (
+                ct
+                if isinstance(ct, datetime)
+                else (
+                    datetime.fromtimestamp(ct, tz=timezone.utc)
+                    if isinstance(ct, (int, float)) and ct > 0
+                    else datetime.now(timezone.utc)
+                )
+            )
             orders.append({
                 "order_id": o.get("order_id", ""),
                 "product_id": o.get("product_id", ""),
@@ -555,7 +625,7 @@ async def fetch_tiktok_shop_orders(
                 "order_amount": o.get("order_amount", 0),
                 "commission_amount": o.get("commission_amount", 0),
                 "order_status": o.get("order_status", ""),
-                "create_time": datetime.fromtimestamp(o.get("create_time", 0), tz=timezone.utc),
+                "create_time": order_dt,
             })
 
         return {

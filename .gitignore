@@ -28,3 +28,4 @@ db_backups/
 tools/
 scripts/
 .trash/
+.agent/

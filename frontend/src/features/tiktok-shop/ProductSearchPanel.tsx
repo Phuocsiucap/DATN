@@ -24,8 +24,8 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
     setLoading(true)
     try {
       const response = await searchTikTokShopProductsApi(credentialId, {
-        keyword: query.trim(),
-        page: 1,
+        query: query.trim(),
+        page_number: 1,
         page_size: 12,
       })
       setProducts(response.products)
@@ -49,8 +49,8 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
     try {
       const nextPage = page + 1
       const response = await searchTikTokShopProductsApi(credentialId, {
-        keyword: query.trim(),
-        page: nextPage,
+        query: query.trim(),
+        page_number: nextPage,
         page_size: 12,
       })
       setProducts((prev) => [...prev, ...response.products])
@@ -69,8 +69,8 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
   const handleApply = async (productId: string) => {
     setApplyingProductId(productId)
     try {
-      await applyCollaborationApi(credentialId, productId)
-      toast.success('Đã gửi yêu cầu hợp tác. Chờ shop phê duyệt.')
+      const result = await applyCollaborationApi(credentialId, productId)
+      toast.success(result.message || 'Đã thêm vào showcase thành công!')
     } catch (error) {
       const message = error && typeof error === 'object' && 'response' in error
         ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Đăng ký thất bại')
@@ -89,7 +89,7 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
 
   const formatCommissionRate = (rate: number | null | undefined) => {
     if (rate === null || rate === undefined) return 'N/A'
-    return `${(rate * 100).toFixed(1)}%`
+    return `${(rate / 100).toFixed(2)}%`
   }
 
   return (
@@ -117,7 +117,7 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
         <div className="rounded-xl border border-[var(--outline-variant)] bg-[#f8fafc] p-8 text-center">
           <ShoppingBag size={32} className="mx-auto mb-2 text-slate-400" />
           <p className="text-sm font-medium text-slate-600">
-            Nhập từ khóa và tìm kiếm sản phẩm để bắt đầu
+            Nhập từ khóa và tìm kiếm sản phẩm Open Collaboration để bắt đầu
           </p>
         </div>
       )}
@@ -139,9 +139,9 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {products.map((product) => (
               <div key={product.product_id} className="rounded-xl border border-[var(--outline-variant)] bg-white p-3 hover:shadow-md transition-shadow">
-                {product.cover_image_url ? (
+                {product.image_url ? (
                   <img
-                    src={product.cover_image_url}
+                    src={product.image_url}
                     alt={product.product_name}
                     className="aspect-square w-full rounded-lg object-cover mb-3"
                   />
@@ -155,7 +155,7 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
                 </h3>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-extrabold text-[#2556ea]">
-                    {formatPrice(product.sale_price, product.currency)}
+                    {formatPrice(product.price, product.currency)}
                   </span>
                   <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">
                     Hoa hồng: {formatCommissionRate(product.commission_rate)}
@@ -167,7 +167,7 @@ export default function ProductSearchPanel({ credentialId }: ProductSearchPanelP
                   disabled={applyingProductId === product.product_id}
                   className="w-full h-8 rounded-md border border-[#2556ea] bg-white text-[#2556ea] text-xs font-bold hover:bg-[#eff4ff] disabled:opacity-60 transition-colors"
                 >
-                  {applyingProductId === product.product_id ? 'Đang gửi...' : 'Đăng ký'}
+                  {applyingProductId === product.product_id ? 'Đang thêm...' : 'Thêm vào Showcase'}
                 </button>
               </div>
             ))}

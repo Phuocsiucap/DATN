@@ -1,10 +1,17 @@
+import sys
+from pathlib import Path
+
+# Ensure backend root (which contains 'common') is in sys.path
+_backend_root = str(Path(__file__).resolve().parents[3])
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
 from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from common.db.bootstrap import ensure_roles, ensure_schema_compatibility
 from common.db.models import Base

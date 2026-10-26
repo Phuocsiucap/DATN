@@ -24,8 +24,8 @@ from app.services.tiktok_shop_client import TikTokShopClient, TIKTOK_SHOP_API_BA
 logger = logging.getLogger(__name__)
 
 # TikTok Shop OAuth endpoints
-TIKTOK_SHOP_AUTHORIZE_URL = "https://services.tiktokshop.com/open/authorize"
-TIKTOK_SHOP_TOKEN_PATH = "/api/token/get"
+TIKTOK_SHOP_AUTHORIZE_URL = "https://auth.tiktok-shops.com/oauth/authorize"
+TIKTOK_SHOP_TOKEN_PATH = "/api/v2/token/get"
 
 # Required scopes for affiliate functionality
 REQUIRED_TIKTOK_SHOP_SCOPES = [
@@ -263,7 +263,7 @@ async def handle_callback(session_id: str, user_id: uuid.UUID, code: str, state:
 async def exchange_authorization_code(code: str) -> dict[str, Any]:
     """Exchange authorization code for access token.
 
-    Calls TikTok Shop /api/token/get endpoint.
+    Calls TikTok Shop /api/v2/token/get endpoint without signing.
 
     Args:
         code: Authorization code from OAuth callback
@@ -276,22 +276,28 @@ async def exchange_authorization_code(code: str) -> dict[str, Any]:
     """
     app_key, app_secret, _redirect_uri, _scopes = _require_tiktok_shop_config()
 
-    client = TikTokShopClient(app_key, app_secret)
-    path = TIKTOK_SHOP_TOKEN_PATH
+    url = f"{TIKTOK_SHOP_API_BASE}{TIKTOK_SHOP_TOKEN_PATH}"
     params = {
         "app_key": app_key,
+        "app_secret": app_secret,
         "auth_code": code,
         "grant_type": "authorized_code",
     }
 
     try:
-        response = await client.post(path, params=params)
-        data = response.get("data", {})
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(url, params=params)
 
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail="TikTok Shop token response invalid JSON") from exc
+
+        data = payload.get("data", {})
         if not data.get("access_token"):
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="TikTok Shop không trả về access_token",
+                status_code=502,
+                detail=f"TikTok Shop token exchange failed: {payload.get('message', 'Không trả về access_token')}",
             )
 
         logger.info("TikTok Shop authorization code exchanged successfully")
@@ -315,7 +321,7 @@ async def exchange_authorization_code(code: str) -> dict[str, Any]:
 async def fetch_shop_info(access_token: str) -> dict[str, Any]:
     """Fetch authorized shop information.
 
-    Calls TikTok Shop /api/shop/get_authorized_shop endpoint.
+    Calls TikTok Shop GET /authorization/202309/shops endpoint.
 
     Args:
         access_token: Valid access token
@@ -329,24 +335,26 @@ async def fetch_shop_info(access_token: str) -> dict[str, Any]:
     app_key, app_secret, _redirect_uri, _scopes = _require_tiktok_shop_config()
 
     client = TikTokShopClient(app_key, app_secret, access_token)
-    path = "/api/shop/get_authorized_shop"
+    path = "/authorization/202309/shops"
 
     try:
         response = await client.get(path)
         data = response.get("data", {})
+        shops = data.get("shops", [])
 
-        if not data.get("shop_id"):
+        if not shops:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="TikTok Shop không trả về shop_id",
+                detail="TikTok Shop authorization returned no shops",
             )
 
-        logger.info("TikTok Shop info fetched: shop_id=%s", data.get("shop_id"))
+        shop = shops[0]
+        logger.info("TikTok Shop info fetched: shop_id=%s", shop.get("id"))
         return {
-            "shop_id": data["shop_id"],
-            "shop_name": data.get("shop_name", ""),
-            "shop_cipher": data.get("shop_cipher", ""),
-            "region": data.get("region", ""),
+            "shop_id": shop["id"],
+            "shop_name": shop.get("name", ""),
+            "shop_cipher": shop.get("cipher", ""),
+            "region": shop.get("region", ""),
         }
     except HTTPException:
         raise

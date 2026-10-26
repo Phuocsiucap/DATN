@@ -34,6 +34,10 @@ class Settings(BaseSettings):
         default="http://localhost:3000/auth/tiktok-shop/callback",
         validation_alias=AliasChoices("TIKTOK_SHOP_REDIRECT_URI"),
     )
+    tiktok_shop_base_url: str = Field(
+        default="https://open-api.tiktokglobalshop.com",
+        validation_alias=AliasChoices("TIKTOK_SHOP_BASE_URL"),
+    )
     # YouTube / Google OAuth2
     google_client_id: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_ID"))
     google_client_secret: str = Field(default="", validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET"))
