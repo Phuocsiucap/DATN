@@ -2,7 +2,31 @@ import { Player } from '@remotion/player'
 import { StorytellingDemo, getDurationSeconds, type Story, type Clip } from './StoryComposition'
 import type { GenerateVideoStory } from '@/commons/apis/generateVideo'
 
+function getVoiceDurationFromStory(story: GenerateVideoStory): number | undefined {
+  // Prefer an explicit voice track from the tracks array (most accurate)
+  const voiceTrack = story.audio?.tracks?.find((t) => t.type === 'voice')
+  if (voiceTrack) {
+    return voiceTrack.start + (voiceTrack.duration ?? 0)
+  }
+  // Fall back to timeline audio clips tagged as voice
+  const timelineAudio = story.timeline?.audio
+  if (Array.isArray(timelineAudio)) {
+    const voiceClips = timelineAudio.filter((c) => String(c.type || '').toLowerCase().includes('voice'))
+    if (voiceClips.length > 0) {
+      return Math.max(
+        ...voiceClips.map((c) => {
+          const start = Number(c.start || 0)
+          const end = Number(c.end ?? start)
+          return end
+        }),
+      )
+    }
+  }
+  return undefined
+}
+
 function adaptStoryForRemotionPlayer(story: GenerateVideoStory): Story {
+  const voiceDuration = getVoiceDurationFromStory(story)
   return {
     meta: story.meta as Record<string, unknown> | undefined,
     video: story.video,
@@ -10,6 +34,7 @@ function adaptStoryForRemotionPlayer(story: GenerateVideoStory): Story {
       ? {
           voice: story.audio.voice,
           voiceVolume: story.audio.voiceVolume,
+          voiceDuration,
           music: story.audio.music,
           musicVolume: story.audio.musicVolume,
           musicDuration: story.audio.musicDuration,
@@ -48,7 +73,7 @@ export default function RemotionPreview({
   const compositionWidth = story.video?.width ?? 1080
   const compositionHeight = story.video?.height ?? 1920
   return (
-    <div className={className} style={{ position: 'relative', aspectRatio: '9/16' }}>
+    <div className={className}>
       <Player
         component={StorytellingDemo}
         inputProps={{ story: adaptedStory }}
