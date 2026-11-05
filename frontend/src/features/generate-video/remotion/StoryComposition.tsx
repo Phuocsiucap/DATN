@@ -1,0 +1,229 @@
+import React from 'react'
+import {
+  AbsoluteFill,
+  Audio,
+  Img,
+  Sequence,
+  Video,
+  interpolate,
+  useCurrentFrame,
+  useVideoConfig,
+} from 'remotion'
+import { generateVideoMediaUrl } from '@/commons/apis/generateVideo'
+
+export type Clip = {
+  id?: string
+  type?: string
+  start?: number
+  end?: number
+  duration?: number
+  src?: string
+  text?: string
+  volume?: number
+  effect?: string
+  fit?: 'cover' | 'contain' | string
+  sourceStart?: number
+  source_start?: number
+}
+
+export type Story = {
+  meta?: Record<string, unknown>
+  video?: { fps?: number; width?: number; height?: number }
+  audio?: {
+    voice?: string
+    voiceVolume?: number
+    voiceDuration?: number
+    music?: string
+    musicVolume?: number
+    musicDuration?: number
+  }
+  timeline?: {
+    duration?: number
+    video?: Clip[]
+    text?: Clip[]
+    audio?: Clip[]
+  }
+}
+
+export const StorytellingDemo: React.FC<{ story?: Story }> = ({ story }) => {
+  const frame = useCurrentFrame()
+  const { fps } = useVideoConfig()
+  const seconds = frame / fps
+  const timeline = story?.timeline || {}
+  const videoClips = Array.isArray(timeline.video) ? timeline.video : []
+  const textClips = Array.isArray(timeline.text) ? timeline.text : []
+  const audioClips = resolveAudioClips(story)
+  const activeText = findActiveClip(textClips, seconds)
+  const title = String(story?.meta?.title || story?.meta?.workflow_title || 'SocialContentHub')
+  const subtitle = String(activeText?.text || title)
+  const tint = colorFromText(title)
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#08090d', fontFamily: 'Inter, Arial, sans-serif' }}>
+      <AbsoluteFill style={fallbackBackground(tint)} />
+      {videoClips.map((clip, index) => {
+        const src = resolveVisualSrc(clip.src)
+        if (!src) {
+          return null
+        }
+        const from = Math.max(0, Math.round((clip.start || 0) * fps))
+        const duration = Math.max(1, Math.round(((clip.end || 0) - (clip.start || 0)) * fps))
+        return (
+          <Sequence key={clip.id || `visual-${index}`} from={from} durationInFrames={duration}>
+            <VisualClip clip={clip} src={src} />
+          </Sequence>
+        )
+      })}
+      <AbsoluteFill
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.24) 42%, rgba(0,0,0,0.78) 100%)',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: 70,
+          right: 70,
+          bottom: 168,
+          color: 'white',
+          textAlign: 'center',
+          fontSize: subtitle.length > 96 ? 50 : 62,
+          lineHeight: 1.14,
+          fontWeight: 850,
+          letterSpacing: 0,
+          textShadow: '0 8px 28px rgba(0,0,0,0.72)',
+          overflowWrap: 'break-word',
+        }}
+      >
+        {subtitle}
+      </div>
+      {audioClips.map((clip, index) => {
+        const src = resolvePublicAsset(clip.src)
+        if (!src) {
+          return null
+        }
+        const from = Math.max(0, Math.round((clip.start || 0) * fps))
+        const duration = clip.end
+          ? Math.max(1, Math.round(((clip.end || 0) - (clip.start || 0)) * fps))
+          : undefined
+        return (
+          <Sequence key={clip.id || `audio-${index}`} from={from} durationInFrames={duration}>
+            <Audio src={src} volume={clip.volume ?? 1} />
+          </Sequence>
+        )
+      })}
+    </AbsoluteFill>
+  )
+}
+
+const VisualClip: React.FC<{ clip: Clip; src: string }> = ({ clip, src }) => {
+  const frame = useCurrentFrame()
+  const { fps } = useVideoConfig()
+  const zoom = interpolate(frame, [0, fps * 8], [1, 1.06], { extrapolateRight: 'extend' })
+  const sourceStart = Math.max(0, Math.round(Number(clip.sourceStart ?? clip.source_start ?? 0) * fps))
+  const style: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: clip.fit === 'contain' ? 'contain' : 'cover',
+  }
+
+  return (
+    <AbsoluteFill
+      style={{
+        transform: `scale(${zoom})`,
+        transformOrigin: 'center',
+      }}
+    >
+      {isVideoClip(clip, src) ? (
+        <Video src={src} muted startFrom={sourceStart} style={style} />
+      ) : (
+        <Img src={src} style={style} />
+      )}
+    </AbsoluteFill>
+  )
+}
+
+function resolveAudioClips(story?: Story): Clip[] {
+  const timelineAudio = Array.isArray(story?.timeline?.audio) ? story?.timeline?.audio || [] : []
+  if (timelineAudio.length > 0) {
+    return timelineAudio.filter((clip) => clip?.src)
+  }
+  const clips: Clip[] = []
+  if (story?.audio?.voice) {
+    clips.push({
+      id: 'voice-main',
+      type: 'voice',
+      start: 0,
+      end: story.audio.voiceDuration,
+      src: story.audio.voice,
+      volume: story.audio.voiceVolume ?? 1,
+    })
+  }
+  if (story?.audio?.music) {
+    clips.push({
+      id: 'music-main',
+      type: 'music',
+      start: 0,
+      end: story.audio.musicDuration,
+      src: story.audio.music,
+      volume: story.audio.musicVolume ?? 0.12,
+    })
+  }
+  return clips
+}
+
+function findActiveClip(clips: Clip[], seconds: number): Clip | undefined {
+  for (const clip of clips) {
+    const start = Number(clip.start || 0)
+    const end = Number(clip.end || start + (clip.duration || 4))
+    if (seconds >= start && seconds < end) {
+      return clip
+    }
+  }
+  return clips[clips.length - 1]
+}
+
+export function getDurationSeconds(story?: Story): number {
+  const timeline = story?.timeline || {}
+  const clips = [...(timeline.video || []), ...(timeline.text || []), ...(timeline.audio || [])]
+  const clipEnd = clips.reduce((max, clip) => {
+    const start = Number(clip.start || 0)
+    const end = Number(clip.end || start + (clip.duration || 0))
+    return Math.max(max, end)
+  }, 0)
+  return Math.max(4, Number(timeline.duration || 0), clipEnd, Number(story?.audio?.voiceDuration || 0))
+}
+
+function resolveVisualSrc(src?: string): string | null {
+  const value = String(src || '').trim()
+  if (!value || value.startsWith('assets/images/')) return null
+  return generateVideoMediaUrl(value)
+}
+
+function isVideoClip(clip: Clip, src: string): boolean {
+  return (
+    String(clip.type || '').toLowerCase().includes('video') ||
+    /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(src)
+  )
+}
+
+function resolvePublicAsset(src?: string): string | null {
+  const value = String(src || '').trim()
+  if (!value) return null
+  return generateVideoMediaUrl(value)
+}
+
+function fallbackBackground(seed: string): React.CSSProperties {
+  return {
+    background: `linear-gradient(145deg, ${seed} 0%, #101828 42%, #121212 100%)`,
+  }
+}
+
+function colorFromText(text: string): string {
+  let hash = 0
+  for (const char of text) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 360
+  }
+  return `hsl(${hash}, 54%, 26%)`
+}

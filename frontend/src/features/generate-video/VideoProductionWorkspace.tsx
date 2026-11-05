@@ -77,6 +77,7 @@ import { isVideoWorkflowWaitingForReview } from '@/commons/apis/videoWorkspaceLi
 import { TransferSeriesModal } from './components/SeriesModal'
 import { EditStoryWithAiDialog } from './components/EditStoryWithAiDialog'
 import WorkflowProgress from './WorkflowProgress'
+import RemotionPreview from './remotion/RemotionPreview'
 
 type StepId = 'story' | 'plan' | 'video' | 'preview'
 type PlanDraft = {
@@ -1653,55 +1654,7 @@ function StoryVisualPreview({
   const frameAspect = frameSize.width / frameSize.height
   const storyBackgroundColor = normalizeColorValue(String(story?.video?.background || '#05070b'))
   const previewStage = (
-    <div className="absolute inset-2 flex items-center justify-center">
-      <div
-        className="relative mx-auto flex max-h-full max-w-full overflow-hidden rounded-lg bg-slate-950"
-        style={{
-          aspectRatio: `${frameSize.width} / ${frameSize.height}`,
-          backgroundColor: storyBackgroundColor,
-          height: '100%',
-        }}
-      >
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="h-full w-full" style={sceneVisualStyle(scene)}>
-          <SceneMediaPreview
-            key={`${version}-${visibleSceneIndex}-${scene.image}`}
-            scene={scene}
-            playing={playing}
-            progress={sceneProgress}
-            time={sceneLocalTime}
-          />
-        </div>
-      </div>
-      {visibleSubtitle && (
-        <div
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId)
-            updateSubtitlePosition(event)
-          }}
-          onPointerMove={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSubtitlePosition(event)
-          }}
-          onPointerUp={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-          }}
-          className={`absolute cursor-grab rounded bg-black/45 px-3 py-2 text-center font-black leading-tight text-white shadow-lg active:cursor-grabbing ${isFullscreen ? 'text-xl' : 'text-base'}`}
-          style={{
-            left: '50%',
-            top: '82%',
-            transform: 'translate(-50%, -50%)',
-            width: '86%',
-            ...(subtitleStyle as React.CSSProperties),
-          }}
-        >
-          {visibleSubtitle}
-        </div>
-      )}
-      <div className="absolute left-3 top-3 rounded bg-black/55 px-2 py-1 text-xs font-bold text-white">
-        {visibleSceneIndex + 1}/{scenes.length} · {Number(scene.duration || 4)}s · {displayTime.toFixed(2)}s
-      </div>
-      </div>
-    </div>
+    <RemotionPreview story={story} className="absolute inset-0" />
   )
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
