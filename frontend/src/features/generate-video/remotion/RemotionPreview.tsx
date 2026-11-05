@@ -48,7 +48,7 @@ export default function RemotionPreview({
   const compositionWidth = story.video?.width ?? 1080
   const compositionHeight = story.video?.height ?? 1920
   return (
-    <div className={className} style={{ position: 'relative' }}>
+    <div className={className} style={{ position: 'relative', aspectRatio: '9/16' }}>
       <Player
         component={StorytellingDemo}
         inputProps={{ story: adaptedStory }}

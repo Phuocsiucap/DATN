@@ -104,9 +104,10 @@ export const StorytellingDemo: React.FC<{ story?: Story }> = ({ story }) => {
           return null
         }
         const from = Math.max(0, Math.round((clip.start || 0) * fps))
+        const totalDurationFrames = Math.max(1, Math.round(getDurationSeconds(story) * fps))
         const duration = clip.end
           ? Math.max(1, Math.round(((clip.end || 0) - (clip.start || 0)) * fps))
-          : undefined
+          : totalDurationFrames - from
         return (
           <Sequence key={clip.id || `audio-${index}`} from={from} durationInFrames={duration}>
             <Audio src={src} volume={clip.volume ?? 1} />
