@@ -20,6 +20,7 @@ const StoryPublishStatusPage = lazy(() => import('@/features/stories/StoryPublis
 const PlanningPage = lazy(() => import('@/features/planning/PlanningPage'))
 const GenerateVideoProjectsPage = lazy(() => import('@/features/generate-video/GenerateVideoProjectsPage'))
 const MediaWorkflowWorkspaceRouter = lazy(() => import('@/features/generate-video/MediaWorkflowWorkspaceRouter'))
+const TikTokStudioPage = lazy(() => import('@/features/tiktok-studio/TikTokStudioPage'))
 const ApprovalsPage = lazy(() => import('@/features/approvals/ApprovalsPage'))
 const SchedulePage = lazy(() => import('@/features/schedule/SchedulePage'))
 const AiManagementPage = lazy(() => import('@/features/ai-management/AiManagementPage'))
@@ -69,6 +70,7 @@ const CREATOR_TABS = new Set<Tab>([
   'storyStatus',
   'planning',
   'generateVideo',
+  'tiktokStudio',
   'approvals',
   'schedule',
   'aiManagement',
@@ -308,6 +310,7 @@ function AppContent() {
           ) : (
             <GenerateVideoProjectsPage refreshKey={generateVideoListRefreshKey} onOpenProject={(workflowId) => handleOpenGenerateVideo(workflowId)} />
           ))}
+          {activeTab === 'tiktokStudio' && <TikTokStudioPage />}
           {activeTab === 'approvals' && <ApprovalsPage />}
           {activeTab === 'schedule' && <SchedulePage />}
           {activeTab === 'aiManagement' && <AiManagementPage />}

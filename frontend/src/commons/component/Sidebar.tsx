@@ -81,6 +81,7 @@ const creatorSections: NavSection[] = [
     title: 'SẢN XUẤT',
     items: [
       { key: 'generateVideo', label: 'Xưởng video', icon: <Clapperboard size={17} /> },
+      { key: 'tiktokStudio', label: 'TikTok Video AI', icon: <Sparkles size={17} /> },
       { key: 'approvals', label: 'Duyệt video', icon: <FileCheck2 size={17} /> },
     ],
   },

@@ -376,6 +376,35 @@ export const fetchGenerateVideoJobApi = async (jobId: string) => {
   return request
 }
 
+export interface VoiceOption {
+  id: string
+  name: string
+  display_name: string
+  gender?: string
+  age?: string
+  style?: string
+  best_for?: string
+  preview_url?: string
+  provider?: string
+}
+
+export interface VoiceProviderGroup {
+  id: string
+  name: string
+  voices: VoiceOption[]
+}
+
+export interface VoicesResponse {
+  ok: boolean
+  default_voice_id: string
+  providers: VoiceProviderGroup[]
+}
+
+export const getGenerateVideoVoicesApi = async () => {
+  const { data } = await api.get(`${basePath}/voices`)
+  return data as VoicesResponse
+}
+
 export const generateVideoVoiceApi = async (workflowId: string, voiceId?: string, voiceSpeed = 1.2, voiceProvider: GenerateVideoVoiceProvider = 'edge_tts_namminh') => {
   const { data } = await api.post(`${basePath}/projects/${workflowId}/voice`, {
     voice_id: voiceId,

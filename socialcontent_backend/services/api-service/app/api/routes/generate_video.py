@@ -20,6 +20,10 @@ from app.services.video_task_guard import (
 )
 from app.services.video_runs import get_video_run, serialize_video_run as _serialize_workflow_run
 from app.services.video_task_enqueue import enqueue_video_task
+from common.constants.elevenlabs_voices import (
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICES,
+)
 from app.services.video_voice_jobs import (
     DEFAULT_AUTO_VOICE_PROVIDER,
     DEFAULT_VOICE_SPEED,
@@ -893,6 +897,41 @@ def output(output_path: str):
         media_type="video/mp4",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+@router.get("/voices")
+def get_available_voices():
+    return {
+        "ok": True,
+        "default_voice_id": DEFAULT_ELEVENLABS_VOICE_ID,
+        "providers": [
+            {
+                "id": "elevenlabs",
+                "name": "ElevenLabs AI Voice",
+                "voices": ELEVENLABS_VOICES,
+            },
+            {
+                "id": "edge_tts",
+                "name": "Microsoft Edge TTS (Việt Nam)",
+                "voices": [
+                    {
+                        "id": "vi-VN-NamMinhNeural",
+                        "name": "Nam Minh",
+                        "display_name": "Nam Minh (Trầm ấm, Rõ chữ, Tiếng Việt chuẩn)",
+                        "gender": "male",
+                        "provider": "edge_tts_namminh",
+                    },
+                    {
+                        "id": "vi-VN-HoaiMyNeural",
+                        "name": "Hoài My",
+                        "display_name": "Hoài My (Dịu dàng, Mượt mà, Giọng nữ chuẩn)",
+                        "gender": "female",
+                        "provider": "edge_tts_hoaimy",
+                    },
+                ],
+            },
+        ],
+    }
 
 
 @router.post("/projects/{workflow_id}/voice")

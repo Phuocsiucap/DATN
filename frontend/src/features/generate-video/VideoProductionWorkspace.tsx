@@ -94,7 +94,25 @@ type PlanDraft = {
   story_data: string
 }
 
-const defaultVoiceId = ''
+const defaultVoiceId = 'pNInz6obpgDQGcFmaJgB'
+export const ELEVENLABS_VOICE_LIST = [
+  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (Reviewer Viral)', gender: 'male', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3' },
+  { id: 'TX3LPaxmHKxFdv7VOQHJ', name: 'Liam (Gen Z Creator)', gender: 'male', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/TX3LPaxmHKxFdv7VOQHJ/63148076-6363-42db-aea8-31424308b92c.mp3' },
+  { id: 'cgSgspJ2msm6clMCkdW9', name: 'Jessica (Dễ thương, Tươi vui)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/cgSgspJ2msm6clMCkdW9/56a97bf8-b69b-448f-846c-c3a11683d45a.mp3' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah (Tự tin, Sang trọng)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/EXAVITQu4vr4xnSDxMaL/01a3e33c-6e99-4ee7-8543-ff2216a32186.mp3' },
+  { id: 'FGY2WhTYpPnrIDTdsKH5', name: 'Laura (Cá tính, Sassy)', gender: 'female', preview_url: 'https://api.us.elevenlabs.io/v1/voices/FGY2WhTYpPnrIDTdsKH5/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiI2NzM0MTc1OS1hZDA4LTQxYTUtYmU2ZS1kZTEyZmU0NDg2MTgubXAzIiwidGltZXN0YW1wIjoxNzk0MjExMjAwMDAwMDAwfQ%3D%3D' },
+  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie (Trầm khỏe, Hype)', gender: 'male', preview_url: 'https://api.us.elevenlabs.io/v1/voices/IKne3meq5aSn9XLyUdCD/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiIxMDJkZTZmMi0yMmVkLTQzZTAtYTFmMS0xMTFmYTc1YzU0ODEubXAzIiwidGltZXN0YW1wIjoxNzk0MjExMjAwMDAwMDAwfQ%3D%3D' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George (Ấm áp, Kể chuyện)', gender: 'male', preview_url: 'https://api.us.elevenlabs.io/v1/voices/JBFqnCBsd6RMkjVDRZzb/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiJlNjIwNmQxYS0wNzIxLTQ3ODctYWFmYi0wNmE2ZTcwNWNhYzUubXAzIiwidGltZXN0YW1wIjoxNzk0MjExMjAwMDAwMDAwfQ%3D%3D' },
+  { id: 'hpp4J3VqNfWAUOO0d1Us', name: 'Bella (Dịu dàng, Thanh lịch)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/hpp4J3VqNfWAUOO0d1Us/dab0f5ba-3aa4-48a8-9fad-f138fea1126d.mp3' },
+  { id: 'nPczCjzI2devNBz1zQrb', name: 'Brian (Dày dặn, Uy tín)', gender: 'male', preview_url: 'https://api.us.elevenlabs.io/v1/voices/nPczCjzI2devNBz1zQrb/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiIyZGQzZTcyYy00ZmQzLTQyZjEtOTNlYS1hYmM1ZDRlNWFhMWQubXAzIiwidGltZXN0YW1wIjoxNzk0MjExMjAwMDAwMDAwfQ%3D%3D' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice (Rõ ràng, Sư phạm)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/Xb7hH8MSUJpSbSDYk0k2/d10f7534-11f6-41fe-a012-2de1e482d336.mp3' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', name: 'Matilda (Lạc quan, Săn sale)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/XrExE9yKIg1WjnnlVkGX/b930e18d-6b4d-466e-bab2-0ae97c6d8535.mp3' },
+  { id: 'iP95p4xoKVk53GoZ742B', name: 'Chris (Tự nhiên, Thân tình)', gender: 'male', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/iP95p4xoKVk53GoZ742B/3f4bde72-cc48-40dd-829f-57fbf906f4d7.mp3' },
+  { id: 'cjVigY5qzO86Huf0OWal', name: 'Eric (Lịch lãm, Sang trọng)', gender: 'male', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/cjVigY5qzO86Huf0OWal/d098fda0-6456-4030-b3d8-63aa048c9070.mp3' },
+  { id: 'SAz9YHcvj6GT2YYXdXww', name: 'River (Thư thái, Dễ chịu)', gender: 'neutral', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/SAz9YHcvj6GT2YYXdXww/e6c95f0b-2227-491a-b3d7-2249240decb7.mp3' },
+  { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily (Ngọt ngào, Quyến rũ)', gender: 'female', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pFZP5JQG7iQjIQuC4Bku/89b68b35-b3dd-4348-a84a-a3c13a3c2b30.mp3' },
+  { id: 'pqHfZKP75CvOlQylNhV4', name: 'Bill (Trầm hùng, Cổ điển)', gender: 'male', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pqHfZKP75CvOlQylNhV4/d782b3ff-84ba-4029-848c-acf01285524d.mp3' },
+]
 const voiceProviderOptions: Array<{ value: GenerateVideoVoiceProvider; label: string }> = [
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'edge_tts_namminh', label: 'Edge NamMinh' },
@@ -291,7 +309,31 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
     )
   }, [selectedProject, story])
   const [activeStep, setActiveStep] = useState<StepId>('story')
-  const [voiceId] = useState(defaultVoiceId)
+  const [voiceId, setVoiceId] = useState(defaultVoiceId)
+  const [playingDemoVoiceId, setPlayingDemoVoiceId] = useState<string | null>(null)
+  const demoAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  const togglePlayVoiceDemo = (targetVoiceId: string) => {
+    const v = ELEVENLABS_VOICE_LIST.find((item) => item.id === targetVoiceId)
+    if (!v || !v.preview_url) return
+    if (!demoAudioRef.current) {
+      demoAudioRef.current = new Audio()
+      demoAudioRef.current.onended = () => setPlayingDemoVoiceId(null)
+      demoAudioRef.current.onpause = () => setPlayingDemoVoiceId(null)
+    }
+    if (playingDemoVoiceId === targetVoiceId) {
+      demoAudioRef.current.pause()
+      setPlayingDemoVoiceId(null)
+    } else {
+      demoAudioRef.current.src = v.preview_url
+      demoAudioRef.current.play().then(() => {
+        setPlayingDemoVoiceId(targetVoiceId)
+      }).catch(() => {
+        setPlayingDemoVoiceId(null)
+      })
+    }
+  }
+
   const [voiceSpeed] = useState(1.2)
   const [voiceProvider, setVoiceProvider] = useState<GenerateVideoVoiceProvider>('edge_tts_namminh')
   const [workflowProgress, setWorkflowProgress] = useState<VideoWorkflowProgress | null>(null)
@@ -868,6 +910,10 @@ export default function VideoProductionWorkspace({ workflowId, onBackToList }: V
           onExport={() => void exportVideo()}
           onGenerateVoice={() => void generateVoice()}
           onVoiceProviderChange={setVoiceProvider}
+          voiceId={voiceId}
+          playingDemoVoiceId={playingDemoVoiceId}
+          onVoiceIdChange={setVoiceId}
+          onTogglePlayVoiceDemo={togglePlayVoiceDemo}
           onFitFrames={() => void generateVoice()}
           onExit={onBackToList}
           onReload={() => void loadInitial()}
@@ -1408,6 +1454,10 @@ function StoryVisualPreview({
   onExport,
   onGenerateVoice,
   onVoiceProviderChange,
+  voiceId,
+  playingDemoVoiceId,
+  onVoiceIdChange,
+  onTogglePlayVoiceDemo,
   onFitFrames,
   onExit,
   onReload,
@@ -1428,6 +1478,10 @@ function StoryVisualPreview({
   onExport: () => void
   onGenerateVoice: () => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+  voiceId?: string
+  playingDemoVoiceId?: string | null
+  onVoiceIdChange?: (voiceId: string) => void
+  onTogglePlayVoiceDemo?: (voiceId: string) => void
   onFitFrames: () => void
   onExit: () => void
   onReload: () => void
@@ -1682,6 +1736,10 @@ function StoryVisualPreview({
         onExport={onExport}
         onGenerateVoice={onGenerateVoice}
         onVoiceProviderChange={onVoiceProviderChange}
+        voiceId={voiceId}
+        playingDemoVoiceId={playingDemoVoiceId}
+        onVoiceIdChange={onVoiceIdChange}
+        onTogglePlayVoiceDemo={onTogglePlayVoiceDemo}
         onFitFrames={onFitFrames}
         onExit={onExit}
         onReload={onReload}
@@ -1758,6 +1816,10 @@ function RemotionLikeEditor({
   onExport,
   onGenerateVoice,
   onVoiceProviderChange,
+  voiceId,
+  playingDemoVoiceId,
+  onVoiceIdChange,
+  onTogglePlayVoiceDemo,
   onFitFrames,
   onExit,
   onReload,
@@ -1794,6 +1856,10 @@ function RemotionLikeEditor({
   onExport: () => void
   onGenerateVoice: () => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+  voiceId?: string
+  playingDemoVoiceId?: string | null
+  onVoiceIdChange?: (voiceId: string) => void
+  onTogglePlayVoiceDemo?: (voiceId: string) => void
   onFitFrames: () => void
   onExit: () => void
   onReload: () => void
@@ -2003,6 +2069,10 @@ function RemotionLikeEditor({
         onExport={onExport}
         onGenerateVoice={onGenerateVoice}
         onVoiceProviderChange={onVoiceProviderChange}
+        voiceId={voiceId}
+        playingDemoVoiceId={playingDemoVoiceId}
+        onVoiceIdChange={onVoiceIdChange}
+        onTogglePlayVoiceDemo={onTogglePlayVoiceDemo}
         onFitFrames={onFitFrames}
         onSave={onSave}
         onToggleFullscreen={onToggleFullscreen}
@@ -2171,6 +2241,10 @@ function RemotionLikeEditor({
         onToggleTrackMute={onToggleTrackMute}
         onUpdateSubtitleTiming={updateSubtitleTiming}
         onVoiceProviderChange={onVoiceProviderChange}
+        voiceId={voiceId}
+        playingDemoVoiceId={playingDemoVoiceId}
+        onVoiceIdChange={onVoiceIdChange}
+        onTogglePlayVoiceDemo={onTogglePlayVoiceDemo}
       />
     </div>
   )
@@ -2236,6 +2310,10 @@ function StudioProductionShell({
   onToggleTrackMute,
   onUpdateSubtitleTiming,
   onVoiceProviderChange,
+  voiceId,
+  playingDemoVoiceId,
+  onVoiceIdChange,
+  onTogglePlayVoiceDemo,
 }: {
   draftReviewRequired: boolean
   audioMenu: { x: number; y: number; kind: 'legacy-music' | 'track'; trackId?: string } | null
@@ -2295,6 +2373,10 @@ function StudioProductionShell({
   onToggleTrackMute: (trackId: string) => void
   onUpdateSubtitleTiming: (index: number, start: number, duration: number) => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+  voiceId?: string
+  playingDemoVoiceId?: string | null
+  onVoiceIdChange?: (voiceId: string) => void
+  onTogglePlayVoiceDemo?: (voiceId: string) => void
 }) {
   const progress = videoDuration ? Math.min(100, Math.max(0, (currentTime / videoDuration) * 100)) : 0
   const frameSize = normalizeVideoFrame(story.video)
@@ -2364,11 +2446,15 @@ function StudioProductionShell({
           story={story}
           voiceGenerating={voiceGenerating}
           voiceProvider={voiceProvider}
+          voiceId={voiceId}
+          playingDemoVoiceId={playingDemoVoiceId}
           onChange={onChange}
           onGenerateVoice={onGenerateVoice}
           onSave={onSave}
           onToggleTrackMute={onToggleTrackMute}
           onVoiceProviderChange={onVoiceProviderChange}
+          onVoiceIdChange={onVoiceIdChange}
+          onTogglePlayVoiceDemo={onTogglePlayVoiceDemo}
         />
       )}
 
@@ -2694,11 +2780,15 @@ function StudioInspector({
   story,
   voiceGenerating,
   voiceProvider,
+  voiceId,
+  playingDemoVoiceId,
   onChange,
   onGenerateVoice,
   onSave,
   onToggleTrackMute,
   onVoiceProviderChange,
+  onVoiceIdChange,
+  onTogglePlayVoiceDemo,
 }: {
   audio1Muted: boolean
   audio2Muted: boolean
@@ -2708,11 +2798,15 @@ function StudioInspector({
   story: GenerateVideoStory
   voiceGenerating: boolean
   voiceProvider: GenerateVideoVoiceProvider
+  voiceId?: string
+  playingDemoVoiceId?: string | null
   onChange: (story: GenerateVideoStory) => void
   onGenerateVoice: () => void
   onSave: () => void
   onToggleTrackMute: (trackId: string) => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+  onVoiceIdChange?: (voiceId: string) => void
+  onTogglePlayVoiceDemo?: (voiceId: string) => void
 }) {
   const [activeTab, setActiveTab] = useState<'info' | 'ai'>('info')
   const meta = story.meta || {}
@@ -2772,12 +2866,37 @@ function StudioInspector({
             value={voiceProvider}
             disabled={voiceGenerating}
             onChange={(event) => onVoiceProviderChange(event.target.value as GenerateVideoVoiceProvider)}
-            className="h-8 w-40 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-xs font-bold text-[#2d3463] outline-none disabled:opacity-50"
+            className="h-8 w-36 rounded-[8px] border border-[#dfe4f3] bg-white px-2 text-xs font-bold text-[#2d3463] outline-none disabled:opacity-50"
           >
             {voiceProviderOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          {voiceProvider === 'elevenlabs' && (
+            <div className="flex items-center gap-1.5">
+              <select
+                aria-label="ElevenLabs Voice"
+                value={voiceId}
+                disabled={voiceGenerating}
+                onChange={(event) => onVoiceIdChange?.(event.target.value)}
+                className="h-8 max-w-[210px] rounded-[8px] border border-[#6247ff]/40 bg-[#f8faff] px-2 text-xs font-bold text-[#2d3463] outline-none disabled:opacity-50"
+              >
+                {ELEVENLABS_VOICE_LIST.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.gender === 'female' ? '👩' : v.gender === 'male' ? '👨' : '🧑'} {v.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => onTogglePlayVoiceDemo?.(voiceId || 'pNInz6obpgDQGcFmaJgB')}
+                className="inline-flex h-8 items-center gap-1 rounded-[8px] border border-[#dfe4f3] bg-white px-2.5 text-xs font-bold text-[#56617f] hover:bg-[#f3f4f6]"
+                title="Nghe thử giọng demo"
+              >
+                {playingDemoVoiceId === (voiceId || 'pNInz6obpgDQGcFmaJgB') ? '⏸ Dừng' : '▶ Demo'}
+              </button>
+            </div>
+          )}
           <button onClick={onSave} className="h-8 rounded-[8px] border border-[#c9c2ff] bg-white px-3 text-xs font-black text-[#6247ff] hover:bg-[#f7f5ff]">
             Lưu chỉnh sửa
           </button>
@@ -3582,6 +3701,10 @@ function ProCutTopToolbar({
   onExport,
   onGenerateVoice,
   onVoiceProviderChange,
+  voiceId,
+  playingDemoVoiceId,
+  onVoiceIdChange,
+  onTogglePlayVoiceDemo,
   onFitFrames,
   onSave,
   onToggleFullscreen,
@@ -3599,6 +3722,10 @@ function ProCutTopToolbar({
   onExport: () => void
   onGenerateVoice: () => void
   onVoiceProviderChange: (provider: GenerateVideoVoiceProvider) => void
+  voiceId?: string
+  playingDemoVoiceId?: string | null
+  onVoiceIdChange?: (voiceId: string) => void
+  onTogglePlayVoiceDemo?: (voiceId: string) => void
   onFitFrames: () => void
   onSave: () => void
   onToggleFullscreen: () => void

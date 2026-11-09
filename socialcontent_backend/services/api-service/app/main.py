@@ -36,6 +36,7 @@ from app.api.routes import (
     stories,
     tiktok_shop,
     users,
+    tiktok_studio,
 )
 from app.services.publish_scheduler import start_publish_queue_scheduler, stop_publish_queue_scheduler
 
@@ -139,6 +140,7 @@ app.include_router(profile_planning.router, prefix="/api/v1/profile", tags=["pro
 app.include_router(media_workflows.router, prefix="/api/v1/media-workflows", tags=["media-workflows"])
 app.include_router(content_series.router, prefix="/api/v1/content-series", tags=["content-series"])
 app.include_router(generate_video.router, prefix="/api/v1/generate-video", tags=["generate-video"])
+app.include_router(tiktok_studio.router, prefix="/api/v1", tags=["tiktok-studio"])
 
 
 @app.get("/health")

@@ -13,13 +13,19 @@ AUDIO_DIR = PUBLIC_DIR / "assets" / "audio"
 VIDEO_ASSET_DIR = PUBLIC_DIR / "assets" / "videos"
 VIDEO_OUT_DIR = RENDER_WORKSPACE_ROOT / "out"
 
+from common.constants.elevenlabs_voices import (
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    ELEVENLABS_VOICES,
+    get_voice_by_id,
+)
+
 DEFAULT_IMAGES = [
     "assets/images/001-signal-room.png",
     "assets/images/002-alien-tower.png",
     "assets/images/003-final-light.png",
 ]
 DEFAULT_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
-DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
+DEFAULT_VOICE_ID = DEFAULT_ELEVENLABS_VOICE_ID
 DEFAULT_VOICE_PROVIDER = "elevenlabs"
 EDGE_TTS_NAMMINH_PROVIDER = "edge_tts_namminh"
 EDGE_TTS_HOAIMY_PROVIDER = "edge_tts_hoaimy"

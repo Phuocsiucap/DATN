@@ -5,6 +5,7 @@ export type Tab =
   | 'storyStatus'
   | 'planning'
   | 'generateVideo'
+  | 'tiktokStudio'
   | 'approvals'
   | 'schedule'
   | 'aiManagement'
@@ -25,6 +26,7 @@ export const TAB_PATHS: Record<Tab, string> = {
   storyStatus: '/stories/status',
   planning: '/planning',
   generateVideo: '/generate-video',
+  tiktokStudio: '/tiktok-studio',
   approvals: '/approvals',
   schedule: '/schedule',
   aiManagement: '/ai-management',
