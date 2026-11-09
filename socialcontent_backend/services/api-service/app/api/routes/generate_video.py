@@ -10,7 +10,27 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.services import generate_video as pipeline
+from app.services.content_access import can_user_access_content
+from app.services.direct_video_script import create_direct_video_script
 from app.services.social_profiles import SocialProfileService
+from app.services.video_task_guard import (
+    ACTIVE_VIDEO_TASK_STATUSES as ACTIVE_TASK_STATUSES,
+    PRE_RENDER_TASK_TYPES,
+    ensure_no_active_video_task as _ensure_no_active_video_task,
+)
+from app.services.video_runs import get_video_run, serialize_video_run as _serialize_workflow_run
+from app.services.video_task_enqueue import enqueue_video_task
+from app.services.video_voice_jobs import (
+    DEFAULT_AUTO_VOICE_PROVIDER,
+    DEFAULT_VOICE_SPEED,
+    enqueue_project_voice_job as _enqueue_project_voice_job,
+)
+from app.services.video_projects import (
+    get_owned_video_project as _get_owned_project,
+    persist_project_story as _persist_project_story,
+    public_story_payload as _public_story,
+)
+from app.services.bilibili_ocr import build_hardsub_story_from_ocr as _build_bilibili_hardsub_story_from_ocr
 from common.db.content_series import (
     find_active_series_by_title,
     lock_active_series,
@@ -18,12 +38,10 @@ from common.db.content_series import (
     sync_series_current_part,
 )
 from app.api.deps import get_current_user
-from common.db.media_workflows import content_category_payload
+from common.db.media_workflows import content_category_payload, content_source_type as _content_source_type
 from common.db.models import (
     ContentItem,
     ContentSeries,
-    CrawlJob,
-    CrawlJobContent,
     MediaWorkflow,
     KafkaTask,
     PublishingQueueItem,
@@ -35,7 +53,6 @@ from common.planning.auto_draft_policy import (
     auto_production_block_reason,
     draft_script_signature,
     draft_has_script,
-    invalidate_draft_media,
     is_auto_workflow,
 )
 from common.db.session import get_db
@@ -47,19 +64,9 @@ from common.events.topics import (
     GENERATE_VIDEO_RENDER_REQUESTED,
     GENERATE_VIDEO_REVIEW_REQUESTED,
     GENERATE_VIDEO_SCRIPT_REQUESTED,
-    GENERATE_VIDEO_VOICE_REQUESTED,
 )
 
 router = APIRouter()
-DEFAULT_AUTO_VOICE_PROVIDER = "edge_tts_namminh"
-DEFAULT_VOICE_SPEED = 1.2
-ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PROCESSING"}
-PRE_RENDER_TASK_TYPES = {
-    "GENERATE_VIDEO_SCRIPT",
-    "GENERATE_VIDEO_EDIT",
-    "GENERATE_VIDEO_REVIEW",
-    "GENERATE_VIDEO_VOICE",
-}
 BILIBILI_RENDER_TASK = "BILIBILI_RENDER_TASK"
 
 class StoryRequest(BaseModel):
@@ -122,7 +129,7 @@ def create_story_from_project(
         if not project.primary_content_id:
             raise HTTPException(status_code=400, detail="Workflow chưa có ContentItem chính để sinh kịch bản")
         content = db.get(ContentItem, project.primary_content_id)
-        if not content or not _can_use_content(db, content, user):
+        if not content or not can_user_access_content(db, content, user):
             raise HTTPException(status_code=404, detail="ContentItem chính không tồn tại hoặc không thuộc quyền truy cập")
         _ensure_bilibili_ocr_ready(content)
 
@@ -140,7 +147,7 @@ def create_story_from_project(
             .first()
         )
         if existing:
-            return {"job": _serialize_workflow_run(db, existing)}
+            return {"job": _serialize_workflow_run(existing)}
 
         job = KafkaTask(
             reference_id=project.id,
@@ -168,132 +175,11 @@ def create_story_from_project(
                 correlation_id=project.id,
             ),
         )
-        return {"job": _serialize_workflow_run(db, job)}
+        return {"job": _serialize_workflow_run(job)}
     except HTTPException:
         raise
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
-
-
-def _public_story(story: dict) -> dict:
-    return pipeline.public_story_payload(story)
-
-
-def _get_owned_project(db: Session, workflow_id: uuid.UUID, user: User) -> MediaWorkflow:
-    query = db.query(MediaWorkflow).filter(MediaWorkflow.id == workflow_id).with_for_update()
-    if not user.is_system_admin:
-        query = query.join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id).filter(SocialProfile.user_id == user.id)
-    project = query.first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Content project not found")
-    return project
-
-
-def _persist_project_story(db: Session, project: MediaWorkflow, story: dict, status: str | None = None) -> None:
-    if project.status == "REJECTED":
-        raise HTTPException(status_code=409, detail="Workflow đã bị từ chối. Hãy mở lại workflow trước khi sửa draft.")
-    previous_story = project.draft_json if isinstance(project.draft_json, dict) else {}
-    next_story = deepcopy(story)
-    if isinstance(previous_story.get("compact_scenes"), list) and not isinstance(next_story.get("compact_scenes"), list):
-        next_story["compact_scenes"] = previous_story["compact_scenes"]
-    public_story = _public_story(next_story)
-    public_story.setdefault("meta", {})
-    public_story["meta"]["workflow_id"] = str(project.id)
-    public_story["meta"]["user_id"] = str(project.profile.user_id)
-    public_story["project_status"] = _project_status(public_story)
-
-    metadata = dict(project.metadata_json or {})
-    script_changed = bool(previous_story) and draft_script_signature(previous_story) != draft_script_signature(public_story)
-    if script_changed and (is_auto_workflow(metadata) or metadata.get("ai_review_required")):
-        invalidate_draft_media(project, public_story)
-        metadata = dict(project.metadata_json or {})
-        signature = draft_script_signature(public_story)
-        metadata["draft_review_approved"] = False
-        metadata.pop("approved_script_signature", None)
-        metadata["draft_review"] = {
-            "status": "REVIEW_REQUIRED",
-            "reason": "DRAFT_CHANGED",
-            "script_signature": signature,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if metadata.get("ai_review_required"):
-            metadata["draft_ai_review"] = {
-                "status": "PENDING",
-                "provider": "deepseek",
-                "model": "deepseek-v4-flash",
-                "script_signature": signature,
-                "reason": "DRAFT_CHANGED",
-            }
-        project.current_stage = "DRAFT_REVIEW_REQUIRED"
-        project.progress_percent = 80
-        status = "EDITING"
-    project.metadata_json = metadata
-    project.draft_json = public_story
-    project.status = status or _project_status(public_story)
-    public_story["project_status"] = project.status
-    db.add(project)
-    db.commit()
-
-
-def _enqueue_project_voice_job(
-    db: Session,
-    project: MediaWorkflow,
-    *,
-    trigger: str,
-    voice_id: str | None = None,
-    voice_speed: float = DEFAULT_VOICE_SPEED,
-    voice_provider: str | None = None,
-) -> KafkaTask:
-    _require_auto_draft_production_ready(project, project.draft_json if isinstance(project.draft_json, dict) else {})
-    existing = (
-        db.query(KafkaTask)
-        .filter(
-            KafkaTask.reference_id == project.id,
-            KafkaTask.task_type == "GENERATE_VIDEO_VOICE",
-            KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
-        )
-        .order_by(KafkaTask.created_at.desc())
-        .first()
-    )
-    if existing:
-        return existing
-
-    job = KafkaTask(
-        reference_id=project.id,
-        reference_type="media_workflow",
-        task_type="GENERATE_VIDEO_VOICE",
-        status="PENDING",
-        current_stage="QUEUED_VOICE",
-        payload_jsonb={
-            "trigger": trigger,
-            "voice_id": voice_id,
-            "voice_provider": voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
-            "voice_speed": voice_speed,
-        },
-    )
-    project.status = "EDITING"
-    project.current_stage = "QUEUED_VOICE"
-    project.progress_percent = 0
-    db.add_all([job, project])
-    db.commit()
-    db.refresh(job)
-    publish(
-        GENERATE_VIDEO_VOICE_REQUESTED,
-        build_event(
-            event_type=GENERATE_VIDEO_VOICE_REQUESTED,
-            source="api-service",
-            job_id=job.id,
-            payload={
-                "workflow_id": str(project.id),
-                "run_type": job.task_type,
-                "task_id": str(job.id),
-                "trigger": trigger,
-                "voice_provider": voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
-            },
-            correlation_id=project.id,
-        ),
-    )
-    return job
 
 
 def _script_task_payload(
@@ -416,31 +302,6 @@ def _active_pre_render_task(db: Session, project: MediaWorkflow) -> KafkaTask | 
     )
 
 
-def _can_use_content(db: Session, content: ContentItem, user: User) -> bool:
-    if user.is_system_admin or content.content_scope == "GLOBAL":
-        return True
-    if content.content_scope != "PRIVATE":
-        return False
-    return bool(
-        db.query(CrawlJobContent.job_id)
-        .join(CrawlJob, CrawlJob.id == CrawlJobContent.job_id)
-        .filter(
-            CrawlJobContent.content_id == content.id,
-            CrawlJob.requested_by == user.id,
-            CrawlJob.content_scope == "PRIVATE",
-        )
-        .first()
-    )
-
-
-def _content_source_type(content: ContentItem | None) -> str:
-    if not content:
-        return ""
-    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
-    primary = sources[0] if sources and isinstance(sources[0], dict) else {}
-    return str(primary.get("source_type") or "").upper()
-
-
 def _ensure_bilibili_ocr_ready(content: ContentItem | None) -> None:
     if _content_source_type(content) != "BILIBILI":
         return
@@ -558,19 +419,6 @@ def _apply_pending_series_decision(db: Session, project: MediaWorkflow, story: d
     return series
 
 
-def _project_status(story: dict) -> str:
-    artifacts = story.get("video_artifacts") if isinstance(story.get("video_artifacts"), dict) else {}
-    audio = story.get("audio") if isinstance(story.get("audio"), dict) else {}
-    timeline = story.get("timeline") if isinstance(story.get("timeline"), dict) else {}
-    if artifacts.get("final"):
-        return "RENDERED"
-    if audio.get("voice") or any(isinstance(clip, dict) and str(clip.get("type") or "").lower() == "voice" for clip in timeline.get("audio") or []):
-        return "VOICE_READY"
-    if timeline.get("video") or timeline.get("text"):
-        return "EDITING"
-    return "READY"
-
-
 def _story_has_voice(story: dict) -> bool:
     audio = story.get("audio") if isinstance(story.get("audio"), dict) else {}
     if audio.get("voice"):
@@ -580,18 +428,6 @@ def _story_has_voice(story: dict) -> bool:
         isinstance(clip, dict) and str(clip.get("type") or "").lower() == "voice" and clip.get("src")
         for clip in (timeline.get("audio") if isinstance(timeline.get("audio"), list) else [])
     )
-
-
-def _ensure_no_active_video_task(db: Session, project: MediaWorkflow, *, allow_rejected: bool = False) -> None:
-    if project.status == "REJECTED" and not allow_rejected:
-        raise HTTPException(status_code=409, detail="Workflow đã bị từ chối. Hãy mở lại workflow trước khi tiếp tục.")
-    blocking = db.query(KafkaTask.id).filter(
-        KafkaTask.reference_id == project.id,
-        KafkaTask.task_type.in_(PRE_RENDER_TASK_TYPES | {"GENERATE_VIDEO_RENDER"}),
-        KafkaTask.status.in_(ACTIVE_TASK_STATUSES),
-    ).first()
-    if blocking:
-        raise HTTPException(status_code=409, detail="Workflow đang xử lý. Hãy đợi task hiện tại hoàn tất trước khi thay đổi hoặc duyệt draft.")
 
 
 @router.post("/projects/{workflow_id}/approve-draft")
@@ -652,7 +488,7 @@ def approve_project_draft(
         "series_id": str(series.id) if series else (str(project.series_id) if project.series_id else None),
         "series_applied": bool(series),
         "series_warning": (project.metadata_json or {}).get("series_decision_error"),
-        "job": _serialize_workflow_run(db, job) if job else None,
+        "job": _serialize_workflow_run(job) if job else None,
     }
 
 
@@ -914,46 +750,18 @@ def edit_story(
             raise HTTPException(status_code=404, detail="Story not found for content project")
         story = _public_story(story)
         _persist_project_story(db, project, story, status="EDITING")
-        existing = (
-            db.query(KafkaTask)
-            .filter(
-                KafkaTask.reference_id == project.id,
-                KafkaTask.task_type == "GENERATE_VIDEO_EDIT",
-                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
-            )
-            .order_by(KafkaTask.created_at.desc())
-            .first()
-        )
-        if existing:
-            return {"job": _serialize_workflow_run(db, existing)}
-
-        job = KafkaTask(
-            reference_id=project.id,
-            reference_type="media_workflow",
-            task_type="GENERATE_VIDEO_EDIT",
-            status="PENDING",
-            current_stage="QUEUED_EDIT",
-            progress_percent=0,
-            payload_jsonb={"prompt": payload.prompt, "trigger": "manual_edit"},
-        )
         _ensure_no_active_video_task(db, project)
-        project.status = "EDITING"
-        project.current_stage = "QUEUED_EDIT"
-        project.progress_percent = 0
-        db.add_all([job, project])
-        db.commit()
-        db.refresh(job)
-        publish(
-            GENERATE_VIDEO_EDIT_REQUESTED,
-            build_event(
-                event_type=GENERATE_VIDEO_EDIT_REQUESTED,
-                source="api-service",
-                job_id=job.id,
-                payload={"workflow_id": str(project.id), "run_type": job.task_type, "prompt": payload.prompt},
-                correlation_id=project.id,
-            ),
+        return enqueue_video_task(
+            db,
+            project,
+            task_type="GENERATE_VIDEO_EDIT",
+            queued_stage="QUEUED_EDIT",
+            workflow_status="EDITING",
+            trigger="manual_edit",
+            task_payload={"prompt": payload.prompt},
+            event_topic=GENERATE_VIDEO_EDIT_REQUESTED,
+            event_payload={"prompt": payload.prompt},
         )
-        return {"job": _serialize_workflow_run(db, job)}
     except HTTPException:
         raise
     except Exception as error:
@@ -976,46 +784,18 @@ def review_story(
         story.setdefault("meta", {})
         story["meta"]["workflow_id"] = str(project.id)
         _persist_project_story(db, project, story, status="REVIEWING")
-        existing = (
-            db.query(KafkaTask)
-            .filter(
-                KafkaTask.reference_id == project.id,
-                KafkaTask.task_type == "GENERATE_VIDEO_REVIEW",
-                KafkaTask.status.in_(["PENDING", "RUNNING", "PROCESSING"]),
-            )
-            .order_by(KafkaTask.created_at.desc())
-            .first()
-        )
-        if existing:
-            return {"job": _serialize_workflow_run(db, existing)}
-
-        job = KafkaTask(
-            reference_id=project.id,
-            reference_type="media_workflow",
-            task_type="GENERATE_VIDEO_REVIEW",
-            status="PENDING",
-            current_stage="QUEUED_REVIEW",
-            progress_percent=0,
-            payload_jsonb={"instructions": payload.instructions, "trigger": "manual_review"},
-        )
         _ensure_no_active_video_task(db, project)
-        project.status = "REVIEWING"
-        project.current_stage = "QUEUED_REVIEW"
-        project.progress_percent = 0
-        db.add_all([job, project])
-        db.commit()
-        db.refresh(job)
-        publish(
-            GENERATE_VIDEO_REVIEW_REQUESTED,
-            build_event(
-                event_type=GENERATE_VIDEO_REVIEW_REQUESTED,
-                source="api-service",
-                job_id=job.id,
-                payload={"workflow_id": str(project.id), "run_type": job.task_type, "instructions": payload.instructions},
-                correlation_id=project.id,
-            ),
+        return enqueue_video_task(
+            db,
+            project,
+            task_type="GENERATE_VIDEO_REVIEW",
+            queued_stage="QUEUED_REVIEW",
+            workflow_status="REVIEWING",
+            trigger="manual_review",
+            task_payload={"instructions": payload.instructions},
+            event_topic=GENERATE_VIDEO_REVIEW_REQUESTED,
+            event_payload={"instructions": payload.instructions},
         )
-        return {"job": _serialize_workflow_run(db, job)}
     except HTTPException:
         raise
     except Exception as error:
@@ -1055,7 +835,7 @@ def generate_video(
             )
         _persist_project_story(db, project, story, status="RENDERING")
         job = _enqueue_project_render_job(db, project, story, trigger="manual_generate_video", mode="manual")
-        return {"job": _serialize_workflow_run(db, job)}
+        return {"job": _serialize_workflow_run(job)}
     except HTTPException:
         raise
     except Exception as error:
@@ -1065,72 +845,6 @@ def generate_video(
 def _is_bilibili_hardsub_project(project: MediaWorkflow) -> bool:
     metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
     return metadata.get("workflow_type") == "ORIGINAL_VIDEO_HARDSUB" or metadata.get("source_type") == "BILIBILI"
-
-
-def _build_bilibili_hardsub_story_from_ocr(db: Session, project: MediaWorkflow) -> dict:
-    tasks = (
-        db.query(KafkaTask)
-        .filter(
-            KafkaTask.reference_id == project.id,
-            KafkaTask.task_type == "BILIBILI_OCR_EPISODE",
-            KafkaTask.status == "COMPLETED",
-        )
-        .order_by(KafkaTask.created_at.asc())
-        .all()
-    )
-    story_data: list[dict] = []
-    for task in tasks:
-        result = task.result_jsonb if isinstance(task.result_jsonb, dict) else {}
-        payload = task.payload_jsonb if isinstance(task.payload_jsonb, dict) else {}
-        video_url = str(result.get("url") or payload.get("url") or "").strip()
-        segments = result.get("translated_segments") or result.get("segments") or []
-        if not video_url or not isinstance(segments, list):
-            continue
-        for segment in segments:
-            if not isinstance(segment, dict):
-                continue
-            start = _safe_float(segment.get("start") or segment.get("start_time"), 0.0)
-            end = _safe_float(segment.get("end") or segment.get("end_time"), start + 2.0)
-            duration = max(0.5, end - start)
-            subtitle = str(segment.get("translated_text") or segment.get("translation") or segment.get("raw_text") or segment.get("text") or "").strip()
-            if not subtitle:
-                continue
-            story_data.append({
-                "scene_index": len(story_data) + 1,
-                "duration": round(duration, 2),
-                "subtitle_start": round(start, 2),
-                "subtitle_duration": round(duration, 2),
-                "image": video_url,
-                "media_type": "video",
-                "effect": "none",
-                "fit": "contain",
-                "subtitle": subtitle,
-                "voice_text": subtitle,
-            })
-
-    if not story_data:
-        return {}
-
-    return {
-        "title": project.title,
-        "meta": {
-            "workflow_id": str(project.id),
-            "profile_id": str(project.profile_id),
-            "source_content_id": str(project.primary_content_id) if project.primary_content_id else None,
-            "source": "BILIBILI",
-        },
-        "video": {"width": 1080, "height": 1920, "fps": 30, "background": "#05070b"},
-        "audio": {"voiceVolume": 0, "musicVolume": 0},
-        "story_data": story_data,
-        "source": {"workflow_id": str(project.id), "type": "BILIBILI"},
-    }
-
-
-def _safe_float(value: object, fallback: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return fallback
 
 
 @router.post("/projects/{workflow_id}/render")
@@ -1148,47 +862,7 @@ def get_render_job(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    job = db.get(KafkaTask, job_id)
-    if not job or job.task_type not in {
-        "GENERATE_VIDEO_RENDER",
-        "GENERATE_VIDEO_SCRIPT",
-        "GENERATE_VIDEO_EDIT",
-        "GENERATE_VIDEO_REVIEW",
-        "GENERATE_VIDEO_VOICE",
-        BILIBILI_RENDER_TASK,
-    }:
-        raise HTTPException(status_code=404, detail="Render job not found")
-
-    project_query = db.query(MediaWorkflow).filter(MediaWorkflow.id == job.reference_id)
-    if not user.is_system_admin:
-        project_query = project_query.join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id).filter(SocialProfile.user_id == user.id)
-    project = project_query.first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Render job not found")
-
-    job.project = project
-    return {"job": _serialize_workflow_run(db, job)}
-
-
-def _serialize_workflow_run(db: Session, job: KafkaTask) -> dict:
-    metadata = job.payload_jsonb if isinstance(job.payload_jsonb, dict) else {}
-    result = job.result_jsonb if isinstance(job.result_jsonb, dict) else {}
-    output_path = result.get("output_path") or metadata.get("output_path")
-    return {
-        "id": str(job.id),
-        "workflow_id": str(job.reference_id),
-        "run_type": job.task_type,
-        "status": job.status,
-        "progress_percent": float(job.progress_percent or 0),
-        "current_stage": job.current_stage,
-        "output_path": output_path,
-        "video_url": f"/api/v1/generate-video/output/{str(output_path).replace('out/', '')}" if output_path else None,
-        "error_message": job.error_message,
-        "created_at": job.created_at,
-        "updated_at": getattr(job, "updated_at", job.created_at),
-        "started_at": job.started_at,
-        "completed_at": job.completed_at,
-    }
+    return get_video_run(db, job_id, user)
 
 
 @router.post("/audio/upload")
@@ -1241,7 +915,7 @@ def generate_project_voice(
         voice_speed=payload.voice_speed,
         voice_provider=payload.voice_provider or DEFAULT_AUTO_VOICE_PROVIDER,
     )
-    return {"job": _serialize_workflow_run(db, job)}
+    return {"job": _serialize_workflow_run(job)}
 
 
 @router.post("/direct-script", status_code=201)
@@ -1250,144 +924,13 @@ def create_direct_script(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Tạo MediaWorkflow trực tiếp từ một ContentItem,
-    sau đó ngay lập tức enqueue KafkaTask GENERATE_VIDEO_SCRIPT.
-    Bỏ qua phần AI chọn lọc / Fit Judge, nhưng draft sinh ra vẫn bắt buộc
-    đi qua DeepSeek Review trước voice hoặc render.
-    """
-    # Lock one profile while checking/creating the workflow. This makes the
-    # endpoint idempotent even when the browser submits two requests at once.
-    profile = (
-        db.query(SocialProfile)
-        .filter(SocialProfile.id == payload.profile_id)
-        .with_for_update()
-        .first()
-    )
-    if not profile or profile.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    content = db.get(ContentItem, payload.content_id)
-    if not content or not _can_use_content(db, content, user):
-        raise HTTPException(status_code=404, detail="ContentItem không tồn tại hoặc không thuộc quyền truy cập")
-    _ensure_bilibili_ocr_ready(content)
-
-    existing_workflow = (
-        db.query(MediaWorkflow)
-        .filter(
-            MediaWorkflow.profile_id == profile.id,
-            MediaWorkflow.primary_content_id == content.id,
-        )
-        .order_by(MediaWorkflow.created_at.desc())
-        .first()
-    )
-    if existing_workflow:
-        existing_job = (
-            db.query(KafkaTask)
-            .filter(
-                KafkaTask.reference_id == existing_workflow.id,
-                KafkaTask.reference_type == "media_workflow",
-            )
-            .order_by(KafkaTask.created_at.desc())
-            .first()
-        )
-        return {
-            "workflow": {
-                "id": str(existing_workflow.id),
-                "title": existing_workflow.title,
-                "status": existing_workflow.status,
-                "profile_id": str(existing_workflow.profile_id),
-                "primary_content_id": str(existing_workflow.primary_content_id),
-            },
-            "job": _serialize_workflow_run(db, existing_job) if existing_job else None,
-            "reused": True,
-        }
-
-    # Resolve title từ content nếu không truyền
-    title = payload.title
-    if not title:
-        title = content.canonical_title or content.normalized_title
-    title = title or payload.note or "Direct script"
-
-    # Tạo MediaWorkflow
-    category_payload = content_category_payload(content)
-    workflow = MediaWorkflow(
-        profile_id=profile.id,
-        title=title,
-        status="SCRIPTING",
-        planning_mode=None,
-        metadata_json={
-            "selection_mode": "MANUAL",
-            "creation_source": "DIRECT_SCRIPT",
-            "ai_review_required": True,
-            "draft_ai_review": {
-                "status": "PENDING",
-                "provider": "deepseek",
-                "model": "deepseek-v4-flash",
-                "script_signature": None,
-                "reason": "WAITING_FOR_DRAFT",
-            },
-            "target_duration_seconds": payload.target_duration_seconds,
-            "note": payload.note,
-            **category_payload,
-        },
-    )
-    db.add(workflow)
-    db.flush()
-
-    workflow.primary_content_id = content.id
-    workflow.inputs_jsonb = [{
-        "type": "content",
-        "id": str(content.id),
-        "role": "primary",
-        "title": content.canonical_title or content.normalized_title,
-        **category_payload,
-    }]
-    db.flush()
-
-    task_payload = _script_task_payload(
-        workflow.primary_content_id,
-        trigger="direct_script",
+    return create_direct_video_script(
+        db,
+        user,
+        profile_id=payload.profile_id,
+        content_id=payload.content_id,
+        title=payload.title,
+        note=payload.note,
         target_duration_seconds=payload.target_duration_seconds,
         instructions=payload.instructions,
     )
-
-
-    job = KafkaTask(
-        reference_id=workflow.id,
-        reference_type="media_workflow",
-        task_type="GENERATE_VIDEO_SCRIPT",
-        status="PENDING",
-        current_stage="QUEUED_SCRIPT",
-        progress_percent=0,
-        payload_jsonb=task_payload,
-    )
-    workflow.current_stage = "QUEUED_SCRIPT"
-    workflow.progress_percent = 0
-    db.add(job)
-    db.commit()
-    db.refresh(workflow)
-    db.refresh(job)
-
-    publish(
-        GENERATE_VIDEO_SCRIPT_REQUESTED,
-        build_event(
-            event_type=GENERATE_VIDEO_SCRIPT_REQUESTED,
-            source="api-service",
-            job_id=job.id,
-            payload={"workflow_id": str(workflow.id), "run_type": job.task_type},
-            correlation_id=workflow.id,
-        ),
-    )
-
-    return {
-        "workflow": {
-            "id": str(workflow.id),
-            "title": workflow.title,
-            "status": workflow.status,
-            "profile_id": str(workflow.profile_id),
-            "primary_content_id": str(workflow.primary_content_id),
-        },
-        "job": _serialize_workflow_run(db, job),
-        "reused": False,
-    }

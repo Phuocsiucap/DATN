@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Provider } from 'react-redux'
 import { Toaster } from 'sonner'
 import { store } from '@/commons/store'
@@ -11,34 +11,33 @@ import {
   type Tab,
 } from '@/commons/component/navigation'
 
-// Features
-import DashboardPage from '@/features/dashboard/DashboardPage'
-import CreatorDashboardPage from '@/features/dashboard/CreatorDashboardPage'
-import CrawlPage from '@/features/crawl/CrawlPage'
-import ContentPage from '@/features/content/ContentPage'
-import StoryPublishStatusPage from '@/features/stories/StoryPublishStatusPage'
-import PlanningPage from '@/features/planning/PlanningPage'
-import GenerateVideoProjectsPage from '@/features/generate-video/GenerateVideoProjectsPage'
-import MediaWorkflowWorkspaceRouter from '@/features/generate-video/MediaWorkflowWorkspaceRouter'
-import ApprovalsPage from '@/features/approvals/ApprovalsPage'
-import SchedulePage from '@/features/schedule/SchedulePage'
-import AiManagementPage from '@/features/ai-management/AiManagementPage'
-import PublishedPostsPage from '@/features/published-posts/PublishedPostsPage'
-import UsersPage from '@/features/users/UsersPage'
-import ProfilePage from '@/features/users/ProfilePage'
-import SettingsPage from '@/features/settings/SettingsPage'
-import TikTokShopPage from '@/features/tiktok-shop/TikTokShopPage'
-import TermsPage from '@/features/legal/TermsPage'
-import PrivacyPage from '@/features/legal/PrivacyPage'
-import TikTokCallbackPage from '@/features/legal/TikTokCallbackPage'
-import YouTubeCallbackPage from '@/features/legal/YouTubeCallbackPage'
-import OpenAiUsagePage from '@/features/admin/OpenAiUsagePage'
-import DeepseekUsagePage from '@/features/admin/DeepseekUsagePage'
-import AuditLogsPage from '@/features/admin/AuditLogsPage'
-import AdminContentItemsPage from '@/features/admin/AdminContentItemsPage'
-
-import LoginPage from '@/features/auth/LoginPage'
-import RegisterPage from '@/features/auth/RegisterPage'
+// Load feature screens only when the matching route is opened.
+const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
+const CreatorDashboardPage = lazy(() => import('@/features/dashboard/CreatorDashboardPage'))
+const CrawlPage = lazy(() => import('@/features/crawl/CrawlPage'))
+const ContentPage = lazy(() => import('@/features/content/ContentPage'))
+const StoryPublishStatusPage = lazy(() => import('@/features/stories/StoryPublishStatusPage'))
+const PlanningPage = lazy(() => import('@/features/planning/PlanningPage'))
+const GenerateVideoProjectsPage = lazy(() => import('@/features/generate-video/GenerateVideoProjectsPage'))
+const MediaWorkflowWorkspaceRouter = lazy(() => import('@/features/generate-video/MediaWorkflowWorkspaceRouter'))
+const ApprovalsPage = lazy(() => import('@/features/approvals/ApprovalsPage'))
+const SchedulePage = lazy(() => import('@/features/schedule/SchedulePage'))
+const AiManagementPage = lazy(() => import('@/features/ai-management/AiManagementPage'))
+const PublishedPostsPage = lazy(() => import('@/features/published-posts/PublishedPostsPage'))
+const UsersPage = lazy(() => import('@/features/users/UsersPage'))
+const ProfilePage = lazy(() => import('@/features/users/ProfilePage'))
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'))
+const TikTokShopPage = lazy(() => import('@/features/tiktok-shop/TikTokShopPage'))
+const TermsPage = lazy(() => import('@/features/legal/TermsPage'))
+const PrivacyPage = lazy(() => import('@/features/legal/PrivacyPage'))
+const TikTokCallbackPage = lazy(() => import('@/features/legal/TikTokCallbackPage'))
+const YouTubeCallbackPage = lazy(() => import('@/features/legal/YouTubeCallbackPage'))
+const OpenAiUsagePage = lazy(() => import('@/features/admin/OpenAiUsagePage'))
+const DeepseekUsagePage = lazy(() => import('@/features/admin/DeepseekUsagePage'))
+const AuditLogsPage = lazy(() => import('@/features/admin/AuditLogsPage'))
+const AdminContentItemsPage = lazy(() => import('@/features/admin/AdminContentItemsPage'))
+const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
+const RegisterPage = lazy(() => import('@/features/auth/RegisterPage'))
 import { getCurrentUserApi, logoutApi } from '@/commons/apis/api'
 import './index.css'
 
@@ -295,7 +294,7 @@ function AppContent() {
         onLogout={() => void handleLogout()}
       />
 
-      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <main className="app-main flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="app-content-frame flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
           {activeTab === 'dashboard' && (isSystemUser
             ? <DashboardPage />
@@ -330,15 +329,22 @@ function AppContent() {
 
 export default function App() {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
-  if (normalizedPath === '/terms') return <TermsPage />
-  if (normalizedPath === '/privacy') return <PrivacyPage />
-  if (normalizedPath === '/auth/tiktok/callback') return <TikTokCallbackPage />
-  if (normalizedPath === '/auth/youtube/callback') return <YouTubeCallbackPage />
+  const fallback = (
+    <div className="flex min-h-screen items-center justify-center bg-[var(--surface)] text-sm text-[var(--on-surface-variant)]">
+      Đang tải trang…
+    </div>
+  )
+  if (normalizedPath === '/terms') return <Suspense fallback={fallback}><TermsPage /></Suspense>
+  if (normalizedPath === '/privacy') return <Suspense fallback={fallback}><PrivacyPage /></Suspense>
+  if (normalizedPath === '/auth/tiktok/callback') return <Suspense fallback={fallback}><TikTokCallbackPage /></Suspense>
+  if (normalizedPath === '/auth/youtube/callback') return <Suspense fallback={fallback}><YouTubeCallbackPage /></Suspense>
 
   return (
-    <Provider store={store}>
-      <Toaster position="top-right" richColors closeButton duration={3500} />
-      <AppContent />
-    </Provider>
+    <Suspense fallback={fallback}>
+      <Provider store={store}>
+        <Toaster position="top-right" richColors closeButton duration={3500} />
+        <AppContent />
+      </Provider>
+    </Suspense>
   )
 }

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
-from common.db.models import Role, User
+from common.db.models import PromptRun, Role, User
 from common.security.passwords import hash_password
 from app.schemas import api as schemas
 
@@ -21,6 +22,111 @@ def to_user_response(user: User) -> schemas.UserResponse:
 
 
 class UserService:
+    def get_all_users_ai_usage(self, db: Session) -> list[dict]:
+        input_tokens = func.coalesce(PromptRun.input_tokens, 0)
+        output_tokens = func.coalesce(PromptRun.output_tokens, 0)
+        total_tokens = case(
+            (
+                or_(PromptRun.total_tokens.is_(None), PromptRun.total_tokens == 0),
+                input_tokens + output_tokens,
+            ),
+            else_=PromptRun.total_tokens,
+        )
+
+        rows = (
+            db.query(
+                User.id.label("user_id"),
+                User.full_name.label("full_name"),
+                User.email.label("email"),
+                PromptRun.run_type.label("run_type"),
+                PromptRun.model_provider.label("model_provider"),
+                PromptRun.model_name.label("model_name"),
+                func.coalesce(func.sum(input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(PromptRun.cost_usd), 0.0).label("cost_usd"),
+                func.count(PromptRun.id).label("runs_count"),
+            )
+            .outerjoin(PromptRun, PromptRun.user_id == User.id)
+            .group_by(
+                User.id,
+                User.full_name,
+                User.email,
+                PromptRun.run_type,
+                PromptRun.model_provider,
+                PromptRun.model_name,
+            )
+            .all()
+        )
+
+        users: dict[str, dict] = {}
+        for row in rows:
+            user_id = str(row.user_id)
+            summary = users.setdefault(
+                user_id,
+                {
+                    "user_id": user_id,
+                    "full_name": row.full_name,
+                    "email": row.email,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_tokens": 0,
+                    "total_cost_usd": 0.0,
+                    "prompt_runs_count": 0,
+                    "breakdown_by_run_type": {},
+                    "breakdown_by_model": {},
+                },
+            )
+            summary["total_input_tokens"] += int(row.input_tokens or 0)
+            summary["total_output_tokens"] += int(row.output_tokens or 0)
+            summary["total_tokens"] += int(row.total_tokens or 0)
+            summary["total_cost_usd"] += float(row.cost_usd or 0.0)
+            summary["prompt_runs_count"] += int(row.runs_count or 0)
+
+            if not row.runs_count:
+                continue
+
+            run_type = str(row.run_type or "UNKNOWN")
+            model = f"{row.model_provider or 'unknown'}:{row.model_name or 'unknown'}"
+            for key, bucket_key in (
+                (run_type, "breakdown_by_run_type"),
+                (model, "breakdown_by_model"),
+            ):
+                bucket = summary[bucket_key].setdefault(
+                    key,
+                    {
+                        "runs": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "cost_usd": 0.0,
+                    },
+                )
+                bucket["runs"] += int(row.runs_count)
+                bucket["input_tokens"] += int(row.input_tokens or 0)
+                bucket["output_tokens"] += int(row.output_tokens or 0)
+                bucket["total_tokens"] += int(row.total_tokens or 0)
+                bucket["cost_usd"] += float(row.cost_usd or 0.0)
+
+        result = []
+        for summary in users.values():
+            summary["total_cost_usd"] = round(summary["total_cost_usd"], 6)
+            for breakdown_key in ("breakdown_by_run_type", "breakdown_by_model"):
+                summary[breakdown_key] = [
+                    {
+                        "key": key,
+                        **bucket,
+                        "cost_usd": round(bucket["cost_usd"], 6),
+                    }
+                    for key, bucket in sorted(
+                        summary[breakdown_key].items(),
+                        key=lambda item: item[1]["cost_usd"],
+                        reverse=True,
+                    )
+                ]
+            result.append(summary)
+        return result
+
     def create_user_by_admin(self, db: Session, payload: schemas.AdminUserCreateRequest) -> User:
         roles = self.get_roles(db, self.normalized_roles(payload.roles))
         user = User(

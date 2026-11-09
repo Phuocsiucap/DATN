@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import type { CrawlJob, VnExpressRssFeed, CrawlSourceConfig } from '@/commons/apis/module1'
+import type { CrawlJob, CrawlSourceConfig } from '@/commons/apis/module1'
 import {
   Dialog,
   DialogBody,
@@ -20,19 +20,17 @@ import {
 export type JobSourceDraft = {
   id: string
   maxItems: number
-  overrides: { source_url?: string | null; keywords?: string[]; configuration?: { rss_feed_keys: string[] } }
+  overrides: { source_url?: string | null; keywords?: string[] }
 }
 const inputClassName = 'mt-1 w-full rounded-md border border-[var(--outline-variant)] bg-white px-3 py-2 text-sm'
 
 export function CreateCrawlJobDialog(props: {
   sourceConfigs: CrawlSourceConfig[]
-  sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[]
   sources: JobSourceDraft[]
   setSources: (sources: JobSourceDraft[]) => void
   jobName: string
   setJobName: (name: string) => void
   saving: boolean
-  vnexpressRssFeeds: VnExpressRssFeed[]
   scheduleEnabled: boolean
   setScheduleEnabled: (enabled: boolean) => void
   schedule: CrawlScheduleForm
@@ -41,7 +39,7 @@ export function CreateCrawlJobDialog(props: {
   onSubmit: () => void
 }) {
   const update = (id: string, patch: Partial<JobSourceDraft>) => props.setSources(props.sources.map(s => s.id === id ? { ...s, ...patch } : s))
-  const available = props.sourceConfigs.filter(c => c.status === 'ACTIVE' && ['VNEXPRESS', 'BILIBILI'].includes(c.source_type))
+  const available = props.sourceConfigs.filter(c => c.status === 'ACTIVE' && c.source_type === 'BILIBILI')
   const optionKeys = (config: CrawlSourceConfig) => Array.isArray(config.configuration.job_options) ? config.configuration.job_options as string[] : []
   const selectSource = (config: CrawlSourceConfig, checked: boolean) => {
     if (!checked) {
@@ -54,7 +52,7 @@ export function CreateCrawlJobDialog(props: {
       {
         id: config.id,
         maxItems: 20,
-        overrides: options.includes('rss_feed_keys') ? { configuration: { rss_feed_keys: [] } } : {},
+        overrides: {},
       },
     ])
   }
@@ -68,8 +66,6 @@ export function CreateCrawlJobDialog(props: {
           const draft = props.sources.find(s => s.id === config.id)
           const options = optionKeys(config)
           const patchOverride = (patch: JobSourceDraft['overrides']) => draft && update(config.id, { overrides: { ...draft.overrides, ...patch } })
-          const availableRssFeeds = props.vnexpressRssFeeds.filter(f => ((config.configuration.rss_feed_keys ?? []) as string[]).includes(f.key))
-          const rssKeys = (draft?.overrides.configuration?.rss_feed_keys ?? []) as string[]
           return <div key={config.id} className="rounded-lg border p-4 space-y-3">
             <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={!!draft} onChange={e => selectSource(config, e.target.checked)} />{config.name} ({config.source_type})</label>
             {config.description && <p className="text-sm text-slate-500">{config.description}</p>}
@@ -77,18 +73,6 @@ export function CreateCrawlJobDialog(props: {
               <label className="block text-sm">Số bài cần thu thập từ nguồn này<input type="number" min={1} max={200} className={inputClassName} value={draft.maxItems} onChange={e => update(config.id, { maxItems: Number(e.target.value) })} /></label>
               {options.includes('source_url') ? <label className="block text-sm">URL (tùy chọn)<input type="url" className={inputClassName} value={draft.overrides.source_url !== undefined ? draft.overrides.source_url || '' : config.source_url || ''} onChange={e => patchOverride({ source_url: e.target.value || null })} /></label> : config.source_url && <p className="text-sm break-all">URL: {config.source_url}</p>}
               {options.includes('keywords') ? <label className="block text-sm">Từ khóa (tùy chọn, phân cách bằng dấu phẩy)<input className={inputClassName} defaultValue={config.keywords.join(', ')} onChange={e => patchOverride({ keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean) })} /></label> : <p className="text-sm">Từ khóa: {config.keywords.join(', ') || 'Không có'}</p>}
-              {options.includes('rss_feed_keys') && (
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold">Chọn chuyên mục RSS muốn crawl</p>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => patchOverride({ configuration: { rss_feed_keys: availableRssFeeds.map(feed => feed.key) } })} className="h-8 rounded-md border px-3 text-xs font-bold">Chọn tất cả</button>
-                      <button type="button" onClick={() => patchOverride({ configuration: { rss_feed_keys: [] } })} className="h-8 rounded-md border px-3 text-xs font-bold">Bỏ chọn</button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-3">{availableRssFeeds.map(feed => <label key={feed.key} className="text-sm flex items-center gap-1"><input type="checkbox" checked={rssKeys.includes(feed.key)} onChange={e => patchOverride({ configuration: { rss_feed_keys: e.target.checked ? [...rssKeys, feed.key] : rssKeys.filter(k => k !== feed.key) } })} />{feed.label}</label>)}</div>
-                </div>
-              )}
             </>}
           </div>
         })}

@@ -154,34 +154,12 @@ def get_my_ai_usage(user: User = Depends(get_current_user), db: Session = Depend
 
 
 @router.get("/ai-usage-summary")
-def get_all_users_ai_usage(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+def get_all_users_ai_usage(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Get aggregated AI usage and billing statistics across all users (Admin only)."""
-    users = db.query(User).all()
-    summary = []
-
-    for u in users:
-        runs = db.query(PromptRun).filter(PromptRun.user_id == u.id).all()
-        in_tok = sum(r.input_tokens or 0 for r in runs)
-        out_tok = sum(r.output_tokens or 0 for r in runs)
-        tot_tok = sum(r.total_tokens or (r.input_tokens or 0) + (r.output_tokens or 0) for r in runs)
-        cost = sum(r.cost_usd or 0.0 for r in runs)
-
-        summary.append(
-            {
-                "user_id": str(u.id),
-                "full_name": u.full_name,
-                "email": u.email,
-                "total_input_tokens": in_tok,
-                "total_output_tokens": out_tok,
-                "total_tokens": tot_tok,
-                "total_cost_usd": round(cost, 6),
-                "prompt_runs_count": len(runs),
-                "breakdown_by_run_type": _usage_breakdown(runs, lambda run: run.run_type or "UNKNOWN"),
-                "breakdown_by_model": _usage_breakdown(runs, lambda run: f"{run.model_provider or 'unknown'}:{run.model_name or 'unknown'}"),
-            }
-        )
-
-    return {"users_ai_usage": summary}
+    return {"users_ai_usage": UserService().get_all_users_ai_usage(db)}
 
 
 def _usage_breakdown(runs: list[PromptRun], key_fn) -> list[dict]:

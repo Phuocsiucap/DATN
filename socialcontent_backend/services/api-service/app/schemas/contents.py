@@ -23,7 +23,7 @@ class ContentCreateRequest(BaseModel):
     full_text: str | None = Field(None, description="Full text content of the article")
     canonical_url: str | None = Field(None, description="Source URL if available")
     content_type: str = Field(default="ARTICLE", description="ARTICLE, VIDEO, IMAGE, etc.")
-    source_type: str = Field(default="MANUAL", description="Source platform (MANUAL, VNEXPRESS, etc.)")
+    source_type: str = Field(default="MANUAL", description="Source platform")
     category: str | None = Field(None, max_length=100, description="Content category")
     tags: list[str] = Field(default_factory=list, description="List of tags")
     language: str = Field(default="vi", description="Content language code")

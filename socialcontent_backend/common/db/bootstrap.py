@@ -547,18 +547,6 @@ def ensure_schema_compatibility(db: Session) -> None:
                     ON crawl_job_sources (source_config_id);
                 END IF;
 
-                -- Insert default VNExpress config if it doesn't exist
-                INSERT INTO crawl_source_configs (id, name, source_type, description, configuration)
-                SELECT 
-                    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, 
-                    'VNExpress RSS Mặc định', 
-                    'VNEXPRESS', 
-                    'Nguồn crawl RSS mặc định cho tất cả các chuyên mục của VNExpress', 
-                    '{"rss_feed_keys": ["tin-moi-nhat", "the-gioi", "thoi-su", "kinh-doanh", "giai-tri", "the-thao", "phap-luat", "giao-duc", "suc-khoe", "doi-song", "du-lich", "khoa-hoc", "so-hoa", "xe"]}'::jsonb
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM crawl_source_configs WHERE source_type = 'VNEXPRESS'
-                );
-
             END $$;
             """
                 )

@@ -27,9 +27,15 @@ let queueProcessing = false;
 let assetServerBaseUrl = null;
 let databaseReady = false;
 let workerMode = 'starting';
+const configuredPoolSize = Number.parseInt(process.env.DATABASE_POOL_SIZE || '5', 10);
+const configuredPoolTimeout = Number.parseInt(process.env.DATABASE_POOL_TIMEOUT_SECONDS || '30', 10);
+const configuredPoolIdleTimeout = Number.parseInt(process.env.DATABASE_POOL_IDLE_TIMEOUT_SECONDS || '30', 10);
 
 const pool = new Pool({
   connectionString: nodePostgresUrl(process.env.DATABASE_URL),
+  max: Number.isFinite(configuredPoolSize) && configuredPoolSize > 0 ? configuredPoolSize : 5,
+  connectionTimeoutMillis: Number.isFinite(configuredPoolTimeout) && configuredPoolTimeout > 0 ? configuredPoolTimeout * 1000 : 30000,
+  idleTimeoutMillis: Number.isFinite(configuredPoolIdleTimeout) && configuredPoolIdleTimeout > 0 ? configuredPoolIdleTimeout * 1000 : 30000,
 });
 
 async function main() {

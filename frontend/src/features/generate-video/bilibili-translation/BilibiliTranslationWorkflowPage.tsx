@@ -19,6 +19,7 @@ import { defaultSubtitleStyle, type BilibiliWorkflowEpisode, type SubtitleStyle,
 
 type Props = {
   workflowId: string
+  initialWorkspace: VideoWorkspaceDetail
   onBackToList: () => void
 }
 
@@ -37,12 +38,16 @@ const normalizeSegments = (episode: BilibiliOcrEpisodeProgress): TimedSubtitleSe
     .filter((segment) => segment.raw_text || segment.translated_text)
 )
 
-const isActiveProgress = (progress: VideoWorkflowProgress | null) => (
-  progress?.tasks.some((task) => ['PENDING', 'RUNNING', 'PROCESSING'].includes(task.status.toUpperCase()))
+const ACTIVE_STATUSES = ['PENDING', 'RUNNING', 'PROCESSING']
+
+const isActiveProgress = (progress: VideoWorkflowProgress | null, episodes: BilibiliWorkflowEpisode[]) => (
+  Boolean(progress && ACTIVE_STATUSES.includes(progress.status.toUpperCase()) && episodes.length === 0)
+  || Boolean(progress?.tasks.some((task) => ACTIVE_STATUSES.includes(task.status.toUpperCase())))
+  || episodes.some((episode) => ACTIVE_STATUSES.includes(episode.status.toUpperCase()))
 )
 
-export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToList }: Props) {
-  const [workspace, setWorkspace] = useState<VideoWorkspaceDetail | null>(null)
+export default function BilibiliTranslationWorkflowPage({ workflowId, initialWorkspace, onBackToList }: Props) {
+  const [workspace, setWorkspace] = useState<VideoWorkspaceDetail | null>(initialWorkspace)
   const [progress, setProgress] = useState<VideoWorkflowProgress | null>(null)
   const [episodes, setEpisodes] = useState<BilibiliWorkflowEpisode[]>([])
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>('')
@@ -51,32 +56,69 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
   const [style, setStyle] = useState<SubtitleStyle>(defaultSubtitleStyle)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [dataWarning, setDataWarning] = useState<string | null>(null)
   const [renderJob, setRenderJob] = useState<GenerateVideoJob | null>(null)
   const [rendering, setRendering] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [finalVideo, setFinalVideo] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refreshWorkspace = true) => {
     setError(null)
-    const detail = await fetchVideoWorkspaceApi(workflowId)
-    const wfProgress = await fetchVideoWorkflowProgressApi(workflowId)
+    const detail = refreshWorkspace ? await fetchVideoWorkspaceApi(workflowId) : initialWorkspace
     setWorkspace(detail)
-    setProgress(wfProgress)
-    setFinalVideo(detail.final_video || wfProgress.final_video || null)
-    if (detail.primary_content_id) {
-      const ocr = await fetchBilibiliOcrProgressApi(detail.primary_content_id)
-      const rows = ocr.episodes
-        .filter((episode) => !episode.workflow_id || episode.workflow_id === workflowId)
+    setFinalVideo(detail.final_video || null)
+
+    const [progressResult, ocrResult] = await Promise.allSettled([
+      fetchVideoWorkflowProgressApi(workflowId),
+      detail.primary_content_id
+        ? fetchBilibiliOcrProgressApi(detail.primary_content_id)
+        : Promise.resolve(null),
+    ])
+
+    let progressUnavailable = false
+    if (progressResult.status === 'fulfilled') {
+      const wfProgress = progressResult.value
+      setProgress(wfProgress)
+      setFinalVideo(detail.final_video || wfProgress.final_video || null)
+    } else {
+      progressUnavailable = true
+    }
+
+    if (ocrResult.status === 'fulfilled') {
+      const ocr = ocrResult.value
+      const candidates = ocr?.episodes || []
+      const scopedRows = candidates.filter((episode) => episode.workflow_id === workflowId)
+      const contentRows = candidates.filter((episode) => !episode.workflow_id)
+      const rowsByEpisode = new Map<string, BilibiliOcrEpisodeProgress>()
+      for (const episode of [...contentRows, ...scopedRows]) {
+        const key = String(episode.episode_index ?? episode.id)
+        const current = rowsByEpisode.get(key)
+        const rank = (item: BilibiliOcrEpisodeProgress) => (
+          (item.status.toUpperCase() === 'COMPLETED' ? 2 : 0)
+          + (item.segments?.some((segment) => segment.translated_text) ? 1 : 0)
+        )
+        if (!current || rank(episode) > rank(current)
+          || (rank(episode) === rank(current) && episode.workflow_id === workflowId)) {
+          rowsByEpisode.set(key, episode)
+        }
+      }
+      const rows = [...rowsByEpisode.values()]
+        .sort((left, right) => Number(left.episode_index || 0) - Number(right.episode_index || 0))
         .map((episode) => ({ ...episode, segments: normalizeSegments(episode) }))
       setEpisodes(rows)
-      setSelectedEpisodeId((current) => current || rows[0]?.id || '')
+      setSelectedEpisodeId((current) => rows.some((episode) => episode.id === current) ? current : rows[0]?.id || '')
     }
-  }, [workflowId])
+
+    const ocrUnavailable = ocrResult.status === 'rejected'
+    setDataWarning(ocrUnavailable
+      ? 'Không tải được tiến trình OCR. Bạn vẫn có thể xem workflow và thử làm mới.'
+      : progressUnavailable ? 'Không tải được tiến trình workflow. Dữ liệu OCR vẫn được hiển thị nếu có.' : null)
+  }, [initialWorkspace, workflowId])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    load()
+    load(false)
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Không tải được workflow dịch Bilibili.')
       })
@@ -89,12 +131,12 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
   }, [load])
 
   useEffect(() => {
-    if (!progress || !isActiveProgress(progress)) return
+    if (!progress || !isActiveProgress(progress, episodes)) return
     const timer = window.setInterval(() => {
       void load().catch(() => undefined)
     }, 5000)
     return () => window.clearInterval(timer)
-  }, [load, progress])
+  }, [episodes, load, progress])
 
   useEffect(() => {
     if (!renderJob || !['PENDING', 'RUNNING', 'PROCESSING'].includes(renderJob.status.toUpperCase())) return
@@ -195,6 +237,7 @@ export default function BilibiliTranslationWorkflowPage({ workflowId, onBackToLi
       <div className="border-b border-[var(--border)] px-4 py-3">
         <WorkflowProgress progress={progress} compact />
         {renderError && <p className="mt-2 text-xs font-medium text-red-600">{renderError}</p>}
+        {dataWarning && <p className="mt-2 text-xs text-amber-700">{dataWarning}</p>}
       </div>
 
       <div className="flex min-h-0 flex-1">

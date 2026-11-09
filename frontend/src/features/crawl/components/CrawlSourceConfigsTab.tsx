@@ -14,7 +14,7 @@ import {
 import { AppButton, AppCard, TableRowActions } from '@/commons/component/social-ui'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/commons/component/ui/dialog'
 
-export function CrawlSourceConfigsTab({ isSystemUser = false, sourceTypes, vnexpressRssFeeds }: { isSystemUser?: boolean; sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[]; vnexpressRssFeeds: import('@/commons/apis/module1').VnExpressRssFeed[] }) {
+export function CrawlSourceConfigsTab({ isSystemUser = false, sourceTypes }: { isSystemUser?: boolean; sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[] }) {
   const [configs, setConfigs] = useState<CrawlSourceConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -133,7 +133,6 @@ export function CrawlSourceConfigsTab({ isSystemUser = false, sourceTypes, vnexp
         <SourceConfigDialog
           config={editingConfig}
           sourceTypes={sourceTypes}
-          vnexpressRssFeeds={vnexpressRssFeeds}
           onClose={() => setShowDialog(false)}
           onSuccess={() => { setShowDialog(false); void loadConfigs(); }}
         />
@@ -142,26 +141,22 @@ export function CrawlSourceConfigsTab({ isSystemUser = false, sourceTypes, vnexp
   )
 }
 
-function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, onSuccess }: { config: CrawlSourceConfig | null; sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[]; vnexpressRssFeeds: import('@/commons/apis/module1').VnExpressRssFeed[]; onClose: () => void; onSuccess: () => void }) {
+function SourceConfigDialog({ config, sourceTypes, onClose, onSuccess }: { config: CrawlSourceConfig | null; sourceTypes: import('@/commons/apis/module1').SourceTypeConfig[]; onClose: () => void; onSuccess: () => void }) {
   const [name, setName] = useState(config?.name || '')
   const [description, setDescription] = useState(config?.description || '')
-  const [sourceType, setSourceType] = useState(config?.source_type || 'VNEXPRESS')
+  const [sourceType, setSourceType] = useState(config?.source_type || 'BILIBILI')
   const [sourceUrl, setSourceUrl] = useState(config?.source_url || '')
   const [bilibiliQueries, setBilibiliQueries] = useState(() => {
     const queries = config?.configuration?.queries
     return Array.isArray(queries) ? queries.map(String).join('\n') : ''
   })
   const [bilibiliMaxDuration, setBilibiliMaxDuration] = useState(() => String(config?.configuration?.max_duration_seconds ?? 7200))
-  const [selectedRssKeys, setSelectedRssKeys] = useState<string[]>(
-    (config?.configuration?.rss_feed_keys as string[]) || (vnexpressRssFeeds.length > 0 ? ['tin-moi-nhat'] : [])
-  )
   const [keywords, setKeywords] = useState(config?.keywords.join(', ') || '')
   const [jobOptions, setJobOptions] = useState<string[]>((config?.configuration.job_options as string[]) ?? [])
   const [saving, setSaving] = useState(false)
 
   const handleSubmit = async () => {
     if (!name.trim()) return toast.error('Vui lòng nhập tên nguồn')
-    if (sourceType === 'VNEXPRESS' && !sourceUrl.trim() && !selectedRssKeys.length) return toast.error('Chọn RSS hoặc nhập URL')
     const queries = bilibiliQueries.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
     const maxDurationSeconds = bilibiliMaxDuration.trim() ? Number(bilibiliMaxDuration) : undefined
     // Removed validation to allow entirely blank inputs for Bilibili, which will fallback to backend defaults.
@@ -175,10 +170,9 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
         source_url: sourceUrl.trim() || null,
         keywords: keywords.split(',').map(k => k.trim()).filter(Boolean),
         configuration: {
-          ...Object.fromEntries(Object.entries(config?.configuration || {}).filter(([key]) => !['max_items', 'limit', 'rss_feed_keys', 'rss_feed_urls', 'rss_feeds', 'job_options', 'queries', 'max_duration_seconds'].includes(key))),
-          ...(sourceType === 'VNEXPRESS' ? { rss_feed_keys: selectedRssKeys } : {}),
+          ...Object.fromEntries(Object.entries(config?.configuration || {}).filter(([key]) => !['max_items', 'limit', 'job_options', 'queries', 'max_duration_seconds'].includes(key))),
           ...(sourceType === 'BILIBILI' ? { queries, ...(maxDurationSeconds !== undefined ? { max_duration_seconds: maxDurationSeconds } : {}) } : {}),
-          job_options: jobOptions.filter(key => key !== 'rss_feed_keys' || sourceType === 'VNEXPRESS'),
+          job_options: jobOptions,
         },
       }
       if (config) {
@@ -194,10 +188,6 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
     } finally {
       setSaving(false)
     }
-  }
-
-  const toggleRssFeed = (key: string) => {
-    setSelectedRssKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
   }
 
   return (
@@ -216,38 +206,11 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
           </label>
           <label className="block text-sm font-semibold">Loại Nguồn
             <select className="mt-1 w-full rounded-md border px-3 py-2 text-sm" value={sourceType} onChange={e => setSourceType(e.target.value)} disabled={!!config}>
-              {sourceTypes.filter(st => ['VNEXPRESS', 'BILIBILI'].includes(st.type)).map(st => (
+              {sourceTypes.filter(st => st.type === 'BILIBILI').map(st => (
                 <option key={st.type} value={st.type}>{st.type}</option>
               ))}
             </select>
           </label>
-          {sourceType === 'VNEXPRESS' && (
-            <div>
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-semibold">Chuyên mục RSS VNExpress</span>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setSelectedRssKeys(vnexpressRssFeeds.map(f => f.key))} className="h-8 rounded-md border px-3 text-xs font-bold">Chọn tất cả</button>
-                  <button type="button" onClick={() => setSelectedRssKeys([])} className="h-8 rounded-md border px-3 text-xs font-bold">Bỏ chọn</button>
-                </div>
-              </div>
-              <div className="grid max-h-[260px] gap-2 overflow-y-auto rounded-lg border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-3 sm:grid-cols-2 lg:grid-cols-3">
-                {vnexpressRssFeeds.length === 0 ? (
-                  <div className="col-span-full text-xs font-semibold text-[var(--on-surface-variant)]">Đang tải danh sách RSS...</div>
-                ) : vnexpressRssFeeds.map((feed) => {
-                  const checked = selectedRssKeys.includes(feed.key)
-                  return (
-                    <label key={feed.key} className={`flex min-h-[54px] cursor-pointer items-start gap-2 rounded-lg border p-2 text-xs transition ${checked ? 'border-[var(--accent)] bg-blue-50' : 'border-[var(--outline-variant)] bg-white hover:bg-slate-50'}`}>
-                      <input type="checkbox" className="mt-0.5" checked={checked} onChange={() => toggleRssFeed(feed.key)} />
-                      <span className="min-w-0">
-                        <span className="block font-extrabold text-[var(--on-surface)]">{feed.label}</span>
-                        <span className="mt-0.5 block truncate font-mono text-xs text-[var(--on-surface-variant)]">{feed.url.replace('https://vnexpress.net/rss/', '')}</span>
-                      </span>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          )}
           {(
             <label className="block text-sm font-semibold">URL nguồn (tùy chọn)
               <input type="text" className="mt-1 w-full rounded-md border px-3 py-2 text-sm" placeholder="VD: https://space.bilibili.com/..." value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} />
@@ -279,7 +242,7 @@ function SourceConfigDialog({ config, sourceTypes, vnexpressRssFeeds, onClose, o
             <input className="mt-1 w-full rounded-md border px-3 py-2 text-sm" value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="Phân cách bằng dấu phẩy" />
           </label>
           <div className="space-y-2"><p className="text-sm font-semibold">Cho phép tùy chỉnh khi tạo job</p>
-            {[['source_url', 'URL'], ['keywords', 'Từ khóa'], ...(sourceType === 'VNEXPRESS' ? [['rss_feed_keys', 'Chọn trong các chuyên mục RSS của nguồn']] : [])].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={jobOptions.includes(key)} onChange={e => setJobOptions(e.target.checked ? [...jobOptions, key] : jobOptions.filter(k => k !== key))} />{label}</label>)}
+            {[['source_url', 'URL'], ['keywords', 'Từ khóa']].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={jobOptions.includes(key)} onChange={e => setJobOptions(e.target.checked ? [...jobOptions, key] : jobOptions.filter(k => k !== key))} />{label}</label>)}
           </div>
         </DialogBody>
         <DialogFooter>

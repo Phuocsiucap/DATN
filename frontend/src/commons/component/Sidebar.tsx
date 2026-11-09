@@ -15,6 +15,7 @@ import {
   LibraryBig,
   LogOut,
   Megaphone,
+  MoreHorizontal,
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
@@ -88,8 +89,10 @@ const creatorSections: NavSection[] = [
     items: [
       { key: 'settings', label: 'Social account', icon: <Megaphone size={17} /> },
       { key: 'schedule', label: 'Lịch đăng', icon: <CalendarDays size={17} /> },
+      { key: 'publishedPosts', label: 'Bài đã đăng', icon: <Megaphone size={17} /> },
       { key: 'aiManagement', label: 'AI Management', icon: <BrainCircuit size={17} /> },
       { key: 'tiktokShop', label: 'TikTok Shop', icon: <ShoppingBag size={17} /> },
+      { key: 'profile', label: 'Hồ sơ cá nhân', icon: <UserRound size={17} /> },
     ],
   },
 ]
@@ -110,6 +113,7 @@ const adminSections: NavSection[] = [
       { key: 'contentItems', label: 'Kho nội dung', icon: <LibraryBig size={17} /> },
       { key: 'users', label: 'Quản lý thành viên', icon: <UserRound size={17} /> },
       { key: 'auditLogs', label: 'Nhật ký hệ thống', icon: <ScrollText size={17} /> },
+      { key: 'profile', label: 'Hồ sơ cá nhân', icon: <UserRound size={17} /> },
     ],
   },
 ]
@@ -127,6 +131,7 @@ export default function Sidebar({
   const [aiUsage, setAiUsage] = useState<AiUsageData | null>(null)
   const [showUsageModal, setShowUsageModal] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
 
   const isCollapsed = collapsed !== undefined ? collapsed : internalCollapsed
   const handleToggle = () => {
@@ -137,7 +142,14 @@ export default function Sidebar({
 
   const sections = isSystemUser ? adminSections : creatorSections
   const allItems = sections.flatMap((section) => section.items)
-  const mobileItems = allItems.slice(0, 6)
+  const mobilePrimaryKeys: Tab[] = isSystemUser
+    ? ['dashboard', 'crawl', 'contentItems', 'users', 'openaiUsage']
+    : ['dashboard', 'crawl', 'content', 'planning', 'generateVideo']
+  const mobileItems = mobilePrimaryKeys
+    .map((key) => allItems.find((item) => item.key === key))
+    .filter((item): item is NavItem => Boolean(item))
+  const mobileMoreItems = allItems.filter((item) => !mobilePrimaryKeys.includes(item.key))
+  const activeMobileMoreItem = mobileMoreItems.find((item) => item.key === activeTab)
   const displayName = userDisplayName(currentUser)
   const roleLabel = userRoleLabel(currentUser)
 
@@ -172,7 +184,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={handleToggle}
-            className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--outline-variant)] text-[#64748b] hover:bg-[#f4f6ff] transition-colors cursor-pointer"
+            className="grid h-8 w-8 place-items-center rounded-lg border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[#f4f6ff] transition-colors cursor-pointer"
             title={isCollapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
           >
             {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -183,6 +195,11 @@ export default function Sidebar({
           <div className="flex flex-col gap-0.5">
             {sections.map((section) => (
               <div key={section.title} className="mb-1">
+                {!isCollapsed && (
+                  <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                    {section.title}
+                  </div>
+                )}
                 <div className="flex flex-col gap-0.5">
                   {section.items.map((item) => (
                     <NavButton
@@ -201,34 +218,29 @@ export default function Sidebar({
 
         <div className="space-y-3 pt-3 border-t border-[var(--outline-variant)]">
           {!isCollapsed ? (
-            <div className="relative rounded-[10px] border border-[var(--outline-variant)] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-3 shadow-xs">
+            <div className="relative rounded-[10px] border border-[var(--outline-variant)] bg-white p-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-[#111827]">
-                  <span className="grid h-7 w-7 place-items-center rounded-full bg-[#eef4ff] text-[#2556ea]">
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--accent-light)] text-[var(--accent)]">
                     <Coins size={15} />
                   </span>
-                  Token hệ thống
+                  Mức sử dụng AI
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowUsageModal(!showUsageModal)}
-                  className="inline-flex items-center gap-1 rounded-[6px] bg-[#eef4ff] px-2 py-0.5 text-xs font-extrabold text-[#2556ea] transition hover:bg-[#e0eafe]"
-                  title="Xem hạch toán Token hệ thống & Chi phí"
+                  className="inline-flex items-center gap-1 rounded-[6px] bg-[var(--accent-light)] px-2 py-0.5 text-xs font-extrabold text-[var(--accent)] transition hover:bg-[var(--secondary-container)]"
+                  title="Xem mức sử dụng AI và chi phí"
                 >
                   <Cpu size={12} />
                   {aiUsage ? `${formatTokens(aiUsage.total_tokens)} Token` : 'Chi tiết'}
                 </button>
               </div>
 
-              <div className="mt-2 text-xs font-medium text-[#64748b]">
-                Dùng: <span className="font-extrabold text-[#111827]">{aiUsage ? formatTokens(aiUsage.total_tokens) : '72'} </span>
-              </div>
-
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e9edf5]">
-                <div
-                  className="h-full rounded-full bg-[linear-gradient(135deg,#6d5dfc,#2556ea)]"
-                  style={{ width: `${aiUsage ? Math.min(100, Math.max(5, (aiUsage.total_tokens / 200000) * 100)) : 36}%` }}
-                />
+              <div className="mt-2 text-xs font-medium text-[var(--on-surface-variant)]">
+                {aiUsage ? (
+                  <>Tổng token: <span className="font-semibold text-[#111827]">{formatTokens(aiUsage.total_tokens)}</span></>
+                ) : 'Đang tải số liệu sử dụng'}
               </div>
 
               {showUsageModal && aiUsage && (
@@ -236,12 +248,12 @@ export default function Sidebar({
                   <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-2">
                     <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#111827]">
                       <Coins size={14} className="text-amber-500" />
-                      Thống kê Token hệ thống
+                      Mức sử dụng AI
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowUsageModal(false)}
-                      className="grid h-6 w-6 place-items-center rounded-md text-[#64748b] hover:bg-[#f4f6ff]"
+                      className="grid h-6 w-6 place-items-center rounded-md text-[var(--on-surface-variant)] hover:bg-[#f4f6ff]"
                     >
                       <X size={14} />
                     </button>
@@ -261,8 +273,8 @@ export default function Sidebar({
               <button
                 type="button"
                 onClick={() => setShowUsageModal(!showUsageModal)}
-                className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--outline-variant)] bg-[#eef4ff] text-[#2556ea] hover:scale-105 transition-transform"
-                title={`Token hệ thống - ${aiUsage ? formatTokens(aiUsage.total_tokens) : '72'}/200K Token`}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-[var(--outline-variant)] bg-[var(--accent-light)] text-[var(--accent)] hover:scale-105 transition-transform"
+                title={aiUsage ? `Sử dụng ${formatTokens(aiUsage.total_tokens)} token` : 'Đang tải số liệu sử dụng AI'}
               >
                 <Coins size={17} />
               </button>
@@ -271,12 +283,12 @@ export default function Sidebar({
                   <div className="flex items-center justify-between border-b border-[#e5e7eb] pb-2">
                     <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#111827]">
                       <Coins size={14} className="text-amber-500" />
-                      Thống kê Token hệ thống
+                      Mức sử dụng AI
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowUsageModal(false)}
-                      className="grid h-6 w-6 place-items-center rounded-md text-[#64748b] hover:bg-[#f4f6ff]"
+                      className="grid h-6 w-6 place-items-center rounded-md text-[var(--on-surface-variant)] hover:bg-[#f4f6ff]"
                     >
                       <X size={14} />
                     </button>
@@ -298,20 +310,20 @@ export default function Sidebar({
               <button
                 type="button"
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex w-full items-center gap-2.5 rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2.5 shadow-xs text-left hover:bg-[#f1f5f9] transition-colors cursor-pointer"
+                className="flex w-full items-center gap-2.5 rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2.5 shadow-xs text-left hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
               >
                 <UserAvatar src={currentUser?.avatar_url ?? null} name={displayName} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-extrabold text-[#111827]">{displayName}</div>
-                  <div className="truncate text-xs font-medium text-[#64748b]">{roleLabel}</div>
+                  <div className="truncate text-xs font-medium text-[var(--on-surface-variant)]">{roleLabel}</div>
                 </div>
-                <ChevronDown size={15} className={cn("text-[#64748b] transition-transform duration-200", showUserMenu && "rotate-180")} />
+                <ChevronDown size={15} className={cn("text-[var(--on-surface-variant)] transition-transform duration-200", showUserMenu && "rotate-180")} />
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex w-full justify-center rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2 shadow-xs hover:bg-[#f1f5f9] transition-colors cursor-pointer"
+                className="flex w-full justify-center rounded-[10px] border border-[var(--outline-variant)] bg-[#f8fafc] p-2 shadow-xs hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
                 title={displayName}
               >
                 <UserAvatar src={currentUser?.avatar_url ?? null} name={displayName} size="md" />
@@ -329,9 +341,9 @@ export default function Sidebar({
                     setShowUserMenu(false)
                     onTabChange('profile')
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-xs font-bold text-[#1e293b] hover:bg-[#f1f5f9] transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-xs font-bold text-[#1e293b] hover:bg-[var(--surface-container)] transition-colors"
                 >
-                  <UserRound size={15} className="text-[#4f46e5]" />
+                  <UserRound size={15} className="text-[var(--accent)]" />
                   Xem profile
                 </button>
                 <button
@@ -339,9 +351,9 @@ export default function Sidebar({
                   onClick={() => {
                     setShowUserMenu(false)
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-xs font-bold text-[#1e293b] hover:bg-[#f1f5f9] transition-colors"
+                  className="flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-xs font-bold text-[#1e293b] hover:bg-[var(--surface-container)] transition-colors"
                 >
-                  <CircleHelp size={15} className="text-[#64748b]" />
+                  <CircleHelp size={15} className="text-[var(--on-surface-variant)]" />
                   Trợ giúp
                 </button>
                 {onLogout && (
@@ -363,17 +375,75 @@ export default function Sidebar({
         </div>
       </aside>
 
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex h-16 items-stretch gap-1 overflow-x-auto border-t border-[var(--outline-variant)] bg-white px-2 py-1.5 md:hidden">
+      <nav aria-label="Điều hướng chính" className="mobile-primary-nav fixed inset-x-0 bottom-0 z-50 flex items-stretch gap-1 border-t border-[var(--outline-variant)] bg-white px-2 py-1.5 md:hidden">
         {mobileItems.map((item) => (
           <button
             key={item.key}
             onClick={() => onTabChange(item.key)}
-            className={cn('flex min-w-[70px] flex-1 flex-col items-center justify-center gap-1 rounded-[8px] px-2 text-xs font-bold transition-colors', activeTab === item.key ? 'bg-[#f2f0ff] text-[#4f46e5]' : 'text-[#64748b]')}
+            aria-current={activeTab === item.key ? 'page' : undefined}
+            className={cn('flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[8px] px-1 text-[11px] font-semibold transition-colors', activeTab === item.key ? 'bg-[var(--accent-light)] text-[var(--accent)]' : 'text-[var(--on-surface-variant)]')}
           >
             {item.icon}
             <span className="max-w-full truncate">{item.label}</span>
           </button>
         ))}
+        <div className="relative min-w-0 flex-1">
+          {showMobileMenu && (
+            <div className="absolute right-0 bottom-full mb-2 max-h-[min(65vh,420px)] w-64 overflow-y-auto rounded-xl border border-[var(--outline-variant)] bg-white p-1.5 shadow-lg">
+              <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                {isSystemUser ? 'Quản trị hệ thống' : 'Không gian sáng tạo'}
+              </div>
+              {sections.map((section) => (
+                <div key={section.title}>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--on-surface-variant)]">
+                    {section.title}
+                  </div>
+                  {section.items.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setShowMobileMenu(false)
+                        onTabChange(item.key)
+                      }}
+                      aria-current={activeTab === item.key ? 'page' : undefined}
+                      className={cn(
+                        'flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm transition-colors',
+                        activeTab === item.key ? 'bg-[var(--accent-light)] font-semibold text-[var(--accent)]' : 'text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]'
+                      )}
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileMenu(false)
+                    onLogout()
+                  }}
+                  className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg border-t border-[var(--outline-variant)] px-3 pt-2 text-left text-sm text-rose-600"
+                >
+                  <LogOut size={17} />
+                  Đăng xuất
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            aria-expanded={showMobileMenu}
+            aria-label={showMobileMenu ? 'Đóng menu điều hướng' : 'Mở tất cả mục điều hướng'}
+            onClick={() => setShowMobileMenu((open) => !open)}
+            className={cn('flex h-full w-full flex-col items-center justify-center gap-1 rounded-[8px] px-1 text-[11px] font-semibold transition-colors', activeMobileMoreItem || showMobileMenu ? 'bg-[var(--accent-light)] text-[var(--accent)]' : 'text-[var(--on-surface-variant)]')}
+          >
+            {activeMobileMoreItem ? activeMobileMoreItem.icon : <MoreHorizontal size={18} />}
+            <span className="max-w-full truncate">{activeMobileMoreItem?.label ?? 'Thêm'}</span>
+          </button>
+        </div>
       </nav>
     </>
   )
@@ -398,18 +468,18 @@ function NavButton({
         'group relative m-0 flex h-[36px] w-full items-center rounded-lg transition-colors cursor-pointer select-none',
         isCollapsed ? 'justify-center px-0' : 'justify-between px-2.5',
         active
-          ? 'bg-[#eff4ff] text-[#2556ea] font-extrabold'
-          : 'text-[#475569] font-medium hover:bg-[#f8fafc] hover:text-[#0f172a]'
+          ? 'bg-[var(--accent-light)] text-[var(--accent)] font-extrabold'
+          : 'text-[var(--on-surface-variant)] font-medium hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]'
       )}
     >
       {active && !isCollapsed && (
-        <span className="absolute left-1 top-1/2 -translate-y-1/2 h-3.5 w-[3px] rounded-full bg-[#2556ea]" />
+        <span className="absolute left-1 top-1/2 -translate-y-1/2 h-3.5 w-[3px] rounded-full bg-[var(--accent)]" />
       )}
       <span className={cn('flex items-center gap-2.5', isCollapsed && 'justify-center')}>
         <span
           className={cn(
             'transition-colors duration-150',
-            active ? 'text-[#2556ea]' : 'text-[#64748b] group-hover:text-[#2556ea]'
+            active ? 'text-[var(--accent)]' : 'text-[var(--on-surface-variant)] group-hover:text-[var(--accent)]'
           )}
         >
           {item.icon}
@@ -420,14 +490,14 @@ function NavButton({
         <span
           className={cn(
             'grid h-5 min-w-[20px] place-items-center rounded-full px-1.5 text-xs font-extrabold transition-colors',
-            active ? 'bg-[#2556ea] text-white' : 'bg-[#f1f5f9] text-[#64748b] group-hover:bg-[#e2e8f0]'
+            active ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] group-hover:bg-[var(--surface-variant)]'
           )}
         >
           {item.badge}
         </span>
       )}
       {isCollapsed && item.badge !== undefined && (
-        <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-[#2556ea] ring-2 ring-white" />
+        <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-[var(--accent)] ring-2 ring-white" />
       )}
     </button>
   )

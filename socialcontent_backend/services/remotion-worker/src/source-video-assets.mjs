@@ -104,10 +104,9 @@ function unwrapMediaProxyUrl(value) {
 function refererFor(sourceUrl) {
   try {
     const hostname = new URL(sourceUrl).hostname.toLowerCase();
-    if (hostname.endsWith('vnecdn.net')) return 'https://vnexpress.net/';
     return `https://${hostname}/`;
   } catch {
-    return 'https://vnexpress.net/';
+    return '';
   }
 }
 

@@ -11,6 +11,10 @@ ENV_FILE = BACKEND_ROOT / ".env"
 class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/socialcontent"
+    database_pool_size: int = Field(default=5, ge=1, validation_alias=AliasChoices("DATABASE_POOL_SIZE"))
+    database_pool_max_overflow: int = Field(default=2, ge=0, validation_alias=AliasChoices("DATABASE_POOL_MAX_OVERFLOW"))
+    database_pool_timeout_seconds: int = Field(default=30, ge=1, validation_alias=AliasChoices("DATABASE_POOL_TIMEOUT_SECONDS"))
+    database_pool_recycle_seconds: int = Field(default=1800, ge=60, validation_alias=AliasChoices("DATABASE_POOL_RECYCLE_SECONDS"))
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db: str = "socialcontent"
     kafka_bootstrap_servers: str = "localhost:9092"

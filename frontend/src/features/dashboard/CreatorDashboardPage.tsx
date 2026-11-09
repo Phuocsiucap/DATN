@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Send,
   Sparkles,
-  WandSparkles,
 } from 'lucide-react'
 
 import {
@@ -58,14 +57,14 @@ export default function CreatorDashboardPage({ onNavigate, onOpenProject }: Crea
 
   return (
     <PageLayout
-      title="Không gian sáng tạo"
-      description="Nội dung, dự án video và lịch xuất bản thuộc tài khoản của bạn."
+      title="Tổng quan"
+      description="Công việc đang mở trên các kênh nội dung của bạn."
       actions={
         <button
           type="button"
           onClick={() => void refreshAll()}
           disabled={refreshing}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-3 text-sm font-medium text-[var(--on-surface)] transition hover:bg-[var(--surface-container-low)] disabled:opacity-50"
         >
           <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
           {refreshing ? 'Đang cập nhật' : 'Cập nhật'}
@@ -158,52 +157,42 @@ function useCreatorSection<T>(fetcher: () => Promise<T>): SectionState<T> {
 
 export function CreatorHero({ data, onNavigate }: { data: CreatorDashboardOverview; onNavigate: (tab: Tab) => void }) {
   return (
-    <section className="shrink-0 relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-700 px-6 py-7 text-white shadow-lg shadow-indigo-200/60 md:px-8">
-      <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-white/10 blur-2xl" />
-      <div className="absolute -bottom-20 left-1/3 h-48 w-48 rounded-full bg-cyan-300/10 blur-2xl" />
-      <div className="relative grid items-center gap-7 lg:grid-cols-[1.35fr_1fr]">
-        <div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/30 bg-white/20 px-3 py-1.5 text-[11px] font-extrabold tracking-wider text-white shadow-sm backdrop-blur-md">
-            <WandSparkles size={13} /> CREATOR WORKSPACE
-          </span>
-          <h2 className="mt-4 max-w-2xl text-2xl font-black tracking-tight md:text-3xl">Biến ý tưởng thành nội dung sẵn sàng xuất bản</h2>
-          <p className="mt-2 max-w-xl text-sm font-medium leading-6 text-indigo-100">
-            Tiếp tục dự án đang làm, duyệt nội dung và giữ lịch đăng của các kênh đi đúng nhịp.
+    <section className="shrink-0 overflow-hidden rounded-xl border border-[var(--outline-variant)] bg-white">
+      <div className="flex flex-col justify-between gap-5 p-5 md:flex-row md:items-center md:p-6">
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold text-[var(--on-surface-variant)]">BẮT ĐẦU TỪ ĐÂY</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-[var(--on-surface)]">Tiếp tục công việc đang mở</h2>
+          <p className="mt-1.5 text-sm leading-6 text-[var(--on-surface-variant)]">
+            Xem kế hoạch nội dung hoặc quay lại xưởng video để hoàn thành dự án.
           </p>
-          <div className="mt-5 flex flex-wrap gap-2.5">
-            <button type="button" onClick={() => onNavigate('planning')} className="inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-xs font-extrabold text-indigo-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-              <Sparkles size={15} /> Lên ý tưởng mới
-            </button>
-            <button type="button" onClick={() => onNavigate('generateVideo')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 text-xs font-extrabold text-white backdrop-blur-sm transition hover:bg-white/20">
-              <Clapperboard size={15} /> Mở xưởng video
-            </button>
-          </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <HeroMetric label="Kênh hoạt động" value={data.profiles.active} detail={`/ ${data.profiles.total} tổng số`} icon={<CircleUserRound size={18} />} />
-          <HeroMetric label="Dự án đang làm" value={data.projects.in_progress} detail={`/ ${data.projects.total} tổng số`} icon={<Clapperboard size={18} />} />
-          <HeroMetric label="Chờ xuất bản" value={data.publishing.scheduled} detail="Đã lên lịch" icon={<CalendarDays size={18} />} />
-          <HeroMetric label="Đã hoàn thành" value={data.publishing.published} detail="Đã đăng tải" icon={<CheckCircle2 size={18} />} />
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button type="button" onClick={() => onNavigate('planning')} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]">
+            <Sparkles size={16} /> Kế hoạch nội dung
+          </button>
+          <button type="button" onClick={() => onNavigate('generateVideo')} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--outline-variant)] bg-white px-4 text-sm font-medium text-[var(--on-surface)] transition hover:bg-[var(--surface-container-low)]">
+            <Clapperboard size={16} /> Xưởng video
+          </button>
         </div>
+      </div>
+      <div className="grid grid-cols-2 border-t border-[var(--outline-variant)] sm:grid-cols-4">
+        <HeroMetric label="Kênh hoạt động" value={data.profiles.active} detail={`/ ${data.profiles.total}`} />
+        <HeroMetric label="Dự án đang làm" value={data.projects.in_progress} detail={`/ ${data.projects.total}`} />
+        <HeroMetric label="Chờ xuất bản" value={data.publishing.scheduled} detail="đã lên lịch" />
+        <HeroMetric label="Đã đăng" value={data.publishing.published} detail="bài viết" />
       </div>
     </section>
   )
 }
 
-function HeroMetric({ label, value, detail, icon }: { label: string; value: number; detail: string; icon?: ReactNode }) {
+function HeroMetric({ label, value, detail }: { label: string; value: number; detail: string }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-3 backdrop-blur-md transition-all hover:bg-white/20">
-      <div className="flex items-center justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1 truncate">
-            <span className="text-xl font-black tabular-nums tracking-tight text-white">{value}</span>
-            <span className="truncate text-[10px] font-semibold text-indigo-200">{detail}</span>
-          </div>
-          <div className="mt-0.5 truncate text-[11px] font-bold text-white">{label}</div>
-        </div>
-        {icon && <div className="ml-2 shrink-0 rounded-lg bg-white/10 p-1.5 text-indigo-100 transition-transform group-hover:scale-110 group-hover:bg-white/20">{icon}</div>}
+    <div className="creator-hero-metric px-4 py-3 md:px-5">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-xl font-semibold tabular-nums text-[var(--on-surface)]">{value}</span>
+        <span className="text-xs text-[var(--on-surface-variant)]">{detail}</span>
       </div>
+      <div className="mt-1 text-xs font-medium text-[var(--on-surface-variant)]">{label}</div>
     </div>
   )
 }
@@ -213,24 +202,23 @@ export function CreatorActions({ data, onNavigate }: { data: CreatorDashboardOve
     <section className="shrink-0">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-black text-slate-900">Việc cần bạn xử lý</h2>
-          <p className="mt-0.5 text-xs font-medium text-slate-500">Ưu tiên theo quy trình sáng tạo của riêng bạn</p>
+          <h2 className="text-base font-semibold text-[var(--on-surface)]">Việc cần bạn xử lý</h2>
+          <p className="mt-1 text-sm text-[var(--on-surface-variant)]">Các bước đang chờ bạn tiếp tục.</p>
         </div>
-        <span className="text-[11px] font-semibold text-slate-400">Tự cập nhật mỗi 30 giây</span>
+        <span className="text-xs text-[var(--on-surface-variant)]">Cập nhật mỗi 30 giây</span>
       </div>
       <div className="grid gap-3.5 md:grid-cols-3">
-        <CreatorActionCard icon={<Sparkles size={19} />} value={data.recommendations_ready} title="Gợi ý chưa khai thác" description="Chọn nguồn phù hợp để bắt đầu một ý tưởng nội dung." action="Xem gợi ý" tone="violet" onClick={() => onNavigate('content')} />
-        <CreatorActionCard icon={<PlayCircle size={19} />} value={data.projects.in_progress} title="Dự án đang sản xuất" description="Tiếp tục draft, voice hoặc video còn dang dở." action="Tiếp tục sản xuất" tone="blue" onClick={() => onNavigate('generateVideo')} />
-        <CreatorActionCard icon={<FileCheck2 size={19} />} value={data.publishing.needs_approval} title="Video chờ bạn duyệt" description="Kiểm tra thành phẩm trước khi xếp lịch xuất bản." action="Mở danh sách duyệt" tone="amber" onClick={() => onNavigate('approvals')} />
+        <CreatorActionCard icon={<Sparkles size={19} />} value={data.recommendations_ready} title="Gợi ý chưa khai thác" description="Chọn nguồn phù hợp để bắt đầu một ý tưởng nội dung." action="Xem gợi ý" tone="primary" onClick={() => onNavigate('content')} />
+        <CreatorActionCard icon={<PlayCircle size={19} />} value={data.projects.in_progress} title="Dự án đang sản xuất" description="Tiếp tục kịch bản, giọng đọc hoặc video còn dang dở." action="Tiếp tục sản xuất" tone="primary" onClick={() => onNavigate('generateVideo')} />
+        <CreatorActionCard icon={<FileCheck2 size={19} />} value={data.publishing.needs_approval} title="Video chờ bạn duyệt" description="Kiểm tra thành phẩm trước khi xếp lịch xuất bản." action="Mở danh sách duyệt" tone="warning" onClick={() => onNavigate('approvals')} />
       </div>
     </section>
   )
 }
 
 const actionTones = {
-  violet: { icon: 'bg-violet-100 text-violet-700', value: 'text-violet-700', border: 'hover:border-violet-300', button: 'text-violet-700' },
-  blue: { icon: 'bg-blue-100 text-blue-700', value: 'text-blue-700', border: 'hover:border-blue-300', button: 'text-blue-700' },
-  amber: { icon: 'bg-amber-100 text-amber-700', value: 'text-amber-700', border: 'hover:border-amber-300', button: 'text-amber-700' },
+  primary: { icon: 'text-[var(--accent)]', value: 'text-[var(--accent)]', border: 'hover:border-[var(--outline)]', button: 'text-[var(--accent)]' },
+  warning: { icon: 'text-amber-700', value: 'text-amber-700', border: 'hover:border-amber-300', button: 'text-amber-700' },
 } as const
 
 function CreatorActionCard({ icon, value, title, description, action, tone, onClick }: {
@@ -244,16 +232,16 @@ function CreatorActionCard({ icon, value, title, description, action, tone, onCl
 }) {
   const colors = actionTones[tone]
   return (
-    <button type="button" onClick={onClick} className={cn('group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:shadow-md', colors.border)}>
+    <button type="button" onClick={onClick} className={cn('group rounded-xl border border-[var(--outline-variant)] bg-white p-4 text-left transition-colors', colors.border)}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', colors.icon)}>{icon}</span>
-          <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+          <span className={cn('flex h-8 w-8 items-center justify-center', colors.icon)}>{icon}</span>
+          <h3 className="text-sm font-semibold text-[var(--on-surface)]">{title}</h3>
         </div>
-        <span className={cn('text-2xl font-black tabular-nums', colors.value)}>{value}</span>
+        <span className={cn('text-2xl font-semibold tabular-nums', colors.value)}>{value}</span>
       </div>
-      <p className="mt-3 min-h-[2rem] text-xs font-medium leading-relaxed text-slate-500">{description}</p>
-      <span className={cn('mt-3 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider', colors.button)}>
+      <p className="mt-3 min-h-[2.5rem] text-sm leading-5 text-[var(--on-surface-variant)]">{description}</p>
+      <span className={cn('mt-3 flex items-center gap-1 text-sm font-semibold', colors.button)}>
         {action}<ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
       </span>
     </button>
@@ -262,14 +250,14 @@ function CreatorActionCard({ icon, value, title, description, action, tone, onCl
 
 export function RecentProjects({ data, onOpenProject, onNavigate }: { data: CreatorDashboardProjects; onOpenProject: (workflowId: string) => void; onNavigate: (tab: Tab) => void }) {
   return (
-    <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-        <div className="flex items-center gap-2.5"><span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 text-blue-700"><Layers3 size={17} /></span><div><h2 className="text-sm font-black text-slate-900">Dự án gần đây</h2><p className="mt-0.5 text-[11px] font-medium text-slate-500">Tiếp tục đúng nơi bạn đang dừng</p></div></div>
-        <button type="button" onClick={() => onNavigate('generateVideo')} className="text-xs font-extrabold text-blue-700 hover:text-blue-800">Xem tất cả</button>
+    <div className="h-full overflow-hidden rounded-xl border border-[var(--outline-variant)] bg-white">
+      <div className="flex items-center justify-between border-b border-[var(--outline-variant)] px-5 py-4">
+        <div className="flex items-center gap-3"><Layers3 size={18} className="text-[var(--accent)]" /><div><h2 className="text-sm font-semibold text-[var(--on-surface)]">Dự án gần đây</h2><p className="mt-0.5 text-xs text-[var(--on-surface-variant)]">Tiếp tục một dự án đang làm</p></div></div>
+        <button type="button" onClick={() => onNavigate('generateVideo')} className="text-sm font-medium text-[var(--accent)] hover:underline">Xem tất cả</button>
       </div>
 
       {data.recent_projects.length === 0 ? (
-        <div className="grid min-h-80 place-items-center p-8 text-center"><div><Clapperboard size={28} className="mx-auto text-slate-300" /><h3 className="mt-3 text-sm font-black text-slate-800">Chưa có dự án video</h3><p className="mt-1 text-xs text-slate-500">Bắt đầu từ một gợi ý nội dung phù hợp với kênh.</p></div></div>
+        <div className="grid min-h-64 place-items-center p-8 text-center"><div><Clapperboard size={26} className="mx-auto text-[var(--on-surface-variant)]" /><h3 className="mt-3 text-sm font-semibold text-[var(--on-surface)]">Chưa có dự án video</h3><p className="mt-1 text-sm text-[var(--on-surface-variant)]">Chọn một nội dung để bắt đầu sản xuất.</p><button type="button" onClick={() => onNavigate('content')} className="mt-4 text-sm font-semibold text-[var(--accent)] hover:underline">Mở kho nội dung</button></div></div>
       ) : (
         <div className="divide-y divide-slate-100">{data.recent_projects.map((project) => <ProjectRow key={project.id} project={project} onOpen={() => onOpenProject(project.id)} />)}</div>
       )}
@@ -280,44 +268,44 @@ export function RecentProjects({ data, onOpenProject, onNavigate }: { data: Crea
 function ProjectRow({ project, onOpen }: { project: CreatorDashboardProject; onOpen: () => void }) {
   const progress = Math.min(100, Math.max(0, Number(project.progress_percent || 0)))
   return (
-    <button type="button" onClick={onOpen} className="group flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-blue-50/40">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-700"><Clapperboard size={16} /></span>
+    <button type="button" onClick={onOpen} className="group flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[var(--surface-container-low)]">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--surface-container-low)] text-[var(--on-surface-variant)] group-hover:text-[var(--accent)]"><Clapperboard size={16} /></span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between gap-3"><span className="truncate text-xs font-black text-slate-900">{project.title}</span><span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold text-slate-600">{projectStatusLabel(project.status)}</span></span>
-        <span className="mt-1.5 flex items-center gap-2"><span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500" style={{ width: `${progress}%` }} /></span><span className="w-8 text-right text-[10px] font-bold tabular-nums text-slate-500">{Math.round(progress)}%</span></span>
-        <span className="mt-1.5 flex items-center gap-2 text-[10px] font-medium text-slate-400"><CircleUserRound size={11} />{project.profile_name}<span>·</span>{formatRelativeTime(project.updated_at)}</span>
+        <span className="flex items-center justify-between gap-3"><span className="truncate text-sm font-medium text-[var(--on-surface)]">{project.title}</span><span className="shrink-0 rounded-md bg-[var(--surface-container)] px-2 py-0.5 text-xs font-medium text-[var(--on-surface-variant)]">{projectStatusLabel(project.status)}</span></span>
+        <span className="mt-2 flex items-center gap-2"><span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-container)]"><span className="block h-full rounded-full bg-[var(--accent)]" style={{ width: `${progress}%` }} /></span><span className="w-9 text-right text-xs tabular-nums text-[var(--on-surface-variant)]">{Math.round(progress)}%</span></span>
+        <span className="mt-1.5 flex items-center gap-2 text-xs text-[var(--on-surface-variant)]"><CircleUserRound size={12} />{project.profile_name}<span>·</span>{formatRelativeTime(project.updated_at)}</span>
       </span>
-      <ArrowRight size={15} className="shrink-0 text-slate-300 transition group-hover:translate-x-1 group-hover:text-blue-600" />
+      <ArrowRight size={15} className="shrink-0 text-slate-300 transition-colors group-hover:text-[var(--accent)]" />
     </button>
   )
 }
 
 export function PublishingJourney({ data, onNavigate }: { data: CreatorDashboardPublishing; onNavigate: (tab: Tab) => void }) {
   const rows = [
-    { key: 'needs_approval', label: 'Chờ duyệt', icon: <FileCheck2 size={14} />, color: 'bg-amber-500' },
-    { key: 'approved', label: 'Đã duyệt', icon: <CheckCircle2 size={14} />, color: 'bg-blue-500' },
-    { key: 'queued', label: 'Đã xếp lịch', icon: <CalendarDays size={14} />, color: 'bg-violet-500' },
-    { key: 'publishing', label: 'Đang đăng', icon: <Send size={14} />, color: 'bg-cyan-500' },
+    { key: 'needs_approval', label: 'Chờ duyệt', icon: <FileCheck2 size={14} />, color: 'bg-amber-600' },
+    { key: 'approved', label: 'Đã duyệt', icon: <CheckCircle2 size={14} />, color: 'bg-[var(--accent)]' },
+    { key: 'queued', label: 'Đã xếp lịch', icon: <CalendarDays size={14} />, color: 'bg-[var(--accent)]' },
+    { key: 'publishing', label: 'Đang đăng', icon: <Send size={14} />, color: 'bg-[var(--accent)]' },
     { key: 'published', label: 'Đã đăng', icon: <CheckCircle2 size={14} />, color: 'bg-emerald-500' },
     { key: 'failed', label: 'Cần xử lý lỗi', icon: <AlertTriangle size={14} />, color: 'bg-rose-500' },
   ]
   const max = Math.max(1, ...rows.map((row) => Number(data.status_counts[row.key] || 0)))
 
   return (
-    <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
-      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-2.5"><span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-700"><Send size={17} /></span><div><h2 className="text-sm font-black text-slate-900">Hành trình xuất bản</h2><p className="mt-0.5 text-[11px] font-medium text-slate-500">Chỉ nội dung trên các kênh của bạn</p></div></div><button type="button" onClick={() => onNavigate('schedule')} className="text-xs font-extrabold text-violet-700">Mở lịch</button></div>
-      <div className="space-y-3.5 p-5">
+    <div className="h-full overflow-hidden rounded-xl border border-[var(--outline-variant)] bg-white">
+      <div className="flex items-center justify-between border-b border-[var(--outline-variant)] px-5 py-4"><div className="flex items-center gap-3"><Send size={18} className="text-[var(--accent)]" /><div><h2 className="text-sm font-semibold text-[var(--on-surface)]">Hành trình xuất bản</h2><p className="mt-0.5 text-xs text-[var(--on-surface-variant)]">Trạng thái nội dung của bạn</p></div></div><button type="button" onClick={() => onNavigate('schedule')} className="text-sm font-medium text-[var(--accent)] hover:underline">Mở lịch</button></div>
+      <div className="space-y-4 p-5">
         {rows.map((row) => {
           const value = Number(data.status_counts[row.key] || 0)
-          return <div key={row.key}><div className="mb-1.5 flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 font-bold text-slate-600">{row.icon}{row.label}</span><span className="font-black tabular-nums text-slate-900">{value}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={cn('h-full rounded-full transition-all', row.color)} style={{ width: `${Math.max(value > 0 ? 8 : 0, (value / max) * 100)}%` }} /></div></div>
+          return <div key={row.key}><div className="mb-1.5 flex items-center justify-between text-sm"><span className="flex items-center gap-2 text-[var(--on-surface-variant)]">{row.icon}{row.label}</span><span className="font-semibold tabular-nums text-[var(--on-surface)]">{value}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-container)]"><div className={cn('h-full rounded-full transition-all', row.color)} style={{ width: `${Math.max(value > 0 ? 8 : 0, (value / max) * 100)}%` }} /></div></div>
         })}
       </div>
-      <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-4">
-        <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-black text-slate-800">Sắp tới</h3><Clock3 size={14} className="text-slate-400" /></div>
+      <div className="border-t border-[var(--outline-variant)] bg-[var(--surface-container-low)] px-5 py-4">
+        <div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold text-[var(--on-surface)]">Sắp tới</h3><Clock3 size={15} className="text-[var(--on-surface-variant)]" /></div>
         {data.upcoming.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-[11px] font-medium text-slate-500">Chưa có bài nào được xếp lịch.</p>
+          <p className="rounded-lg border border-dashed border-[var(--outline)] bg-white px-3 py-4 text-center text-sm text-[var(--on-surface-variant)]">Chưa có bài nào được xếp lịch.</p>
         ) : (
-          <div className="space-y-2">{data.upcoming.slice(0, 3).map((item) => <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white p-2.5"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-700"><CalendarDays size={14} /></span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-extrabold text-slate-800">{item.title}</span><span className="mt-0.5 block truncate text-[10px] font-medium text-slate-400">{item.profile_name} · {formatDateTime(item.scheduled_at)}</span></span></div>)}</div>
+          <div className="space-y-2">{data.upcoming.slice(0, 3).map((item) => <div key={item.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--outline-variant)] bg-white p-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[var(--accent-light)] text-[var(--accent)]"><CalendarDays size={15} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-[var(--on-surface)]">{item.title}</span><span className="mt-0.5 block truncate text-xs text-[var(--on-surface-variant)]">{item.profile_name} · {formatDateTime(item.scheduled_at)}</span></span></div>)}</div>
         )}
       </div>
     </div>
@@ -325,15 +313,15 @@ export function PublishingJourney({ data, onNavigate }: { data: CreatorDashboard
 }
 
 function CreatorHeroSkeleton() {
-  return <div data-testid="creator-hero-skeleton" className="h-72 animate-pulse rounded-3xl bg-indigo-200/70 md:h-64" />
+  return <div data-testid="creator-hero-skeleton" className="h-64 animate-pulse rounded-xl border border-[var(--outline-variant)] bg-white md:h-56" />
 }
 
 function CreatorActionsSkeleton() {
-  return <section data-testid="creator-actions-skeleton"><div className="mb-3 h-9 w-56 animate-pulse rounded-lg bg-slate-200" /><div className="grid gap-3.5 md:grid-cols-3">{[0, 1, 2].map((item) => <div key={item} className="h-48 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />)}</div></section>
+  return <section data-testid="creator-actions-skeleton"><div className="mb-3 h-9 w-56 animate-pulse rounded-lg bg-[var(--surface-container)]" /><div className="grid gap-3.5 md:grid-cols-3">{[0, 1, 2].map((item) => <div key={item} className="h-44 animate-pulse rounded-xl border border-[var(--outline-variant)] bg-white" />)}</div></section>
 }
 
 function CreatorPanelSkeleton({ rows, testId }: { rows: number; testId: string }) {
-  return <div data-testid={testId} className="min-h-96 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs"><div className="h-10 w-48 animate-pulse rounded-lg bg-slate-200" /><div className="mt-5 space-y-4">{Array.from({ length: rows }, (_, item) => <div key={item} className="h-10 animate-pulse rounded-xl bg-slate-100" />)}</div></div>
+  return <div data-testid={testId} className="min-h-96 rounded-xl border border-[var(--outline-variant)] bg-white p-5"><div className="h-10 w-48 animate-pulse rounded-lg bg-[var(--surface-container)]" /><div className="mt-5 space-y-4">{Array.from({ length: rows }, (_, item) => <div key={item} className="h-10 animate-pulse rounded-lg bg-[var(--surface-container-low)]" />)}</div></div>
 }
 
 function CreatorSectionError({ title, detail, className }: { title: string; detail: string; className?: string }) {

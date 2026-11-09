@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.services.social_profiles import SocialProfileService
-from common.db.models import SocialPost, SocialPostMetric, SocialProfile, SocialProfileSnapshot, User
+from app.services.analytics import (
+    daily_view_deltas as _daily_view_deltas,
+    latest_metrics_by_post as _latest_metrics_by_post,
+    latest_profile_snapshots_by_day,
+)
+from common.db.models import SocialPost, SocialProfile, User
 from common.db.session import get_db
 
 router = APIRouter()
@@ -49,107 +54,6 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _empty_daily_views(date_key: str) -> dict:
-    return {"date": date_key, "views": 0, "avg_views": 0, "videos": 0}
-
-
-def _period_day_keys(start: datetime | None, end: datetime | None) -> list[str]:
-    if start is None or end is None:
-        return []
-    keys: list[str] = []
-    cursor = start.date()
-    while cursor < end.date():
-        keys.append(cursor.isoformat())
-        cursor += timedelta(days=1)
-    return keys
-
-
-def _daily_view_deltas(
-    db: Session,
-    profile_id: uuid.UUID,
-    start: datetime | None,
-    end: datetime | None,
-) -> list[dict]:
-    by_day: dict[str, dict] = {key: _empty_daily_views(key) for key in _period_day_keys(start, end)}
-
-    metrics_query = (
-        db.query(SocialPostMetric)
-        .join(SocialPost, SocialPost.id == SocialPostMetric.post_id)
-        .filter(SocialPost.profile_id == profile_id)
-    )
-    if end is not None:
-        metrics_query = metrics_query.filter(SocialPostMetric.captured_at < end)
-    metrics = metrics_query.order_by(SocialPostMetric.post_id.asc(), SocialPostMetric.captured_at.asc()).all()
-
-    metrics_by_post: dict[uuid.UUID, list[SocialPostMetric]] = {}
-    all_days: set[date] = set()
-    if start is not None and end is not None:
-        cursor = start.date()
-        while cursor < end.date():
-            all_days.add(cursor)
-            cursor += timedelta(days=1)
-
-    for metric in metrics:
-        captured_at = _aware_utc(metric.captured_at)
-        metrics_by_post.setdefault(metric.post_id, []).append(metric)
-        if start is not None and captured_at < start:
-            continue
-        all_days.add(captured_at.date())
-
-    def latest_metric_before(post_metrics: list[SocialPostMetric], cutoff: datetime) -> SocialPostMetric | None:
-        latest = None
-        for metric in post_metrics:
-            if _aware_utc(metric.captured_at) < cutoff:
-                latest = metric
-            else:
-                break
-        return latest
-
-    for day in sorted(all_days):
-        day_start = datetime.combine(day, time.min, tzinfo=timezone.utc)
-        next_day_start = day_start + timedelta(days=1)
-        if start is not None and day_start < start:
-            continue
-        if end is not None and day_start >= end:
-            continue
-
-        day_key = day.isoformat()
-        if day_key not in by_day:
-            by_day[day_key] = _empty_daily_views(day_key)
-
-        current_total = 0
-        previous_total = 0
-        changed_posts = 0
-        for post_metrics in metrics_by_post.values():
-            current = latest_metric_before(post_metrics, next_day_start)
-            previous = latest_metric_before(post_metrics, day_start)
-            if current is None:
-                continue
-            current_views = int(current.views or 0)
-            previous_views = int(previous.views or 0) if previous else 0
-            current_total += current_views
-            previous_total += previous_views
-            if current_views > previous_views:
-                changed_posts += 1
-
-        item = by_day[day_key]
-        item["views"] = max(current_total - previous_total, 0)
-        item["videos"] = changed_posts
-        item["avg_views"] = round(item["views"] / item["videos"]) if item["videos"] else 0
-
-    return [by_day[key] for key in sorted(by_day)]
-
-
-def _latest_snapshots_by_day(snapshots: list[SocialProfileSnapshot]) -> list[SocialProfileSnapshot]:
-    latest_by_day: dict[date, SocialProfileSnapshot] = {}
-    for snapshot in snapshots:
-        day = _aware_utc(snapshot.captured_at).date()
-        current = latest_by_day.get(day)
-        if current is None or _aware_utc(snapshot.captured_at) >= _aware_utc(current.captured_at):
-            latest_by_day[day] = snapshot
-    return [latest_by_day[key] for key in sorted(latest_by_day)]
-
-
 def _owned_profile(db: Session, service: SocialProfileService, profile_id: uuid.UUID, user: User) -> SocialProfile:
     return service.get_owned_profile(db, profile_id, user)
 
@@ -168,21 +72,6 @@ def _owned_post(db: Session, service: SocialProfileService, post_id: uuid.UUID, 
 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy bài đăng")
     return post
-
-
-def _latest_metrics_by_post(db: Session, post_ids: list[uuid.UUID]) -> dict[uuid.UUID, SocialPostMetric]:
-    latest_by_post: dict[uuid.UUID, SocialPostMetric] = {}
-    if not post_ids:
-        return latest_by_post
-    metrics = (
-        db.query(SocialPostMetric)
-        .filter(SocialPostMetric.post_id.in_(post_ids))
-        .order_by(SocialPostMetric.post_id.asc(), SocialPostMetric.captured_at.asc())
-        .all()
-    )
-    for metric in metrics:
-        latest_by_post[metric.post_id] = metric
-    return latest_by_post
 
 
 @router.get("/account/overview")
@@ -273,25 +162,14 @@ def account_charts(
             
     posts_by_day = [posts_by_day_dict[key] for key in sorted(posts_by_day_dict)]
 
-    snapshots_query = db.query(SocialProfileSnapshot).filter(SocialProfileSnapshot.profile_id == profile.id)
-    snapshots = _apply_period(snapshots_query, SocialProfileSnapshot.captured_at, start, end).order_by(SocialProfileSnapshot.captured_at.asc()).all()
-    daily_snapshots = _latest_snapshots_by_day(snapshots)
+    daily_snapshots = latest_profile_snapshots_by_day(db, profile.id, start, end)
 
     return {
         "profile_id": str(profile.id),
         "granularity": granularity,
         "views_by_day": views_by_day,
         "posts_by_day": posts_by_day,
-        "account_snapshots": [
-            {
-                "date": snapshot.captured_at.date().isoformat(),
-                "followers": snapshot.follower_count,
-                "following": snapshot.following_count,
-                "likes": snapshot.likes_count,
-                "videos": snapshot.video_count,
-            }
-            for snapshot in daily_snapshots
-        ],
+        "account_snapshots": daily_snapshots,
         "content_mix": [
             {"name": "Video ngắn", "value": len(posts), "color": "#2556ea"},
             {"name": "Series", "value": 0, "color": "#16a34a"},

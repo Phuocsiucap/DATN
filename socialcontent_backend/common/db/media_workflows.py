@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -20,7 +21,20 @@ DEFAULT_STORY_IMAGES = [
 DEFAULT_STORY_EFFECTS = ["slow-zoom", "pan-right", "pan-left", "push-in"]
 
 
-def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> dict[str, Any]:
+def content_source_type(content: ContentItem | None) -> str:
+    if not content:
+        return ""
+    sources = content.sources_jsonb if isinstance(content.sources_jsonb, list) else []
+    primary = sources[0] if sources and isinstance(sources[0], dict) else {}
+    return str(primary.get("source_type") or "").upper()
+
+
+def serialize_workflow(
+    workflow: MediaWorkflow,
+    db: Session | None = None,
+    *,
+    source_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     artifacts = workflow.artifacts_jsonb if isinstance(workflow.artifacts_jsonb, list) else []
     final_artifact = next(
         (
@@ -33,7 +47,11 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
         None,
     )
 
-    source_context = _workflow_source_context(workflow, db) if db else {"source_content": None, "media": [], "images": []}
+    source_context = source_context or (
+        _workflow_source_context(workflow, db)
+        if db
+        else {"source_content": None, "media": [], "images": []}
+    )
     draft_json = _normalized_workflow_draft_json(workflow)
     metadata = workflow.metadata_json or {}
     raw_meta = workflow.metadata_json or {}
@@ -87,6 +105,111 @@ def serialize_workflow(workflow: MediaWorkflow, db: Session | None = None) -> di
     }
 
 
+def serialize_workflows(workflows: list[MediaWorkflow], db: Session) -> list[dict[str, Any]]:
+    if not workflows:
+        return []
+
+    references_by_workflow: dict[Any, list[tuple[str, Any]]] = {}
+    story_ids: set[Any] = set()
+    direct_content_ids: set[Any] = set()
+
+    for workflow in workflows:
+        references: list[tuple[str, Any]] = []
+
+        def add_reference(kind: str, value: Any) -> None:
+            if not value:
+                return
+            try:
+                normalized_id = value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+            except (TypeError, ValueError, AttributeError):
+                return
+            reference = (kind, normalized_id)
+            if reference in references:
+                return
+            references.append(reference)
+            if kind == "story":
+                story_ids.add(normalized_id)
+            else:
+                direct_content_ids.add(normalized_id)
+
+        add_reference("content", workflow.primary_content_id)
+
+        if isinstance(workflow.inputs_jsonb, list):
+            for item in workflow.inputs_jsonb:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "content":
+                    add_reference("content", item.get("id"))
+                elif item.get("type") == "story":
+                    add_reference("story", item.get("id"))
+
+        draft = _workflow_draft_json(workflow)
+        for scene in (draft.get("story_data") or draft.get("scenes") or []):
+            if not isinstance(scene, dict):
+                continue
+            for source_ref in _source_refs_from_payload(scene):
+                if not isinstance(source_ref, dict):
+                    continue
+                add_reference("content", source_ref.get("content_id"))
+                add_reference("story", source_ref.get("story_id"))
+
+        references_by_workflow[workflow.id] = references
+
+    stories_by_id = {}
+    if story_ids:
+        stories_by_id = {
+            str(story.id): story
+            for story in db.query(Story).filter(Story.id.in_(story_ids)).all()
+        }
+
+    all_content_ids = set(direct_content_ids)
+    all_content_ids.update(
+        story.content_id
+        for story in stories_by_id.values()
+        if story.content_id
+    )
+    contents_by_id = {}
+    if all_content_ids:
+        contents_by_id = {
+            str(content.id): content
+            for content in db.query(ContentItem).filter(ContentItem.id.in_(all_content_ids)).all()
+        }
+
+    source_contexts: dict[Any, dict[str, Any]] = {}
+    serialized = []
+    for workflow in workflows:
+        content_ids: list[Any] = []
+        for kind, reference_id in references_by_workflow[workflow.id]:
+            content_id = reference_id
+            if kind == "story":
+                story = stories_by_id.get(str(reference_id))
+                content_id = story.content_id if story else None
+            if content_id and all(str(existing_id) != str(content_id) for existing_id in content_ids):
+                content_ids.append(content_id)
+
+        contents = [
+            contents_by_id[str(content_id)]
+            for content_id in content_ids
+            if str(content_id) in contents_by_id
+        ]
+        primary = _primary_workflow_content(workflow, contents)
+        context = {"source_content": None, "media": [], "images": []}
+        if primary:
+            context = source_contexts.get(primary.id)
+            if context is None:
+                media = primary.media_jsonb if isinstance(primary.media_jsonb, list) else []
+                context = {
+                    "source_content": _serialize_source_content(primary),
+                    "media": media,
+                    "images": _image_urls(media),
+                }
+                source_contexts[primary.id] = context
+
+        serialized.append(serialize_workflow(workflow, source_context=context))
+
+    return serialized
+
+
 def _workflow_source_context(workflow: MediaWorkflow, db: Session) -> dict[str, Any]:
     content_ids = _workflow_content_ids(workflow, db)
     if not content_ids:
@@ -106,17 +229,25 @@ def _workflow_source_context(workflow: MediaWorkflow, db: Session) -> dict[str, 
 
 def _workflow_content_ids(workflow: MediaWorkflow, db: Session) -> list[Any]:
     ids: list[Any] = []
+    story_ids: set[uuid.UUID] = set()
 
     def add(value: Any) -> None:
-        if value and value not in ids:
-            ids.append(value)
+        if not value:
+            return
+        try:
+            normalized_id = value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+        except (TypeError, ValueError, AttributeError):
+            return
+        if normalized_id not in ids:
+            ids.append(normalized_id)
 
     def add_story(story_id: Any) -> None:
         if not story_id:
             return
-        story = db.get(Story, story_id)
-        if story and getattr(story, "content_id", None):
-            add(story.content_id)
+        try:
+            story_ids.add(story_id if isinstance(story_id, uuid.UUID) else uuid.UUID(str(story_id)))
+        except (TypeError, ValueError, AttributeError):
+            return
 
     add(workflow.primary_content_id)
 
@@ -137,6 +268,10 @@ def _workflow_content_ids(workflow: MediaWorkflow, db: Session) -> list[Any]:
             add(ref.get("content_id"))
             add_story(ref.get("story_id"))
 
+    if story_ids:
+        stories = db.query(Story).filter(Story.id.in_(story_ids)).all()
+        for story in stories:
+            add(story.content_id)
     return ids
 
 

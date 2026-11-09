@@ -355,8 +355,6 @@ class CanonicalWriter:
         db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
     def _should_group_as_story(self, source_type: str | None, normalized: dict) -> bool:
-        if (source_type or "").upper() == "VNEXPRESS":
-            return False
         if (source_type or "").upper() == "BILIBILI":
             return True
         return bool(

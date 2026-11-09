@@ -137,9 +137,7 @@ class CrawlJob(Base):
 class CrawlSourceConfig(Base):
     """Standalone shared source configuration, independent of any specific CrawlJob.
 
-    Allows sources to be reused across multiple crawl jobs.  VNExpress RSS feeds
-    that already exist in the system are simply represented with
-    source_type = 'VNEXPRESS'.
+    Allows sources to be reused across multiple crawl jobs.
     """
 
     __tablename__ = "crawl_source_configs"

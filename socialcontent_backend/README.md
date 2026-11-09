@@ -71,32 +71,6 @@ Two flows are supported:
 - Pending flow: start QR first, create `social_profiles` only after TikTok auth succeeds.
 - Existing profile flow: start QR against an existing TikTok profile and update status from `qr_pending` to `active` after auth.
 
-## VNExpress Crawl Config
-
-Use `source_type: "VNEXPRESS"` in a crawl job source.
-
-```json
-{
-  "source_type": "VNEXPRESS",
-  "keywords": ["thời sự", "kinh doanh"],
-  "configuration": {
-    "max_items": 10,
-    "exclude_keywords": ["bóng đá"],
-    "timeout_seconds": 20
-  }
-}
-```
-
-The crawler discovers links from a direct article URL or RSS/category RSS, then parses article detail HTML and writes normalized processed documents directly.
-
-The VNExpress pipeline now records:
-
-- Per-step `crawl_logs` for discovery, crawling, normalization, grouping, skipped URLs, and terminal job status.
-- Terminal job status through the pipeline: `SUCCEEDED`, `PARTIAL_SUCCESS`, or `FAILED`.
-- Retry with bounded backoff using source `configuration.max_attempts` and `configuration.retry_backoff_seconds`.
-- Dead-letter events on permanent crawler/normalization failures.
-- Article metadata: description, author, published_at, category, tags, HTTP status/headers/timing, article_id, category_id, site_id, images, videos.
-
 ## Bilibili Metadata Crawl Config
 
 Use `source_type: "BILIBILI"` when the job should crawl Bilibili video/series metadata.

@@ -1,11 +1,31 @@
 """Normalize historical planning JSON into a compact, non-mutating read model."""
 
 from collections import Counter
+import html
 from math import isfinite
 from typing import Any
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload
 
 from app.schemas.planning_run_detail import CandidateDetail, PlanningRunCompactResponse, PlanningRunDetailResponse
+from app.schemas.planning_run_detail import PlanningCandidateDiagnosticsResponse
+from app.services.planning_candidate_review import owned_candidate
+from common.db.media_workflows import _load_content_full_text
+from common.db.models import (
+    ContentItem,
+    ContentSeries,
+    CrawlJob,
+    MediaWorkflow,
+    PlanningCandidate,
+    PlanningRun,
+    SocialProfile,
+    User,
+)
 from common.planning.candidate_review import candidate_decision, review_state
+from common.planning.candidate_review import content_available_to_profile
 
 REASON_CODE_LABELS: dict[str, str] = {
     "HIGH_CONFIDENCE_MATCH": "Bài phù hợp rõ ràng với chủ đề kênh, đủ dữ kiện và chất lượng để sản xuất tự động.",
@@ -25,6 +45,7 @@ REASON_CODE_LABELS: dict[str, str] = {
     "HUMAN_REJECTED": "Người dùng đã quyết định không sản xuất bài này.",
     "MISSING_REQUIRED_VIDEO": "Bài nguồn thiếu video bắt buộc theo cấu hình kênh.",
 }
+TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "WAITING_REVIEW"}
 
 
 def as_dict(value: Any) -> dict:
@@ -316,3 +337,242 @@ def compact_planning_run_detail(detail: PlanningRunDetailResponse) -> PlanningRu
         **detail.model_dump(exclude={"schema_version", "topics", "candidates"}),
         "candidates": candidates,
     })
+
+
+def list_planning_runs(
+    db: Session,
+    user: User,
+    *,
+    profile_id,
+    run_status: str | None,
+    limit: int,
+    offset: int,
+) -> dict:
+    filters = []
+    if not user.is_system_admin:
+        filters.append(SocialProfile.user_id == user.id)
+    if profile_id:
+        filters.append(PlanningRun.profile_id == profile_id)
+    if run_status:
+        filters.append(PlanningRun.status == run_status.strip().upper())
+
+    total = (
+        db.query(PlanningRun.id)
+        .join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+        .filter(*filters)
+        .count()
+    )
+    rows = (
+        db.query(
+            PlanningRun.id,
+            PlanningRun.profile_id,
+            PlanningRun.crawl_job_id,
+            PlanningRun.planning_mode,
+            PlanningRun.status,
+            PlanningRun.output_jsonb,
+            PlanningRun.reason_jsonb,
+            PlanningRun.metadata_json,
+            PlanningRun.started_at,
+            PlanningRun.completed_at,
+            PlanningRun.created_at,
+            PlanningRun.updated_at,
+            SocialProfile.profile_name,
+            SocialProfile.username.label("profile_username"),
+            SocialProfile.platform.label("profile_platform"),
+            SocialProfile.avatar_url.label("profile_avatar_url"),
+            CrawlJob.name.label("crawl_job_name"),
+        )
+        .join(SocialProfile, SocialProfile.id == PlanningRun.profile_id)
+        .outerjoin(CrawlJob, CrawlJob.id == PlanningRun.crawl_job_id)
+        .filter(*filters)
+        .order_by(PlanningRun.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    counts = _candidate_counts(db, [row.id for row in rows])
+    return {
+        "items": [_serialize_run_summary(row, counts.get(row.id, {})) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_owned_planning_run(db: Session, run_id, user: User):
+    query = db.query(PlanningRun).options(joinedload(PlanningRun.profile)).join(
+        SocialProfile, SocialProfile.id == PlanningRun.profile_id
+    )
+    if not user.is_system_admin:
+        query = query.filter(SocialProfile.user_id == user.id)
+    run = query.filter(PlanningRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Planning run not found")
+    return run
+
+
+def _candidate_rows(db: Session, run, candidate_id=None):
+    filters = [PlanningCandidate.planning_run_id == run.id]
+    if candidate_id:
+        filters.append(PlanningCandidate.id == candidate_id)
+    return (
+        db.query(
+            PlanningCandidate.id,
+            PlanningCandidate.content_id,
+            PlanningCandidate.rank_order,
+            PlanningCandidate.score,
+            PlanningCandidate.selected,
+            PlanningCandidate.eligible,
+            PlanningCandidate.reason_jsonb,
+            PlanningCandidate.metadata_json,
+            ContentItem.canonical_title,
+            ContentItem.summary,
+        )
+        .outerjoin(ContentItem, ContentItem.id == PlanningCandidate.content_id)
+        .filter(*filters)
+        .order_by(PlanningCandidate.rank_order.asc().nullslast(), PlanningCandidate.created_at.asc())
+        .all()
+    )
+
+
+def _workflow_rows(db: Session, run, candidates):
+    output = as_dict(run.output_jsonb)
+    workflow_ids = {str(value) for value in (output.get("workflows_created") or []) if value}
+    candidate_ids = [row.id for row in candidates]
+    for row in candidates:
+        decision_workflow_id = stored_decision(row, output).get("workflow_id")
+        if decision_workflow_id:
+            workflow_ids.add(str(decision_workflow_id))
+    ids = [_uuid_or_none(value) for value in workflow_ids]
+    ids = [value for value in ids if value]
+    if not ids and not candidate_ids:
+        return []
+    return (
+        db.query(
+            MediaWorkflow.id,
+            MediaWorkflow.title,
+            MediaWorkflow.primary_content_id,
+            MediaWorkflow.status,
+            MediaWorkflow.current_stage,
+            MediaWorkflow.updated_at,
+            MediaWorkflow.series_id,
+            MediaWorkflow.planning_candidate_id,
+            MediaWorkflow.metadata_json,
+            ContentSeries.title.label("series_title"),
+        )
+        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+        .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
+        .filter(
+            or_(MediaWorkflow.id.in_(ids), MediaWorkflow.planning_candidate_id.in_(candidate_ids)),
+            SocialProfile.user_id == run.profile.user_id,
+            MediaWorkflow.profile_id == run.profile_id,
+        )
+        .order_by(MediaWorkflow.created_at, MediaWorkflow.id)
+        .all()
+    )
+
+
+def get_planning_run_detail(db: Session, run_id, user: User, *, diagnostic: bool = False):
+    run = get_owned_planning_run(db, run_id, user)
+    profile = db.query(SocialProfile.id, SocialProfile.profile_name).filter(SocialProfile.id == run.profile_id).first()
+    crawl_job = db.query(CrawlJob.id, CrawlJob.name).filter(CrawlJob.id == run.crawl_job_id).first() if run.crawl_job_id else None
+    candidates = _candidate_rows(db, run)
+    workflows = _workflow_rows(db, run, candidates)
+    detail = build_planning_run_detail(run, profile, crawl_job, candidates, workflows)
+    return detail if diagnostic else compact_planning_run_detail(detail)
+
+
+def get_planning_candidate_diagnostics(db: Session, run_id, candidate_id, user: User):
+    run = get_owned_planning_run(db, run_id, user)
+    candidates = _candidate_rows(db, run, candidate_id)
+    if not candidates:
+        raise HTTPException(status_code=404, detail="Planning candidate not found")
+    workflows = _workflow_rows(db, run, candidates)
+    detail = build_planning_run_detail(run, None, None, candidates, workflows)
+    candidate = detail.candidates[0]
+    return PlanningCandidateDiagnosticsResponse(
+        run_id=str(run.id),
+        candidate=candidate,
+        topics=detail.topics,
+        workflow=next((item for item in detail.workflows if item.id == candidate.workflow_id), None),
+    )
+
+
+def get_planning_candidate_source(db: Session, run_id, candidate_id, user: User) -> dict:
+    run, candidate = owned_candidate(db, user, run_id, candidate_id)
+    content = db.get(ContentItem, candidate.content_id) if candidate.content_id else None
+    owner_id = run.profile.user_id if run.profile else None
+    if not content_available_to_profile(db, content, owner_id):
+        raise HTTPException(status_code=404, detail="Nội dung nguồn không còn khả dụng cho profile này.")
+    full_text = _load_content_full_text(content.mongo_normalized_id) or ""
+    return {
+        "id": str(content.id),
+        "title": content.canonical_title,
+        "summary": content.summary,
+        "full_text": html.unescape(full_text),
+        "source_url": content.canonical_url,
+    }
+
+
+def _candidate_counts(db: Session, run_ids: list) -> dict:
+    if not run_ids:
+        return {}
+    rows = (
+        db.query(
+            PlanningCandidate.planning_run_id,
+            func.count(PlanningCandidate.id).label("candidate_count"),
+            func.count(PlanningCandidate.id).filter(PlanningCandidate.selected.is_(True)).label("selected_count"),
+            func.count(PlanningCandidate.id).filter(PlanningCandidate.eligible.is_(True)).label("eligible_count"),
+        )
+        .filter(PlanningCandidate.planning_run_id.in_(run_ids))
+        .group_by(PlanningCandidate.planning_run_id)
+        .all()
+    )
+    return {
+        row.planning_run_id: {
+            "candidate_count": int(row.candidate_count or 0),
+            "selected_count": int(row.selected_count or 0),
+            "eligible_count": int(row.eligible_count or 0),
+        }
+        for row in rows
+    }
+
+
+def _serialize_run_summary(row, counts: dict) -> dict:
+    terminal = row.status in TERMINAL_STATUSES
+    metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+    output = row.output_jsonb if isinstance(row.output_jsonb, dict) else {}
+    reason = row.reason_jsonb if isinstance(row.reason_jsonb, dict) else {}
+    return {
+        "id": str(row.id),
+        "profile": {
+            "profile_id": str(row.profile_id),
+            "profile_name": row.profile_name,
+            "profile_username": row.profile_username,
+            "profile_platform": row.profile_platform,
+            "profile_avatar_url": row.profile_avatar_url,
+        },
+        "crawl_job": {"id": str(row.crawl_job_id), "name": row.crawl_job_name} if row.crawl_job_id else None,
+        "planning_mode": row.planning_mode,
+        "status": row.status,
+        "current_stage": "COMPLETED" if terminal else "SELECTING_CANDIDATES",
+        "progress_percent": 100.0 if terminal else 5.0,
+        "candidate_count": counts.get("candidate_count", 0),
+        "selected_count": counts.get("selected_count", 0),
+        "eligible_count": counts.get("eligible_count", 0),
+        "selected_content_id": output.get("selected_content_id"),
+        "selection_reasons": reason.get("selection_reasons") or [],
+        "trigger": metadata.get("trigger") or reason.get("trigger"),
+        "error_message": metadata.get("error_message"),
+        "started_at": row.started_at,
+        "completed_at": row.completed_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _uuid_or_none(value: Any):
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None

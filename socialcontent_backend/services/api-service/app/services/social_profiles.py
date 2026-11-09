@@ -655,6 +655,22 @@ class SocialProfileService:
             video_data = await fetch_tiktok_video_list(access_token, max_count=20)
             videos = video_data.get("videos") or []
             if isinstance(videos, list):
+                video_ids = {
+                    str(video.get("id") or "").strip()
+                    for video in videos
+                    if isinstance(video, dict) and str(video.get("id") or "").strip()
+                }
+                existing_posts = (
+                    db.query(SocialPost)
+                    .filter(
+                        SocialPost.profile_id == profile.id,
+                        SocialPost.platform_post_id.in_(video_ids),
+                    )
+                    .all()
+                    if video_ids
+                    else []
+                )
+                posts_by_platform_id = {post.platform_post_id: post for post in existing_posts}
                 for v in videos:
                     if not isinstance(v, dict):
                         continue
@@ -662,11 +678,7 @@ class SocialProfileService:
                     if not v_id:
                         continue
 
-                    post = (
-                        db.query(SocialPost)
-                        .filter(SocialPost.profile_id == profile.id, SocialPost.platform_post_id == v_id)
-                        .first()
-                    )
+                    post = posts_by_platform_id.get(v_id)
                     v_title = self._social_post_title(v.get("title") or v.get("video_description"), f"TikTok Video {v_id}")
                     v_url = v.get("share_url")
                     v_caption = v.get("video_description")
@@ -685,6 +697,7 @@ class SocialProfileService:
                         )
                         db.add(post)
                         db.flush()
+                        posts_by_platform_id[v_id] = post
                     else:
                         post.title = v_title
                         if v_url:
@@ -882,6 +895,29 @@ class SocialProfileService:
         if not workflows:
             return
 
+        queued_item_ids = set()
+        for workflow in workflows:
+            queued_id = (workflow.metadata_json or {}).get("queued_post_id") if isinstance(workflow.metadata_json, dict) else None
+            if queued_id:
+                try:
+                    queued_item_ids.add(uuid.UUID(str(queued_id)))
+                except (ValueError, TypeError):
+                    pass
+        existing_queue_items = (
+            db.query(PublishingQueueItem)
+            .filter(PublishingQueueItem.id.in_(queued_item_ids))
+            .all()
+            if queued_item_ids
+            else []
+        )
+        queue_items_by_id = {item.id: item for item in existing_queue_items}
+        profile_ids = {workflow.profile_id for workflow in workflows if workflow.profile_id}
+        profiles = db.query(SocialProfile).filter(SocialProfile.id.in_(profile_ids)).all() if profile_ids else []
+        profiles_by_id = {profile.id: profile for profile in profiles}
+        content_ids = {workflow.primary_content_id for workflow in workflows if workflow.primary_content_id}
+        contents = db.query(ContentItem).filter(ContentItem.id.in_(content_ids)).all() if content_ids else []
+        contents_by_id = {content.id: content for content in contents}
+
         changed = False
         for wf in workflows:
             metadata = dict(wf.metadata_json or {})
@@ -892,7 +928,7 @@ class SocialProfileService:
             queued_id = metadata.get("queued_post_id")
             if queued_id:
                 try:
-                    existing = db.get(PublishingQueueItem, uuid.UUID(str(queued_id)))
+                    existing = queue_items_by_id.get(uuid.UUID(str(queued_id)))
                     if existing:
                         # Older intake mislabeled already-approved videos as
                         # pending review. Only repair its untouched, unscheduled
@@ -923,11 +959,11 @@ class SocialProfileService:
             if not final_video:
                 continue
 
-            profile = db.get(SocialProfile, wf.profile_id)
+            profile = profiles_by_id.get(wf.profile_id)
             if not profile:
                 continue
 
-            content = db.get(ContentItem, wf.primary_content_id) if wf.primary_content_id else None
+            content = contents_by_id.get(wf.primary_content_id) if wf.primary_content_id else None
             article_link = final_video
             article_title = wf.title or (content.canonical_title if content else "Video bài viết")
             publish_caption = self.caption_with_hashtags(wf.title, profile=profile, content=content, story=wf.draft_json)
@@ -1627,6 +1663,24 @@ class SocialProfileService:
             .limit(limit)
             .all()
         )
+        publish_ids = {
+            post.platform_publish_id.strip()
+            for post in posts
+            if post.platform_publish_id and post.platform_publish_id.strip()
+        }
+        queue_items = (
+            db.query(PublishingQueueItem)
+            .filter(
+                PublishingQueueItem.profile_id == profile.id,
+                PublishingQueueItem.platform_publish_id.in_(publish_ids),
+            )
+            .all()
+            if publish_ids
+            else []
+        )
+        queue_items_by_publish_id = {
+            item.platform_publish_id: item for item in queue_items if item.platform_publish_id
+        }
         resolved = 0
         for post in posts:
             publish_id = (post.platform_publish_id or "").strip()
@@ -1645,14 +1699,7 @@ class SocialProfileService:
             post.status = "published_to_tiktok"
             db.add(post)
 
-            queue_item = (
-                db.query(PublishingQueueItem)
-                .filter(
-                    PublishingQueueItem.profile_id == profile.id,
-                    PublishingQueueItem.platform_publish_id == publish_id,
-                )
-                .first()
-            )
+            queue_item = queue_items_by_publish_id.get(publish_id)
             if queue_item:
                 queue_item.publish_status_jsonb = status_data
                 queue_item.status = "published"
@@ -1825,9 +1872,17 @@ class SocialProfileService:
         posts_by_profile: dict[uuid.UUID, list[SocialPost]] = {}
         for post in posts:
             posts_by_profile.setdefault(post.profile_id, []).append(post)
+        profiles = (
+            db.query(SocialProfile)
+            .filter(SocialProfile.id.in_(posts_by_profile.keys()))
+            .all()
+            if posts_by_profile
+            else []
+        )
+        profiles_by_id = {profile.id: profile for profile in profiles}
 
         for profile_id, profile_posts in posts_by_profile.items():
-            profile = db.get(SocialProfile, profile_id)
+            profile = profiles_by_id.get(profile_id)
             if not profile:
                 continue
             result["profiles"] += 1

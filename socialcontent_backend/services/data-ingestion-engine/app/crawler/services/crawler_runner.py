@@ -9,7 +9,6 @@ from common.db.content_history import processed_source_identities_for_user
 from common.db.idempotency import claim_event
 from common.db.models import CrawlJob, KafkaTask
 from app.crawler.crawlers.bilibili import BilibiliCrawler
-from app.crawler.crawlers.vnexpress import VNExpressCrawler
 from app.crawler.producers.content_events import CrawlerEventProducer
 from app.normalization.normalizers.document import normalize_raw_document
 from app.normalization.producers.normalized_events import NormalizationEventProducer
@@ -34,7 +33,7 @@ class CrawlerRunner:
     def pick_crawler(self, source_type: str):
         if source_type.upper() == "BILIBILI":
             return BilibiliCrawler()
-        return VNExpressCrawler()
+        raise ValueError(f"Unsupported crawler source type: {source_type}")
 
     def handle_task_requested(self, db: Session, message: dict) -> None:
         event_id = message.get("event_id")

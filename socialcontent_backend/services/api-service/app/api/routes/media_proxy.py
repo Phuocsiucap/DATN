@@ -14,7 +14,6 @@ HLS_URI_ATTR_RE = re.compile(r'URI=(["\'])(?P<uri>[^"\']+)\1', re.IGNORECASE)
 
 def _build_headers(request: Request, original_url: str = "") -> dict[str, str]:
     headers = {
-        "Referer": "https://www.bilibili.com/" if "bilibili" in original_url or "hdslb" in original_url else "https://vnexpress.net/",
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -23,6 +22,8 @@ def _build_headers(request: Request, original_url: str = "") -> dict[str, str]:
         "Accept": "*/*",
         "Accept-Encoding": "identity",
     }
+    if "bilibili" in original_url or "hdslb" in original_url:
+        headers["Referer"] = "https://www.bilibili.com/"
     range_header = request.headers.get("range")
     if range_header:
         headers["Range"] = range_header

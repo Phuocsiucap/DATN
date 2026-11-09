@@ -6,7 +6,6 @@ import logging
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from common.core.vnexpress_rss import resolve_vnexpress_rss_feeds
 from common.core.crawl_source_config import effective_source_configuration
 from common.db.models import AuditLog, CrawlJob, CrawlJobSchedule, CrawlJobSource, CrawlSourceConfig, KafkaTask, User
 from common.events.envelope import build_event
@@ -40,12 +39,21 @@ class CrawlJobService:
             status="SCHEDULED" if is_scheduled and payload.schedule.enabled else ("PAUSED" if is_scheduled else "PENDING"),
             current_stage="SCHEDULING" if is_scheduled else "DISCOVERING",
         )
+        source_config_ids = {source.source_config_id for source in payload.sources}
+        source_configs = (
+            db.query(CrawlSourceConfig)
+            .filter(CrawlSourceConfig.id.in_(source_config_ids))
+            .all()
+            if source_config_ids
+            else []
+        )
+        source_configs_by_id = {config.id: config for config in source_configs}
         for source in payload.sources:
-            config = db.get(CrawlSourceConfig, source.source_config_id)
+            config = source_configs_by_id.get(source.source_config_id)
             if not config or config.status != "ACTIVE":
                 raise HTTPException(400, "Nguồn crawl không tồn tại hoặc đã tạm dừng")
             source_type = config.source_type
-            if source_type not in ("VNEXPRESS", "BILIBILI"):
+            if source_type != "BILIBILI":
                 raise HTTPException(400, "Loại nguồn chưa hỗ trợ crawl")
             if source.source_type and source.source_type.upper() != source_type:
                 raise HTTPException(400, "Loại nguồn không khớp cấu hình")
@@ -54,28 +62,13 @@ class CrawlJobService:
             for key in source.model_fields_set & {"source_url", "keywords"}:
                 if key not in allowed:
                     raise HTTPException(400, f"Nguồn không cho phép tùy chỉnh {key}")
-            if set(source.configuration) - (set(allowed) & {"rss_feed_keys"}):
+            if source.configuration:
                 raise HTTPException(400, "Tùy chọn crawl không được nguồn hỗ trợ")
-            if "rss_feed_keys" in source.configuration:
-                keys = source.configuration["rss_feed_keys"]
-                supported = configuration.get("rss_feed_keys", [])
-                if not isinstance(keys, list) or not keys or any(key not in supported for key in keys):
-                    raise HTTPException(400, "Chuyên mục không được nguồn hỗ trợ")
-                configuration.pop("rss_feed_urls", None)
-                configuration.pop("rss_feeds", None)
             configuration.update(source.configuration)
             configuration.pop("limit", None)
             configuration["max_items"] = source.max_items
             source_url = source.source_url if "source_url" in source.model_fields_set else config.source_url
             keywords = source.keywords if "keywords" in source.model_fields_set else config.keywords
-            if source_type == "VNEXPRESS":
-                selected_feeds = resolve_vnexpress_rss_feeds(configuration)
-                if selected_feeds:
-                    configuration["rss_feed_keys"] = [feed["key"] for feed in selected_feeds]
-                    configuration["rss_feed_urls"] = [feed["url"] for feed in selected_feeds]
-                    configuration["rss_feeds"] = selected_feeds
-                    if not source_url and len(selected_feeds) == 1:
-                        source_url = selected_feeds[0]["url"]
             job.sources.append(
                 CrawlJobSource(
                     source_type=source_type,

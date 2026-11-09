@@ -926,10 +926,10 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
       {activeTab === 'profiles' && (
         <div className="space-y-5">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={<CircleUserRound size={18} />} label="Kênh social đã kết nối" value={profiles.length} tint="#2556ea" />
-            <MetricCard icon={<Check size={18} />} label="Đang hoạt động" value={activeProfiles} tint="#16a34a" />
-            <MetricCard icon={<AlertTriangle size={18} />} label="Cần xác thực" value={Math.max(profiles.length - activeProfiles, 0)} tint="#f97316" />
-            <MetricCard icon={<Zap size={18} />} label="Kênh social" value={connectedPlatforms} tint="#7c3aed" />
+            <MetricCard icon={<CircleUserRound size={18} />} label="Kênh social đã kết nối" value={profiles.length} />
+            <MetricCard icon={<Check size={18} />} label="Đang hoạt động" value={activeProfiles} />
+            <MetricCard icon={<AlertTriangle size={18} />} label="Cần xác thực" value={Math.max(profiles.length - activeProfiles, 0)} />
+            <MetricCard icon={<Zap size={18} />} label="Kênh social" value={connectedPlatforms} />
           </div>
 
           <AppCard className="p-4 space-y-4">
@@ -1069,9 +1069,9 @@ export default function SettingsPage({ currentUser }: { currentUser: CurrentUser
             </div>
 
             <div className="my-4 grid gap-3 sm:grid-cols-3">
-              <MetricCard icon={<CalendarClock size={18} />} label="Tổng lịch Crawl Job" value={crawlScheduleJobs.length} tint="#2556ea" />
-              <MetricCard icon={<Play size={18} />} label="Đang hoạt động" value={activeCrawlSchedules} tint="#16a34a" />
-              <MetricCard icon={<Pause size={18} />} label="Đang tạm dừng" value={pausedCrawlSchedules} tint="#f97316" />
+              <MetricCard icon={<CalendarClock size={18} />} label="Tổng lịch Crawl Job" value={crawlScheduleJobs.length} />
+              <MetricCard icon={<Play size={18} />} label="Đang hoạt động" value={activeCrawlSchedules} />
+              <MetricCard icon={<Pause size={18} />} label="Đang tạm dừng" value={pausedCrawlSchedules} />
             </div>
 
             <div className="max-h-[360px] overflow-y-auto rounded-xl border border-slate-200">

@@ -14,7 +14,6 @@ import {
   type CrawlJob,
   type CrawlSourceConfig,
   type SourceTypeConfig,
-  type VnExpressRssFeed,
 } from '@/commons/apis/module1'
 import {
   AppButton,
@@ -78,7 +77,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
   const [sourceTypes, setSourceTypes] = useState<SourceTypeConfig[]>([])
   const [jobName, setJobName] = useState('Thu thập dữ liệu')
   const [jobSources, setJobSources] = useState<JobSourceDraft[]>([])
-  const [vnexpressRssFeeds, setVnexpressRssFeeds] = useState<VnExpressRssFeed[]>([])
 
   const loadCrawlData = async () => {
     setLoading(true)
@@ -105,14 +103,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
   useEffect(() => {
     fetchSourceTypesApi()
-      .then((data) => {
-        setSourceTypes(data)
-        const vnexpress = data.find(s => s.type === 'VNEXPRESS')
-        if (vnexpress && vnexpress.rss_feeds) {
-          const feeds = vnexpress.rss_feeds
-          setVnexpressRssFeeds(feeds)
-        }
-      })
+      .then(setSourceTypes)
       .catch(() => toast.error('Không tải được cấu hình Source Types'))
   }, [])
 
@@ -158,12 +149,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
     }
     if (!jobSources.length) return toast.error('Vui lòng chọn ít nhất một nguồn')
     if (jobSources.some(s => !Number.isInteger(s.maxItems) || s.maxItems < 1 || s.maxItems > 200)) return toast.error('Số bài mỗi nguồn phải từ 1 đến 200')
-    const missingRssSelection = jobSources.some((source) => {
-      const config = sourceConfigs.find(item => item.id === source.id)
-      const options = Array.isArray(config?.configuration.job_options) ? config.configuration.job_options as string[] : []
-      return options.includes('rss_feed_keys') && !source.overrides.configuration?.rss_feed_keys.length
-    })
-    if (missingRssSelection) return toast.error('Vui lòng chọn ít nhất một chuyên mục RSS cho nguồn cho phép tùy chỉnh RSS')
     const scheduleError = scheduleEnabled ? scheduleValidationMessage(scheduleForm) : null
     if (scheduleError) return toast.error(scheduleError)
     setLoading(true)
@@ -257,7 +242,7 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
 
       <section className="app-list-layout">
         {isSystemUser && activeTab === 'SOURCES' ? (
-          <CrawlSourceConfigsTab isSystemUser={isSystemUser} sourceTypes={sourceTypes} vnexpressRssFeeds={vnexpressRssFeeds} />
+          <CrawlSourceConfigsTab isSystemUser={isSystemUser} sourceTypes={sourceTypes} />
         ) : (
           <>
             {loading && (
@@ -279,7 +264,6 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
                   <SearchField placeholder="Tìm kiếm job..." value={searchQuery} onChange={setSearchQuery} />
                   <SelectControl value={filterSource} onChange={setFilterSource}>
                     <option value="">Tất cả nguồn</option>
-                    <option value="VNEXPRESS">VNExpress</option>
                     <option value="BILIBILI">Bilibili</option>
                   </SelectControl>
                   <SelectControl value={filterStatus} onChange={setFilterStatus}>
@@ -312,13 +296,11 @@ export default function CrawlPage({ isSystemUser = false, onOpenModule2 }: { isS
       {showCreate && (
         <CreateCrawlJobDialog
           sourceConfigs={sourceConfigs}
-          sourceTypes={sourceTypes}
           jobName={jobName}
           setJobName={setJobName}
           sources={jobSources}
           setSources={setJobSources}
           saving={loading}
-          vnexpressRssFeeds={vnexpressRssFeeds}
           scheduleEnabled={scheduleEnabled}
           setScheduleEnabled={setScheduleEnabled}
           schedule={scheduleForm}
@@ -477,7 +459,6 @@ function JobsTable({
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const SOURCE_META: Record<string, { label: string; logo: string; color: string }> = {
-  VNEXPRESS: { label: 'VNExpress', logo: 'https://vnexpress.net/favicon.ico', color: '#1a6dc2' },
   BILIBILI:  { label: 'Bilibili',  logo: 'https://www.bilibili.com/favicon.ico', color: '#fb7299' },
 }
 

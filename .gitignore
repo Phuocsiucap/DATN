@@ -22,6 +22,12 @@ bilibili_crawler.zip
 data_demo/
 node_modules/
 docs/
+/docs/
+!/docs/
+/docs/*
+!/docs/superpowers/
+!/docs/superpowers/**
+.superpowers/
 tests/
 outputs/
 db_backups/
