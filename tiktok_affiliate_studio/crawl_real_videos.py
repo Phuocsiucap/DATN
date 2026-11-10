@@ -1,12 +1,28 @@
 import json
+import os
 import re
+import shutil
 import subprocess
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-YT_DLP = "/Users/nguyenduccanh/Documents/Ca_nhan/Tool/Tiktok/.venv/bin/yt-dlp"
-ASSETS_DIR = Path("/Users/nguyenduccanh/Documents/Ca_nhan/Tool/Tiktok/assets/real")
+BASE_DIR = Path(__file__).resolve().parent
+
+def _find_ytdlp() -> str:
+    which = shutil.which("yt-dlp")
+    if which:
+        return which
+    cand = BASE_DIR.parent / ".venv" / "Scripts" / "yt-dlp.exe"
+    if cand.exists():
+        return str(cand)
+    for c in BASE_DIR.parent.glob("**/yt-dlp*.exe"):
+        if c.is_file():
+            return str(c)
+    return "yt-dlp"
+
+YT_DLP = _find_ytdlp()
+ASSETS_DIR = BASE_DIR / "assets" / "real"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
 

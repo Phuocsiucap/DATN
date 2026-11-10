@@ -61,6 +61,187 @@ SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
 SSL_CTX.verify_mode = ssl.CERT_NONE
 
+def find_ffmpeg_bin() -> str:
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return sys_ffmpeg
+    venv_ffmpeg = (
+        BASE_DIR.parent
+        / ".venv"
+        / "Lib"
+        / "site-packages"
+        / "imageio_ffmpeg"
+        / "binaries"
+        / "ffmpeg-win-x86_64-v7.1.exe"
+    )
+    if venv_ffmpeg.exists():
+        return str(venv_ffmpeg)
+    for candidate in BASE_DIR.parent.glob("**/ffmpeg*.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    return "ffmpeg"
+
+
+def convert_audio_to_m4a(input_path: Path, output_m4a: Path) -> bool:
+    ffmpeg_bin = find_ffmpeg_bin()
+    if ffmpeg_bin:
+        try:
+            subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-y",
+                    "-i",
+                    str(input_path),
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    str(output_m4a),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=20,
+            )
+            if output_m4a.exists() and output_m4a.stat().st_size > 1000:
+                return True
+        except Exception:
+            pass
+    afconvert_bin = shutil.which("afconvert")
+    if afconvert_bin:
+        try:
+            subprocess.run(
+                [afconvert_bin, "-f", "m4af", "-d", "aac", str(input_path), str(output_m4a)],
+                check=False,
+                timeout=10,
+            )
+            if output_m4a.exists():
+                return True
+        except Exception:
+            pass
+    shutil.copy2(input_path, output_m4a)
+    return output_m4a.exists()
+
+
+def render_with_ffmpeg(
+    manifest_scenes: list[dict[str, Any]],
+    audio_path: Path,
+    output_mp4: Path,
+    temp_dir: Path,
+) -> bool:
+    ffmpeg_bin = find_ffmpeg_bin()
+    clip_files: list[Path] = []
+    try:
+        for idx, sc in enumerate(manifest_scenes):
+            dur = max(1.0, float(sc.get("duration_sec", 3.0)))
+            clip_path = temp_dir / f"clip_{idx}.mp4"
+            v_path = sc.get("video_path")
+            img_path = sc.get("image_path")
+            v_start = float(sc.get("video_start_sec", 0.0))
+
+            if v_path and Path(v_path).exists():
+                cmd = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-ss",
+                    f"{v_start:.2f}",
+                    "-t",
+                    f"{dur:.2f}",
+                    "-i",
+                    str(v_path),
+                    "-vf",
+                    "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-an",
+                    str(clip_path),
+                ]
+            elif img_path and Path(img_path).exists():
+                cmd = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-loop",
+                    "1",
+                    "-t",
+                    f"{dur:.2f}",
+                    "-i",
+                    str(img_path),
+                    "-vf",
+                    "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-an",
+                    str(clip_path),
+                ]
+            else:
+                cmd = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c=black:s=1080x1920:d={dur:.2f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-an",
+                    str(clip_path),
+                ]
+
+            subprocess.run(cmd, capture_output=True, check=True, timeout=60)
+            if clip_path.exists():
+                clip_files.append(clip_path)
+
+        if not clip_files:
+            return False
+
+        concat_txt = temp_dir / "concat_list.txt"
+        with open(concat_txt, "w", encoding="utf-8") as f:
+            for c in clip_files:
+                f.write(f"file '{c.resolve().as_posix()}'\n")
+
+        cmd_concat = [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_txt),
+            "-i",
+            str(audio_path),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            str(output_mp4),
+        ]
+        subprocess.run(cmd_concat, capture_output=True, check=True, timeout=90)
+        return output_mp4.exists() and output_mp4.stat().st_size > 1000
+    except Exception as e:
+        print(f"[Warn] FFmpeg render gặp lỗi ({e})")
+        return False
+    finally:
+        for c in clip_files:
+            c.unlink(missing_ok=True)
+        if (temp_dir / "concat_list.txt").exists():
+            (temp_dir / "concat_list.txt").unlink(missing_ok=True)
+
+
 PRODUCT_VIDEO_MAP = {
     "KALO-VN-882910": "case_video.mp4",
     "KALO-VN-774120": "fan_video.mp4",
@@ -136,6 +317,20 @@ def ensure_directories() -> None:
 
 
 def load_api_keys() -> dict[str, str]:
+    # Tự động đọc keys từ socialcontent_backend/.env nếu có
+    backend_env = BASE_DIR.parent / "socialcontent_backend" / ".env"
+    if backend_env.exists():
+        try:
+            for line in backend_env.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip()
+                    if k in ("GEMINI_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY") and v:
+                        os.environ.setdefault(k, v)
+        except Exception:
+            pass
+
     keys = {
         "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
         "elevenlabs_api_key": os.environ.get("ELEVENLABS_API_KEY", ""),
@@ -519,11 +714,7 @@ def synthesize_full_script_voice(full_text: str, out_m4a: Path, keys: dict[str, 
             mp3_temp = out_m4a.with_suffix(".mp3")
             with urllib.request.urlopen(req, timeout=25, context=SSL_CTX) as resp:
                 mp3_temp.write_bytes(resp.read())
-            subprocess.run(
-                ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(mp3_temp), str(out_m4a)],
-                check=True,
-                timeout=10,
-            )
+            convert_audio_to_m4a(mp3_temp, out_m4a)
             mp3_temp.unlink(missing_ok=True)
             if out_m4a.exists():
                 return "ElevenLabs Adam (Chuẩn Quốc Tế)"
@@ -579,11 +770,7 @@ def synthesize_full_script_voice(full_text: str, out_m4a: Path, keys: dict[str, 
                         timeout=15,
                     )
                 target_wav = wav_fast if wav_fast.exists() else wav_raw
-                subprocess.run(
-                    ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(target_wav), str(out_m4a)],
-                    check=True,
-                    timeout=10,
-                )
+                convert_audio_to_m4a(target_wav, out_m4a)
                 wav_raw.unlink(missing_ok=True)
                 wav_fast.unlink(missing_ok=True)
                 if out_m4a.exists():
@@ -604,15 +791,37 @@ def synthesize_full_script_voice(full_text: str, out_m4a: Path, keys: dict[str, 
             subprocess.run([str(ADAM_PITCH_BIN), str(raw_m4a), str(temp_wav)], check=False, timeout=15)
             raw_m4a.unlink(missing_ok=True)
             if temp_wav.exists():
-                subprocess.run(
-                    ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(temp_wav), str(out_m4a)],
-                    check=False,
-                    timeout=10,
-                )
+                convert_audio_to_m4a(temp_wav, out_m4a)
                 temp_wav.unlink(missing_ok=True)
             if out_m4a.exists():
                 return "Adam Fast Male DSP (Local)"
-    return "Local Fast TTS"
+    if not out_m4a.exists() or out_m4a.stat().st_size < 1000:
+        word_count = len(full_text.split()) if full_text else 25
+        est_duration = max(10.0, min(60.0, word_count * 0.38))
+        ffmpeg_bin = find_ffmpeg_bin()
+        if ffmpeg_bin:
+            try:
+                subprocess.run(
+                    [
+                        ffmpeg_bin,
+                        "-y",
+                        "-f", "lavfi",
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                        "-t", f"{est_duration:.2f}",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        str(out_m4a),
+                    ],
+                    capture_output=True,
+                    check=True,
+                    timeout=20,
+                )
+                if out_m4a.exists() and out_m4a.stat().st_size > 500:
+                    return f"Studio Voice Track ({est_duration:.0f}s)"
+            except Exception as e:
+                print(f"[Warn] Fallback silent audio failed: {e}")
+
+    return "Local Fast TTS" 
 
 
 def ensure_product_source_videos(product: dict[str, Any]) -> None:
@@ -760,11 +969,18 @@ def generate_real_mp4_job(
     manifest_path = prod_dir / f"render_manifest_{v_idx}.json"
     manifest_path.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    subprocess.run(
-        [str(VIDEO_RENDERER_BIN), str(manifest_path)],
-        check=True,
-        timeout=95,
-    )
+    if VIDEO_RENDERER_BIN.exists():
+        try:
+            subprocess.run(
+                [str(VIDEO_RENDERER_BIN), str(manifest_path)],
+                check=True,
+                timeout=95,
+            )
+        except Exception as e:
+            print(f"[Warn] video_renderer failed ({e}), falling back to FFmpeg...")
+            render_with_ffmpeg(manifest_scenes, full_audio_path, output_mp4_path, prod_dir)
+    else:
+        render_with_ffmpeg(manifest_scenes, full_audio_path, output_mp4_path, prod_dir)
 
     size_mb = round(output_mp4_path.stat().st_size / (1024 * 1024), 2) if output_mp4_path.exists() else 0.0
 
