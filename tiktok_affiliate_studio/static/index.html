@@ -76,18 +76,6 @@
           <form id="render-form" action="/api/render-mp4" method="POST" novalidate>
             <div id="scenes-script-list" class="script-list"></div>
 
-            <div class="form-group voice-selector-box">
-              <div class="voice-header-row">
-                <label for="voice-select">🎙️ Chọn Giọng Đọc AI (ElevenLabs Đa Dạng Giọng Nam/Nữ):</label>
-                <button type="button" id="btn-play-voice-demo" class="btn btn-sub btn-sm">
-                  ▶️ Nghe Thử Demo
-                </button>
-              </div>
-              <select id="voice-select" name="voice_id" class="select-control"></select>
-              <div id="voice-desc-hint" class="voice-detail-hint"></div>
-              <audio id="voice-demo-player" preload="none" hidden></audio>
-            </div>
-
             <div class="form-group">
               <label for="caption-input">Caption &amp; Hashtag gợi ý (Copy riêng khi đăng bài):</label>
               <input type="text" id="caption-input" name="caption" required>

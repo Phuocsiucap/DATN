@@ -33,11 +33,6 @@ from typing import Any
 
 import crawl_real_images
 import crawl_real_videos
-from elevenlabs_voices import (
-    DEFAULT_ELEVENLABS_VOICE_ID,
-    ELEVENLABS_VOICES,
-    get_voice_by_id,
-)
 
 BASE_DIR = Path(__file__).resolve().parent
 FEEDS_DIR = BASE_DIR / "feeds"
@@ -65,187 +60,6 @@ _TTS_MODEL_CURSOR = 0
 SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
 SSL_CTX.verify_mode = ssl.CERT_NONE
-
-
-def find_ffmpeg_bin() -> str:
-    sys_ffmpeg = shutil.which("ffmpeg")
-    if sys_ffmpeg:
-        return sys_ffmpeg
-    venv_ffmpeg = (
-        BASE_DIR.parent
-        / ".venv"
-        / "Lib"
-        / "site-packages"
-        / "imageio_ffmpeg"
-        / "binaries"
-        / "ffmpeg-win-x86_64-v7.1.exe"
-    )
-    if venv_ffmpeg.exists():
-        return str(venv_ffmpeg)
-    for candidate in BASE_DIR.parent.glob("**/ffmpeg*.exe"):
-        if candidate.is_file():
-            return str(candidate)
-    return "ffmpeg"
-
-
-def convert_audio_to_m4a(input_path: Path, output_m4a: Path) -> bool:
-    ffmpeg_bin = find_ffmpeg_bin()
-    if ffmpeg_bin:
-        try:
-            subprocess.run(
-                [
-                    ffmpeg_bin,
-                    "-y",
-                    "-i",
-                    str(input_path),
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    str(output_m4a),
-                ],
-                capture_output=True,
-                check=False,
-                timeout=20,
-            )
-            if output_m4a.exists() and output_m4a.stat().st_size > 1000:
-                return True
-        except Exception:
-            pass
-    afconvert_bin = shutil.which("afconvert")
-    if afconvert_bin:
-        try:
-            subprocess.run(
-                [afconvert_bin, "-f", "m4af", "-d", "aac", str(input_path), str(output_m4a)],
-                check=False,
-                timeout=10,
-            )
-            if output_m4a.exists():
-                return True
-        except Exception:
-            pass
-    shutil.copy2(input_path, output_m4a)
-    return output_m4a.exists()
-
-
-def render_with_ffmpeg(
-    manifest_scenes: list[dict[str, Any]],
-    audio_path: Path,
-    output_mp4: Path,
-    temp_dir: Path,
-) -> bool:
-    ffmpeg_bin = find_ffmpeg_bin()
-    clip_files: list[Path] = []
-    try:
-        for idx, sc in enumerate(manifest_scenes):
-            dur = max(1.0, float(sc.get("duration_sec", 3.0)))
-            clip_path = temp_dir / f"clip_{idx}.mp4"
-            v_path = sc.get("video_path")
-            img_path = sc.get("image_path")
-            v_start = float(sc.get("video_start_sec", 0.0))
-
-            if v_path and Path(v_path).exists():
-                cmd = [
-                    ffmpeg_bin,
-                    "-y",
-                    "-ss",
-                    f"{v_start:.2f}",
-                    "-t",
-                    f"{dur:.2f}",
-                    "-i",
-                    str(v_path),
-                    "-vf",
-                    "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-an",
-                    str(clip_path),
-                ]
-            elif img_path and Path(img_path).exists():
-                cmd = [
-                    ffmpeg_bin,
-                    "-y",
-                    "-loop",
-                    "1",
-                    "-t",
-                    f"{dur:.2f}",
-                    "-i",
-                    str(img_path),
-                    "-vf",
-                    "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-an",
-                    str(clip_path),
-                ]
-            else:
-                cmd = [
-                    ffmpeg_bin,
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    f"color=c=black:s=1080x1920:d={dur:.2f}",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-an",
-                    str(clip_path),
-                ]
-
-            subprocess.run(cmd, capture_output=True, check=True, timeout=60)
-            if clip_path.exists():
-                clip_files.append(clip_path)
-
-        if not clip_files:
-            return False
-
-        concat_txt = temp_dir / "concat_list.txt"
-        with open(concat_txt, "w", encoding="utf-8") as f:
-            for c in clip_files:
-                f.write(f"file '{c.resolve().as_posix()}'\n")
-
-        cmd_concat = [
-            ffmpeg_bin,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_txt),
-            "-i",
-            str(audio_path),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-shortest",
-            str(output_mp4),
-        ]
-        subprocess.run(cmd_concat, capture_output=True, check=True, timeout=90)
-        return output_mp4.exists() and output_mp4.stat().st_size > 1000
-    except Exception as e:
-        print(f"[Warn] FFmpeg render gặp lỗi ({e})")
-        return False
-    finally:
-        for c in clip_files:
-            c.unlink(missing_ok=True)
-        if (temp_dir / "concat_list.txt").exists():
-            (temp_dir / "concat_list.txt").unlink(missing_ok=True)
 
 PRODUCT_VIDEO_MAP = {
     "KALO-VN-882910": "case_video.mp4",
@@ -677,20 +491,11 @@ def resolve_product_video_path(product: dict[str, Any], variant_index: int = 1) 
     return None
 
 
-def synthesize_full_script_voice(
-    full_text: str,
-    out_m4a: Path,
-    keys: dict[str, str],
-    voice_id: str | None = None,
-) -> str:
-    target_voice_id = voice_id or DEFAULT_ELEVENLABS_VOICE_ID
-    voice_meta = get_voice_by_id(target_voice_id)
-    voice_label = voice_meta["name"] if voice_meta else "Adam"
-
+def synthesize_full_script_voice(full_text: str, out_m4a: Path, keys: dict[str, str]) -> str:
     el_key = keys.get("elevenlabs_api_key", "")
     if el_key:
         try:
-            url = f"https://api.elevenlabs.io/v1/text-to-speech/{target_voice_id}"
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_ADAM_VOICE_ID}"
             payload = {
                 "text": full_text,
                 "model_id": "eleven_multilingual_v2",
@@ -714,13 +519,16 @@ def synthesize_full_script_voice(
             mp3_temp = out_m4a.with_suffix(".mp3")
             with urllib.request.urlopen(req, timeout=25, context=SSL_CTX) as resp:
                 mp3_temp.write_bytes(resp.read())
-
-            converted = convert_audio_to_m4a(mp3_temp, out_m4a)
+            subprocess.run(
+                ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(mp3_temp), str(out_m4a)],
+                check=True,
+                timeout=10,
+            )
             mp3_temp.unlink(missing_ok=True)
-            if converted and out_m4a.exists() and out_m4a.stat().st_size > 1000:
-                return f"ElevenLabs {voice_label} ({voice_meta.get('style', 'Chuẩn Quốc Tế') if voice_meta else 'Chuẩn'})"
+            if out_m4a.exists():
+                return "ElevenLabs Adam (Chuẩn Quốc Tế)"
         except Exception as e:
-            print(f"[Warn] ElevenLabs giọng {target_voice_id} trả về lỗi ({e}), tự động chuyển sang Google Gemini TTS...")
+            print(f"[Warn] ElevenLabs trả về lỗi ({e}), tự động chuyển sang Google Gemini TTS...")
 
     gem_key = keys.get("gemini_api_key", "")
     if gem_key:
@@ -771,10 +579,14 @@ def synthesize_full_script_voice(
                         timeout=15,
                     )
                 target_wav = wav_fast if wav_fast.exists() else wav_raw
-                convert_audio_to_m4a(target_wav, out_m4a)
+                subprocess.run(
+                    ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(target_wav), str(out_m4a)],
+                    check=True,
+                    timeout=10,
+                )
                 wav_raw.unlink(missing_ok=True)
                 wav_fast.unlink(missing_ok=True)
-                if out_m4a.exists() and out_m4a.stat().st_size > 1000:
+                if out_m4a.exists():
                     return f"Google Gemini AI Voice (Charon Male • {model_name})"
             except Exception as e:
                 print(f"[Warn] Model {model_name} bận ({e}), thử model TTS tiếp theo...")
@@ -782,59 +594,24 @@ def synthesize_full_script_voice(
     say_bin = shutil.which("say")
     raw_m4a = out_m4a.with_suffix(".raw.m4a")
     if say_bin:
-        try:
-            subprocess.run(
-                [say_bin, "-v", "Linh", "-r", "210", "-o", str(raw_m4a), "--data-format=aac", full_text],
-                check=False,
-                timeout=15,
-            )
-            if raw_m4a.exists() and ADAM_PITCH_BIN.exists():
-                temp_wav = out_m4a.with_suffix(".adam.wav")
-                subprocess.run([str(ADAM_PITCH_BIN), str(raw_m4a), str(temp_wav)], check=False, timeout=15)
-                raw_m4a.unlink(missing_ok=True)
-                if temp_wav.exists():
-                    convert_audio_to_m4a(temp_wav, out_m4a)
-                    temp_wav.unlink(missing_ok=True)
-            elif raw_m4a.exists():
-                convert_audio_to_m4a(raw_m4a, out_m4a)
-                raw_m4a.unlink(missing_ok=True)
-            if out_m4a.exists() and out_m4a.stat().st_size > 1000:
-                return "Adam Fast Male DSP (Local)"
-        except Exception:
-            pass
-
-    # Fallback audio engine: sinh file âm thanh chuẩn tương thích tuyệt đối cho video render
-    if not out_m4a.exists() or out_m4a.stat().st_size < 1000:
-        word_count = len(full_text.split()) if full_text else 25
-        est_duration = max(10.0, min(60.0, word_count * 0.38))
-        ffmpeg_bin = find_ffmpeg_bin()
-        if ffmpeg_bin:
-            try:
+        subprocess.run(
+            [say_bin, "-v", "Linh", "-r", "210", "-o", str(raw_m4a), "--data-format=aac", full_text],
+            check=False,
+            timeout=15,
+        )
+        if raw_m4a.exists() and ADAM_PITCH_BIN.exists():
+            temp_wav = out_m4a.with_suffix(".adam.wav")
+            subprocess.run([str(ADAM_PITCH_BIN), str(raw_m4a), str(temp_wav)], check=False, timeout=15)
+            raw_m4a.unlink(missing_ok=True)
+            if temp_wav.exists():
                 subprocess.run(
-                    [
-                        ffmpeg_bin,
-                        "-y",
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        "anullsrc=channel_layout=stereo:sample_rate=44100",
-                        "-t",
-                        f"{est_duration:.2f}",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "192k",
-                        str(out_m4a),
-                    ],
-                    capture_output=True,
-                    check=True,
-                    timeout=20,
+                    ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", str(temp_wav), str(out_m4a)],
+                    check=False,
+                    timeout=10,
                 )
-                if out_m4a.exists() and out_m4a.stat().st_size > 500:
-                    return f"Studio Voice Track ({voice_label} • {est_duration:.0f}s)"
-            except Exception as e:
-                print(f"[Warn] Fallback silent audio failed: {e}")
-
+                temp_wav.unlink(missing_ok=True)
+            if out_m4a.exists():
+                return "Adam Fast Male DSP (Local)"
     return "Local Fast TTS"
 
 
@@ -872,7 +649,6 @@ def generate_real_mp4_job(
     visual_mode: str = "hybrid",
     fixed_job_id: str | None = None,
     use_veo_if_available: bool = False,
-    voice_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Lưu toàn bộ các video của cùng 1 sản phẩm vào ĐÚNG 1 THƯ MỤC RIÊNG của sản phẩm đó:
@@ -909,7 +685,15 @@ def generate_real_mp4_job(
         shutil.copy2(legacy_voice, full_audio_path)
         script_file.write_text(new_script_txt, encoding="utf-8")
 
-    voice_engine_used = synthesize_full_script_voice(joined_script, full_audio_path, keys, voice_id=voice_id)
+    if (
+        full_audio_path.exists()
+        and full_audio_path.stat().st_size > 20_000
+        and script_file.exists()
+        and script_file.read_text(encoding="utf-8").strip() == new_script_txt.strip()
+    ):
+        voice_engine_used = "Google Gemini AI Voice (Charon Male • Đã đồng bộ)"
+    else:
+        voice_engine_used = synthesize_full_script_voice(joined_script, full_audio_path, keys)
 
     total_audio_sec = max(8.0, measure_audio_duration(full_audio_path))
     total_chars = max(1, sum(len(str(sc.get("narration", ""))) for sc in scenes))
@@ -976,18 +760,11 @@ def generate_real_mp4_job(
     manifest_path = prod_dir / f"render_manifest_{v_idx}.json"
     manifest_path.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    if VIDEO_RENDERER_BIN.exists():
-        try:
-            subprocess.run(
-                [str(VIDEO_RENDERER_BIN), str(manifest_path)],
-                check=True,
-                timeout=95,
-            )
-        except Exception as e:
-            print(f"[Warn] video_renderer failed ({e}), falling back to FFmpeg...")
-            render_with_ffmpeg(manifest_scenes, full_audio_path, output_mp4_path, prod_dir)
-    else:
-        render_with_ffmpeg(manifest_scenes, full_audio_path, output_mp4_path, prod_dir)
+    subprocess.run(
+        [str(VIDEO_RENDERER_BIN), str(manifest_path)],
+        check=True,
+        timeout=95,
+    )
 
     size_mb = round(output_mp4_path.stat().st_size / (1024 * 1024), 2) if output_mp4_path.exists() else 0.0
 
@@ -998,7 +775,6 @@ def generate_real_mp4_job(
         "variant_index": v_idx,
         "variant_name": style["name"],
         "visual_mode": visual_mode,
-        "voice_id": voice_id or DEFAULT_ELEVENLABS_VOICE_ID,
         "created_at": dt.datetime.now().strftime("%H:%M:%S %d/%m/%Y"),
         "total_duration_sec": round(total_audio_sec, 1),
         "voice_engine": voice_engine_used,
@@ -1066,8 +842,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                     "ok": True,
                     "products": products,
                     "jobs": state.get("jobs", []),
-                    "voices": ELEVENLABS_VOICES,
-                    "default_voice_id": DEFAULT_ELEVENLABS_VOICE_ID,
                     "keys_status": {
                         "has_gemini": bool(keys.get("gemini_api_key")),
                         "has_elevenlabs": bool(keys.get("elevenlabs_api_key")),
@@ -1075,16 +849,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                         "gemini_masked": mask_key(keys.get("gemini_api_key", "")),
                         "elevenlabs_masked": mask_key(keys.get("elevenlabs_api_key", "")),
                     },
-                }
-            )
-            return
-
-        if route == "/api/voices":
-            self._send_json(
-                {
-                    "ok": True,
-                    "voices": ELEVENLABS_VOICES,
-                    "default_voice_id": DEFAULT_ELEVENLABS_VOICE_ID,
                 }
             )
             return
@@ -1173,7 +937,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             caption = str(body.get("caption", ""))
             variant_index = int(body.get("variant_index", 1))
             visual_mode = str(body.get("visual_mode", "real_video"))
-            voice_id = body.get("voice_id")
 
             products = get_all_products()
             product = next((p for p in products if p["external_id"] == product_id), None)
@@ -1193,7 +956,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                     caption=caption,
                     variant_index=variant_index,
                     visual_mode=visual_mode,
-                    voice_id=voice_id,
                 )
                 self._send_json(
                     {
@@ -1210,7 +972,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
             body = self._read_json_body()
             product_id = body.get("product_id")
             visual_mode = str(body.get("visual_mode", "hybrid"))
-            voice_id = body.get("voice_id")
 
             products = get_all_products()
             product = next((p for p in products if p["external_id"] == product_id), None)
@@ -1236,7 +997,6 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                         caption=pack["caption"],
                         variant_index=v_idx,
                         visual_mode=mode_for_v,
-                        voice_id=voice_id,
                     )
                     created_jobs.append(j)
                 self._send_json(

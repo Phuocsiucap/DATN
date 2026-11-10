@@ -16,8 +16,6 @@ const state = {
   currentJob: null,
   productJobs: [],
   keysStatus: {},
-  voices: [],
-  selectedVoiceId: "pNInz6obpgDQGcFmaJgB",
 };
 
 const VARIANT_LABELS = [
@@ -35,10 +33,6 @@ const btnBatch5El = document.getElementById("btn-batch-5");
 const realPhotosGridEl = document.getElementById("real-photos-grid");
 const scenesScriptListEl = document.getElementById("scenes-script-list");
 const captionInputEl = document.getElementById("caption-input");
-const voiceSelectEl = document.getElementById("voice-select");
-const btnPlayVoiceDemoEl = document.getElementById("btn-play-voice-demo");
-const voiceDescHintEl = document.getElementById("voice-desc-hint");
-const voiceDemoPlayerEl = document.getElementById("voice-demo-player");
 const videoPlayerEl = document.getElementById("real-video-player");
 const savedVariantsStripEl = document.getElementById("saved-variants-strip");
 const renderingOverlayEl = document.getElementById("rendering-overlay");
@@ -82,81 +76,10 @@ async function bootstrap() {
   const data = await res.json();
   state.products = data.products || [];
   updateEngineStatusPill(data.keys_status);
-  renderVoiceSelector(data.voices, data.default_voice_id);
   renderProductStrip();
 
   if (state.products.length > 0) {
     await selectProduct(state.products[0].external_id, 1);
-  }
-}
-
-function renderVoiceSelector(voices, defaultId) {
-  if (!voiceSelectEl) return;
-  state.voices = voices || [];
-  state.selectedVoiceId = defaultId || (state.voices[0] ? state.voices[0].id : "");
-
-  voiceSelectEl.innerHTML = "";
-  state.voices.forEach((v) => {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    const genderTag = v.gender === "female" ? "👩 Nữ" : v.gender === "male" ? "👨 Nam" : "🧑 Neutral";
-    opt.textContent = `${genderTag} • ${v.name} (${v.style})`;
-    if (v.id === state.selectedVoiceId) opt.selected = true;
-    voiceSelectEl.appendChild(opt);
-  });
-
-  updateVoiceHint();
-
-  voiceSelectEl.addEventListener("change", () => {
-    state.selectedVoiceId = voiceSelectEl.value;
-    updateVoiceHint();
-    stopVoiceDemo();
-  });
-
-  if (btnPlayVoiceDemoEl && voiceDemoPlayerEl) {
-    btnPlayVoiceDemoEl.addEventListener("click", toggleVoiceDemo);
-    voiceDemoPlayerEl.addEventListener("ended", () => {
-      btnPlayVoiceDemoEl.textContent = "▶️ Nghe Thử Demo";
-    });
-    voiceDemoPlayerEl.addEventListener("pause", () => {
-      btnPlayVoiceDemoEl.textContent = "▶️ Nghe Thử Demo";
-    });
-  }
-}
-
-function updateVoiceHint() {
-  const current = state.voices.find((v) => v.id === state.selectedVoiceId);
-  if (!voiceDescHintEl) return;
-  if (current) {
-    voiceDescHintEl.innerHTML = `<strong>✨ Điểm mạnh:</strong> ${escapeHtml(current.best_for)} <br><strong>🎭 Phong cách:</strong> ${escapeHtml(current.style)}`;
-  } else {
-    voiceDescHintEl.textContent = "Giọng đọc tiêu chuẩn ElevenLabs chất lượng cao.";
-  }
-}
-
-function toggleVoiceDemo() {
-  const current = state.voices.find((v) => v.id === state.selectedVoiceId);
-  if (!current || !current.preview_url) {
-    alert("Giọng này chưa có file demo nghe thử.");
-    return;
-  }
-  if (!voiceDemoPlayerEl.paused && voiceDemoPlayerEl.src.includes(current.id)) {
-    voiceDemoPlayerEl.pause();
-    btnPlayVoiceDemoEl.textContent = "▶️ Nghe Thử Demo";
-  } else {
-    voiceDemoPlayerEl.src = current.preview_url;
-    voiceDemoPlayerEl.play().then(() => {
-      btnPlayVoiceDemoEl.textContent = "⏸ Tạm Dừng";
-    }).catch((e) => {
-      alert("Không thể phát audio demo: " + e.message);
-    });
-  }
-}
-
-function stopVoiceDemo() {
-  if (voiceDemoPlayerEl && !voiceDemoPlayerEl.paused) {
-    voiceDemoPlayerEl.pause();
-    if (btnPlayVoiceDemoEl) btnPlayVoiceDemoEl.textContent = "▶️ Nghe Thử Demo";
   }
 }
 
@@ -381,7 +304,6 @@ async function triggerRenderMp4(targetVariant = null, advanceVariant = false) {
         caption: captionInputEl.value,
         variant_index: vToRender,
         visual_mode: visualMode,
-        voice_id: state.selectedVoiceId,
       }),
     });
     const data = await res.json();
@@ -417,7 +339,6 @@ async function triggerBatch5() {
       body: JSON.stringify({
         product_id: state.selectedProduct.external_id,
         visual_mode: visualModeSelectEl.value || "real_video",
-        voice_id: state.selectedVoiceId,
       }),
     });
     const data = await res.json();
