@@ -61,7 +61,7 @@ def fetch_bing_image_urls(query: str, max_results: int = 12) -> list[str]:
 
 
 def download_image_file(url: str, dest_path: Path) -> bool:
-    """Tải file ảnh thực tế và kiểm tra dung lượng hợp lệ (> 8KB)."""
+    """Tải file ảnh thực tế và kiểm tra dung lượng hợp lệ (> 8KB). Chuẩn hoá sang RGB JPEG."""
     try:
         req = urllib.request.Request(
             url,
@@ -79,8 +79,15 @@ def download_image_file(url: str, dest_path: Path) -> bool:
             if "html" in ctype or data[:15].lower().startswith(b"<!doctype"):
                 return False
             dest_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_path.write_bytes(data)
-            return True
+            try:
+                import io
+                from PIL import Image
+                with Image.open(io.BytesIO(data)) as im:
+                    im.convert("RGB").save(dest_path, "JPEG", quality=92)
+                return True
+            except Exception:
+                dest_path.write_bytes(data)
+                return True
     except Exception:
         return False
 
@@ -204,13 +211,10 @@ def crawl_images_for_query(
         dest = REAL_ASSETS_DIR / filename
         if download_image_file(img_url, dest):
             try:
-                import subprocess
-                subprocess.run(
-                    ["/usr/bin/sips", "-s", "format", "jpeg", str(dest), "--out", str(dest)],
-                    capture_output=True,
-                    timeout=5,
-                    check=False,
-                )
+                from PIL import Image
+                with Image.open(dest) as im:
+                    if im.format != "JPEG" or im.mode != "RGB":
+                        im.convert("RGB").save(dest, "JPEG", quality=92)
             except Exception:
                 pass
             print(f"  [OK] Đã tải ảnh thật: {filename} ({dest.stat().st_size // 1024} KB) <- {img_url[:70]}")

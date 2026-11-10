@@ -49,11 +49,11 @@ PORT = int(os.environ.get("PORT", "8088"))
 ELEVENLABS_ADAM_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 
 GEMINI_TTS_MODELS = [
-    "gemini-2.5-flash-preview-tts",
     "gemini-3.8-flash-tts",
-    "gemini-2.5-pro-preview-tts",
     "gemini-3.1-flash-tts-preview",
     "gemini-3.8-flash-lite-tts",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
 ]
 _TTS_MODEL_CURSOR = 0
 
@@ -122,6 +122,22 @@ def convert_audio_to_m4a(input_path: Path, output_m4a: Path) -> bool:
     return output_m4a.exists()
 
 
+def ensure_safe_image(img_path: str | Path) -> str:
+    """Chuẩn hóa ảnh về file JPEG RGB tiêu chuẩn để FFmpeg decode mượt mà, không lỗi."""
+    p = Path(img_path)
+    if not p.exists() or p.stat().st_size == 0:
+        return str(img_path)
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            if im.format != "JPEG" or im.mode != "RGB":
+                rgb_im = im.convert("RGB")
+                rgb_im.save(p, "JPEG", quality=92)
+    except Exception as e:
+        print(f"[Warn] Không thể chuẩn hóa ảnh {p}: {e}")
+    return str(p)
+
+
 def render_with_ffmpeg(
     manifest_scenes: list[dict[str, Any]],
     audio_path: Path,
@@ -158,6 +174,7 @@ def render_with_ffmpeg(
                     str(clip_path),
                 ]
             elif img_path and Path(img_path).exists():
+                safe_img = ensure_safe_image(img_path)
                 cmd = [
                     ffmpeg_bin,
                     "-y",
@@ -166,7 +183,7 @@ def render_with_ffmpeg(
                     "-t",
                     f"{dur:.2f}",
                     "-i",
-                    str(img_path),
+                    str(safe_img),
                     "-vf",
                     "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30",
                     "-c:v",
@@ -194,7 +211,26 @@ def render_with_ffmpeg(
                     str(clip_path),
                 ]
 
-            subprocess.run(cmd, capture_output=True, check=True, timeout=60)
+            try:
+                subprocess.run(cmd, capture_output=True, check=True, timeout=60)
+            except Exception as e_clip:
+                print(f"[Warn] Lỗi render clip {idx} ({e_clip}), tự động fallback nền đen...")
+                fb_cmd = [
+                    ffmpeg_bin,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c=black:s=1080x1920:d={dur:.2f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-an",
+                    str(clip_path),
+                ]
+                subprocess.run(fb_cmd, capture_output=True, check=False, timeout=30)
+
             if clip_path.exists():
                 clip_files.append(clip_path)
 
@@ -544,20 +580,23 @@ def extract_product_info_from_input(raw_input: str, keys: dict[str, str]) -> dic
                 extracted_title = " ".join(slug_parts[-6:])
 
     gem_key = keys.get("gemini_api_key", "")
+    openai_key = keys.get("openai_api_key", "")
+
+    prompt = (
+        f"Người dùng nhập thông tin hoặc link sản phẩm: '{raw}' (Tiêu đề trích xuất: '{extracted_title}').\n"
+        "Hãy đóng vai chuyên gia TikTok Shop Affiliate Việt Nam, trả về đúng 1 JSON object (không bọc markdown) gồm:\n"
+        '{"title": "Tên sản phẩm tiếng Việt chuẩn xác, giữ nguyên Tên Hãng và Mã Model (ví dụ: Sạc Dự Phòng CUKTECH 15 SE PB200 85W 20000mAh)", '
+        '"exact_model_query": "Cụm từ khóa ngắn gọn chỉ gồm Tên Hãng + Mã Model để tìm đúng 100% ảnh/video sản phẩm (ví dụ: CUKTECH 15 SE PB200)", '
+        '"search_keyword_en": "Cụm từ khóa ngắn gọn tìm video review/unboxing trên YouTube Shorts (ví dụ: CUKTECH 15 SE power bank review)", '
+        '"price_vnd": 690000, '
+        '"sales_7d": 11200, '
+        '"verified_specs": ["Đặc điểm kỹ thuật thật số 1 của đúng model này (dưới 15 từ)", "Đặc điểm kỹ thuật thật số 2 của đúng model này (dưới 15 từ)", "Đặc điểm kỹ thuật thật số 3 của đúng model này (dưới 15 từ)"]}'
+    )
+
     if gem_key:
-        for text_model in ("gemini-2.5-flash", "gemini-2.5-pro"):
+        for text_model in ("gemini-3.8-flash", "gemini-flash-latest"):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{text_model}:generateContent?key={gem_key}"
-                prompt = (
-                    f"Người dùng nhập thông tin hoặc link sản phẩm: '{raw}' (Tiêu đề trích xuất: '{extracted_title}').\n"
-                    "Hãy đóng vai chuyên gia TikTok Shop Affiliate Việt Nam, trả về đúng 1 JSON object (không bọc markdown) gồm:\n"
-                    '{"title": "Tên sản phẩm tiếng Việt chuẩn xác, giữ nguyên Tên Hãng và Mã Model (ví dụ: Sạc Dự Phòng CUKTECH 15 SE PB200 85W 20000mAh)", '
-                    '"exact_model_query": "Cụm từ khóa ngắn gọn chỉ gồm Tên Hãng + Mã Model để tìm đúng 100% ảnh/video sản phẩm (ví dụ: CUKTECH 15 SE PB200)", '
-                    '"search_keyword_en": "Cụm từ khóa ngắn gọn tìm video review/unboxing trên YouTube Shorts (ví dụ: CUKTECH 15 SE power bank review)", '
-                    '"price_vnd": 690000, '
-                    '"sales_7d": 11200, '
-                    '"verified_specs": ["Đặc điểm kỹ thuật thật số 1 của đúng model này (dưới 15 từ)", "Đặc điểm kỹ thuật thật số 2 của đúng model này (dưới 15 từ)", "Đặc điểm kỹ thuật thật số 3 của đúng model này (dưới 15 từ)"]}'
-                )
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"responseMimeType": "application/json"},
@@ -568,7 +607,7 @@ def extract_product_info_from_input(raw_input: str, keys: dict[str, str]) -> dic
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=18, context=SSL_CTX) as resp:
+                with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as resp:
                     res_json = json.loads(resp.read().decode("utf-8"))
                 txt = res_json["candidates"][0]["content"]["parts"][0]["text"]
                 parsed_ai = json.loads(txt)
@@ -577,6 +616,33 @@ def extract_product_info_from_input(raw_input: str, keys: dict[str, str]) -> dic
                     return parsed_ai
             except Exception as e:
                 print(f"[Warn] Gemini auto-spec ({text_model}) fallback: {e}")
+
+    if openai_key:
+        try:
+            url = "https://api.openai.com/v1/chat/completions"
+            oai_payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(oai_payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=8, context=SSL_CTX) as resp:
+                res_json = json.loads(resp.read().decode("utf-8"))
+            txt = res_json["choices"][0]["message"]["content"]
+            parsed_ai = json.loads(txt)
+            if parsed_ai.get("title"):
+                parsed_ai["og_image_url"] = og_image_url
+                return parsed_ai
+        except Exception as e:
+            print(f"[Warn] OpenAI auto-spec fallback: {e}")
 
     short_queries = crawl_real_videos.simplify_product_query(extracted_title)
     clean_title = extracted_title if len(extracted_title) >= 4 else "Sản Phẩm Hot Trend TikTok Shop"
@@ -1256,13 +1322,13 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
                 primary_og_image=og_image_url,
             )
 
-            # Tự động tải trọn bộ 5 video nguồn thực tế khác nhau từ YouTube Shorts
+            # Tải ngay 1 video nguồn thực tế từ YouTube Shorts để phản hồi nhanh chóng
             video_out_path = REAL_ASSETS_DIR / f"{prefix}_video.mp4"
             try:
                 crawled_vids = crawl_real_videos.download_multiple_short_mp4s(
                     [search_kw_en, exact_model_q, title],
                     prefix,
-                    count=5,
+                    count=1,
                 )
                 if crawled_vids and crawled_vids[0].exists():
                     video_out_path = crawled_vids[0]

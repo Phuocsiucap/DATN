@@ -3,25 +3,18 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
-def _find_ytdlp() -> str:
-    which = shutil.which("yt-dlp")
-    if which:
-        return which
-    cand = BASE_DIR.parent / ".venv" / "Scripts" / "yt-dlp.exe"
-    if cand.exists():
-        return str(cand)
-    for c in BASE_DIR.parent.glob("**/yt-dlp*.exe"):
-        if c.is_file():
-            return str(c)
-    return "yt-dlp"
+def _get_ytdlp_cmd() -> list[str]:
+    # Dùng sys.executable -m yt_dlp để tránh bị Windows Application Control chặn exe
+    return [sys.executable, "-m", "yt_dlp"]
 
-YT_DLP = _find_ytdlp()
+YT_DLP_CMD = _get_ytdlp_cmd()
 ASSETS_DIR = BASE_DIR / "assets" / "real"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -175,7 +168,7 @@ def collect_candidate_short_ids(query_or_queries: str | list[str], min_count: in
 def download_single_short_id(vid: str, out_path: Path) -> bool:
     url = f"https://www.youtube.com/shorts/{vid}"
     cmd = [
-        YT_DLP,
+        *YT_DLP_CMD,
         "--js-runtimes", "node",
         "-S", "vcodec:h264,res:1080,ext:mp4",
         "-f", "bv*[vcodec^=avc1][ext=mp4]/b[vcodec^=avc1][ext=mp4]/18",
@@ -186,7 +179,7 @@ def download_single_short_id(vid: str, out_path: Path) -> bool:
         url,
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=65)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
         if res.returncode == 0 and out_path.exists() and out_path.stat().st_size > 100_000:
             print(f"  -> Downloaded {out_path.name} ({out_path.stat().st_size // 1024} KB) from {url}")
             return True
