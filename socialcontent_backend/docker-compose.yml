@@ -51,6 +51,9 @@ services:
     image: confluentinc/cp-zookeeper:7.4.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+    volumes:
+      - socialcontent_zookeeper_data:/var/lib/zookeeper/data
+      - socialcontent_zookeeper_log:/var/lib/zookeeper/log
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -67,34 +70,44 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  # api-service:
-  #   build:
-  #     context: ..
-  #     dockerfile: socialcontent_backend/services/api-service/Dockerfile
-  #   working_dir: /app/services/api-service
-  #   command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-  #   depends_on:
-  #     - postgres
-  #     - mongodb
-  #     - kafka
-  #     - embedding-service
-  #     - ai-media-planning-worker
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-  #     MONGO_URI: mongodb://mongodb:27017
-  #     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-  #     EMBEDDING_SERVICE_URL: http://embedding-service:8075
-  #     DATA_INGESTION_SERVICE_URL: http://data-ingestion-worker:8010
-  #     PLANNING_SERVICE_URL: http://ai-media-planning-worker:8050
-  #     AI_MEDIA_WORKER_URL: http://ai-media-worker:8060
-  #     REMOTION_WORKER_URL: http://remotion-worker:8090
-  #     VIDEO_STORAGE_ROOT: /app/runtime/video-generation
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - ./runtime/video-generation:/app/runtime/video-generation
+  api-service:
+    build:
+      context: ..
+      dockerfile: socialcontent_backend/services/api-service/Dockerfile
+    working_dir: /app/services/api-service
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      kafka:
+        condition: service_started
+      data-ingestion-worker:
+        condition: service_started
+      ai-media-engine:
+        condition: service_started
+      remotion-worker:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
+      MONGO_URI: mongodb://mongodb:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EMBEDDING_SERVICE_URL: http://data-ingestion-worker:8010
+      DATA_INGESTION_SERVICE_URL: http://data-ingestion-worker:8010
+      PLANNING_SERVICE_URL: http://ai-media-planning-worker:8050
+      AI_MEDIA_WORKER_URL: http://ai-media-worker:8060
+      REMOTION_WORKER_URL: http://remotion-worker:8090
+      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./runtime/video-generation:/app/runtime/video-generation
+      - ../tiktok_affiliate_studio/assets:/tiktok_affiliate_studio/assets:ro
+      - ../tiktok_affiliate_studio/feeds:/tiktok_affiliate_studio/feeds:ro
+      - ../tiktok_affiliate_studio/output:/tiktok_affiliate_studio/output
 
   data-ingestion-worker:
     build:
@@ -117,43 +130,27 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      PYTHONUNBUFFERED: "1"
-
-  embedding-service:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/embedding-service/Dockerfile
-    working_dir: /app/services/embedding-service
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8075
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongodb:
-        condition: service_started
-      kafka:
-        condition: service_started
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EMBEDDING_MODEL_NAME: text-embedding-3-small
       EMBEDDING_DIMENSIONS: "512"
       EMBEDDING_BATCH_SIZE: "64"
       PYTHONUNBUFFERED: "1"
-      ENABLE_WORKERS: "true"
-    ports:
-      - "8075:8075"
 
-  ai-media-planning-worker:
+  ai-media-engine:
     build:
       context: ..
       dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
     working_dir: /app/services/ai-media-engine
-    command: uvicorn app.planning.main:app --host 0.0.0.0 --port 8050
+    command: uvicorn app.entrypoints.main:app --host 0.0.0.0 --port 8050
     ports:
       - "127.0.0.1:8050:8050"
+      - "127.0.0.1:8060:8060"
+      - "127.0.0.1:8061:8061"
+    networks:
+      default:
+        aliases:
+          - ai-media-planning-worker
+          - ai-media-worker
+          - ai-media-ocr-worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,7 +158,7 @@ services:
         condition: service_started
       kafka:
         condition: service_started
-      embedding-service:
+      data-ingestion-worker:
         condition: service_started
     env_file:
       - .env
@@ -169,68 +166,14 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
       MONGO_URI: mongodb://mongodb:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EMBEDDING_SERVICE_URL: http://embedding-service:8075
+      EMBEDDING_SERVICE_URL: http://data-ingestion-worker:8010
       EMBEDDING_MODEL_NAME: text-embedding-3-small
       EMBEDDING_DIMENSIONS: "512"
       EMBEDDING_BATCH_SIZE: "64"
-      PYTHONUNBUFFERED: "1"
-      ENABLE_WORKERS: "true"
-
-  ai-media-worker:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
-    working_dir: /app/services/ai-media-engine
-    command: python -m app.video.workers.generate_video_worker
-    ports:
-      - "127.0.0.1:8060:8060"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongodb:
-        condition: service_started
-      kafka:
-        condition: service_started
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EMBEDDING_SERVICE_URL: http://embedding-service:8075
       GENERATE_VIDEO_DISABLE_RENDER: "true"
       GENERATE_VIDEO_WORKER_TASK_TYPES: GENERATE_VIDEO_SCRIPT,GENERATE_VIDEO_EDIT,GENERATE_VIDEO_REVIEW,GENERATE_VIDEO_VOICE
-      PYTHONUNBUFFERED: "1"
       VIDEO_STORAGE_ROOT: /app/runtime/video-generation
-      HEALTH_PORT: "8060"
-    volumes:
-      - ./runtime/video-generation:/app/runtime/video-generation
-
-  ai-media-ocr-worker:
-    build:
-      context: ..
-      dockerfile: socialcontent_backend/services/ai-media-engine/Dockerfile
-    working_dir: /app/services/ai-media-engine
-    command: python -m app.video.workers.bilibili_ocr_worker
-    ports:
-      - "127.0.0.1:8061:8061"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongodb:
-        condition: service_started
-      kafka:
-        condition: service_started
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/socialcontent
-      MONGO_URI: mongodb://mongodb:27017
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      EMBEDDING_SERVICE_URL: http://embedding-service:8075
-      PYTHONUNBUFFERED: "1"
-      VIDEO_STORAGE_ROOT: /app/runtime/video-generation
-      HEALTH_PORT: "8061"
+      BILIBILI_OCR_WORKER_GROUP_ID: bilibili-ocr-workers
       BILIBILI_HARDSUB_OCR_ENABLED: "true"
       BILIBILI_HARDSUB_OCR_FPS: "1.0"
       BILIBILI_HARDSUB_OCR_WORKERS: "2"
@@ -239,6 +182,8 @@ services:
       MKL_NUM_THREADS: "1"
       NUMEXPR_NUM_THREADS: "1"
       BILIBILI_HARDSUB_OCR_MAX_SECONDS: "360"
+      PYTHONUNBUFFERED: "1"
+      ENABLE_WORKERS: "true"
     volumes:
       - ./runtime/video-generation:/app/runtime/video-generation
 
@@ -273,3 +218,9 @@ services:
 volumes:
   socialcontent_postgres:
   socialcontent_mongo:
+  socialcontent_zookeeper_data:
+    external: true
+    name: 95ee9a291f921969b5531829802239458e54117d0ad2418fdc9c72ed18b832ce
+  socialcontent_zookeeper_log:
+    external: true
+    name: ea7f664875728ab42744bb5e1fb2d3bff4cc4355abedacdf55ef0d80a892e58b

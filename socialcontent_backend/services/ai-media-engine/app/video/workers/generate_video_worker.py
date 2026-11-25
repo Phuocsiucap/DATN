@@ -33,11 +33,21 @@ class HealthHandler(BaseHTTPRequestHandler):
         return
 
 
-def start_health_server(task_types: set[str], service_name: str | None = None) -> ThreadingHTTPServer:
-    HealthHandler.task_types = task_types
-    HealthHandler.service_name = service_name or os.getenv("WORKER_SERVICE_NAME", "ai-media-worker")
-    port = int(os.getenv("HEALTH_PORT", "8060"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+def start_health_server(
+    task_types: set[str],
+    service_name: str | None = None,
+    port: int | None = None,
+) -> ThreadingHTTPServer:
+    handler = type(
+        "WorkerHealthHandler",
+        (HealthHandler,),
+        {
+            "task_types": set(task_types),
+            "service_name": service_name or os.getenv("WORKER_SERVICE_NAME", "ai-media-worker"),
+        },
+    )
+    health_port = port if port is not None else int(os.getenv("HEALTH_PORT", "8060"))
+    server = ThreadingHTTPServer(("0.0.0.0", health_port), handler)
     threading.Thread(target=server.serve_forever, name="ai-media-health", daemon=True).start()
     return server
 

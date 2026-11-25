@@ -30,6 +30,91 @@ WORKSPACE_METADATA_KEYS = {
 
 
 def get_video_workspace(db: Session, workflow_id: uuid.UUID, user: User) -> dict:
+    import json
+    import os
+    from pathlib import Path
+
+    sync_file = Path(os.getenv("VIDEO_STORAGE_ROOT", "d:/DATN/runtime/video-generation")).expanduser() / "tiktok_affiliate_workflows.json"
+    if sync_file.exists():
+        try:
+            tiktok_wfs = json.loads(sync_file.read_text(encoding="utf-8"))
+            match = next((tw for tw in tiktok_wfs if tw.get("id") == str(workflow_id)), None)
+            if match:
+                video_url = match.get("video_url") or match.get("final_video") or match.get("rendered_video")
+                return {
+                    "id": match["id"],
+                    "profile_id": str(match.get("profile_id", "00000000-0000-0000-0000-000000000000")),
+                    "series_id": None,
+                    "planning_candidate_id": None,
+                    "primary_content_id": None,
+                    "title": match["title"],
+                    "status": "RENDERED",
+                    "current_stage": "RENDERED",
+                    "progress_percent": 100.0,
+                    "planning_mode": "SINGLE",
+                    "final_video": video_url,
+                    "rendered_video": video_url,
+                    "metadata": {
+                        "creation_source": "TIKTOK_STUDIO",
+                        "workflow_type": "TIKTOK_AFFILIATE",
+                        "product_id": match.get("product_id"),
+                        "product_title": match.get("product_title"),
+                        "caption": match.get("caption"),
+                        "video_url": video_url,
+                    },
+                    "source_content": None,
+                    "inputs": [],
+                    "draft": {
+                        "title": match["title"],
+                        "caption": match.get("caption"),
+                        "scenes": match.get("scenes", []),
+                        "story_data": match.get("scenes", []),
+                    },
+                    "story": {
+                        "title": match["title"],
+                        "caption": match.get("caption"),
+                        "scenes": match.get("scenes", []),
+                        "video": {
+                            "aspectRatio": "9:16",
+                            "width": 1080,
+                            "height": 1920,
+                            "fps": 30,
+                            "duration": match.get("duration_sec", 20.0),
+                        },
+                    },
+                    "profile": {
+                        "id": "00000000-0000-0000-0000-000000000000",
+                        "name": "TikTok Affiliate Creator",
+                        "platform": "TIKTOK",
+                        "avatar": None,
+                    },
+                    "series": None,
+                    "tasks": [],
+                    "artifacts": [
+                        {
+                            "artifact_type": "FINAL_VIDEO",
+                            "type": "FINAL_VIDEO",
+                            "uri": video_url,
+                            "status": "READY",
+                        }
+                    ],
+                    "candidate": None,
+                    "content": None,
+                    "capabilities": {
+                        "can_generate_draft": False,
+                        "can_edit": True,
+                        "can_approve_draft": False,
+                        "can_generate_voice": False,
+                        "can_render": False,
+                        "can_approve": True,
+                        "can_queue": True,
+                    },
+                    "created_at": match.get("created_at", "2026-11-11T00:00:00Z"),
+                    "updated_at": match.get("updated_at", match.get("created_at", "2026-11-11T00:00:00Z")),
+                }
+        except Exception:
+            pass
+
     workflow = get_owned_workflow(db, workflow_id, user, allow_admin=True)
 
     profile = (

@@ -7,7 +7,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from common.db.models import TikTokShopCredential, User
@@ -217,7 +217,7 @@ def list_tiktok_shop_credentials(
     ]
 
 
-@router.delete("/credentials/{credential_id}", status_code=204)
+@router.delete("/credentials/{credential_id}", status_code=204, response_model=None, response_class=Response)
 def disconnect_tiktok_shop_credential(
     credential_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -252,6 +252,7 @@ def disconnect_tiktok_shop_credential(
         credential.shop_id,
         current_user.id,
     )
+    return Response(status_code=204)
 
 
 # ── Profile & Showcase Endpoints ──────────────────────────────────────────────

@@ -49,9 +49,6 @@ PORT = int(os.environ.get("PORT", "8088"))
 ELEVENLABS_ADAM_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 
 GEMINI_TTS_MODELS = [
-    "gemini-3.8-flash-tts",
-    "gemini-3.1-flash-tts-preview",
-    "gemini-3.8-flash-lite-tts",
     "gemini-2.5-flash-preview-tts",
     "gemini-2.5-pro-preview-tts",
 ]
@@ -594,7 +591,7 @@ def extract_product_info_from_input(raw_input: str, keys: dict[str, str]) -> dic
     )
 
     if gem_key:
-        for text_model in ("gemini-3.8-flash", "gemini-flash-latest"):
+        for text_model in ("gemini-2.5-flash", "gemini-flash-latest"):
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{text_model}:generateContent?key={gem_key}"
                 payload = {
@@ -661,7 +658,31 @@ def extract_product_info_from_input(raw_input: str, keys: dict[str, str]) -> dic
     }
 
 
+def _get_duration_ffmpeg(media_path: Path) -> float | None:
+    ffmpeg = find_ffmpeg_bin()
+    if not ffmpeg:
+        return None
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-i", str(media_path)],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr)
+        if match:
+            h, mn, s = match.groups()
+            return round(int(h) * 3600 + int(mn) * 60 + float(s), 2)
+    except Exception:
+        pass
+    return None
+
+
 def measure_audio_duration(audio_path: Path) -> float:
+    ff_dur = _get_duration_ffmpeg(audio_path)
+    if ff_dur and ff_dur > 0:
+        return ff_dur
     try:
         proc = subprocess.run(
             ["/usr/bin/afinfo", str(audio_path)],
@@ -679,6 +700,9 @@ def measure_audio_duration(audio_path: Path) -> float:
 
 
 def get_video_duration(video_path: Path) -> float:
+    ff_dur = _get_duration_ffmpeg(video_path)
+    if ff_dur and ff_dur > 0:
+        return ff_dur
     try:
         proc = subprocess.run(
             ["mdls", "-name", "kMDItemDurationSeconds", str(video_path)],
@@ -978,9 +1002,9 @@ def generate_real_mp4_job(
     real_video_path = resolve_product_video_path(product, v_idx)
 
     # Tính toán thời lượng clip nguồn và độ dịch chuyển video_start thông minh
-    # Bỏ qua đoạn mở hộp/cắt băng dính ban đầu (skip 12% - 18% đầu) để vào NGAY cảnh cầm hàng thật
+    # Bỏ qua đoạn mở đầu / giới thiệu / chào hỏi ban đầu (skip 18% đầu) để vào NGAY cảnh đôi tay cầm sản phẩm thật
     src_video_dur = get_video_duration(Path(real_video_path)) if (real_video_path and Path(real_video_path).exists()) else 20.0
-    safe_lead_sec = max(1.5, min(6.0, src_video_dur * 0.15))
+    safe_lead_sec = max(2.0, min(7.5, src_video_dur * 0.18))
     usable_video_span = max(4.0, src_video_dur - safe_lead_sec - 1.5)
     scene_step = usable_video_span / max(1, len(scenes))
 
@@ -993,7 +1017,8 @@ def generate_real_mp4_job(
 
         # Tính toán điểm cắt video động vào giữa lúc người dùng thao tác / review sản phẩm thực tế
         if real_video_path and Path(real_video_path).exists():
-            dyn_v_start = round(safe_lead_sec + scene_step * s_i, 2)
+            variant_offset = (v_idx - 1) * (usable_video_span * 0.15)
+            dyn_v_start = round(safe_lead_sec + (variant_offset + scene_step * s_i) % usable_video_span, 2)
             dyn_v_start = min(dyn_v_start, max(0.0, src_video_dur - scene_dur - 0.5))
             v_start = dyn_v_start
         else:
@@ -1109,7 +1134,13 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        raw = self.rfile.read(length)
+        for enc in ("utf-8", "utf-8-sig", "windows-1258", "latin1"):
+            try:
+                return json.loads(raw.decode(enc))
+            except Exception:
+                pass
+        return json.loads(raw.decode("utf-8", errors="replace"))
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
@@ -1433,7 +1464,9 @@ class StudioRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(data)
 

@@ -11,6 +11,9 @@ COPY socialcontent_backend/common /app/common
 COPY socialcontent_backend/alembic.ini /app/alembic.ini
 COPY socialcontent_backend/alembic /app/alembic
 COPY socialcontent_backend/services/api-service/app /app/services/api-service/app
+COPY tiktok_affiliate_studio/app.py /tiktok_affiliate_studio/app.py
+COPY tiktok_affiliate_studio/crawl_real_images.py /tiktok_affiliate_studio/crawl_real_images.py
+COPY tiktok_affiliate_studio/crawl_real_videos.py /tiktok_affiliate_studio/crawl_real_videos.py
 
 WORKDIR /app/services/api-service
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

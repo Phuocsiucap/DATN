@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from common.db.models import ContentItem, MediaWorkflow, SocialPost, SocialProfileSnapshot, User
@@ -863,7 +863,7 @@ def create_social_post(
     return service.serialize_post(post)
 
 
-@router.delete("/{profile_id}/posts/{post_id}", status_code=204)
+@router.delete("/{profile_id}/posts/{post_id}", status_code=204, response_model=None, response_class=Response)
 def delete_social_post(
     profile_id: uuid.UUID,
     post_id: uuid.UUID,
@@ -872,7 +872,7 @@ def delete_social_post(
 ):
     service = SocialProfileService()
     service.delete_post(db, post_id, current_user)
-    return None
+    return Response(status_code=204)
 
 
 @router.post("/{profile_id}/tiktok/qr/start")

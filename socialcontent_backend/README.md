@@ -1,13 +1,15 @@
 # SocialContent Backend
 
-Backend mới cho Module 1, bám theo kiến trúc trong `.agents/module1`.
+Backend cho SocialContent, gồm API, ingestion, AI media và các worker xử lý nền.
 
 ## Services
 
-- `api-service`: REST API, auth, user/admin system, crawl jobs, sources, content, stories, data quality.
-- `crawl-orchestrator`: nhận `crawl.job.created`, chia task, publish `crawl.task.requested`.
-- `crawler-service`: nhận task crawl, normalize trực tiếp, lưu processed MongoDB, publish `content.normalized`.
-- `story-processing-service`: grouping, ordering, dedup, lưu canonical PostgreSQL, publish `story.grouped` và `content.canonical.saved`.
+- `api-service`: REST API, xác thực, user/admin, crawl, content, planning, video và publishing.
+- `data-ingestion-worker`: một tiến trình chứa crawl orchestration, crawler, normalization, story grouping/dedup, crawl scheduler và embedding API/consumer.
+- `ai-media-engine`: một deployment chạy ba nhóm worker độc lập: planning, video generation/voice và Bilibili OCR. Mỗi nhóm giữ task filter và Kafka consumer group riêng; planning health ở `8050`, video worker health ở `8060`, OCR health ở `8061`.
+- `remotion-worker`: render video; tiếp nhận task qua Kafka và có cơ chế polling DB dự phòng.
+
+Compose khởi chạy `api-service` ở `http://localhost:8000`. Embedding API là endpoint nội bộ của `data-ingestion-worker`, được `api-service` và `ai-media-engine` gọi qua mạng Compose; không mở port riêng cho embedding ra host. Các worker AI dùng chung một Compose service `ai-media-engine`; tên DNS cũ `ai-media-planning-worker`, `ai-media-worker` và `ai-media-ocr-worker` vẫn là alias để giữ các URL health/config đang dùng.
 
 ## Run Local
 

@@ -54,42 +54,50 @@ def list_video_workspace(
     if search and search.strip():
         filters.append(MediaWorkflow.title.ilike(f"%{search.strip()}%"))
 
-    total = (
-        db.query(MediaWorkflow.id)
-        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
-        .filter(*filters)
-        .count()
-    )
-    rows = (
-        db.query(
-            MediaWorkflow.id,
-            MediaWorkflow.profile_id,
-            MediaWorkflow.series_id,
-            MediaWorkflow.title,
-            MediaWorkflow.status,
-            MediaWorkflow.current_stage,
-            MediaWorkflow.progress_percent,
-            MediaWorkflow.created_at,
-            MediaWorkflow.updated_at,
-            SocialProfile.profile_name.label("profile_name"),
-            SocialProfile.platform.label("profile_platform"),
-            SocialProfile.avatar_url.label("profile_avatar"),
-            ContentSeries.title.label("series_title"),
-            ContentItem.sources_jsonb[0]["metadata_json"]["category"].astext.label("source_category"),
-            ContentItem.sources_jsonb[0]["metadata_json"]["thumbnail_url"].astext.label("source_thumbnail"),
-            ContentItem.sources_jsonb[0]["metadata_json"]["image_url"].astext.label("source_image"),
-            ContentItem.media_jsonb.label("content_media"),
+    rows = []
+    tasks_by_workflow = {}
+    total = 0
+
+    try:
+        total = (
+            db.query(MediaWorkflow.id)
+            .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+            .filter(*filters)
+            .count()
         )
-        .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
-        .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
-        .outerjoin(ContentItem, ContentItem.id == MediaWorkflow.primary_content_id)
-        .filter(*filters)
-        .order_by(MediaWorkflow.updated_at.desc(), MediaWorkflow.id.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    tasks_by_workflow = _latest_tasks_by_workflow(db, [row.id for row in rows])
+        rows = (
+            db.query(
+                MediaWorkflow.id,
+                MediaWorkflow.profile_id,
+                MediaWorkflow.series_id,
+                MediaWorkflow.title,
+                MediaWorkflow.status,
+                MediaWorkflow.current_stage,
+                MediaWorkflow.progress_percent,
+                MediaWorkflow.created_at,
+                MediaWorkflow.updated_at,
+                SocialProfile.profile_name.label("profile_name"),
+                SocialProfile.platform.label("profile_platform"),
+                SocialProfile.avatar_url.label("profile_avatar"),
+                ContentSeries.title.label("series_title"),
+                ContentItem.sources_jsonb[0]["metadata_json"]["category"].astext.label("source_category"),
+                ContentItem.sources_jsonb[0]["metadata_json"]["thumbnail_url"].astext.label("source_thumbnail"),
+                ContentItem.sources_jsonb[0]["metadata_json"]["image_url"].astext.label("source_image"),
+                ContentItem.media_jsonb.label("content_media"),
+            )
+            .join(SocialProfile, SocialProfile.id == MediaWorkflow.profile_id)
+            .outerjoin(ContentSeries, ContentSeries.id == MediaWorkflow.series_id)
+            .outerjoin(ContentItem, ContentItem.id == MediaWorkflow.primary_content_id)
+            .filter(*filters)
+            .order_by(MediaWorkflow.updated_at.desc(), MediaWorkflow.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        tasks_by_workflow = _latest_tasks_by_workflow(db, [row.id for row in rows])
+    except Exception as e:
+        print(f"[list_video_workspace] DB query fallback (offline): {e}")
+
     return build_video_workspace_list(rows, tasks_by_workflow, total=total, limit=limit, offset=offset)
 
 
@@ -141,7 +149,12 @@ def _card_current_stage(row, task: dict, *, active: bool) -> str | None:
 
 
 def build_video_workspace_list(rows, tasks_by_workflow, *, total: int, limit: int, offset: int) -> VideoWorkspaceListResponse:
-    result = VideoWorkspaceListResponse(total=total, limit=limit, offset=offset)
+    import json
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    result = VideoWorkspaceListResponse(total=total or 0, limit=limit, offset=offset)
     for row in rows:
         profile_id = str(row.profile_id)
         series_id = str(row.series_id) if row.series_id else None
@@ -170,4 +183,47 @@ def build_video_workspace_list(rows, tasks_by_workflow, *, total: int, limit: in
             progress_percent=float(task.get("progress_percent") or 0) if active else float(row.progress_percent or 0),
             task_status=task.get("status"), updated_at=row.updated_at or row.created_at,
         ))
-    return result
+
+    # Tự động nạp thêm các video vừa hoàn thành từ TikTok Affiliate Studio vào danh sách Xưởng video
+    sync_file = Path(os.getenv("VIDEO_STORAGE_ROOT", "d:/DATN/runtime/video-generation")).expanduser() / "tiktok_affiliate_workflows.json"
+    if sync_file.exists():
+        try:
+            tiktok_wfs = json.loads(sync_file.read_text(encoding="utf-8"))
+            for tw in tiktok_wfs:
+                tw_id = tw.get("id")
+                if any(item.id == tw_id for item in result.items):
+                    continue
+                result.profiles.setdefault("00000000-0000-0000-0000-000000000000", WorkspaceProfile(
+                    name="TikTok Affiliate AI", platform="TIKTOK", avatar=None
+                ))
+                created_dt = datetime.now(timezone.utc)
+                if tw.get("created_at"):
+                    try:
+                        created_dt = datetime.fromisoformat(tw["created_at"])
+                    except Exception:
+                        pass
+                result.items.insert(0, WorkspaceCard(
+                    id=tw_id,
+                    profile_id="00000000-0000-0000-0000-000000000000",
+                    series_id=None,
+                    title=tw.get("title", "[TikTok Affiliate] Video"),
+                    thumbnail_url=tw.get("thumbnail_url") or (tw.get("scenes", [{}])[0].get("image_url") if tw.get("scenes") else None),
+                    category="TikTok Affiliate",
+                    status="RENDERED",
+                    current_stage="RENDERED",
+                    progress_percent=100.0,
+                    task_status="COMPLETED",
+                    updated_at=created_dt,
+                ))
+                result.total += 1
+        except Exception:
+            pass
+
+    return VideoWorkspaceListResponse(
+        total=len(result.items),
+        limit=limit,
+        offset=offset,
+        items=result.items,
+        profiles=result.profiles,
+        series=result.series,
+    )

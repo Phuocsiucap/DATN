@@ -12,7 +12,7 @@ from common.db.models import ContentItem, CrawlJobContent
 from common.db.session import SessionLocal
 from common.events.kafka import consumer
 from common.events.topics import CONTENT_EMBEDDING_REQUESTED
-from app.service import ensure_content_embeddings
+from app.embedding.service import ensure_content_embeddings
 
 logger = logging.getLogger(__name__)
 CONSUMER_NAME = "content-embedding-service"

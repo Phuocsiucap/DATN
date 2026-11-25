@@ -155,17 +155,51 @@ export default function Sidebar({
   const roleLabel = userRoleLabel(currentUser)
 
   useEffect(() => {
+    let interval: number | undefined
+    let requestInFlight = false
+
     const loadUsage = async () => {
+      if (requestInFlight || document.visibilityState === 'hidden') return
+      requestInFlight = true
       try {
         const data = await getMyAiUsageApi()
         setAiUsage(data)
       } catch {
         setAiUsage(null)
+      } finally {
+        requestInFlight = false
       }
     }
+
+    const stopPolling = () => {
+      if (interval !== undefined) {
+        window.clearInterval(interval)
+        interval = undefined
+      }
+    }
+
+    const startPolling = () => {
+      stopPolling()
+      if (document.visibilityState === 'hidden') return
+      interval = window.setInterval(() => void loadUsage(), 5 * 60 * 1000)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopPolling()
+        return
+      }
+      void loadUsage()
+      startPolling()
+    }
+
     void loadUsage()
-    const interval = setInterval(() => void loadUsage(), 30000)
-    return () => clearInterval(interval)
+    startPolling()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      stopPolling()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [])
 
   const formatTokens = (num: number) => {

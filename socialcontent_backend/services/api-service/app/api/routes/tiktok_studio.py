@@ -18,6 +18,68 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 import importlib.util
+import json
+import shutil
+from datetime import datetime, timezone
+
+VIDEO_STORAGE_ROOT = Path(
+    os.getenv("VIDEO_STORAGE_ROOT", str(PROJECT_ROOT / "runtime" / "video-generation"))
+).expanduser()
+VIDEO_OUT_DIR = VIDEO_STORAGE_ROOT / "out"
+
+
+def register_video_in_workspace(product: dict[str, Any], job: dict[str, Any], v_idx: int) -> dict[str, Any]:
+    job_id = job.get("job_id", "")
+    prod_folder = Path(job.get("output_dir", ""))
+    video_file = prod_folder / job.get("video_file_name", f"video_{v_idx}.mp4")
+
+    workflow_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tiktok-affiliate-{job_id}"))
+    out_filename = f"tiktok_{workflow_id[:12]}_{v_idx}.mp4"
+    target_out_path = VIDEO_OUT_DIR / out_filename
+
+    VIDEO_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if video_file.exists():
+        try:
+            shutil.copy2(video_file, target_out_path)
+        except Exception as e:
+            print(f"[tiktok-studio] Copy to video workspace out err: {e}")
+
+    wf_record = {
+        "id": workflow_id,
+        "title": f"[TikTok Affiliate] {product.get('title', 'Sản phẩm')} (Biến thể #{v_idx})",
+        "status": "RENDERED",
+        "current_stage": "RENDERED",
+        "progress_percent": 100.0,
+        "product_id": product.get("external_id"),
+        "product_title": product.get("title"),
+        "variant_index": v_idx,
+        "variant_name": job.get("variant_name", f"Biến thể #{v_idx}"),
+        "rendered_video": out_filename,
+        "final_video": out_filename,
+        "video_url": f"/api/v1/generate-video/output/{out_filename}",
+        "audio_url": job.get("audio_url", ""),
+        "caption": job.get("caption", ""),
+        "duration_sec": job.get("total_duration_sec", 20.0),
+        "scenes": job.get("scenes", []),
+        "created_at": job.get("created_at", datetime.now(timezone.utc).isoformat()),
+        "creation_source": "TIKTOK_STUDIO",
+    }
+
+    sync_file = VIDEO_STORAGE_ROOT / "tiktok_affiliate_workflows.json"
+    try:
+        existing = []
+        if sync_file.exists():
+            existing = json.loads(sync_file.read_text(encoding="utf-8"))
+        existing = [x for x in existing if x.get("id") != workflow_id]
+        existing.insert(0, wf_record)
+        sync_file.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[tiktok-studio] Save sync_file err: {e}")
+
+    job["workflow_id"] = workflow_id
+    job["in_video_workspace"] = True
+    job["video_workspace_url"] = f"/generate-video/{workflow_id}"
+    return wf_record
 
 try:
     from common.constants.elevenlabs_voices import DEFAULT_ELEVENLABS_VOICE_ID, ELEVENLABS_VOICES
@@ -97,6 +159,12 @@ def get_bootstrap_data():
     normalized_jobs = []
     for j in state.get("jobs", []):
         j_copy = dict(j)
+        j_id = j_copy.get("job_id", "")
+        if not j_copy.get("workflow_id") and j_id:
+            wf_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tiktok-affiliate-{j_id}"))
+            j_copy["workflow_id"] = wf_id
+            j_copy["in_video_workspace"] = True
+            j_copy["video_workspace_url"] = f"/generate-video/{wf_id}"
         for key in ("video_url", "audio_url", "script_url", "caption_url"):
             if j_copy.get(key) and not j_copy[key].startswith("/api/v1/tiktok-studio/media"):
                 j_copy[key] = f"/api/v1/tiktok-studio/media{j_copy[key]}"
@@ -253,6 +321,8 @@ def crawl_and_create_product(payload: CrawlProductRequest):
         voice_id=chosen_voice,
     )
 
+    register_video_in_workspace(scored_prod, job, 1)
+
     # Chuẩn hóa URLs cho response
     job_copy = dict(job)
     for key in ("video_url", "audio_url", "script_url", "caption_url"):
@@ -299,6 +369,7 @@ def render_mp4(payload: RenderMp4Request):
             visual_mode=payload.visual_mode,
             voice_id=payload.voice_id,
         )
+        register_video_in_workspace(product, job, payload.variant_index)
         job_copy = dict(job)
         for key in ("video_url", "audio_url", "script_url", "caption_url"):
             if job_copy.get(key) and not job_copy[key].startswith("/api/v1/tiktok-studio/media"):
@@ -347,6 +418,7 @@ def render_batch_5(payload: RenderBatch5Request):
                 visual_mode=mode_for_v,
                 voice_id=payload.voice_id,
             )
+            register_video_in_workspace(product, j, v_idx)
             j_c = dict(j)
             for key in ("video_url", "audio_url", "script_url", "caption_url"):
                 if j_c.get(key) and not j_c[key].startswith("/api/v1/tiktok-studio/media"):

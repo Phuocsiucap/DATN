@@ -53,6 +53,8 @@ export type TikTokScriptPack = {
 
 export type TikTokStudioJob = {
   id: string
+  workflow_id?: string
+  video_workspace_url?: string
   product_id: string
   product_title: string
   variant_index: number

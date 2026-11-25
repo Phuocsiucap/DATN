@@ -13,6 +13,8 @@ from app.orchestrator.consumers.job_created import run_job_created_consumer
 from app.orchestrator.scheduler.periodic_sources import run_periodic_source_scheduler
 from app.crawler.consumers.task_requested import run_task_requested_consumer
 from app.story_processing.consumers.content_normalized import run_content_normalized_consumer
+from app.embedding.consumer import run_content_embedding_requested_consumer
+from app.embedding.routes import router as embedding_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +39,9 @@ async def lifespan(app: FastAPI):
         
         # 3. Story Processing
         tasks.append(asyncio.create_task(run_thread_worker_forever("story-processing:content-normalized", run_content_normalized_consumer)))
+
+        # Embeddings are produced directly from normalized/canonical ingestion events.
+        tasks.append(asyncio.create_task(run_thread_worker_forever("embedding-service:content-embedding-requested", run_content_embedding_requested_consumer)))
         
     yield
     
@@ -45,6 +50,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Data Ingestion Engine", lifespan=lifespan)
 configure_api_responses(app)
+app.include_router(embedding_router)
 
 @app.get("/health")
 def health():

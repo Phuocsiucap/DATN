@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     )
     scheduler_poll_seconds: int = 60
     enable_scheduler: bool = True
-    embedding_service_url: str = Field(default="http://localhost:8075", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))
+    embedding_service_url: str = Field(default="http://localhost:8010", validation_alias=AliasChoices("EMBEDDING_SERVICE_URL"))
     data_ingestion_service_url: str = Field(default="http://localhost:8010", validation_alias=AliasChoices("DATA_INGESTION_SERVICE_URL"))
     planning_service_url: str = Field(default="http://localhost:8050", validation_alias=AliasChoices("PLANNING_SERVICE_URL"))
     ai_media_worker_url: str = Field(default="http://localhost:8060", validation_alias=AliasChoices("AI_MEDIA_WORKER_URL"))
